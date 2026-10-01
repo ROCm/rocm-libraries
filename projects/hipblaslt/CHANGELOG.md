@@ -35,6 +35,11 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
+* Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
+* Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
+* Fixed C++ algorithm support checks rejecting integer and complex scalar types, and preserved complex conjugation when constructing or updating GEMM descriptors.
+* Fixed gfx1250 output-amax generation to use Wave32 masks, supported atomics, cross-workgroup memory ordering, and target-specific buffer descriptors.
 * Fixed incorrect results (`beta` applied twice) for `AdaptiveGemmGSUA` GEMMs that resolve to MultipleBuffer accumulation with a non-zero `beta`.
 * Fixed out-of-bounds tensor loads in the single-wave TDM kernel for edge (non-tile-aligned) `M`/`N` sizes on gfx1250, which could produce incorrect results.
 * Fixed a Stream-K flag-region overrun on dynamic-queue paths (`StreamK=4` and the SK4 sub-path of `StreamK=5`) where a grid scaled via `TENSILE_STREAMK_GRID_MULTIPLIER` could write past its own region.

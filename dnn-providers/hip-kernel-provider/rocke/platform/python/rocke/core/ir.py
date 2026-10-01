@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch import target as _arch
+from .dtypes import dtype_info
 
 # ----------------------------- Types --------------------------------------
 
@@ -51,6 +53,39 @@ F16 = Type("f16")
 F32 = Type("f32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
+FP4E2M1 = Type("fp4e2m1")
+FP6E2M3 = Type("fp6e2m3")
+FP6E3M2 = Type("fp6e3m2")
+E8M0 = Type("e8m0")
+E5M3 = Type("e5m3")
+
+
+def dtype_to_ir_type(dtype: str) -> Type:
+    """Resolve a logical type without claiming scalar operation support.
+
+    Packed memory is described separately; a low-bit type is never an I8 alias.
+    """
+    info = dtype_info(dtype)
+    types = {
+        "i1": I1,
+        "i8": I8,
+        "i16": I16,
+        "i32": I32,
+        "i64": I64,
+        "fp16": F16,
+        "bf16": BF16,
+        "fp32": F32,
+        "fp8e4m3": FP8E4M3,
+        "bf8e5m2": BF8E5M2,
+        "fp4e2m1": FP4E2M1,
+        "fp6e2m3": FP6E2M3,
+        "fp6e3m2": FP6E3M2,
+        "e8m0": E8M0,
+        "e5m3": E5M3,
+    }
+    if info.name not in types:
+        raise ValueError(f"no logical IR type for dtype {info.name!r}")
+    return types[info.name]
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -72,9 +107,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -134,12 +168,10 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -153,11 +185,9 @@ def _mma_c_is_int(op_id: str) -> bool:
     """True when ``op_id`` accumulates in i32 (integer WMMA).
 
     Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
+    Op_ids absent from the catalog default to the f32 accumulator.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
@@ -815,6 +845,14 @@ class IRBuilder:
         return self._op("math.rsqrt", [a], [a.type], result_name_hint="rsq").result
 
     def tanh(self, a: Value) -> Value:
+        """Return the f32 hyperbolic tangent of ``a``.
+
+        Narrow activation users must promote to f32 explicitly and cast the
+        result back. Keeping the core operation f32-only prevents an invalid
+        narrow intrinsic from reaching the AMDGPU lowerer.
+        """
+        if a.type != F32:
+            raise ValueError(f"math.tanh requires f32 operand, got {a.type.name}")
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
@@ -1534,34 +1572,30 @@ class IRBuilder:
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
-        Supports the full element-type catalog the LLVM lowering already
-        accepts: ``f16`` / ``bf16`` (N in {2, 4, 8}), ``f32`` / ``i32``
-        (N in {2, 4, 8}), ``i16`` (N in {2, 4, 8}), ``fp8e4m3`` /
-        ``bf8e5m2`` / ``i8`` (N in {2, 4, 8, 16}).
+        Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32
+        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
+        Loads exactly N elements. Instruction selection depends on target and
+        alignment; 96-bit payloads do not require a 96-bit scalar type.
 
-        Lowers to a single ``load <N x elem>`` from ``addrspace(1)``;
-        AMDGPU's backend coalesces these into a single VMEM transaction
-        (``global_load_dwordxN``) when the address is naturally aligned.
-
-        The per-element size is folded into the default alignment so the
-        common case (8 fp8 → 8-byte load, 4 f32 → 16-byte load) does
-        not need an explicit ``align=`` kwarg.
+        Default alignment is the payload size for power-of-two loads, and
+        element alignment for 12-byte loads. An explicit alignment is a caller
+        guarantee about the address after adding idx.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
             # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
             # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 6, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
         elif dtype.name in ("f32", "i32"):
             elem_bytes = 4
-            if n not in (2, 4, 8):
+            if n not in (2, 3, 4, 8):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
-            if n not in (2, 4, 8, 16):
+            if n not in (2, 4, 8, 12, 16):
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
@@ -1577,7 +1611,9 @@ class IRBuilder:
             attrs={
                 "elem_type": dtype.name,
                 "vec": n,
-                "align": int(align or (n * elem_bytes)),
+                "align": int(
+                    align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
+                ),
             },
             result_name_hint=f"gv{n}",
         ).result
@@ -1784,10 +1820,9 @@ class IRBuilder:
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
         i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        AMDGPU lowers vector LDS loads to ``ds_read_b{8, 16, 32, 64, 128}``
-        based on total payload size. The 8-bit variants must use ``n in {1,
-        2, 4, 8, 16}`` so the resulting payload still maps to a single
-        ``ds_read_b*`` instruction (n=16 → ds_read_b128).
+        loads exactly N elements. In addition to power-of-two widths, accepts
+        96-bit payloads (12 bytes, six halfwords, or three words), using element
+        alignment. The target and alignment determine instruction selection.
         """
         if dtype.name not in ("f16", "bf16", "f32", "i32", "fp8e4m3", "bf8e5m2", "i8"):
             raise ValueError(
@@ -1795,9 +1830,9 @@ class IRBuilder:
                 f"bf8e5m2 / i8, got {dtype.name}"
             )
         allowed_n = (
-            (1, 2, 4, 8, 16)
+            (1, 2, 4, 8, 12, 16)
             if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 8)
+            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
         )
         if n not in allowed_n:
             raise ValueError(
@@ -1858,7 +1893,11 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        hint = (
+            "mxacc"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
@@ -2811,6 +2850,64 @@ class IRBuilder:
             attrs={"xor_mask": int(xor_mask)},
             result_name_hint="dppx",
         ).result
+
+    def quad_perm(self, data: Value, perm) -> Value:
+        """Intra-quad ``v_mov_b32_dpp`` permutation on the VALU.
+
+        Lane ``4q + i`` reads ``data`` from lane ``4q + perm[i]``.
+        ``perm`` is encoded in the low eight bits of the DPP control word.
+
+        **Wave size.** The mapping is wave-size-independent: the same
+        control word applies within every four-lane group, and four
+        divides both 32 and 64, so a lane never addresses outside its own
+        quad. Wave size changes only the *number* of quads (8 in wave32,
+        16 in wave64), never the permutation a quad performs. Contrast
+        :meth:`warp_shuffle_xor`, whose ``lane_xor = 32`` partner is a
+        real lane in wave64 and does not exist in wave32.
+
+        That is a property of the quad, not a claim about every target:
+        the op still requires DPP-capable hardware. Base-DPP
+        ``quad_perm`` is available on CDNA, where the RDNA-only
+        ``row_xmask`` of :meth:`dpp_xor` is not.
+
+        The op carries no lane targeting -- the control word is broadcast
+        to every quad in the wave, with row and bank masks fixed at
+        ``15, 15`` (all enabled) by the lowerers. Selecting a subset of
+        quads is the caller's job.
+        """
+        perm = list(perm)
+        if len(perm) != 4 or any(not (0 <= p <= 3) for p in perm):
+            raise ValueError(f"quad_perm perm must be 4 values in 0..3, got {perm}")
+        if data.type.name != "i32":
+            raise ValueError("quad_perm requires i32 data")
+        ctrl = perm[0] | (perm[1] << 2) | (perm[2] << 4) | (perm[3] << 6)
+        return self._op(
+            "tile.quad_perm",
+            [data],
+            [I32],
+            attrs={"ctrl": int(ctrl)},
+            result_name_hint="qperm",
+        ).result
+
+    def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
+        """XOR shuffle within a four-lane quad.
+
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
+        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        """
+        if xor_mask == 1:
+            perm = [1, 0, 3, 2]
+        elif xor_mask == 2:
+            perm = [2, 3, 0, 1]
+        else:
+            raise ValueError(
+                f"warp_shuffle_xor_quad supports xor_mask 1 or 2, got {xor_mask}"
+            )
+        if v.type.name == "f32":
+            return self.bitcast(self.quad_perm(self.bitcast(v, I32), perm), F32)
+        if v.type.name == "i32":
+            return self.quad_perm(v, perm)
+        raise ValueError(f"warp_shuffle_xor_quad: unsupported type {v.type.name}")
 
     def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
         """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
@@ -4466,6 +4563,7 @@ PURE_OP_NAMES = {
     "tile.ds_swizzle_xor",
     "tile.ds_swizzle",
     "tile.mov_dpp8",
+    "tile.quad_perm",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",
