@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1079,6 +1079,51 @@ namespace rocalution
                                                    BaseMatrix<ValueType>*       prolong_int,
                                                    BaseMatrix<ValueType>*       prolong_gst,
                                                    BaseVector<int64_t>* global_ghost_col) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                               const BaseVector<bool>& S,
+                                               BaseVector<int>*        f2c,
+                                               BaseVector<int>*        f2f,
+                                               BaseMatrix<ValueType>*  A_FF,
+                                               BaseMatrix<ValueType>*  A_FC) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                               const BaseVector<int>&       f2f,
+                                               const BaseMatrix<ValueType>& A_FC,
+                                               BaseMatrix<ValueType>*       A_FF) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                               const BaseVector<int>& f2f,
+                                               BaseMatrix<ValueType>* A_FC,
+                                               BaseMatrix<ValueType>* A_FF) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                                   const BaseVector<int>&       f2c,
+                                                   const BaseVector<int>&       f2f,
+                                                   const BaseMatrix<ValueType>& W,
+                                                   BaseMatrix<ValueType>*       prolong) const
     {
         return false;
     }

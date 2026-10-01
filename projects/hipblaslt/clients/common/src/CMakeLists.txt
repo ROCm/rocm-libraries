@@ -23,5 +23,7 @@ if(HIPBLASLT_ENABLE_BLIS)
 endif()
 
 if(amd_smi_FOUND)
-    target_link_libraries(hipblaslt-clients-common PRIVATE amd_smi)
+    # PUBLIC: efficiency_monitor.hpp includes <amd_smi/amdsmi.h> directly, so
+    # consumers like hipblaslt-bench need the include path propagated too.
+    target_link_libraries(hipblaslt-clients-common PUBLIC amd_smi)
 endif()

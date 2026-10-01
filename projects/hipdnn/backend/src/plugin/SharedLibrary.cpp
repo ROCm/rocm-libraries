@@ -11,6 +11,22 @@ namespace hipdnn_backend
 namespace plugin
 {
 
+namespace detail
+{
+
+std::optional<std::filesystem::path> decoratedLibraryPath(const std::filesystem::path& path)
+{
+    if(path.filename().empty() || path.has_extension())
+    {
+        return std::nullopt;
+    }
+
+    return path.parent_path()
+           / hipdnn_data_sdk::utilities::getLibraryName(path.filename().string().c_str());
+}
+
+} // namespace detail
+
 SharedLibrary::SharedLibrary()
     : _libraryHandle(nullptr)
 {
@@ -65,20 +81,15 @@ void SharedLibrary::load(const std::filesystem::path& libraryPath)
     auto modifiedLibraryPath = libraryPath;
 
     // Check file extension and add prefix/suffix if needed
-    if(modifiedLibraryPath.has_extension())
+    if(const auto decoratedPath = detail::decoratedLibraryPath(modifiedLibraryPath))
     {
-        if(modifiedLibraryPath.extension() != hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
-        {
-            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                                  std::string("Invalid file extension. Expected ")
-                                      + hipdnn_data_sdk::utilities::SHARED_LIB_EXT);
-        }
+        modifiedLibraryPath = *decoratedPath;
     }
-    else
+    else if(modifiedLibraryPath.extension() != hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
     {
-        auto libraryName = hipdnn_data_sdk::utilities::getLibraryName(
-            modifiedLibraryPath.filename().string().c_str());
-        modifiedLibraryPath = modifiedLibraryPath.parent_path() / libraryName;
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              std::string("Invalid file extension. Expected ")
+                                  + hipdnn_data_sdk::utilities::SHARED_LIB_EXT);
     }
 
     if(modifiedLibraryPath.is_relative())
