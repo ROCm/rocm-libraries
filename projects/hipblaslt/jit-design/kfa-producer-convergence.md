@@ -9,9 +9,8 @@ Convergence means the same versioned metadata schema and execution semantics acr
 producers, not identical symbols, layouts, or tuning values.
 
 The approved [target design](../JIT.md#target-design) makes the explicit JIT entry
-points internal, adds rocRoller as a future independent backend behind the Jit
-interface, and has JIT-generated solutions supply the heuristic query after the
-pre-tuned Equality results. The sections below reflect that design. The
+points internal and has JIT-generated solutions supply the heuristic query after
+the pre-tuned Equality results. The sections below reflect that design. The
 [roadmap](../JIT.md#roadmap) records which steps are implemented.
 
 **The infrastructure already exists in the source tree as Gemm-From-Anywhere (GFA) V1.**
@@ -143,7 +142,7 @@ API. Their headers are internal and used by unit tests, and Jit invokes the
 backend behind them. Evaluate these reuse choices against that internal
 contract.
 
-## rocRoller: existing integration and proposed KFA adaptation
+## Existing rocRoller route
 
 The current [rocRoller host route](../library/src/amd_detail/rocblaslt/src/rocroller/rocroller_host.cpp)
 derives `KernelType`, obtains Origami-ranked configurations, and checks a handle-owned
@@ -154,7 +153,9 @@ checks predicates, and calls `launchKernel`. The
 [configuration selector](../library/src/amd_detail/rocblaslt/src/rocroller/solution_selection.cpp)
 and [cache](../library/src/amd_detail/rocblaslt/src/rocroller/solution_cache.cpp)
 are separate responsibilities. This route precedes Tensile solution lookup and
-does not currently pass through generic `getJitAlgo` or the Tensile KFA consumer.
+does not pass through generic `getJitAlgo` or the Tensile KFA consumer. It is
+not a JIT backend, and `HIPBLASLT_JIT=2` skips it so that JIT is the only
+source of solutions.
 
 The checked-in [rocRoller KFA fixture](../tensilelite/Tensile/Tests/custom/custom_rr.yaml)
 demonstrates one assembly artifact entering existing custom-kernel ingestion. It
@@ -163,28 +164,24 @@ branch also supports precompiled custom code objects with handwritten argument
 packing; [custom_kernels.cpp](../library/src/amd_detail/rocblaslt/src/rocroller/custom_kernels.cpp)
 includes kernels from other producers, so this route does not identify a kernel's producer.
 
-| TensileLite proposal | rocRoller proposal | Other-generator proposal |
-| --- | --- | --- |
-| Complete generated KFA metadata and use the library-owned consumer for proven profiles. | Export or normalize supported generated artifacts into that same schema and consumer. | Implement the same producer contract; add an operation adapter only for missing operation semantics. |
+## Producer proposals
+
+| TensileLite proposal | Other-generator proposal |
+| --- | --- |
+| Complete generated KFA metadata and use the library-owned consumer for proven profiles. | Implement the same producer contract; add an operation adapter only for missing operation semantics. |
 
 The contract includes binary/symbol/target compatibility, full argument ABI and
 physical layout, predicates, grid/workgroup/cluster units and dynamic shared memory,
 every ordered helper, workspace and synchronization initialization, lifetime, and
-diagnostics. Preserve rocRoller's `ZeroedBeforeAndAfter` Stream-K scratch contract:
-caller-visible workspace is not the complete synchronization requirement. The
-TensileLite path also obtains handle-owned synchronization state during preparation;
-applications own buffers/workspace and follow existing handle/stream rules.
+diagnostics. Caller-visible workspace is not the complete synchronization
+requirement: the TensileLite path obtains handle-owned synchronization state during
+preparation, and applications own buffers/workspace and follow existing
+handle/stream rules.
 
-All three producers should share the library-owned validation and execution
-consumer for each supported profile. Origami ranking remains distinct from code
+Every producer should share the library-owned validation and execution consumer
+for each supported profile. Origami ranking remains distinct from code
 generation. This assessment is based on source inspection; it is not a runtime or
 interoperability result.
-
-In the target design, rocRoller is a future independent backend behind the Jit
-interface, alongside TensileLite and other generators; it does not route through
-TensileLite. That backend is outside the six roadmap steps. Until it
-exists, the runtime route described above stays in place. `HIPBLASLT_JIT=2`
-skips that early route so that JIT is the only source of solutions.
 
 ## Selection and JIT-generated solutions
 

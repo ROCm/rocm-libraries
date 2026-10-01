@@ -190,9 +190,9 @@ prediction, and publishes its solutions into the JIT solution library.
 `tensilelite::getGemmAlgo` and `tensilelite::createBackend` remain internal
 entry points for the tests.
 
-TensileLite remains one of several independent backends. rocRoller and
-HipKittens are future backends behind the same interface; they do not route
-through TensileLite. `Tensile.SingleSolution` and `Tensile.JitGemm` are the
+TensileLite remains one of several independent backends. HipKittens and other
+future backends sit behind the same interface; they do not route through
+TensileLite. `Tensile.SingleSolution` and `Tensile.JitGemm` are the
 current Python entry points; the [single-solution guide](tensilelite/SINGLE_SOLUTION.md)
 describes them.
 

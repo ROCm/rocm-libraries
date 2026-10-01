@@ -538,7 +538,6 @@ flowchart RL
     subgraph generation["Backends and prediction"]
         TensileLite["TensileLite"]
         HipKittens["HipKittens (future)"]
-        rocRoller["rocRoller (future)"]
         OtherBackends["OtherBackends (future)"]
         Predictor["Predictor"]
         TuningKnowledge["TuningKnowledge"]
@@ -551,14 +550,13 @@ flowchart RL
     SolutionLibrary --> AlgoGetHeuristic
     TensileLite --> Jit
     HipKittens -.-> Jit
-    rocRoller -.-> Jit
     OtherBackends -.-> Jit
     Predictor --> Jit
     TuningKnowledge --> Predictor
     Origami --> Predictor
 
     classDef future stroke-dasharray: 5 5
-    class HipKittens,rocRoller,OtherBackends future
+    class HipKittens,OtherBackends future
 ```
 
 Dashed nodes and edges are future backends. Each backend is an independent
@@ -576,7 +574,7 @@ TensileLite.
 | Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| rocRoller, HipKittens, other backends | Future extension points behind the same interface. HipKittens is explicitly deferred in this pass. |
+| HipKittens, other backends | Future extension points behind the same interface. HipKittens is explicitly deferred in this pass. |
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
@@ -589,9 +587,8 @@ TensileLite.
 Jit is the component name; the design does not introduce a `JitInterface`
 type name. Jit passes the algorithm parameters and gfx target to the selected
 backend and receives solutions back. Backend implementations are backend
-specific and independent of one another: TensileLite is live, rocRoller and
-HipKittens are future extension points, and other generators can implement the
-same interface. A new in-process mock backend in the tests demonstrates that Jit
+specific and independent of one another: TensileLite is live, HipKittens is a
+future extension point, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
 does not depend on TensileLite.
 
 The existing type-reuse guidance still applies. The GEMM payload remains
@@ -768,7 +765,7 @@ The following work sits outside the six steps and remains future:
 | --- | --- |
 | Exact epilogue specialization | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
-| rocRoller and HipKittens backends | Implement the backend interface. HipKittens is deferred in this pass. The existing rocRoller runtime path remains separate until then. |
+| HipKittens and other backends | Implement the backend interface. HipKittens is deferred in this pass. |
 | KFA metadata convergence | Complete producer metadata, then prove argument, launch, helper, workspace and synchronization equivalence before sharing dispatch. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | Timing/progress | Independent `HIPBLASLT_JIT_DEBUG` categories `timing`, `progress`, or `timing,progress`. Unset/empty adds no collection, observer or files. See the [host](jit-design/timing-host-plan.md) and [Python](jit-design/timing-python-plan.md) plans. |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |
