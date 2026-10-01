@@ -370,6 +370,14 @@ validParameters = { # we need to make sure this matches develop
     # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
     # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
     "PrefetchGL2Inc64Bit": [False, True],
+    # Address form of the PrefetchGL2 global_prefetch_b8.
+    # False: a 64-bit vgpr pair address per load (vaddr, saddr=off).
+    # True: a 64-bit sgpr pair base per tensor (GL2PrefetchBase{A,B,...}) plus a
+    # 32-bit vgpr offset per load. Halves the address vgprs and advances the
+    # address with scalar instead of vector adds, but each lane's byte offset
+    # from the base (within one prefetch tile) must fit in 32 bits.
+    # Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2SAddr": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
