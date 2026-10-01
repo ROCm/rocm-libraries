@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from .. import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -659,7 +659,6 @@ for paramDict in defaultBenchmarkCommonParameters:
 # other non-benchmark options for solutions
 
 
-
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
 defaultBenchmarkFinalProblemSizes = [{"Range": [[64, 64, 64, 512], 0, 0]}]
 defaultBatchedProblemSizes = [{"Range": [[2880], 0, [1], 0]}]
@@ -849,6 +848,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict

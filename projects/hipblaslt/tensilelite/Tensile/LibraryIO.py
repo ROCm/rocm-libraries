@@ -26,18 +26,18 @@ from .CustomKernels import getCustomKernelConfig
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from . import __version__
+from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Common.TimingInstrumentation import timing_context
+from .Common.Architectures import gfxToIsa
+from .SolutionStructs import Solution, ProblemSizes
+from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from .Common.GlobalParameters import defaultSolution
+from .SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
 import io
 import os
@@ -114,7 +114,6 @@ try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 
 ###################
@@ -549,7 +548,8 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -560,7 +560,8 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading
+               lazyLibraryLoading,
+               archRenames,
            )
 
 
@@ -672,9 +673,14 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
-    """Parses the data of a library logic file."""
+    """Parses the data of a library logic file.
+
+    ``archRenames`` maps a declared ArchitectureName to the name the library is
+    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
+    """
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -684,6 +690,8 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
+    if archRenames:
+        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input

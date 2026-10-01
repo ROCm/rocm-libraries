@@ -116,7 +116,12 @@ def _make_fp16_config(gfx_arch: str) -> BatchedGemmKernelConfig:
 CASES = [(3, 128, 128, 128), (3, 128, 128, 257)]
 
 
-def test_batched_fp16(gfx_arch: str, batch: int, M: int, N: int, K: int) -> tuple[str, str]:
+# NOTE: deliberately NOT named test_* -- this module is script-style and is
+# run directly by ctest (see tests/CMakeLists.txt). Under the old name pytest
+# collected it and failed with "fixture 'gfx_arch' not found" (conftest
+# provides 'gpu_arch'), and it returns a (status, detail) tuple, which pytest
+# also flags. main() below remains the supported entry point.
+def check_batched_fp16(gfx_arch: str, batch: int, M: int, N: int, K: int) -> tuple[str, str]:
     cfg = _make_fp16_config(gfx_arch)
     need = _codegen_common().gemm_problem_vector_sizes(M, N, K, "rcr", "fp16", "fp16", "fp16")
     if need != cfg.effective_vector_sizes:
@@ -183,7 +188,7 @@ def main() -> int:
     results = []
     for case in CASES:
         try:
-            results.append(test_batched_fp16(gfx, *case))
+            results.append(check_batched_fp16(gfx, *case))
         except Exception as exc:  # noqa: BLE001
             results.append((FAIL, f"batched/fp16 {case}: exception: {exc}"))
 

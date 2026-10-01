@@ -37,6 +37,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 import numpy as np  # noqa: E402
+import pytest
 
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
@@ -52,8 +53,7 @@ from gemm_utils import (  # noqa: E402
     _output_dtype,
 )
 from ctypes_utils import detect_gpu_arch, get_build_dir  # noqa: E402
-from arch_specs_generated import get_warp_tile_combos  # noqa: E402
-from codegen_common import gemm_problem_vector_sizes, normalize_gfx_arch  # noqa: E402
+from codegen_common import gemm_problem_vector_sizes  # noqa: E402
 
 # (dtype, layout) surface the regular bridge supports. Column-major C is rejected
 # by ck_tile's universal GEMM at build, so every layout keeps row-major C, which
@@ -61,8 +61,8 @@ from codegen_common import gemm_problem_vector_sizes, normalize_gfx_arch  # noqa
 #
 # fp16/bf16 are the PR #8479 surface; fp8 (E4M3), bf8 (E5M2) and int8 are the
 # remaining dtypes TE's plain GEMM has MFMA warp tiles for (fp8/bf8 -> fp16 out,
-# int8 -> int32 out). A dtype the arch has no warp tile for (int8 on gfx1250)
-# skips (handled below).
+# int8 -> int32 out). int8 only has warp tiles on gfx942; on other arches its
+# kernels simply fail to build and the case skips (handled below).
 _FLOAT_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 _INT_DTYPES = ("int8",)
 _LAYOUTS = ("rcr", "rrr", "ccr", "crr")
@@ -77,21 +77,19 @@ _CASES = [
 _ALGO = dict(
     tile_m=128, tile_n=128, tile_k=32,
     wave_m=2, wave_n=2, wave_k=1,
+    warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
     pipeline="compv4", scheduler="intrawave", epilogue="cshuffle",
     pad_m=True, pad_n=True, pad_k=True,
 )
 
-# MFMA warp tile used wherever the arch supports it for the dtype; otherwise
-# (e.g. gfx1250 WMMA) the arch's first listed warp tile, see _warp_tile.
-_WARP_TILE = (32, 32, 16)
-
-# (name, M, N, K). 'awkward' deliberately uses M, N that do not divide the 128
-# tile (padding) and are odd (narrow vector widths for the tensors they are
-# contiguous in).
+# (name, M, N, K). 'awkward' is vector-aligned but not block-aligned, exercising
+# padding. Padding does not waive the kernel's vector-load/store alignment, so
+# 'unaligned' (odd M, N) runs on a kernel with narrowed vector widths.
 _SHAPES = [
     ("square", 512, 512, 512),
     ("rectangular", 1024, 512, 256),
-    ("awkward", 257, 129, 512),
+    ("awkward", 272, 144, 512),
+    ("unaligned", 257, 129, 512),
 ]
 
 # Global-relative-error gates. fp16 measured ~3-4e-4 and bf16 ~8e-3 on gfx942.
@@ -170,41 +168,26 @@ def _reference(A, B, dtype):
     return ref.astype(np.int32) if out_dtype == "int32" else ref
 
 
-def _acc_dtype(dtype: str) -> str:
-    return "int32" if dtype == "int8" else "fp32"
-
-
-def _warp_tile(dtype: str, arch: str):
-    """_WARP_TILE if the arch supports it for dtype, else the arch's first listed
-    warp tile; None if the arch has none for dtype (the case skips)."""
-    key = f"{dtype}_{dtype}_{_acc_dtype(dtype)}"
-    combos = [tuple(c) for c in get_warp_tile_combos(normalize_gfx_arch(arch), key)]
-    return _WARP_TILE if _WARP_TILE in combos else (combos[0] if combos else None)
-
-
-def _config(dtype: str, layout: str, arch: str):
-    """Kernel config for the case, or None if the arch has no warp tile for dtype."""
-    wt = _warp_tile(dtype, arch)
-    if wt is None:
-        return None
+def _config(dtype: str, layout: str, arch: str) -> GemmKernelConfig:
     la, lb, lc = layout
-    algo = dict(_ALGO, tile_k=max(_ALGO["tile_k"], wt[2]))
+    algo = dict(_ALGO)
+    if arch == "gfx1250":
+        # Native WMMA shapes: 16-bit inputs use K=32; 8-bit inputs use K=64.
+        warp_k = 32 if dtype in ("fp16", "bf16") else 64
+        algo.update(warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_k, tile_k=warp_k)
     return GemmKernelConfig(
         dtype_a=dtype, dtype_b=dtype,
         dtype_c=_output_dtype(dtype),
-        dtype_acc=_acc_dtype(dtype),
+        dtype_acc=("int32" if dtype == "int8" else "fp32"),
         layout_a=_LAYOUT_WORD[la], layout_b=_LAYOUT_WORD[lb], layout_c=_LAYOUT_WORD[lc],
-        gfx_arch=arch, warp_tile_m=wt[0], warp_tile_n=wt[1], warp_tile_k=wt[2], **algo,
+        gfx_arch=arch, **algo,
     )
 
 
-def _shape_config(dtype: str, layout: str, arch: str, shape):
+def _shape_config(dtype: str, layout: str, arch: str, shape) -> GemmKernelConfig:
     """Native kernel when its vector widths divide the shape's contiguous
-    extents, else a copy with the widest fixed widths the shape allows (None if
-    the arch has no warp tile for dtype)."""
+    extents, else a copy with the widest fixed widths the shape allows."""
     cfg = _config(dtype, layout, arch)
-    if cfg is None:
-        return None
     _, M, N, K = shape
     need = gemm_problem_vector_sizes(M, N, K, layout, dtype, dtype, cfg.dtype_c)
     if all(n % v == 0 for n, v in zip(need, cfg.effective_vector_sizes)):
@@ -214,17 +197,17 @@ def _shape_config(dtype: str, layout: str, arch: str, shape):
 
 def _build_all(arch):
     """Build every distinct (dtype, layout, shape) kernel once; returns
-    {(dtype, layout, shape_name): (config or None, .so or None)}."""
+    {(dtype, layout, shape_name): (config, .so or None)}."""
     cfgs = {
         (dt, lay, sh[0]): _shape_config(dt, lay, arch, sh)
         for dt, lay in _CASES
         for sh in _SHAPES
     }
-    unique = list({c.name: c for c in cfgs.values() if c}.values())
+    unique = list({c.name: c for c in cfgs.values()}.values())
     libs = dict(
         zip((c.name for c in unique), setup_multiple_gemm_dispatchers(unique, verbose=False))
     )
-    return {key: (c, libs[c.name] if c else None) for key, c in cfgs.items()}
+    return {key: (c, libs[c.name]) for key, c in cfgs.items()}
 
 
 def _max_rel(out: np.ndarray, ref: np.ndarray) -> float:
@@ -244,11 +227,13 @@ def _gpu_environment_reason():
     return None
 
 
+@pytest.mark.usefixtures("dispatcher_static_lib")
 class GemmBridgeParity(unittest.TestCase):
     """End-to-end GPU-vs-NumPy parity across the bridge's dtype/layout surface."""
 
     arch = None
     built = {}        # (dtype, layout, shape_name) -> (config, Path(.so) or None)
+    build_failures = {}  # (dtype, layout, shape_name) -> kernel name
 
     @classmethod
     def setUpClass(cls):
@@ -258,13 +243,19 @@ class GemmBridgeParity(unittest.TestCase):
         cls.arch = detect_gpu_arch()
 
         cls.built = _build_all(cls.arch)
-        if not any(so for _, so in cls.built.values()):
-            raise unittest.SkipTest(f"no bridge kernels built on {cls.arch}")
+        cls.build_failures = {k: c.name for k, (c, so) in cls.built.items() if so is None}
+
+        if cls.arch == "gfx1250" and cls.build_failures:
+            raise AssertionError(f"MI400 parity kernels failed to build: {cls.build_failures}")
+
+        if len(cls.build_failures) == len(cls.built):
+            raise unittest.SkipTest(
+                f"no bridge kernels built on {cls.arch} "
+                f"(failures: {cls.build_failures})"
+            )
 
     def _run_case(self, dtype, layout, shape):
         cfg, so = self.built[(dtype, layout, shape[0])]
-        if cfg is None:
-            self.skipTest(f"{self.arch} has no warp tile for {dtype}")
         if so is None:
             self.skipTest(f"{cfg.name} did not build on {self.arch}")
 
@@ -291,6 +282,17 @@ class GemmBridgeParity(unittest.TestCase):
             max_rel, _TOL[dtype],
             f"{dtype}/{layout} {shape[0]} max_rel={max_rel:.2e} > {_TOL[dtype]:.0e}",
         )
+
+    def test_unaligned_problem_is_rejected(self):
+        """The native kernel's vector widths do not divide 257x129, so it must
+        reject the problem; the 'unaligned' shape runs it on a narrowed kernel."""
+        so = self.built[("fp16", "rcr", "square")][1]
+        if so is None:
+            self.skipTest("fp16/rcr kernel unavailable")
+        M, N, K = 257, 129, 512
+        A, B = _make_inputs("fp16", M, N, K, np.random.default_rng(42))
+        result = GpuGemmRunner(so).run(A, B, GemmProblem(M=M, N=N, K=K))
+        self.assertEqual(result.status, -1)
 
 
 def _add_parity_tests():
@@ -332,16 +334,11 @@ def _main() -> int:
     rng = np.random.default_rng(42)
     total = 0
     passed = 0
-    skipped = 0
     for dtype, layout in _CASES:
         tag = f"{dtype}/{layout}"
         for sname, M, N, K in _SHAPES:
-            cfg, so = built[(dtype, layout, sname)]
-            if cfg is None:
-                skipped += 1
-                print(f"  {tag:<12} {sname:<12} {'SKIP (no warp tile)':>35}")
-                continue
             total += 1
+            so = built[(dtype, layout, sname)][1]
             if so is None:
                 print(f"  {tag:<12} {sname:<12} {'BUILD FAILED':>35}")
                 continue
@@ -360,7 +357,7 @@ def _main() -> int:
                   f"{mr:>10.2e} {_TOL[dtype]:>8.0e} {'PASS' if ok else 'FAIL':>6}")
 
     print("\n" + "=" * 78)
-    print(f"  {passed}/{total} parity checks passed ({skipped} skipped: no warp tile on {arch})")
+    print(f"  {passed}/{total} parity checks passed")
     print("=" * 78)
     return 0 if passed == total else 1
 
