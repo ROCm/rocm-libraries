@@ -8,11 +8,6 @@
 #include "miopen_impl.h"
 
 #include <hipdnn_frontend.hpp>
-// A detail header because the version the backend reports is not on the
-// frontend's public surface. It is header-only, so MIOpen's link line is
-// unchanged.
-#include <hipdnn_frontend/detail/BackendWrapper.hpp>
-#include <hipdnn_frontend/version.h>
 
 #include <hip/hip_runtime_api.h>
 
@@ -238,55 +233,25 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
     return RunGraph(*state, graph, variantPack);
 }
 
-BackendState ClassifyBackend(int reportedMajor, int expectedMajor)
+bool IsAvailable()
 {
-    if(reportedMajor < 0)
-        return BackendState::Missing;
-    if(reportedMajor != expectedMajor)
-        return BackendState::MajorVersionMismatch;
-    return BackendState::Usable;
-}
-
-const char* DescribeBackendState(BackendState state)
-{
-    if(state == BackendState::Missing)
-        return "libhipdnn_backend.so could not be loaded, or reports a version string the "
-               "hipDNN frontend refused";
-    if(state == BackendState::MajorVersionMismatch)
-        return "the hipDNN backend reports a major version this MIOpen was not built against";
-    if(state == BackendState::HandleCreationFailed)
-        return "the hipDNN backend loaded but could not create a handle";
-    return "the hipDNN backend is usable";
-}
-
-BackendState ProbeBackendState()
-{
-    static const BackendState state = [] {
-        // Asking the backend for its version is what makes the frontend dlopen it.
-        const BackendState version = ClassifyBackend(fe::detail::hipdnnBackend()->version().major,
-                                                     HIPDNN_FRONTEND_VERSION_MAJOR);
-
-        // Creating a handle is cheap and exercises the rest of the chain, so a backend
-        // that loads but cannot work is caught here rather than at the first convolution.
-        BackendState probed = version;
-        if(probed == BackendState::Usable)
-        {
-            auto [handle, error] = fe::createHipdnnHandle();
-            if(!error.is_good() || handle == nullptr)
-                probed = BackendState::HandleCreationFailed;
-        }
-
-        if(probed != BackendState::Usable)
-        {
-            std::cerr << "[MIOpen] hipDNN forwarding is unavailable: "
-                      << DescribeBackendState(probed) << ".\n";
-        }
-        return probed;
+    static const bool available = [] {
+        // Creating a handle makes the frontend load the backend, refuse it if its major
+        // version differs, and then run hipdnnCreate, so this one call catches every way
+        // the backend can be unusable. hipDNN always says why a load failed, but explains
+        // a refused version only when its logging is on, hence the hint. The frontend's
+        // message goes last because it ends in an empty "Backend error: " when no
+        // backend was loaded.
+        auto [handle, error] = fe::createHipdnnHandle();
+        if(error.is_good() && handle != nullptr)
+            return true;
+        std::cerr << "[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set "
+                     "HIPDNN_LOG_LEVEL=error): "
+                  << error.get_message() << "\n";
+        return false;
     }();
-    return state;
+    return available;
 }
-
-bool IsAvailable() { return ProbeBackendState() == BackendState::Usable; }
 
 void ReleaseHandle(miopenHandle_t handle)
 {
