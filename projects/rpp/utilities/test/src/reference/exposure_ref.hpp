@@ -58,17 +58,7 @@ Per-type form
     F16/F32 clamp[0,1]     ( v * mult )
 */
 inline double exposure_scalar(double v, DType dt, double mult) {
-    switch (dt) {
-        case DType::U8:
-            return clampd(std::nearbyint(v * mult), 0.0, 255.0);
-        case DType::I8:
-            return clampd(std::nearbyint((v + 128.0) * mult), 0.0, 255.0) - 128.0;
-        case DType::F16:
-        case DType::F32:
-            return clampd(v * mult, 0.0, 1.0);
-        default:
-            return v;
-    }
+    return from_unit(to_unit(v, dt) * mult, dt);
 }
 
 template <typename T>

@@ -27,8 +27,6 @@ SOFTWARE.
 
 #include <rpp/rpp.h>
 
-#include <cmath>
-
 #include "framework/config_param.hpp"
 #include "framework/intensity.hpp"
 #include "framework/tensor_setup.hpp"
@@ -60,18 +58,7 @@ Per-type form
     F16/F32 clamp[0,1]     ( (src1 - src2) * alpha + src2 )
 */
 inline double blend_scalar(double s1, double s2, DType dt, double alpha) {
-    const double v = (s1 - s2) * alpha + s2;
-    switch (dt) {
-        case DType::U8:
-            return clampd(std::nearbyint(v), 0.0, 255.0);
-        case DType::I8:
-            return clampd(std::nearbyint(v), -128.0, 127.0);
-        case DType::F16:
-        case DType::F32:
-            return clampd(v, 0.0, 1.0);
-        default:
-            return v;
-    }
+    return quantize_stored((s1 - s2) * alpha + s2, dt);
 }
 
 template <typename T>
