@@ -28,21 +28,18 @@
 #include <cstring>
 
 // rocblas_device_malloc_alloc is the public entry point rocSOLVER and hipSOLVER reach
-// device memory through, and it is the only caller of the count form of _device_malloc.
-// On the stream-order path that constructor compared hipMallocAsync against hipSuccess,
-// pushed one null pointer per requested count, and left its success flag at the true it
-// was initialised with. rocblas_device_malloc_alloc read that flag, concluded the
-// allocation had worked, took mem[0] as a base address to compute the rest from, and
-// returned rocblas_status_success holding nothing. A caller that checked the status it
-// was handed was told to go ahead and use a null pointer.
+// device memory through, and the only caller of the count form of _device_malloc. On the
+// stream-order path that constructor pushed one null pointer per requested count but left
+// its success flag at the true it was initialised with, so the alloc returned
+// rocblas_status_success holding nothing and a caller that checked the status went on to
+// use a null pointer.
 //
-// Driven through the public API rather than the constructor, because the flag only ever
-// mattered through what rocblas_device_malloc_alloc did with it.
+// Driven through the public API, since the flag only ever mattered through what
+// rocblas_device_malloc_alloc did with it.
 namespace
 {
-    // Large enough that no device satisfies it, small enough that rounding it up to the
-    // device memory granularity cannot overflow size_t. An overflowing size would wrap to
-    // something allocatable and the test would pass having proved nothing.
+    // Too large for any device, but small enough that rounding up to the allocation
+    // granularity cannot overflow size_t and wrap to something allocatable.
     constexpr size_t c_unsatisfiable_bytes = size_t(1) << 50;
 
     void testing_device_malloc_count_alloc_failure(const Arguments& arg)
@@ -51,34 +48,25 @@ namespace
         GTEST_SKIP() << "hipMallocAsync on the default stream needs HIP 5.3, and the branch "
                         "this covers is compiled out below it";
 #else
-        // graph_test is what makes rocblas_local_handle export ROCBLAS_STREAM_ORDER_ALLOC
-        // before rocblas_create_handle and restore it afterwards, and a handle built that
-        // way is the only one whose destructor matches its constructor. Calling
-        // set_stream_order_memory_allocation on an already-built handle would reach the
-        // same branch, but the handle allocated its workspace with hipMalloc and the
-        // destructor would then release it with hipFreeAsync; on any runtime where that
-        // returns an error the destructor calls rocblas_abort, which resets SIGABRT before
-        // aborting, so gtest could not turn it into a failed test and the whole
-        // rocblas-test binary would go down. rocblas_stream_begin_capture carries that same
-        // setter call commented out in favour of the environment, for the same reason.
+        // graph_test makes rocblas_local_handle set ROCBLAS_STREAM_ORDER_ALLOC around
+        // rocblas_create_handle, and only a handle built that way has a destructor matching
+        // its constructor. Calling set_stream_order_memory_allocation afterwards reaches the
+        // same branch but pairs a hipMalloc'd workspace with hipFreeAsync; where that errors
+        // the destructor calls rocblas_abort, which resets SIGABRT, so gtest could not turn
+        // it into a failed test and the whole binary would go down. No graph capture happens
+        // here -- that is pre_test's doing and this test never calls it.
         //
-        // No graph capture happens: that is pre_test's doing and this test never calls it.
-        // Asserted on the argument rather than on the handle because the flag the branch
-        // actually reads, _rocblas_handle::stream_order_alloc, is private and has no
-        // getter. This at least fails loudly if the YAML line goes away, rather than
-        // letting the test drop back to the allocator branch and pass against an
-        // unfixed library.
+        // Asserted on the argument because the flag the branch reads,
+        // _rocblas_handle::stream_order_alloc, is private with no getter. Without it, losing
+        // the YAML line would silently drop the test onto the other allocator, where it
+        // passes against an unfixed library.
         ASSERT_TRUE(arg.graph_test)
             << "this test needs a handle built with stream-order allocation; restore "
                "graph_test: true in device_malloc_gtest.yaml";
 
-        // Probed before the handle is built, because graph_test makes the constructor
-        // call hipMallocAsync and that throws where memory pools are unsupported. The
-        // throw escapes rocblas_create_handle as a status, rocblas_local_handle turns it
-        // into a std::runtime_error, and the harness reports "Received uncaught
-        // exception" -- which would read as this test finding a defect rather than as a
-        // device that does not offer the feature. The docs name this attribute as the
-        // way to ask; see docs/reference/memory-alloc.rst.
+        // Probed before the handle is built: graph_test makes the constructor call
+        // hipMallocAsync, which throws where memory pools are unsupported, and the harness
+        // reports that as an uncaught exception -- an absent feature reading as a defect.
         int device          = 0;
         int pools_supported = 0;
         CHECK_HIP_ERROR(hipGetDevice(&device));
@@ -91,16 +79,11 @@ namespace
 
         rocblas_local_handle handle{arg};
 
-        // The other half of the branch condition, and asserted rather than assumed: a
-        // handle given a user workspace allocates from it instead, and that path sets the
-        // same flag correctly and always has. This test would then return
-        // rocblas_status_memory_error for a reason that has nothing to do with the fix and
-        // stay green while covering none of it.
-        //
-        // Skipped rather than failed, because that is a property of the run and not of the
-        // library: a non-zero ROCBLAS_DEVICE_MEMORY_SIZE in the environment makes every
-        // handle in the process user managed, and failing there would report a configured
-        // run as a regression. A skip still says so out loud, which a silent pass does not.
+        // The other half of the branch condition. A handle given a user workspace allocates
+        // from it instead, on a path that sets the flag correctly and always has, so the
+        // test would return rocblas_status_memory_error for an unrelated reason and stay
+        // green while covering none of the fix. Skipped rather than failed because a
+        // non-zero ROCBLAS_DEVICE_MEMORY_SIZE is a property of the run, not a regression.
         if(!rocblas_is_managing_device_memory(handle))
             GTEST_SKIP() << "handle is not managing its own device memory, so the count "
                             "allocation under test is not the one that runs; unset "
@@ -116,12 +99,12 @@ namespace
             << "; a caller that trusts the status would go on to use the null pointer it was "
                "handed";
 
-        // Checked independently of the status, because the defect produced a usable-looking
-        // object alongside its success and a caller holding one has nothing else to test.
+        // Checked independently of the status: the defect produced a usable-looking object
+        // alongside its success, and a caller holding one has nothing else to test.
         EXPECT_EQ(mem, nullptr) << "a failed allocation still produced an allocation object";
 
-        // Not reached once the fix is in place. Present so that running this test against an
-        // unfixed library does not also leak the object that failure used to hand back.
+        // Unreachable once the fix is in place; present so a run against an unfixed library
+        // does not also leak the object that failure handed back.
         if(mem)
             EXPECT_ROCBLAS_STATUS(rocblas_device_malloc_free(mem), rocblas_status_success);
 #endif
@@ -141,10 +124,9 @@ namespace
 
     struct device_malloc : RocBLAS_Test<device_malloc, device_malloc_testing>
     {
-        // Nothing here varies with the type, the allocation being counted in bytes, so
-        // device_malloc_testing is valid for all of them. Dispatched anyway rather than
-        // answering true, because type_filter_functor also applies the global filters --
-        // os_flags, gpu_arch, the no-Tensile exclusions -- and those do apply.
+        // Nothing here varies with the type, the allocation being counted in bytes.
+        // Dispatched anyway rather than answering true, because type_filter_functor also
+        // applies the global filters -- os_flags, gpu_arch, the no-Tensile exclusions.
         static bool type_filter(const Arguments& arg)
         {
             return rocblas_simple_dispatch<type_filter_functor>(arg);
