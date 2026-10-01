@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -153,7 +153,6 @@ void stedc_clement_initData(const rocblas_handle handle,
             hEw->copy_data_from(E);
         }
     }
-
 }
 
 // Creates an `n` by `n` tridiagonal, Toeplitz matrix T of the following form:
@@ -441,12 +440,12 @@ void stedc_default_initData(const rocblas_handle handle,
         cpu_geqrf<S>(NN1, NN1, Q1.data(), NN1, ipiv1.data(), hW.data(), sw);
         cpu_geqrf<S>(NN2, NN2, Q2.data(), NN2, ipiv2.data(), hW.data(), sw);
         // now multiply the orthogonal matrices by the diagonals A1 and A2 to hide the eigenvalues
-        cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN1, NN1, NN1,
-                           Q1.data(), NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
+        cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN1, NN1, NN1, Q1.data(),
+                           NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
         cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN1, NN1, NN1, Q1.data(),
                            NN1, ipiv1.data(), A1.data(), NN1, hW.data(), sw);
-        cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN2, NN2, NN2,
-                           Q2.data(), NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
+        cpu_ormqr_unmqr<S>(rocblas_side_left, rocblas_operation_transpose, NN2, NN2, NN2, Q2.data(),
+                           NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
         cpu_ormqr_unmqr<S>(rocblas_side_right, rocblas_operation_none, NN2, NN2, NN2, Q2.data(),
                            NN2, ipiv2.data(), A2.data(), NN2, hW.data(), sw);
         // finally, perform tridiagonalization
@@ -511,38 +510,34 @@ void stedc_initData(const rocblas_handle handle,
 {
     if(CPU)
     {
-        if((std::getenv("TEST_WILKINSON") != nullptr) || (std::getenv("STEDC_TEST_WILKINSON") != nullptr))
+        if((std::getenv("TEST_WILKINSON") != nullptr)
+           || (std::getenv("STEDC_TEST_WILKINSON") != nullptr))
         {
-            stedc_wilkinson_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                                  hInfo);
+            stedc_wilkinson_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
         else if((std::getenv("TEST_CLEMENT") != nullptr)
                 || (std::getenv("STEDC_TEST_CLEMENT") != nullptr))
         {
-            stedc_clement_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                                hInfo);
+            stedc_clement_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
         else if((std::getenv("TEST_TOEPLITZ") != nullptr)
                 || (std::getenv("STEDC_TEST_TOEPLITZ") != nullptr))
         {
-            stedc_toeplitz_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                                 hInfo);
+            stedc_toeplitz_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
         else if((std::getenv("TEST_IDENTITY") != nullptr)
                 || (std::getenv("STEDC_TEST_IDENTITY") != nullptr))
         {
-            stedc_identity_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                                 hInfo);
+            stedc_identity_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
-        else if((std::getenv("TEST_RANDOM") != nullptr) || (std::getenv("STEDC_TEST_RANDOM") != nullptr))
+        else if((std::getenv("TEST_RANDOM") != nullptr)
+                || (std::getenv("STEDC_TEST_RANDOM") != nullptr))
         {
-            stedc_random_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                               hInfo);
+            stedc_random_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
         else
         {
-            stedc_default_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC,
-                                                hInfo);
+            stedc_default_initData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
         }
 
         if(singular)
@@ -553,9 +548,9 @@ void stedc_initData(const rocblas_handle handle,
             for(auto i = 0; i < n - 1; ++i)
             {
                 hD[0][i] *= scl;
-                hE[0][i] *= scl; 
+                hE[0][i] *= scl;
             }
-            hD[0][n-1] *= scl;
+            hD[0][n - 1] *= scl;
         }
     }
 
@@ -568,7 +563,7 @@ void stedc_initData(const rocblas_handle handle,
         if(evect == rocblas_evect_original)
             CHECK_HIP_ERROR(dC.transfer_from(hC));
     }
-    
+
     return;
 }
 
@@ -610,7 +605,8 @@ void stedc_getError(const rocblas_handle handle,
     std::vector<rocblas_int> iwork(liwork);
 
     // input data initialization
-    stedc_initData<true, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo, singular);
+    stedc_initData<true, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                  singular);
 
     // execute computations
     // GPU lapack
@@ -744,7 +740,8 @@ void stedc_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        stedc_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo, singular);
+        stedc_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                       singular);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -753,12 +750,14 @@ void stedc_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    stedc_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo, singular);
+    stedc_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                   singular);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        stedc_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo, singular);
+        stedc_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                       singular);
 
         CHECK_ROCBLAS_ERROR(
             rocsolver_stedc(handle, evect, n, dD.data(), dE.data(), dC.data(), ldc, dInfo.data()));
@@ -781,7 +780,8 @@ void stedc_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        stedc_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo, singular);
+        stedc_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                       singular);
 
         timer.start(stream);
         rocsolver_stedc(handle, evect, n, dD.data(), dE.data(), dC.data(), ldc, dInfo.data());
