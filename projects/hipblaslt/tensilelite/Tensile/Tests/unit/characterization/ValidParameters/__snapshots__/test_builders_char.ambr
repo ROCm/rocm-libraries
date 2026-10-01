@@ -1462,6 +1462,8 @@
     'PersistentXCCMapping',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
+    'PrefetchGL2Inc64Bit',
+    'PrefetchGL2SAddr',
     'PrefetchGlobalRead',
     'PrefetchGlobalReadA',
     'PrefetchGlobalReadB',
@@ -2444,6 +2446,22 @@
         2,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchGL2Inc64Bit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2SAddr': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'PrefetchGlobalRead': dict({

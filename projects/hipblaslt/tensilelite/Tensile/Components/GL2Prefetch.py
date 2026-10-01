@@ -4,11 +4,11 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
-    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32, SBranch, \
+    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SMovB64, SAddU32, SAddCU32, SAndB32, SBranch, \
     SCBranchSCC1, SCMovB32, SCMovB64, SLShiftRightB32, SMulHIU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
-from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
-    scalarStaticRemainder
+from rocisa.functions import vectorMultiply64Bpe, vectorMultiplyBpe, scalarMultiplyBpe, \
+    vectorStaticDivideAndRemainder, scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
 
@@ -69,6 +69,16 @@ class GL2PrefetchLoad(GL2Prefetch):
     def numIncSgpr(kernel: Mapping) -> int:
         """Width of GL2PrefetchInc{tc}: 2 sgprs (64-bit) if PrefetchGL2Inc64Bit, else 1."""
         return 2 if kernel["PrefetchGL2Inc64Bit"] else 1
+
+    @staticmethod
+    def useSAddr(kernel: Mapping) -> bool:
+        """True if each tensor uses one sgpr pair base (GL2PrefetchBase{tc}) plus 32-bit vgpr offsets."""
+        return kernel["PrefetchGL2SAddr"]
+
+    @staticmethod
+    def numAddrVgpr(kernel: Mapping) -> int:
+        """Vgprs per GL2PrefetchAddr{tc}_{i}: a 32-bit offset in SAddr mode, else a 64-bit address."""
+        return 1 if GL2PrefetchLoad.useSAddr(kernel) else 2
 
     def clearIncrement(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         """Zero the addr increment if SCC is set."""
@@ -229,6 +239,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         nl: int = tp["gl2nl"]
         ncPerInst: int = ceil(nc / tp["gl2nl"])
         inactiveShiftBits: int = int(log2(numCooperativeThreads // ncPerInst))
+        useSAddr: bool = self.useSAddr(kernel)
         numTmpSgpr = 4
         tmpVgprIdx = writer.vgprPool.checkOutAligned(2, 2)
         tmpVgprCoalIdx = writer.vgprPool.checkOutAligned(1, 1)
@@ -313,6 +324,12 @@ class GL2PrefetchLoad(GL2Prefetch):
                 else:
                     mod.add(VCmpGtU32(VCC(), vgpr(vgprAddrName), sgpr(tmpSgprIdx1), comment="> edge limit?"))
                     mod.add(VCndMaskB32(vgpr(vgprAddrName), vgpr(vgprAddrName), sgpr(tmpSgprIdx1), VCC()))
+                if useSAddr:
+                    # the per-lane byte offset must fit in 32 bits
+                    mod.add(VMulLOU32(vgpr(vgprAddrName), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
+                    mod.add(VAddU32(vgpr(vgprAddrName), vgpr(vgprAddrName), vgpr(tmpVgprCoalIdx), comment="coal + perp"))
+                    mod.add(vectorMultiplyBpe(vgprAddrName, vgprAddrName, bpe, comment="scale by bpe"))
+                    continue
                 # perp stride
                 mod.add(VMulHIU32(vgpr(vgprAddrNameHi), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
                 mod.add(VMulLOU32(vgpr(vgprAddrName), vgpr(vgprAddrName), perpStride))
@@ -356,9 +373,12 @@ class GL2PrefetchLoad(GL2Prefetch):
                     tmpSgprIdx0, tmpSgprIdx2, tmpVgprIdx))
 
             # add all together
-            for i in range(tp["gl2nl"]):
-                dst = f"{vgprAddrBaseName}_{i}"
-                mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2)))
+            if useSAddr:
+                mod.add(SMovB64(sgpr(f"GL2PrefetchBase{tc}", 2), sgpr(tmpSgprIdx0, 2), comment="scalar base addr"))
+            else:
+                for i in range(tp["gl2nl"]):
+                    dst = f"{vgprAddrBaseName}_{i}"
+                    mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2)))
 
         writer.vgprPool.checkIn(tmpVgprIdx)
         writer.vgprPool.checkIn(tmpVgprCoalIdx)
@@ -367,28 +387,39 @@ class GL2PrefetchLoad(GL2Prefetch):
     def issueLoad(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
+        if self.useSAddr(kernel):
+            vaddrs = [vgpr(f"GL2PrefetchAddr{tc}_{i}") for i in range(tp["gl2nl"])]
+            saddr = sgpr(f"GL2PrefetchBase{tc}", 2)
+        else:
+            vaddrs = [vgpr(f"GL2PrefetchAddr{tc}_{i}", 2) for i in range(tp["gl2nl"])]
+            saddr = sgpr("off", isOff=True)
+        for vaddr in vaddrs:
+            mod.add(GlobalPrefetchB8(vaddr, saddr, self.globalModifiers))
+        return mod
+
+    def addOffset(self, kernel: Mapping, tp: Mapping, offsetSgpr: str | int, is64: bool) -> Module:
+        """Advance every prefetch address of tp by the 32-bit (or 64-bit if is64) sgpr offsetSgpr."""
+        mod = Module()
+        tc: str = tp["tensorChar"]
+        if self.useSAddr(kernel):
+            base: str = f"GL2PrefetchBase{tc}"
+            if is64:
+                mod.add(SAddU64(sgpr(base, 2), sgpr(base, 2), sgpr(offsetSgpr, 2)))
+            else:
+                mod.add(SAddU32(sgpr(base), sgpr(base), sgpr(offsetSgpr)))
+                mod.add(SAddCU32(sgpr(f"{base}+1"), sgpr(f"{base}+1"), 0))
+            return mod
         for i in range(tp["gl2nl"]):
-            addrName = f"GL2PrefetchAddr{tc}_{i}"
-            mod.add(GlobalPrefetchB8(vgpr(addrName, 2), sgpr("off", isOff=True), self.globalModifiers))
+            addr = f"GL2PrefetchAddr{tc}_{i}"
+            if is64:
+                mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(offsetSgpr, 2)))
+            else:
+                mod.add(VAddCOU32(vgpr(addr), VCC(), vgpr(addr), sgpr(offsetSgpr)))
+                mod.add(VAddCCOU32(vgpr(f"{addr}+1"), VCC(), vgpr(f"{addr}+1"), 0, VCC()))
         return mod
 
     def incrementAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
-        mod = Module()
-        tc: str = tp["tensorChar"]
-        if self.numIncSgpr(kernel) == 2:
-            inc64 = sgpr(f"GL2PrefetchInc{tc}", 2)
-            for i in range(tp["gl2nl"]):
-                addrName = f"GL2PrefetchAddr{tc}_{i}"
-                mod.add(VAddNCU64(vgpr(addrName, 2), vgpr(addrName, 2), inc64))
-            return mod
-        inc = sgpr(f"GL2PrefetchInc{tc}")
-        for i in range(tp["gl2nl"]):
-            addrName = f"GL2PrefetchAddr{tc}_{i}"
-            addrNameHi = addrName + "+1"
-            mod.add(VAddCOU32(vgpr(addrName), VCC(), vgpr(addrName), inc))
-            mod.add(VAddCCOU32(vgpr(addrNameHi), VCC(), vgpr(addrNameHi), 0, VCC()))
-
-        return mod
+        return self.addOffset(kernel, tp, f"GL2PrefetchInc{tp['tensorChar']}", self.numIncSgpr(kernel) == 2)
     
     def skipPGR(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         """Skip PGR loads.
@@ -413,17 +444,7 @@ class GL2PrefetchLoad(GL2Prefetch):
                         mod.add(SMulI32(sgpr(tmpSgprIdx2), sgpr(f"GL2PrefetchInc{tc}+1"), pgr, \
                             comment="inc.hi *= PGR"))
                         mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx2)))
-                    for i in range(tp["gl2nl"]):
-                        addr = f"GL2PrefetchAddr{tc}_{i}"
-                        mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(tmpSgprIdx0, 2)))
-            elif is64:
-                for i in range(tp["gl2nl"]):
-                    addr = f"GL2PrefetchAddr{tc}_{i}"
-                    mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(f"GL2PrefetchInc{tc}", 2)))
+                    mod.addModuleAsFlatItems(self.addOffset(kernel, tp, tmpSgprIdx0, True))
             else:
-                for i in range(tp["gl2nl"]):
-                    addr = f"GL2PrefetchAddr{tc}_{i}"
-                    addrHi = addr + "+1"
-                    mod.add(VAddCOU32(vgpr(addr), VCC(), vgpr(addr), inc))
-                    mod.add(VAddCCOU32(vgpr(addrHi), VCC(), vgpr(addrHi), 0, VCC()))
+                mod.addModuleAsFlatItems(self.incrementAddr(writer, kernel, tp))
         return mod
