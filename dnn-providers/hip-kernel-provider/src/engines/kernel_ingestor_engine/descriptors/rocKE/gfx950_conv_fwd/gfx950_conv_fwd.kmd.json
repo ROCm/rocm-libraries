@@ -1,0 +1,116 @@
+{
+  "version": "1.0",
+  "id": "fb2104d3-bae8-40b7-9a6f-4f7bc7ced8c7",
+  "name": "Gfx950ConvFwd variant fields",
+  "fields": [
+    {
+      "name": "N",
+      "type": "int"
+    },
+    {
+      "name": "Hi",
+      "type": "int"
+    },
+    {
+      "name": "Wi",
+      "type": "int"
+    },
+    {
+      "name": "C",
+      "type": "int"
+    },
+    {
+      "name": "K",
+      "type": "int"
+    },
+    {
+      "name": "Y",
+      "type": "int"
+    },
+    {
+      "name": "X",
+      "type": "int"
+    },
+    {
+      "name": "sH",
+      "type": "int"
+    },
+    {
+      "name": "sW",
+      "type": "int"
+    },
+    {
+      "name": "pH",
+      "type": "int"
+    },
+    {
+      "name": "pW",
+      "type": "int"
+    },
+    {
+      "name": "dH",
+      "type": "int"
+    },
+    {
+      "name": "dW",
+      "type": "int"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "groups",
+      "type": "int"
+    },
+    {
+      "name": "tile_m",
+      "type": "int"
+    },
+    {
+      "name": "tile_n",
+      "type": "int"
+    },
+    {
+      "name": "tile_k",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "warp_m",
+      "type": "int"
+    },
+    {
+      "name": "warp_n",
+      "type": "int"
+    },
+    {
+      "name": "warp_tile_m",
+      "type": "int"
+    },
+    {
+      "name": "warp_tile_n",
+      "type": "int"
+    },
+    {
+      "name": "warp_tile_k",
+      "type": "int"
+    },
+    {
+      "name": "wave_size",
+      "type": "int"
+    },
+    {
+      "name": "pipeline",
+      "type": "string"
+    },
+    {
+      "name": "epilogue",
+      "type": "string"
+    }
+  ]
+}

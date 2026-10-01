@@ -87,6 +87,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
+        kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
     )
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
@@ -217,6 +218,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+    )
+endif()
+
+# Gated on the same predicate shape as the dense-attention target above: ENGINE_NAME pins
+# this target, so a build whose `product` root does not ship hipkernel:Gfx950ConvFwd for
+# gfx950 must not register it. Routed into the gfx950 census shard for the same reason.
+set(_hkp_gfx950_conv_fwd FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND HIPKERNELPROVIDER_ENABLE_ROCKE
+   AND _hkp_gfx950_conv_fwd
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_conv_fwd_external_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME "hipkernel:Gfx950ConvFwd"
+        INSTALL_SUBDIR hip_kernel_provider
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_Gfx950ConvFwd*:standard_Gfx950ConvFwd*"
     )
 endif()
 

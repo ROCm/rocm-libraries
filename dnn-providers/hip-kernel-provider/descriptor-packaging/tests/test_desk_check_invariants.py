@@ -424,14 +424,24 @@ class TestRealBundleDtypeVocabulary:
 
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
     def test_real_rocke_example_dtype_vocabularies_are_not_drift(self, rocke_root):
+        grounded = []
         for kdp in _require_bundles(rocke_root):
             kernels = _kernels(_read(kdp))
             spec = kernels[0]["kernel_source"]["spec"]
             meta = kernels[0]["metadata"]
-            # The premise: two different spellings of one type. A failure here
-            # means the bundle changed and the regression needs re-grounding.
-            assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
             assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
+            # A bundle may legitimately use the builder's spelling in its metadata
+            # too (gfx950_conv_fwd's identity vocabulary); it has nothing to say
+            # about normalisation, so only a two-spelling bundle grounds the premise.
+            if spec["dtype"] != meta["dtype"]:
+                # The premise: two different spellings of one type. A failure here
+                # means the bundle changed and the regression needs re-grounding.
+                assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
+                grounded.append(kdp)
+        assert grounded, (
+            f"no rocKE bundle under {rocke_root} spells dtype in two vocabularies, "
+            f"so this regression needs re-grounding"
+        )
 
     @pytest.mark.parametrize(
         "spec_dtype,meta_dtype",

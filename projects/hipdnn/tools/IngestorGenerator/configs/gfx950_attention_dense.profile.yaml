@@ -4,6 +4,9 @@
 
 arch: gfx950
 slug: gfx950_attention_dense
+# The engine verify_variant_sets.py gates: the shipped gfx950 shard also carries
+# gfx950_conv_fwd, so a root-level run must be told which bundle it is about.
+bundle: gfx950_attention_dense
 
 # Repository-relative, resolved against the checkout root the tools find from their
 # own location -- never against the current directory. A `../..` chain is only correct
