@@ -1059,29 +1059,50 @@ double scoreKernel(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 
 /// The argument list this pack marshals, matching the launch() below one for one:
-/// `(q_ptr, k_ptr, v_ptr, o_ptr, scale)`. It sits beside that launch so the two are
+/// `(q_ptr, k_ptr, v_ptr, o_ptr, scale)`, then `(batch, seqlen_q, seqlen_kv)` as i32 for a
+/// kernel that reads its shape at runtime. rocKE's `runtime_shape` (attention_dense.py) is
+/// exactly "not persistent" on gfx942: the persistent grid strength-reduces its divides
+/// against baked extents, so it keeps them baked. It sits beside that launch so the two are
 /// edited together -- a stale copy rejects the correct kernel rather than the drifted
 /// one. Names are empty and offsets zero because neither is compared for a
 /// HIP-produced kernel; see requireSignatureMatch.
-const std::vector<KernelArgument>& gfx942AttentionDenseKernelSignature()
+const std::vector<KernelArgument>& gfx942AttentionDenseKernelSignature(bool runtimeShape)
 {
     static const KernelArgument s_buffer{
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_scale{
         "by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
-    static const std::vector<KernelArgument> s_signature{
+    static const KernelArgument s_extent{
+        "by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
+    static const std::vector<KernelArgument> s_baked{
         s_buffer, s_buffer, s_buffer, s_buffer, s_scale};
-    return s_signature;
+    static const std::vector<KernelArgument> s_runtime{
+        s_buffer, s_buffer, s_buffer, s_buffer, s_scale, s_extent, s_extent, s_extent};
+    return runtimeShape ? s_runtime : s_baked;
 }
+
+/// The extents a runtime-shape kernel is launched with. They are the kernel's own metadata,
+/// which the matcher holds equal to the problem; `enabled` is false for a persistent kernel,
+/// whose extents are baked.
+struct RuntimeExtents
+{
+    bool enabled = false;
+    int32_t batch = 0;
+    int32_t seqLenQ = 0;
+    int32_t seqLenKv = 0;
+};
 
 /// The compiled kernel plus everything launch() needs, resolved once and owning
 /// nothing that points back into the MatchContext or BoundTokens it came from.
 class PreparedGfx942AttentionDense : public PreparedDispatch
 {
 public:
-    PreparedGfx942AttentionDense(IngestorKernelCode code, AttentionDenseBinding binding)
+    PreparedGfx942AttentionDense(IngestorKernelCode code,
+                                 AttentionDenseBinding binding,
+                                 RuntimeExtents extents)
         : _code(std::move(code))
         , _binding(binding)
+        , _extents(extents)
     {
     }
 
@@ -1097,11 +1118,17 @@ public:
         return _binding;
     }
 
+    const RuntimeExtents& extents() const
+    {
+        return _extents;
+    }
+
 private:
     // Owns each device's program alongside the kernel viewing into it, so a module
     // outlives every function resolved from it for the plan's lifetime.
     IngestorKernelCode _code;
     AttentionDenseBinding _binding;
+    RuntimeExtents _extents;
 };
 
 /**
@@ -1184,12 +1211,25 @@ public:
         const compilation::KernelCompileOptions options(standIn,
                                                         context.deviceProperties.gcnArchName);
 
+        RuntimeExtents extents;
+        extents.enabled = kernel.getIntMetadata(std::string(PERSISTENT_FIELD)) == 0;
+        if(extents.enabled)
+        {
+            // Each fits: the graph matcher declines any problem whose element counts reach
+            // 2^31 (its 32-bit addressing step), and every extent here is a factor of one.
+            extents.batch = static_cast<int32_t>(kernel.getIntMetadata(std::string(BATCH_FIELD)));
+            extents.seqLenQ
+                = static_cast<int32_t>(kernel.getIntMetadata(std::string(SEQLEN_Q_FIELD)));
+            extents.seqLenKv
+                = static_cast<int32_t>(kernel.getIntMetadata(std::string(SEQLEN_KV_FIELD)));
+        }
+
         auto code = buildIngestorKernelCode(_kernelCompiler,
                                             _kpackLoader,
                                             context,
                                             kernel,
                                             options,
-                                            gfx942AttentionDenseKernelSignature());
+                                            gfx942AttentionDenseKernelSignature(extents.enabled));
 
         // Geometry, restated from the builder's own helpers, INCLUDING the persistent
         // branch. The arithmetic and its guards live in attentionDenseGeometry() so a
@@ -1209,14 +1249,15 @@ public:
         code.setBlockSize(geometry.blockX, 1, 1);
         code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
 
-        return std::make_unique<PreparedGfx942AttentionDense>(std::move(code), binding);
+        return std::make_unique<PreparedGfx942AttentionDense>(std::move(code), binding, extents);
     }
 
-    /// The ABI is `attention_dense_signature` (attention_dense.py:1819-1839):
-    /// `(q_ptr, k_ptr, v_ptr, o_ptr, scale)`, in that order. It is UNCONDITIONAL --
-    /// five slots for every spec this engine ships, with no optional pointers appended
-    /// under a feature flag, because varlen/paged/sinks are all declined. That order is
-    /// a hand-maintained contract with the Python, unchecked by the type system.
+    /// The ABI is `attention_dense_signature` (attention_dense.py): `(q_ptr, k_ptr, v_ptr,
+    /// o_ptr, scale)`, in that order, then `(batch, seqlen_q, seqlen_kv)` for a runtime-shape
+    /// (non-persistent) kernel. No optional pointers are appended under a feature flag,
+    /// because varlen/paged/sinks are all declined. That order is a hand-maintained contract
+    /// with the Python, unchecked by the type system; the packaged signature check catches a
+    /// drift at prepare().
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -1237,8 +1278,24 @@ public:
 
         // Changing this argument list means changing gfx942AttentionDenseKernelSignature()
         // with it.
-        preparedDense.kernelForStream(handle.getStream())
-            .launch(handle.getStream(), q.ptr, k.ptr, v.ptr, o.ptr, binding.scale);
+        const auto& extents = preparedDense.extents();
+        auto& kernel = preparedDense.kernelForStream(handle.getStream());
+        if(extents.enabled)
+        {
+            kernel.launch(handle.getStream(),
+                          q.ptr,
+                          k.ptr,
+                          v.ptr,
+                          o.ptr,
+                          binding.scale,
+                          extents.batch,
+                          extents.seqLenQ,
+                          extents.seqLenKv);
+        }
+        else
+        {
+            kernel.launch(handle.getStream(), q.ptr, k.ptr, v.ptr, o.ptr, binding.scale);
+        }
     }
 
 private:
