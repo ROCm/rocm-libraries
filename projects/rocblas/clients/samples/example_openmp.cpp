@@ -54,39 +54,39 @@
 #include <vector>
 
 #ifndef CHECK_HIP_ERROR
-#define CHECK_HIP_ERROR(error)                    \
-    if(error != hipSuccess)                       \
-    {                                             \
-        fprintf(stderr,                           \
-                "Hip error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),         \
-                error,                            \
-                __FILE__,                         \
-                __LINE__);                        \
-        exit(EXIT_FAILURE);                       \
-    }
+#define CHECK_HIP_ERROR(expr)                         \
+    do                                                \
+    {                                                 \
+        hipError_t error_ = (expr);                   \
+        if(error_ != hipSuccess)                      \
+        {                                             \
+            fprintf(stderr,                           \
+                    "hip error: '%s'(%d) at %s:%d\n", \
+                    hipGetErrorString(error_),        \
+                    error_,                           \
+                    __FILE__,                         \
+                    __LINE__);                        \
+            exit(EXIT_FAILURE);                       \
+        }                                             \
+    } while(0)
 #endif
 
 #ifndef CHECK_ROCBLAS_ERROR
-#define CHECK_ROCBLAS_ERROR(error)                              \
-    if(error != rocblas_status_success)                         \
-    {                                                           \
-        fprintf(stderr, "rocBLAS error: ");                     \
-        if(error == rocblas_status_invalid_handle)              \
-            fprintf(stderr, "rocblas_status_invalid_handle");   \
-        if(error == rocblas_status_not_implemented)             \
-            fprintf(stderr, " rocblas_status_not_implemented"); \
-        if(error == rocblas_status_invalid_pointer)             \
-            fprintf(stderr, "rocblas_status_invalid_pointer");  \
-        if(error == rocblas_status_invalid_size)                \
-            fprintf(stderr, "rocblas_status_invalid_size");     \
-        if(error == rocblas_status_memory_error)                \
-            fprintf(stderr, "rocblas_status_memory_error");     \
-        if(error == rocblas_status_internal_error)              \
-            fprintf(stderr, "rocblas_status_internal_error");   \
-        fprintf(stderr, "\n");                                  \
-        exit(EXIT_FAILURE);                                     \
-    }
+#define CHECK_ROCBLAS_ERROR(expr)                         \
+    do                                                    \
+    {                                                     \
+        rocblas_status status_ = (expr);                  \
+        if(status_ != rocblas_status_success)             \
+        {                                                 \
+            fprintf(stderr,                               \
+                    "rocBLAS error: '%s'(%d) at %s:%d\n", \
+                    rocblas_status_to_string(status_),    \
+                    status_,                              \
+                    __FILE__,                             \
+                    __LINE__);                            \
+            exit(EXIT_FAILURE);                           \
+        }                                                 \
+    } while(0)
 #endif
 
 #define NUM_THREADS 4
