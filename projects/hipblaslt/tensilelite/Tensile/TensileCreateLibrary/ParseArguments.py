@@ -181,6 +181,14 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Enable ASAN build.",
     )
     argParser.add_argument(
+        "--gfx1250v0",
+        dest="BuildGfx1250v0",
+        action="store_true",
+        default=False,
+        help="With gfx1250 requested, also build library/gfx1250v0/: gfx1250-strict's "
+        "kernels built for gfx1250, for A0 parts the runtime reports as gfx1250.",
+    )
+    argParser.add_argument(
         "--keep-build-tmp",
         dest="KeepBuildTmp",
         action="store_true",
@@ -231,6 +239,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["AsmDebug"] = args.AsmDebug
     arguments["BuildIdKind"] = args.BuildIdKind
     arguments["KeepBuildTmp"] = args.KeepBuildTmp
+    arguments["BuildGfx1250v0"] = args.BuildGfx1250v0
     arguments["AsanBuild"] = args.AsanBuild
     arguments["UseCompression"] = not args.NoCompress
     arguments["CxxCompiler"] = args.CxxCompiler
