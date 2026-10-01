@@ -148,8 +148,10 @@ def test_block_scheduling_is_scoped_to_mt256():
     def partitions(src):
         return {int(n) for n in re.findall(r"/\* partition=(\d+) subIterK=", src)}
 
-    assert partitions(tiles["MT256x256"]) == {0, 1, 2, 3}, (
-        "MT256x256 should carry the four-way partitioned K reduction, got "
+    # Eight partitions, not four: the tail splits M as well as N on this tile,
+    # giving a 2x4 grid. The N split alone floors at four.
+    assert partitions(tiles["MT256x256"]) == {0, 1, 2, 3, 4, 5, 6, 7}, (
+        "MT256x256 should carry the partitioned K reduction, got "
         f"{sorted(partitions(tiles['MT256x256']))}"
     )
     assert partitions(tiles["MT128x128"]) == {0}, (

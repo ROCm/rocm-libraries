@@ -5495,10 +5495,7 @@ class LogicalScheduler:
                 break
         if not placed:
             return None, units
-        relaxed = self._plsinRelaxDrainStoreWaits(woven)
-        self._plsinWeaveStat("earlydrain", units=len(units), mfma=len(mfmaPos),
-                             placed=len(placed), spacing=spacing, relaxed=relaxed,
-                             leftover=len(units) - idx)
+        self._plsinRelaxDrainStoreWaits(woven)
         return woven, units[idx:]
 
     def _weaveStagedDrainIntoPartition(self, partModule, units, label):
