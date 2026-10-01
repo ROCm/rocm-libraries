@@ -242,6 +242,22 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
+def _check_dense_factory_request(req: AttentionRequest) -> None:
+    """Raise ``ValueError`` for a request no dense spec can carry.
+
+    The dense spec factories are also called directly (the IngestorGenerator
+    profile tools pair ``dense_spec_for_request`` with ``supports_attention_dense``
+    and never consult ``Capability``), so a request field the spec has no slot for
+    must fail here rather than be dropped into a plain dense spec. The spec has one
+    ``head_size`` and no fp8 mode.
+    """
+    errors = _request_errors(req)
+    if bool(req.use_fp8):
+        errors.append("attention_dense has no fp8 path (use_fp8=True)")
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
 def _device_num_cus() -> "int | None":
     """Live device multiprocessor (CU) count, or None if unqueryable.
 

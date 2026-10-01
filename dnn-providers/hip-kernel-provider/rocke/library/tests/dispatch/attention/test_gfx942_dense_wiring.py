@@ -34,7 +34,7 @@ from dispatch.attention import (
 
 # gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
 # which is gfx950's and would hand back an untuned spec for a gfx942 request.
-from dispatch.attention.gfx942 import _dense_spec
+from dispatch.attention.gfx942 import _dense_spec, dense_spec_for_request
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
@@ -379,6 +379,45 @@ class TestGfx942SlidingWindow(unittest.TestCase):
             ok, why = _candidate().admits(_req(sliding_window=128, mask_type=0))
             self.assertFalse(ok)
             self.assertNotIn("capability", why)
+
+
+class TestGfx942DirectFactoryHonoursRequest(unittest.TestCase):
+    """The public factory plus ``supports_attention_dense`` is the pair the
+    IngestorGenerator profile tools call, without ``Capability`` in front. Every
+    request feature the factory cannot carry into the spec must therefore either
+    reach the spec (so the predicate can refuse it) or make the factory raise. A
+    field it drops turns an unsupported request into a plain dense one."""
+
+    def test_sinks_reach_the_spec_and_the_predicate_refuses(self):
+        spec = dense_spec_for_request(_req(use_sinks=True))
+        self.assertTrue(spec.use_sinks)
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("sinks", why)
+
+    def test_fp8_request_raises(self):
+        with self.assertRaisesRegex(ValueError, "fp8"):
+            dense_spec_for_request(_req(use_fp8=True))
+
+    def test_mismatched_value_head_size_raises(self):
+        with self.assertRaisesRegex(ValueError, "hdim_q == hdim_v"):
+            dense_spec_for_request(_req(hdim_q=128, hdim_v=64))
+
+    def test_gfx950_variant_pins_raise(self):
+        for kw, field in (
+            (dict(dense_tile="bm128"), "dense_tile"),
+            (dict(dense_wide_lds_dma="on"), "dense_wide_lds_dma"),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, field):
+                    dense_spec_for_request(_req(**kw))
+
+    def test_pins_gfx942_already_satisfies_keep_the_spec(self):
+        baseline = dense_spec_for_request(_req())
+        self.assertFalse(baseline.use_sinks)
+        for kw in (dict(dense_tile="default"), dict(dense_wide_lds_dma="off")):
+            with self.subTest(**kw):
+                self.assertEqual(dense_spec_for_request(_req(**kw)), baseline)
 
 
 if __name__ == "__main__":

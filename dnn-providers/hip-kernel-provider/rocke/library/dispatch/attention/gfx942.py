@@ -34,6 +34,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
+    _check_dense_factory_request,
     _parse_attention_mask_type,
     _problem,
     _request_errors,
@@ -162,6 +163,12 @@ def _dense_spec(req: OperatorRequest):
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
 
+    Every request feature reaches the spec or raises: ``use_sinks`` is carried so
+    ``supports_attention_dense`` refuses it, and fp8, a separate ``hdim_v``, and
+    the gfx950-only ``dense_tile`` / ``dense_wide_lds_dma`` pins raise here. The
+    profile tools call this factory and the predicate without ``Capability``, so a
+    dropped field would make an unsupported request look like a plain dense one.
+
     Nothing here overrides a gfx942-private codegen knob: LDS layout, cfvst,
     exp2_fast, and IGLP stay at the concrete spec's measured defaults. The factory
     returns :class:`Gfx942AttentionDenseSpec` directly so unsupported gfx950 knobs
@@ -177,6 +184,19 @@ def _dense_spec(req: OperatorRequest):
     if req.arch != "gfx942":
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
+        )
+    _check_dense_factory_request(req)
+    tile = req.dense_tile.strip().lower()
+    if tile not in ("auto", "default"):
+        raise ValueError(
+            "gfx942 attention_dense ships only the default tile; "
+            f"dense_tile must be 'auto'/'default', got {req.dense_tile!r}"
+        )
+    wide = req.dense_wide_lds_dma.strip().lower()
+    if wide not in ("auto", "off"):
+        raise ValueError(
+            "gfx942 attention_dense has no wide LDS DMA variant; "
+            f"dense_wide_lds_dma must be 'auto'/'off', got {req.dense_wide_lds_dma!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     mask_type = _parse_attention_mask_type(req.mask_type)
@@ -224,6 +244,7 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
         sliding_window=int(req.sliding_window),
+        use_sinks=bool(req.use_sinks),
         waves_per_eu=_resolve_dense_waves_per_eu(
             req, _tuned_waves_per_eu(head_size, dtype)
         ),

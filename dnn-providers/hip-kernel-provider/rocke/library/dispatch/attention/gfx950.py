@@ -33,6 +33,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
+    _check_dense_factory_request,
     _parse_attention_mask_type,
     _problem,
     _request_errors,
@@ -268,8 +269,11 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     stays on the request (``auto`` selects GQA-local mappings inside the spec).
     Non-tile-multiple self-attention lengths use the on-chip ragged path.
     ``variant=None`` keeps the one-argument call used by existing tests and
-    selects the auto-policy variant.
+    selects the auto-policy variant. fp8 and a separate ``hdim_v`` have no spec
+    field, so they raise here rather than build a plain dense spec.
     """
+    assert isinstance(req, AttentionRequest)
+    _check_dense_factory_request(req)
     if variant is None:
         variant = select_dense_variant(req)
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -278,7 +282,6 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
         Gfx950AttentionDenseSpec,
     )
 
-    assert isinstance(req, AttentionRequest)
     if req.arch != "gfx950":
         raise ValueError(
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
