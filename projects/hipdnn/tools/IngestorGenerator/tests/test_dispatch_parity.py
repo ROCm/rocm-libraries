@@ -3,11 +3,15 @@
 
 """What `dispatch_parity.py` reports, and what it refuses to report.
 
-A shape that is not served has exactly ONE per-shape explanation: the eligibility
-predicate ran, returned false, and gave a reason. Spec construction failing aborts the
-command instead, because a corpus the request class cannot hydrate makes every
-remaining count untrustworthy, and a `rejected` bucket that can only print 0 claims a
-failure was checked for. The dispatcher, request class and predicate are stubs.
+A shape that is not served has one per-shape explanation from the layer that said no:
+the eligibility predicate (declined), the spec factory's ValueError, which the
+dispatcher's own candidate treats as a decline (refused), or a graph feature outside
+the profile's graph contract (out_of_contract). Request construction failing, or the
+factory raising anything else, aborts the command instead, because a corpus the
+request class cannot hydrate makes every remaining count untrustworthy, and a
+`rejected` bucket that can only print 0 claims a failure was checked for. The
+dispatcher, request class and predicate are stubs, except in the classes that bind
+the shipped profile.
 
 Also what the tool BINDS before it can report anything: where a profile's
 ``provider_root`` resolves from, and which dispatch arm the shipped profile pins.
@@ -134,9 +138,8 @@ _SERVED_AND_DECLINED = [{"seqlen_q": 256}, {"seqlen_q": 2048}, {"seqlen_q": 777}
 
 class TestTheReportCarriesNoUnpopulatableBucket:
     def test_the_summary_names_no_rejected_bucket(self, parity, capsys):
-        """Only two `kind` values can exist: the dataclass default "constructed" and the
-        "declined" the predicate path sets, since a construction failure returns 2 long
-        before the summary prints."""
+        """A request-construction failure returns 2 long before the summary prints,
+        so no `rejected` bucket exists to print."""
         assert dispatch_parity.main(parity(_SERVED_AND_DECLINED)) == 0
         out = capsys.readouterr().out
         assert "rejected" not in out, (
