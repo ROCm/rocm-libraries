@@ -270,7 +270,8 @@ template <index_t NDimSpatial,
                                                      // passed
           typename BComputeDataType = AComputeDataType,
           index_t NumGroupsToMerge  = 1,
-          bool DirectLoad           = false>
+          bool DirectLoad           = false,
+          bool UseTdm               = false>
 struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -546,7 +547,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         CDEBlockTransferScalarPerVector_NPerBlock,
         AComputeDataType,
         BComputeDataType,
-        DirectLoad>;
+        DirectLoad,
+        UseTdm>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
