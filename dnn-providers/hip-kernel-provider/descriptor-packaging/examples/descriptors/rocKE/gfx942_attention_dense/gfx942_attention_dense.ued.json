@@ -27,6 +27,8 @@
     "use_exp2_fast"
   ],
   "predict_engine": {
-    "gfx942": "ab1659a8-463e-45dc-9a7b-67e52430410f"
+    "gfx942": [
+      "8fba39d5-dab4-4ebf-9f55-7e65a69f0583"
+    ]
   }
 }
