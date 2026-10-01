@@ -741,8 +741,20 @@ generate, build and install the supported pairwise arms:
 ```
 
 Obtain selection approval from coverage, correctness and per-corpus measurements. For
-the rocKE shipping cross, `APPROVED_KNOBS_JSON` contains the approved JSON object of
-knob value lists, **not a filename**:
+the rocKE shipping set, `APPROVED_KNOBS_JSON` holds the approved knobs as JSON text,
+**not a filename**, in one of two forms:
+
+- An object of value lists, crossed: `'{"use_exp2_fast": [0, 1]}'`. Use it when every
+  combination of the surviving values was approved.
+- A list of combinations, emitted as listed:
+  `'[{"block_m": 256, "block_n": 64}, {"block_m": 128, "block_n": 32}]'`. Use it when the
+  approved set is not a cross-product, for example only some tile pairs survived. A
+  cross would add the pairs that were never approved.
+
+Pinned values are applied before tile-dependent metadata is resolved, and the builder
+validates each combination per shape. A combination it refuses for a shape is dropped
+and counted by reason (a `WARNING: N knob variant(s) not emitted` block), so check those
+counts against the approved set.
 
 ```bash
 "$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" --shapes "$SHAPES" \
