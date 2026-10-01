@@ -417,6 +417,9 @@ block-id → work-item map:
   ≥8192 work items, `bt_hkv_minor` for other aligned causal attention, else
   `qb_minor`.
 
+Measurements, L2 counters and the orders ruled out are in the
+[dense attention thread-block mapping case study](../../../../platform/dsl_docs/architecture/attention_thread_block_mapping_case_study.md).
+
 **Measured (MI355X, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
 ≈1.46e-3).** Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only
 **same-session ratios are load-bearing**; the numbers below are one representative
