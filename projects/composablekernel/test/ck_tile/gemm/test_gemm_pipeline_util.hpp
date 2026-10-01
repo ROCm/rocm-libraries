@@ -441,11 +441,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
         {
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
-        // TDM pipelines use cluster launch (multicast), not supported on gfx1250 A0 (revision 0)
-        if constexpr(PipelineType == GemmPipelineType::CompTDMV1 ||
-                     PipelineType == GemmPipelineType::CompTDMV2)
+        // Multicast cluster launches are not supported on gfx1250 A0.
+        if constexpr(ClusterLaunch && (PipelineType == GemmPipelineType::CompTDMV1 ||
+                                       PipelineType == GemmPipelineType::CompTDMV2))
         {
-            if(ck_tile::get_device_revision() == 0)
+            if(ck_tile::is_gfx125_supported() && ck_tile::get_device_revision() == 0)
             {
                 GTEST_SKIP() << "TDM pipeline cluster launch is not supported on gfx1250 "
                                 "asicRevision=0";

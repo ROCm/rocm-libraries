@@ -26,10 +26,6 @@ template <typename T>
 class TestCkTileGemmPipelineCompTDMSubTile
     : public TestCkTileGemmPipelineWmmaBase<T, TestCkTileGemmPipelineCompTDMSubTile<T>>
 {
-    protected:
-    // These instances use the regular (non-cluster) launch, which also works on
-    // asicRevision=0, so the base-class TDM revision skip does not apply here.
-    void SetUp() override { this->k_batches_ = {1}; }
 };
 
 TYPED_TEST_SUITE(TestCkTileGemmPipelineCompTDMSubTile, KernelTypesCompTDMSubTile);
