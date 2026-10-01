@@ -1746,10 +1746,9 @@ namespace
     // MatrixInstK 128. Outside that envelope 256 is the wrong number rather
     // than a violated one, so the envelope is pinned too.
     //
-    // NoSwizzle (0) remains refused under USO pending a hardware audit with
-    // itersPerTile > 1 (ordinary StreamK NoSwizzle depthU is format-gated
-    // correctly). InMemorySwizzle (2) is likewise unaudited. Only
-    // HostPreSwizzle remains admitted under this envelope.
+    // NoSwizzle (0) and HostPreSwizzle (1) are admitted under this envelope
+    // (StreamK._depthUForTc is format-gated for both). InMemorySwizzle (2)
+    // and any unexpected format remain refused until audited.
     TEST(RowUniformityStreamKRejection_pre_checkin, MXScaleFormatEnvelope)
     {
         const auto hardware = probeHardware();
@@ -1765,15 +1764,21 @@ namespace
                 << ") under StreamK USO must be refused until audited";
         };
 
-        refuseFormat(0, "NoSwizzle");
-        refuseFormat(2, "InMemorySwizzle");
+        auto admitFormat = [&](int mxScaleFormat, const char* name) {
+            auto solution                       = probeSolution();
+            solution->problemType.mxBlockA      = 32;
+            solution->problemType.mxBlockB      = 32;
+            solution->problemType.mxScaleFormat = mxScaleFormat;
 
-        auto admitted                     = probeSolution();
-        admitted->problemType.mxBlockA    = 32;
-        admitted->problemType.mxBlockB    = 32;
-        admitted->problemType.mxScaleFormat = 1; // HostPreSwizzle (probe default)
-        EXPECT_TRUE(admitsUniformSummationOrder(*admitted, hardware))
-            << "HostPreSwizzle under the MX StreamK USO envelope must remain admitted";
+            EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
+                << "MX scale format " << name << " (" << mxScaleFormat
+                << ") under the MX StreamK USO envelope must be admitted";
+        };
+
+        admitFormat(0, "NoSwizzle");
+        admitFormat(1, "HostPreSwizzle");
+        refuseFormat(2, "InMemorySwizzle");
+        refuseFormat(3, "Unexpected");
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)

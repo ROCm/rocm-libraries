@@ -6130,22 +6130,19 @@ namespace TensileLite
             // problem-type level in the logic files.
             if(problemType.mxBlockA != 0 || problemType.mxBlockB != 0)
             {
-                // MX StreamK USO is audited only for HostPreSwizzle (1) under the
-                // envelope below (mxBlock 32, MatrixInstK 128, DepthU % 256 == 0).
+                // MX StreamK USO admits NoSwizzle (0) and HostPreSwizzle (1)
+                // under the envelope below (mxBlock 32, MatrixInstK 128,
+                // DepthU % 256 == 0). StreamK._depthUForTc is format-gated:
+                // HPS/IMS use *32 DepthU-sized K-steps; NoSwizzle Option B
+                // keeps the canonical _DepthUMXS* step that matches
+                // SubtileScaleEmit.emitScaleGRPtrUpdate.
                 //
-                // NoSwizzle (0): StreamK._depthUForTc is format-gated so ordinary
-                // StreamK uses the canonical _DepthUMXS* K-step that matches
-                // Option-B emit (SubtileScaleEmit.emitScaleGRPtrUpdate). USO
-                // still refuses format 0 until USO+StreamK+scaleA=3 is verified
-                // on hardware with itersPerTile > 1 (K-partial exposure that
-                // DP-only / single-iter tiles hide).
-                //
-                // InMemorySwizzle (2) is likewise unaudited (gfx1250 TDM path).
-                // Change the swizzle format, the block size or MatrixInstK and
-                // 256 silently becomes the wrong number rather than a violated
-                // one, so pin the envelope the derivation covers. All shipped
-                // MX StreamK USO solutions satisfy HostPreSwizzle + all three.
-                if(problemType.mxScaleFormat != 1)
+                // InMemorySwizzle (2) remains refused until audited (gfx1250
+                // TDM path). Unexpected format values are refused the same
+                // way. Change the block size or MatrixInstK and 256 silently
+                // becomes the wrong number rather than a violated one, so pin
+                // the envelope the derivation covers.
+                if(problemType.mxScaleFormat != 0 && problemType.mxScaleFormat != 1)
                     return refuse("MXScaleFormat",
                                   "MX scale format " + std::to_string(problemType.mxScaleFormat)
                                       + " under StreamK is not audited for uniform summation "

@@ -220,8 +220,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   else:
     # NoSwizzle: match GSU/KernelWriterAssembly canonical K-step.
     # StreamK._depthUForTc is format-gated and uses unscaled _DepthUMXS* here,
-    # so ordinary StreamKLocalStart offsets match this increment. USO still
-    # refuses mxScaleFormat==0 pending a hardware audit with itersPerTile > 1.
+    # so StreamKLocalStart offsets match this increment under USO as well.
     inc = int(ti.scaleDepthU * ti.bpe)
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))

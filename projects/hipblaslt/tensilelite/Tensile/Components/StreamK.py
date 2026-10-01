@@ -485,10 +485,9 @@ class StreamK(Component):
             (SubtileScaleEmit.emitScaleGRPtrUpdate). Use the unscaled
             _DepthUMXS{A,B} so StreamKLocalStart offsets the correct K window.
 
-        USO still refuses mxScaleFormat==0 pending hardware audit of
-        USO+StreamK+scaleA=3 with itersPerTile > 1
-        (ContractionSolution.streamKUniformSummationOrderObstacle); ordinary
-        StreamK NoSwizzle (non-USO / DP-only) relies on this format gate.
+        USO admits mxScaleFormat 0 (NoSwizzle) and 1 (HostPreSwizzle);
+        InMemorySwizzle (2) remains refused
+        (ContractionSolution.streamKUniformSummationOrderObstacle).
 
         For Sparse problems the compressed data operand and the Metadata
         tensor genuinely hold fewer elements per DepthU of computation, so
