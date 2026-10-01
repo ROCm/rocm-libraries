@@ -14,6 +14,8 @@ Documentation for rocFFT is available at
 * Fixed `rocfft_plan_create` failures for large prime-length 1D complex transforms when a scale factor is set.
 * Fixed a potential write-after-free if plans are destroyed during process teardown.
 * Fixed a possible hang in `rocfft_cleanup` in builds with RCCL enabled, for single-process multi-device usage.
+* Fixed incorrect results for 1D complex transforms of lengths involving large prime factors
+  with large batch sizes, where 32-bit kernel indexing could overflow.
 
 ### Added
 
