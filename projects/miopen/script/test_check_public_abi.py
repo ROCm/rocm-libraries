@@ -451,6 +451,32 @@ def test_stub_carrying_both_macros_is_reported(capsys):
     assert "miopenCreate has 2 dispatch macros" in capsys.readouterr().out
 
 
+def test_dispatch_macro_given_a_forward_call_is_reported(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate,\n"
+            "                            ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
+
+
+def test_forward_macro_without_a_call_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_FORWARD(miopenCreate);")
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
+
+
 def test_exempt_stub_growing_the_macro_is_reported(capsys):
     source = """
 extern "C" const char* miopenGetErrorString(miopenStatus_t error)
@@ -963,6 +989,26 @@ def test_check_wrapper_fails_a_differing_needed_baseline(tmp_path, monkeypatch, 
     assert "DT_NEEDED list differs from baseline" in out
     assert "missing from build: libhipdnn_backend.so" in out
     assert "unexpected in build: libc.so.6" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
+
+
+def test_check_wrapper_fails_without_the_private_lib_dependency(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(needed=("libc.so.6",))
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper, good_private()) == 1
+    out = capsys.readouterr().out
+    assert "flag-on wrapper has no DT_NEEDED on libMIOpen_private" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
+
+
+def test_check_wrapper_fails_on_a_hipdnn_backend_dependency(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(needed=("libMIOpen_private.so.1", "libhipdnn_backend.so"))
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper, good_private()) == 1
+    out = capsys.readouterr().out
+    assert "wrapper has DT_NEEDED on libhipdnn_backend.so" in out
     assert "wrapper public-abi symbol check: FAIL" in out
 
 

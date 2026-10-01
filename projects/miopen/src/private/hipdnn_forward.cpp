@@ -10,6 +10,7 @@
 
 #include "hipdnn_forward.hpp"
 
+#include "lru_cache.hpp"
 #include "miopen_impl.h"
 
 #include <hipdnn_frontend.hpp>
@@ -23,7 +24,6 @@
 
 #include <cstdint>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -307,7 +307,7 @@ struct HandleState
     }
 };
 
-std::mutex& HandleMutex()
+std::mutex& HandleMapMutex()
 {
     static std::mutex mutex;
     return mutex;
@@ -327,7 +327,7 @@ HandleState* AcquireHandleState(miopenHandle_t handle)
     if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
         return nullptr;
 
-    const std::lock_guard<std::mutex> lock(HandleMutex());
+    const std::lock_guard<std::mutex> lock(HandleMapMutex());
     auto& slot = HandleMap()[handle];
     if(slot == nullptr)
     {
@@ -359,9 +359,15 @@ std::mutex& PlanMutex()
     return mutex;
 }
 
-std::unordered_map<PlanKey, GraphPtr, PlanKeyHash>& PlanCache()
+// Capped because a workload with changing shapes (varying batch size or input
+// size) makes a new key per shape, and each built graph holds backend state for
+// as long as it is cached. Evicting is always safe: a miss just rebuilds, and a
+// call still running an evicted graph holds its own reference to it.
+constexpr size_t kPlanCacheCapacity = 128;
+
+LruCache<PlanKey, GraphPtr, PlanKeyHash>& PlanCache()
 {
-    static std::unordered_map<PlanKey, GraphPtr, PlanKeyHash> plans;
+    static LruCache<PlanKey, GraphPtr, PlanKeyHash> plans(kPlanCacheCapacity);
     return plans;
 }
 
@@ -540,9 +546,8 @@ std::pair<GraphPtr, miopenStatus_t> AcquireGraph(const PlanKey& key, hipdnnHandl
 {
     const std::lock_guard<std::mutex> lock(PlanMutex());
 
-    auto found = PlanCache().find(key);
-    if(found != PlanCache().end())
-        return {found->second, miopenStatusSuccess};
+    if(const GraphPtr* cached = PlanCache().Find(key))
+        return {*cached, miopenStatusSuccess};
 
     GraphPtr graph = std::make_shared<fe::graph::Graph>();
     if(!PopulateGraph(key, *graph))
@@ -554,7 +559,7 @@ std::pair<GraphPtr, miopenStatus_t> AcquireGraph(const PlanKey& key, hipdnnHandl
     if(!error.is_good())
         return {nullptr, RecordHipdnnFailure(error)};
 
-    PlanCache().emplace(key, graph);
+    PlanCache().Insert(key, graph);
     return {graph, miopenStatusSuccess};
 }
 
@@ -685,11 +690,10 @@ void ReleaseHandle(miopenHandle_t handle)
 {
     {
         const std::lock_guard<std::mutex> lock(PlanMutex());
-        for(auto it = PlanCache().begin(); it != PlanCache().end();)
-            it = it->first.handle == handle ? PlanCache().erase(it) : std::next(it);
+        PlanCache().EraseIf([handle](const PlanKey& key) { return key.handle == handle; });
     }
 
-    const std::lock_guard<std::mutex> lock(HandleMutex());
+    const std::lock_guard<std::mutex> lock(HandleMapMutex());
     HandleMap().erase(handle);
 }
 

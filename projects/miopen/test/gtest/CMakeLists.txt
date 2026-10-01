@@ -79,6 +79,7 @@ endif()
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
         hipdnn_availability.cpp
+        hipdnn_lru_cache.cpp
         hipdnn_shim_conv.cpp
         version_api.cpp
     )
@@ -458,7 +459,6 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
       --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
-      --needed-baseline ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
   )
   set_tests_properties(wrapper_abi_check PROPERTIES
@@ -545,7 +545,7 @@ endif()
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\" \"--needed-baseline\" \"../wrapper_needed.baseline\")
+"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")
 set_tests_properties(wrapper_abi_check PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\")
 
 ")
@@ -577,7 +577,6 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
-          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline"
           "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests

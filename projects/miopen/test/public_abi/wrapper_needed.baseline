@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: MIT
 #
 # The complete DT_NEEDED list of the flag-on wrapper libMIOpen.so, checked for
-# exact equality by check_public_abi.py check-wrapper --needed-baseline.
+# exact equality by check_public_abi.py check-wrapper --needed-baseline. No ctest
+# entry passes that flag: the list names ROCm soversions and the x86-64 loader,
+# so it would fail on every ROCm soversion bump and on other architectures. Run
+# it by hand when the wrapper's link line changes.
 #
-# Two things this is here to catch, both of which a symbol-set check misses:
+# check-wrapper always checks the two entries that matter, with or without this
+# file, by name prefix so that soversions do not matter:
 #
 #   - libMIOpen_private.so.1 must be present. Without it the wrapper's stubs
 #     have nothing to forward to, and a consumer that links only -lMIOpen gets
@@ -17,11 +21,10 @@
 #     every MIOpen consumer, which is the one outcome this whole design exists
 #     to avoid.
 #
-# Exact equality rather than a pair of substring tests because a new runtime
-# dependency appearing in the thin wrapper is itself worth a second look -- it
-# has three translation units and should need almost nothing. The comgr,
-# rocblas and sqlite3 entries are not used by any of them; they arrive from the
-# private library's link interface.
+# The full list is kept because a new runtime dependency appearing in the thin
+# wrapper is itself worth a second look -- it has three translation units and
+# should need almost nothing. The comgr, rocblas and sqlite3 entries are not
+# used by any of them; they arrive from the private library's link interface.
 #
 # ld-linux is here because the wrapper has thread-local state. A thread_local in
 # a shared library compiles to a call to __tls_get_addr, which lives in the

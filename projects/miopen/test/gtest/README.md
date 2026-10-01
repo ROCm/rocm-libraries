@@ -86,9 +86,13 @@ on a packaged build would select nothing and pass. The packaged entries are not 
 tested elsewhere. Only the single-binary build (`MIOPEN_TEST_DISCRETE=OFF`) ships them.
 
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
-two built libraries. It also compares the wrapper's list of required shared libraries
-(`DT_NEEDED`) with `test/public_abi/wrapper_needed.baseline`, which keeps the hipDNN backend
-opened on first use rather than required at load time. It loads neither library, so it needs
+two built libraries. It also checks the wrapper's list of required shared libraries
+(`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
+hipDNN backend is opened on first use rather than required at load time. The full list is
+also committed as `test/public_abi/wrapper_needed.baseline`, but the ctest entry does not
+compare against it, because it names ROCm soversions and the x86-64 loader and would fail on
+every ROCm update. To compare it by hand, pass `--needed-baseline
+test/public_abi/wrapper_needed.baseline` to `script/check_wrapper_abi.py`. It loads neither library, so it needs
 no GPU and is registered whenever the flag is on. The packaged copy leaves out `--public-header`, which compares two source files that
 the build-tree entry already checks.
 
