@@ -70,36 +70,12 @@ struct EpilogueCShuffleBase
         constexpr index_t MWaves = MPerBlock / (MRepeat * MPerWmma);
         constexpr index_t NWaves = NPerBlock / (NRepeat * NPerWmma);
 
-        constexpr index_t NPerShRepeat = CShuffleNRepeatPerShuffle * NWaves * NPerWmma;
-        constexpr index_t MPerShRepeat = CShuffleMRepeatPerShuffle * MWaves * MPerWmma;
-
-        // T1-01 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): an unpadded (tile-linear) row stride of
-        // NPerShRepeat elements collapses to the same LDS bank for every row whenever
-        // NPerShRepeat * sizeof(CShuffleDataType) is a multiple of the gfx1250 LDS bank period
-        // (64 banks x 4 bytes = 256 bytes) -- NPerShRepeat is typically a power-of-2 multiple of
-        // 64, so this is the common case, producing a maximal 64-way bank conflict on every
-        // VGPR<->LDS access in this epilogue. Pad the row stride by 16 bytes in that case
-        // (MISA-measured conflict-free pad: gcd(stride_dwords, 64) == 4) so consecutive rows land
-        // on different banks. Only the row stride is padded; the logical extents (and therefore
-        // every downstream unmerge into MRepeat/MWave/.../NThreadPerSubGroup) are unchanged.
-        // The pad is gated on the conflict actually being present: an unconditional pad turns a
-        // free (shift-based) row-stride multiply into an explicit multiply instruction even for
-        // tile configs whose natural stride was never bank-period-aligned, which is a pure cost
-        // with no offsetting benefit for those configs (measured regression without this gate).
-        constexpr index_t LdsBankPeriodBytes = 256; // 64 banks x 4 bytes on gfx1250
-        constexpr index_t RowStrideBytes     = NPerShRepeat * sizeof(CShuffleDataType);
-        constexpr bool RowStrideConflictProne = (RowStrideBytes % LdsBankPeriodBytes) == 0;
-        constexpr index_t LdsRowPadElems =
-            RowStrideConflictProne ? (16 / sizeof(CShuffleDataType)) : 0;
-        constexpr index_t NPerShRepeatPadded = NPerShRepeat + LdsRowPadElems;
-
         constexpr auto c_shuffle_block_desc_mshrepeat_mpershrepeat_nshrepeat_npershrepeat =
-            make_naive_tensor_descriptor(
-                make_tuple(I1, Number<MPerShRepeat>{}, I1, Number<NPerShRepeat>{}),
-                make_tuple(Number<MPerShRepeat * NPerShRepeatPadded>{},
-                           Number<NPerShRepeatPadded>{},
-                           Number<NPerShRepeatPadded>{},
-                           I1));
+            make_naive_tensor_descriptor_packed(
+                make_tuple(I1,
+                           Number<CShuffleMRepeatPerShuffle * MWaves * MPerWmma>{},
+                           I1,
+                           Number<CShuffleNRepeatPerShuffle * NWaves * NPerWmma>{}));
 
         return c_shuffle_block_desc_mshrepeat_mpershrepeat_nshrepeat_npershrepeat;
     }

@@ -434,16 +434,6 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         }
     }
 
-    // T2-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): the roadmap asked to replace host/software
-    // M-padding here with gfx1250 TDM's native per-dimension OOB-clip descriptor field. That does
-    // not apply to this path: MakeGridDescriptor's padM/padK below builds a software
-    // bounds-checked/zero-filled descriptor (make_right_pad_transform) consumed by the legacy
-    // ThreadGroupTensorSliceTransfer_v4r1/v7r2 buffer_load copy engine (ABTransferThreadTiles /
-    // ABTransferWaveTiles) -- this WMMA v3 gridwise/blockwise gemm path never uses the TDM/
-    // cluster_load primitives (ck::cluster_load_async, ck_tile::cluster_load_async_to_lds) at all,
-    // so there is no TDM descriptor here to attach a hardware OOB-clip field to. Closing this half
-    // of T2-02 with no code change; would become actionable if this path is ever migrated onto
-    // TDM loads.
     template <typename BaseDescriptors_M_K>
     __host__ __device__ static auto
     MakeAsGridDescriptor_AK0_M_AK1(const BaseDescriptors_M_K& base_descs,

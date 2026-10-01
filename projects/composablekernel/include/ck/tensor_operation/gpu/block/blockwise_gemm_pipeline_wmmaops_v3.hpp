@@ -189,17 +189,6 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
         }
     }
 
-    // T1-03 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): the roadmap asked to add a compile-time
-    // toggle to disable this function's sched_group_barrier-based A/B split schedule for gfx1250
-    // specifically, to test whether it costs performance there (per MISA/rocKE/FlyDSL's converging
-    // finding that hand-scheduled instruction interleaving tends not to beat the compiler's default
-    // on gfx1250 WMMA). That toggle is unnecessary: the entire body below is already wrapped in a
-    // block comment (still true on this line count as of this investigation) and is therefore
-    // already a hard no-op for every architecture, not just gfx1250 - there is nothing live to
-    // toggle. Confirmed by direct read, not merely by this comment: HotLoopScheduler() is called
-    // unconditionally from four hot-loop sites in this file but its body never emits a single
-    // sched_group_barrier. Closing this item with no functional change; record this as the
-    // requested "on vs off" confirmation (off, unconditionally, today).
     __device__ static constexpr auto HotLoopScheduler()
     {
         // TODO: Calculation of the number of instructions may require changes for WMMA
@@ -447,21 +436,11 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                 a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
                 b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
-                // T1-04 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): a wide tile (MRepeat > 1) has
-                // enough independent WMMA issue slots in the burst below to fully absorb the
-                // next-tile prefetch's front-end issue cost if issued now, before any of this
-                // K-step's WMMA; a narrow tile (MRepeat == 1) has only one WMMA group per K-step,
-                // so issuing the prefetch here would put its issue cost on the critical path
-                // instead of the WMMA's own latency. For MRepeat == 1 the issue is deferred to
-                // just after the first K-step's WMMA group (inside the static_ford below).
-                if constexpr(MRepeat > 1)
-                {
-                    a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
-                    b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+                a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
+                b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
 
-                    a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                    b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-                }
+                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
                 b_scale_struct.template GlobalLoad<0>((i + 2) % num_loop_per_scale == 0);
 
@@ -517,34 +496,6 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                     wmma_gemm.Run(a_thread_vec.template AsType<wmma_input_type_a>(),
                                   b_thread_vec.template AsType<wmma_input_type_b>(),
                                   c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                    // T1-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): bracket this WMMA-issue burst
-                    // with s_setprio(1)/(0), ported from blockwise_gemm_pipeline_wmmaops_v1.hpp's
-                    // existing pattern (raise priority right after the first WMMA issue of the
-                    // burst, restore it right after the last).
-                    if constexpr(k0 == 0 && m0 == 0 && n0 == 0 && k_inner == 0)
-                    {
-                        __builtin_amdgcn_sched_barrier(0);
-                        __builtin_amdgcn_s_setprio(1);
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
-                    if constexpr(k0 == KRepeat - 1 && m0 == MRepeat - 1 && n0 == NRepeat - 1 &&
-                                 k_inner == KInner - 1)
-                    {
-                        __builtin_amdgcn_sched_barrier(0);
-                        __builtin_amdgcn_s_setprio(0);
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
-                    // T1-04: narrow tile (MRepeat == 1) deferred prefetch issue -- see the
-                    // matching MRepeat > 1 branch before this static_ford.
-                    if constexpr(MRepeat == 1 && k0 == 0 && n0 == NRepeat - 1 &&
-                                 k_inner == KInner - 1)
-                    {
-                        a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
-                        b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
-
-                        a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                        b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-                    }
                 });
 
                 block_sync_lds();
@@ -619,21 +570,6 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                 wmma_gemm.Run(a_thread_vec.template AsType<wmma_input_type_a>(),
                               b_thread_vec.template AsType<wmma_input_type_b>(),
                               c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                // T1-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): see the identical comment on the
-                // steady-state hot loop's WMMA burst above.
-                if constexpr(k0 == 0 && m0 == 0 && n0 == 0 && k_inner == 0)
-                {
-                    __builtin_amdgcn_sched_barrier(0);
-                    __builtin_amdgcn_s_setprio(1);
-                    __builtin_amdgcn_sched_barrier(0);
-                }
-                if constexpr(k0 == KRepeat - 1 && m0 == MRepeat - 1 && n0 == NRepeat - 1 &&
-                             k_inner == KInner - 1)
-                {
-                    __builtin_amdgcn_sched_barrier(0);
-                    __builtin_amdgcn_s_setprio(0);
-                    __builtin_amdgcn_sched_barrier(0);
-                }
             });
 
             block_sync_lds();
@@ -888,24 +824,6 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                                       b_thread_vec.template AsType<wmma_input_type_b>(),
                                       c_scale_struct.c_thread_buf_per_scale.GetVectorTypeReference(
                                           Number<0>{}));
-                        // T1-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): see the identical
-                        // s_setprio bracketing comment on the non-BScale hot loop's WMMA burst
-                        // above; here the burst spans both the outer (m0, n0, kscale0) and inner
-                        // (k0, k_inner) static_ford loops.
-                        if constexpr(m0 == 0 && n0 == 0 && kscale0 == 0 && k0 == 0 && k_inner == 0)
-                        {
-                            __builtin_amdgcn_sched_barrier(0);
-                            __builtin_amdgcn_s_setprio(1);
-                            __builtin_amdgcn_sched_barrier(0);
-                        }
-                        if constexpr(m0 == MRepeat - 1 && n0 == NRepeat - 1 &&
-                                     kscale0 == NumScaleKBlock - 1 &&
-                                     k0 == KRepeat / NumScaleKBlock - 1 && k_inner == KInner - 1)
-                        {
-                            __builtin_amdgcn_sched_barrier(0);
-                            __builtin_amdgcn_s_setprio(0);
-                            __builtin_amdgcn_sched_barrier(0);
-                        }
                     });
                     c_scale_struct.template UpdateCThreadBuf<kscale0, m0, n0>(c_thread_buf);
                 });
@@ -988,22 +906,6 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                         a_thread_vec.template AsType<wmma_input_type_a>(),
                         b_thread_vec.template AsType<wmma_input_type_b>(),
                         c_scale_struct.c_thread_buf_per_scale.GetVectorTypeReference(Number<0>{}));
-                    // T1-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): see the identical s_setprio
-                    // bracketing comment on the BScale steady-state hot loop's WMMA burst above.
-                    if constexpr(m0 == 0 && n0 == 0 && kscale0 == 0 && k0 == 0 && k_inner == 0)
-                    {
-                        __builtin_amdgcn_sched_barrier(0);
-                        __builtin_amdgcn_s_setprio(1);
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
-                    if constexpr(m0 == MRepeat - 1 && n0 == NRepeat - 1 &&
-                                 kscale0 == NumScaleKBlock - 1 &&
-                                 k0 == KRepeat / NumScaleKBlock - 1 && k_inner == KInner - 1)
-                    {
-                        __builtin_amdgcn_sched_barrier(0);
-                        __builtin_amdgcn_s_setprio(0);
-                        __builtin_amdgcn_sched_barrier(0);
-                    }
                 });
                 c_scale_struct.template UpdateCThreadBuf<kscale0, m0, n0>(c_thread_buf);
             });
