@@ -1,0 +1,218 @@
+// Include rocRAND's benchmark
+#include "benchmark_host_api.hpp"
+
+// Include primbench executor.
+#include "primbench.hpp"
+
+{% block backend_include %}  
+// Include the right backend 
+    #include "rng/{{algo_name}}.hpp"
+{% endblock %}
+#include <cstdint>
+#include <numeric>
+#include <vector>
+
+using config_provider = rocrand_impl::host::static_config_provider<{{ config.block_size_x }}, {{ config.grid_size }}>;
+
+{% block generator_define %}
+template<class ConfigProvider>
+using generator_template
+    = rocrand_impl::host::{{ algo_name }}_generator_template<rocrand_impl::system::device_system,
+                                                             ConfigProvider>;
+{% endblock %}
+
+
+// Disable ULL
+template<typename T, template<class> class GeneratorTemplate>
+struct output_type_supported : std::true_type
+{};
+
+#define DISABLE_ULL(Generator)                                                    \
+    template<>                                                                    \
+    struct output_type_supported<unsigned long long, Generator> : std::false_type \
+    {}
+
+DISABLE_ULL(generator_template);
+#undef DISABLE_ULL
+
+// QUEUING TEMPLATE 
+template<class T, distribution Dist, template<class> class GeneratorTemplate, class ConfigProvider>
+void queue_one(primbench::executor& executor,
+               size_t               dimensions,
+               size_t               offset,
+               bool                 benchmark_host,
+               double               poisson_lambda)
+{
+    using generator_t       = GeneratorTemplate<ConfigProvider>;
+    constexpr auto rng_type = generator_t::type();
+
+    if constexpr(Dist == DISTRIBUTION_POISSON)
+    {
+        executor.queue<host_api_benchmark<T, Dist, generator_t>>(rng_type,
+                                                                 RAND_ORDERING_PSEUDO_DYNAMIC,
+                                                                 dimensions,
+                                                                 offset,
+                                                                 benchmark_host,
+                                                                 poisson_lambda);
+    }
+    else
+    {
+        executor.queue<host_api_benchmark<T, Dist, generator_t>>(rng_type,
+                                                                 RAND_ORDERING_PSEUDO_DEFAULT,
+                                                                 dimensions,
+                                                                 offset,
+                                                                 benchmark_host);
+    }
+}
+
+template<typename T, template<class> class GeneratorTemplate, class ConfigProvider>
+void queue_distributions(primbench::executor&       executor,
+                         size_t                     dimensions,
+                         size_t                     offset,
+                         bool                       benchmark_host,
+                         const std::vector<double>& poisson_lambdas)
+{
+    if constexpr(!output_type_supported<T, GeneratorTemplate>::value)
+    {
+        return;
+    }
+    else if constexpr(std::is_integral_v<T>)
+    {
+        queue_one<T, DISTRIBUTION_UNIFORM, GeneratorTemplate, ConfigProvider>(executor,
+                                                                              dimensions,
+                                                                              offset,
+                                                                              benchmark_host,
+                                                                              0.0);
+
+        if constexpr(std::is_same_v<T, uint32_t>)
+        {
+            for(double lambda : poisson_lambdas)
+            {
+                queue_one<T, DISTRIBUTION_POISSON, GeneratorTemplate, ConfigProvider>(
+                    executor,
+                    dimensions,
+                    offset,
+                    benchmark_host,
+                    lambda);
+            }
+        }
+    }
+    else
+    {
+        queue_one<T, DISTRIBUTION_UNIFORM, GeneratorTemplate, ConfigProvider>(executor,
+                                                                              dimensions,
+                                                                              offset,
+                                                                              benchmark_host,
+                                                                              0.0);
+        queue_one<T, DISTRIBUTION_NORMAL, GeneratorTemplate, ConfigProvider>(executor,
+                                                                             dimensions,
+                                                                             offset,
+                                                                             benchmark_host,
+                                                                             0.0);
+        queue_one<T, DISTRIBUTION_LOG_NORMAL, GeneratorTemplate, ConfigProvider>(executor,
+                                                                                 dimensions,
+                                                                                 offset,
+                                                                                 benchmark_host,
+                                                                                 0.0);
+    }
+}
+
+template<template<class> class GeneratorTemplate, class ConfigProvider>
+void queue_all_types(primbench::executor&       executor,
+                     size_t                     dimensions,
+                     size_t                     offset,
+                     bool                       benchmark_host,
+                     const std::vector<double>& poisson_lambdas)
+{
+    queue_distributions<uint32_t, GeneratorTemplate, ConfigProvider>(executor,
+                                                                     dimensions,
+                                                                     offset,
+                                                                     benchmark_host,
+                                                                     poisson_lambdas);
+    queue_distributions<uint8_t, GeneratorTemplate, ConfigProvider>(executor,
+                                                                    dimensions,
+                                                                    offset,
+                                                                    benchmark_host,
+                                                                    poisson_lambdas);
+    queue_distributions<uint16_t, GeneratorTemplate, ConfigProvider>(executor,
+                                                                     dimensions,
+                                                                     offset,
+                                                                     benchmark_host,
+                                                                     poisson_lambdas);
+    queue_distributions<unsigned long long, GeneratorTemplate, ConfigProvider>(executor,
+                                                                               dimensions,
+                                                                               offset,
+                                                                               benchmark_host,
+                                                                               poisson_lambdas);
+    queue_distributions<float, GeneratorTemplate, ConfigProvider>(executor,
+                                                                  dimensions,
+                                                                  offset,
+                                                                  benchmark_host,
+                                                                  poisson_lambdas);
+    queue_distributions<half, GeneratorTemplate, ConfigProvider>(executor,
+                                                                 dimensions,
+                                                                 offset,
+                                                                 benchmark_host,
+                                                                 poisson_lambdas);
+    queue_distributions<double, GeneratorTemplate, ConfigProvider>(executor,
+                                                                   dimensions,
+                                                                   offset,
+                                                                   benchmark_host,
+                                                                   poisson_lambdas);
+}
+
+{% block extern_c_wrapper %}
+extern "C" float {{algo_name}}_wrapper(
+    {% block arguments %}
+    uint64_t bytes_size
+    {% endblock %}
+)
+{
+    // Flush is required for fancy primbench printing
+    std::cout << std::flush;
+    
+    {% block primbench_settings %}
+    auto settings = primbench::settings();
+    settings.json_out = "/dev/null";
+    settings.max_warming_secs = 90;
+    settings.max_cooling_secs = 90;
+    settings.size = bytes_size;
+    settings.skip_header = true;
+    {% endblock %}
+
+    {% block primbench_args %}
+    char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
+    {% endblock %}
+    
+    {% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+    {% endblock %}
+
+    {% block set_up_settings %}
+    auto dimensions = 1;
+    auto offset = 0;
+    auto poisson_lambdas = {10.0};
+    auto benchmark_host = false;
+    {% endblock %}
+
+    queue_all_types<generator_template, config_provider>(executor,
+                                                        dimensions,
+                                                        offset,
+                                                        benchmark_host,
+                                                        poisson_lambdas);
+
+
+    executor.run();
+
+    {% block calculate_time %}
+    std::vector<double> bps = executor.get_all_bytes_per_second();
+    
+    double total = 0.0;
+    for(double x : bps)
+        total += (1000.0 * primbench::GiB) / x;   
+    
+    return total / static_cast<double>(bps.size());
+    {% endblock %}
+
+}
+{% endblock %}
