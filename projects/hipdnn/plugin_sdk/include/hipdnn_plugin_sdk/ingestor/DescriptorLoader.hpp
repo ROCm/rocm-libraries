@@ -2829,14 +2829,21 @@ inline std::deque<std::string>& registeredEngineNames()
  *
  * Takes a parsed catalog rather than roots so a provider that also resolves declared L1
  * models out of the same trees (resolveDeclaredEnginePredictions) walks them once.
+ * @p source names where the catalog was read from, for the summary line.
+ *
+ * A summary line reports how many sets survived and how many validation dropped. The line
+ * is an error if validation drops a set.
  *
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
  */
 template <typename THandle>
-inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCatalog& catalog)
+inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCatalog& catalog,
+                                                              std::string_view source
+                                                              = "the descriptor catalog")
 {
     std::vector<DescriptorSet> validated;
+    size_t dropped = 0;
 
     for(auto& set : resolveDescriptorSets(catalog))
     {
@@ -2943,6 +2950,7 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
         }
         if(!resolvable)
         {
+            ++dropped;
             continue;
         }
 
@@ -2961,6 +2969,7 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' does not validate: " << error.what()
                                     << "; dropping it");
+            ++dropped;
             continue;
         }
 
@@ -2987,8 +2996,19 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
         validated.push_back(std::move(set));
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("descriptor loader: " << validated.size()
-                                                 << " descriptor-backed engine(s) loaded");
+    if(dropped == 0)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: "
+                               << validated.size() << " descriptor-backed engine(s) loaded from "
+                               << source << "; " << dropped << " dropped during validation");
+    }
+    else
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                << dropped << " descriptor set(s) dropped during validation; "
+                                << validated.size() << " descriptor-backed engine(s) loaded from "
+                                << source);
+    }
     return validated;
 }
 
@@ -3003,7 +3023,7 @@ inline std::vector<DescriptorSet>
         from += (from.empty() ? "" : ", ") + root.string();
     }
     HIPDNN_PLUGIN_LOG_INFO("descriptor loader: reading descriptor root(s) " << from);
-    return loadValidatedDescriptorSets<THandle>(loadDescriptorCatalog(roots));
+    return loadValidatedDescriptorSets<THandle>(loadDescriptorCatalog(roots), from);
 }
 
 /// @brief The one-root form: every constructible descriptor set under @p root.

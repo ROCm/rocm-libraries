@@ -738,18 +738,30 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     }
     HIPDNN_CHECK_ERROR(hipError(hipStreamSynchronize(stream), "Warmup synchronization failed"));
 
-    const auto timeOnce = [&](float& elapsed) -> hipdnn_frontend::Error {
+    // Unstalled, host-bracketed HIP events: this loop is not one of the stall-gated
+    // comparisons, so every sample reports TimingQuality::UNSTALLED and the pass below is
+    // run with stalled=false, which can never ask for a restart.
+    const auto timeOnce = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(start.get(), stream), "Could not start timing"));
         HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(stop.get(), stream), "Could not stop timing"));
         HIPDNN_CHECK_ERROR(
             hipError(hipEventSynchronize(stop.get()), "Timing synchronization failed"));
+        float elapsed = 0.0F;
         HIPDNN_CHECK_ERROR(hipError(hipEventElapsedTime(&elapsed, start.get(), stop.get()),
                                     "Could not read timing"));
-        if(!std::isfinite(elapsed) || elapsed <= 0.0F)
+        if(!std::isfinite(elapsed) || elapsed == 0.0F)
         {
             return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
                     "HIP event timing must be finite and positive"};
+        }
+        // A finite negative reading leaves `timing` INVALID with no elapsed time, the same
+        // shape execute_timed_ext() reports it in, so the loop re-measures the slot within
+        // its bounded retry budget instead of failing the whole collection on it.
+        if(elapsed > 0.0F)
+        {
+            timing.elapsedMs = elapsed;
+            timing.quality = hipdnn_frontend::TimingQuality::UNSTALLED;
         }
         return {};
     };
@@ -757,6 +769,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
         = hipdnn_frontend::autotune::detail::runUntilStable(options.maxIterations,
                                                             AutotuneConfig{}.windowSize,
                                                             options.stability,
+                                                            /*stalled=*/false,
                                                             timeOnce,
                                                             [](int, float, float, bool) {});
     output["iterations"] = outcome.timings.size();

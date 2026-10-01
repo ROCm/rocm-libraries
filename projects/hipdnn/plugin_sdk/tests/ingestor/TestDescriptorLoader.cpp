@@ -1460,6 +1460,8 @@ TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
 TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
 {
     const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_validated"));
     const auto installed = dir.path() / "a";
     const auto dropIn = dir.path() / "b";
@@ -1473,6 +1475,13 @@ TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
     ASSERT_EQ(sets.size(), 2u);
     EXPECT_EQ(sets.front().engine.name, "test:validated_installed");
     EXPECT_EQ(sets.back().engine.name, "test:validated_drop_in");
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "; 0 dropped during validation"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("descriptor set(s) dropped"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoads)
@@ -3041,6 +3050,38 @@ TEST(TestDescriptorLoader, UnregisteredScorerDoesNotDisableAnOtherwiseValidEngin
     ASSERT_EQ(sets.size(), 2u);
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
     EXPECT_EQ(firstBlockSize(sets.back()), 64);
+}
+
+/// The summary line carries a count of dropped sets, not of ERROR lines. The first bad
+/// set below names two unregistered symbols, so it logs twice and still costs the count
+/// one; a count of lines would read 3 here.
+TEST(TestDescriptorLoader, ReportsHowManyDescriptorSetsWereDropped)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("drop_count"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:drop_count_survivor"));
+
+    auto twoUnregistered = makeSetDocuments('2', "test:drop_count_two_symbols");
+    documentOfType(twoUnregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
+    documentOfType(twoUnregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), twoUnregistered);
+
+    auto misrouted = makeSetDocuments('3', "test:drop_count_misrouted");
+    secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
+    writeDocuments(dir.path(), misrouted);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    EXPECT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "2 descriptor set(s) dropped during validation; 1 "
+                                          "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
 }
 
 /// The probe's catch: two kernels completing to the same metadata tuple make the state

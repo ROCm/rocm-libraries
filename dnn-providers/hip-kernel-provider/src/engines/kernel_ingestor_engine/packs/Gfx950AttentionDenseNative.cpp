@@ -26,12 +26,9 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
-#include "compilation/IKernelCompiler.hpp"
-#include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
@@ -847,10 +844,8 @@ private:
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
-    Gfx950AttentionDenseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
-                                        const compilation::KpackKernelLoader& kpackLoader)
-        : _kernelCompiler(kernelCompiler)
-        , _kpackLoader(kpackLoader)
+    explicit Gfx950AttentionDenseDispatchHandler(const compilation::KpackKernelLoader& kpackLoader)
+        : _kpackLoader(kpackLoader)
     {
     }
 
@@ -894,36 +889,8 @@ public:
                     + "' declares no supported block_m/block_n tile");
         }
 
-        // KernelCompileOptions dereferences the tensor it is handed UNCONDITIONALLY and
-        // throws for any 4D stride order that is neither NCHW nor NHWC. BSHD attention
-        // memory is neither, so passing the real query tensor throws at prepare() time.
-        // A layout-neutral stand-in is safe here only because every kernel in this pack
-        // is KPACK, and buildIngestorKernelCode does not consult `options` on the KPACK
-        // branch.
-        flatbuffers::FlatBufferBuilder standInBuilder;
-        {
-            const std::vector<int64_t> unitDims{1, 1, 1, 1};
-            const std::vector<int64_t> unitStrides{1, 1, 1, 1};
-            standInBuilder.Finish(
-                data_objects::CreateTensorAttributesDirect(standInBuilder,
-                                                           0,
-                                                           nullptr,
-                                                           data_objects::DataType::FLOAT,
-                                                           &unitStrides,
-                                                           &unitDims,
-                                                           false));
-        }
-        const auto* standIn = flatbuffers::GetRoot<data_objects::TensorAttributes>(
-            standInBuilder.GetBufferPointer());
-        const compilation::KernelCompileOptions options(standIn,
-                                                        context.deviceProperties.gcnArchName);
-
-        auto code = buildIngestorKernelCode(_kernelCompiler,
-                                            _kpackLoader,
-                                            context,
-                                            kernel,
-                                            options,
-                                            attentionDenseKernelSignature());
+        auto code = buildIngestorKernelCode(
+            _kpackLoader, context, kernel, attentionDenseKernelSignature());
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
@@ -976,7 +943,6 @@ public:
     }
 
 private:
-    const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
@@ -999,11 +965,9 @@ namespace
 /// This engine's dispatch handler, process-lifetime.
 const Gfx950AttentionDenseDispatchHandler& gfx950AttentionDenseDispatchHandler()
 {
-    static const HipMlopsKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx950AttentionDenseKpackModuleCache());
-    static const Gfx950AttentionDenseDispatchHandler s_dispatchHandler(s_kernelCompiler,
-                                                                       s_kpackLoader);
+    static const Gfx950AttentionDenseDispatchHandler s_dispatchHandler(s_kpackLoader);
     return s_dispatchHandler;
 }
 
