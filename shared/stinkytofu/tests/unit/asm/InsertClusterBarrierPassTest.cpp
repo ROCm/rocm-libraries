@@ -780,6 +780,68 @@ TEST_F(InsertClusterBarrierPassTest, Rule1SignalBelowGsu1IsDrunkByRule2Wait) {
         << "the wait has to have Rule 1's token to drink:" << blockListing(*bb);
 }
 
+TEST_F(InsertClusterBarrierPassTest, FirstLoadInsideALoopIsSignalledEveryTrip) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    openLoop();
+    StinkyInstruction* load = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    createWMMA(32, 0, 8);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    closeLoop();
+
+    runPass();
+    const auto countsAfterFirstRun = clusterBarrierCounts();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 0)
+        << "the run-up's token has to be drunk before the loop:" << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(load)) << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(load)), nullptr)
+        << "each trip has to signal ahead of its own wait:" << blockListing(*bb);
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+
+    runPass();
+    EXPECT_EQ(clusterBarrierCounts(), countsAfterFirstRun)
+        << "a second run must not add to the handshake:" << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, FirstLoadInsideALoopWaitsInFrontOfItsTrigger) {
+    createLabel(kGSU1LabelName);
+    createWMMA(24, 0, 8);
+    openLoop();
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createWMMA(32, 0, 8);
+    closeLoop();
+
+    runPass();
+    const auto countsAfterFirstRun = clusterBarrierCounts();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(inFlightAt(indexOf(loopHead)), 0)
+        << "the run-up's token has to be drunk before the loop:" << blockListing(*bb);
+    StinkyInstruction* perTripWait = realInstBefore(trigger);
+    ASSERT_NE(perTripWait, nullptr);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*perTripWait, /*wantSignal=*/false) &&
+                indexOf(perTripWait) > indexOf(loopHead))
+        << "each trip has to wait in front of the trigger:" << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(perTripWait)), nullptr)
+        << "each trip has to signal ahead of its own wait:" << blockListing(*bb);
+    StinkyInstruction* load = findFirstTensorLoad();
+    ASSERT_NE(load, nullptr);
+    EXPECT_EQ(firstRealInstAfter(trigger), realInstBefore(load))
+        << "the pass must not come between the trigger and its load:" << blockListing(*bb);
+    expectClusterTokensBalanceOnEveryPath(/*completeProgram=*/true);
+
+    runPass();
+    EXPECT_EQ(clusterBarrierCounts(), countsAfterFirstRun)
+        << "a second run must not add to the handshake:" << blockListing(*bb);
+}
+
 TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
     appendGsu1Preheader();
     openLoop();
