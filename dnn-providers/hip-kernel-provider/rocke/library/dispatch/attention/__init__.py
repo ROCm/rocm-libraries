@@ -389,11 +389,12 @@ def dispatch_attention(
 
 def dispatch_for_arches(
     req: AttentionRequest,
-    arches: str,
+    arches: str | Sequence[str],
     *,
     ranker: Ranker | None = None,
-) -> Dict[str, DispatchResult]:
-    """Run :func:`dispatch_attention` for each arch in a comma-separated list.
+    strict: bool = True,
+) -> Dict[str, "DispatchResult | Exception"]:
+    """Run :func:`dispatch_attention` for each of ``arches``.
 
     Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
     compare selections across architectures from a single host.
@@ -410,30 +411,67 @@ def dispatch_for_arches(
 
     Example::
 
-        results = dispatch_for_arches(req, "gfx942,gfx950")
+        results = dispatch_for_arches(req, ["gfx942", "gfx950"])
         print(results["gfx942"].candidate.name)
         print(results["gfx950"].candidate.name)
 
     Each arch is canonicalized via :func:`canonical_arch` (strips suffixes such
     as ``:sramecc+``, normalizes case) before dispatch, so ``"GFX950"`` and
     ``"gfx950:sramecc+"`` both appear in the output under the key ``"gfx950"``.
-    Duplicate arches after canonicalization are dispatched only once.
+    Duplicate arches after canonicalization are dispatched only once, and
+    insertion order is preserved so the output reads in the caller's order.
 
     Args:
         req:    Base :class:`AttentionRequest`. Its ``arch`` field is overridden
                 for each target; all other fields are preserved.
-        arches: Comma-separated arch names, e.g. ``"gfx942,gfx950"`` or a
-                single name ``"gfx942"``.
+        arches: A sequence of arch names (``["gfx942", "gfx950"]``) or, for CLI
+                and config callers, one comma-separated string
+                (``"gfx942,gfx950"``). Splitting happens only for the ``str``
+                form -- a sequence is used as given, so an arch name is never
+                silently cut in half.
         ranker: Optional ranker forwarded to :func:`dispatch_attention`.
+        strict: ``True`` (default) propagates the first dispatch failure.
+                ``False`` maps each failing arch to its exception instead, so
+                one unsupported arch does not discard the results for the
+                others -- the point of a cross-arch comparison. Values are then
+                ``DispatchResult | Exception``; test with ``isinstance``.
+
+    Raises:
+        ValueError: if ``arches`` is empty, or an entry does not canonicalize.
+                    This is a malformed argument, not a per-arch dispatch
+                    failure, so ``strict=False`` does not suppress it.
     """
-    results: Dict[str, DispatchResult] = {}
-    for raw in arches.split(","):
+    if isinstance(arches, str):
+        # CLI boundary only: --arches gfx942,gfx950. A Sequence[str] is already
+        # the structured form and must not be re-split.
+        requested = arches.split(",")
+    else:
+        requested = list(arches)
+        # canonical_arch() truncates a target ID at its first comma, so an entry
+        # like "gfx942,gfx950" would quietly canonicalize to "gfx942" and the
+        # second arch would vanish from the results. Reject it instead.
+        joined = [a for a in requested if isinstance(a, str) and "," in a]
+        if joined:
+            raise ValueError(
+                f"comma-joined entries in a sequence of arches: {joined!r}. "
+                "Pass the whole thing as one string, or split it yourself"
+            )
+    if not requested:
+        raise ValueError("arches is empty: nothing to dispatch for")
+
+    results: Dict[str, "DispatchResult | Exception"] = {}
+    for raw in requested:
         arch = canonical_arch(raw)
         if not arch:
-            raise ValueError(f"invalid arch {raw!r} in arches string {arches!r}")
+            raise ValueError(f"invalid arch {raw!r} in arches {arches!r}")
         if arch in results:
             continue  # deduplicate after canonicalization
-        results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
+        try:
+            results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
+        except Exception as exc:
+            if strict:
+                raise
+            results[arch] = exc
     return results
 
 
