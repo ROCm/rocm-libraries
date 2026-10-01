@@ -214,7 +214,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
 | `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
-| Descriptors themselves | — | **Never.** There is no descriptor splice |
+| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `tools/splice_additions.py` |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
