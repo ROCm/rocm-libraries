@@ -200,6 +200,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # Distinct anchor at the end of the device source list. Needs
   # rocsparse_conjugate.cpp compiled in (see ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
   unit_test_internal_common_conjugate.cpp
+  # --- AISPARSE-649: forced-clamp coverage of gthr_strided_batched ----------
+  # Needs rocsparse_gthr_impl.cpp compiled in (see
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_level1_gthr_grids.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -281,6 +285,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # AISPARSE-654: rocsparse::conjugate is hidden in librocsparse; defining TU for
   # unit_test_internal_common_conjugate.cpp.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_conjugate.cpp
+  # AISPARSE-649: rocsparse::gthr_strided_batched_template is hidden in
+  # librocsparse; defining TU for unit_test_internal_level1_gthr_grids.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure

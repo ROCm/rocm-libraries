@@ -28,23 +28,39 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    // GRID_STRIDE must be true when grid.x was clamped below (nnz - 1) / BLOCKSIZE
+    // + 1 blocks. Without the clamp the grid holds at most 2^32 - 1 work-items,
+    // so the 32-bit block offset of the straight-line path cannot wrap.
+    template <uint32_t BLOCKSIZE, typename I, typename T, bool GRID_STRIDE = true>
     ROCSPARSE_DEVICE_ILF void
         gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
-        // Index in int64_t so neither the block offset nor the final grid-stride
-        // increment wraps for 32-bit nnz, and grid-stride so every element is
-        // gathered even when grid.x is clamped below the ideal block count.
-        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
-        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-            idx < nnz;
-            idx += stride)
+        if constexpr(GRID_STRIDE)
         {
-            x_val[idx] = y[x_ind[idx] - idx_base];
+            // Index in int64_t so neither the block offset nor the final
+            // grid-stride increment wraps for 32-bit nnz.
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+            for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+                idx < nnz;
+                idx += stride)
+            {
+                x_val[idx] = y[x_ind[idx] - idx_base];
+            }
+        }
+        else
+        {
+            I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+            if(idx < nnz)
+            {
+                x_val[idx] = y[x_ind[idx] - idx_base];
+            }
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    // GRID_STRIDE must be true when either grid axis was clamped: grid.x below the
+    // block count nnz needs, or grid.y below batch_count.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gthr_kernel(I                    nnz,
                      int64_t              batch_count,
@@ -55,16 +71,28 @@ namespace rocsparse
                      const I*             x_ind,
                      rocsparse_index_base idx_base)
     {
-        // Grid-stride over the batch axis so batch_count is not limited by the
-        // 65,535 grid.y hardware cap.
-        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
-            batch_index += hipGridDim_y)
+        if constexpr(GRID_STRIDE)
         {
-            gthr_device<BLOCKSIZE, I, T>(nnz,
-                                         y + batch_index * y_stride,
-                                         x_val + batch_index * x_val_stride,
-                                         x_ind,
-                                         idx_base);
+            // Grid-stride over the batch axis so batch_count is not limited by the
+            // 65,535 grid.y hardware cap.
+            for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+                batch_index += hipGridDim_y)
+            {
+                gthr_device<BLOCKSIZE, I, T, true>(nnz,
+                                                   y + batch_index * y_stride,
+                                                   x_val + batch_index * x_val_stride,
+                                                   x_ind,
+                                                   idx_base);
+            }
+        }
+        else
+        {
+            uint32_t batch_index = hipBlockIdx_y;
+            gthr_device<BLOCKSIZE, I, T, false>(nnz,
+                                                y + batch_index * y_stride,
+                                                x_val + batch_index * x_val_stride,
+                                                x_ind,
+                                                idx_base);
         }
     }
 }
