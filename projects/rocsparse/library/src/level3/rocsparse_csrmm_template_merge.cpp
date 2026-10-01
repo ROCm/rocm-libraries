@@ -168,40 +168,49 @@ namespace rocsparse
         }
     }
 
-#define LAUNCH_CSRMMNN_MERGE_KERNEL(CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD)                \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
-        (rocsparse::csrmmnn_merge_path_kernel<CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3(rocsparse::get_grid_size_x(                                                  \
-                 handle, (block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1, CSRMMNN_DIM),   \
-             get_grid_size_y<J>(handle, batch_count_C)),                                  \
-        dim3(CSRMMNN_DIM),                                                                \
-        0,                                                                                \
-        handle->stream,                                                                   \
-        conj_A,                                                                           \
-        conj_B,                                                                           \
-        m,                                                                                \
-        n,                                                                                \
-        k,                                                                                \
-        nnz,                                                                              \
-        batch_count_C,                                                                    \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                     \
-        offsets_batch_stride_A,                                                           \
-        columns_values_batch_stride_A,                                                    \
-        csr_row_ptr,                                                                      \
-        csr_col_ind,                                                                      \
-        csr_val,                                                                          \
-        coord0,                                                                           \
-        coord1,                                                                           \
-        dense_B,                                                                          \
-        ldb,                                                                              \
-        batch_stride_B,                                                                   \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                      \
-        dense_C,                                                                          \
-        ldc,                                                                              \
-        batch_stride_C,                                                                   \
-        order_C,                                                                          \
-        descr->base,                                                                      \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_CSRMMNN_MERGE_KERNEL(CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD)          \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                    \
+        handle,                                                                     \
+        (block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,                            \
+        CSRMMNN_DIM,                                                                \
+        [&](auto grid_stride, uint32_t grid_x) -> rocsparse_status {                \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+                (rocsparse::csrmmnn_merge_path_kernel<CSRMMNN_DIM,                  \
+                                                      WF_SIZE,                      \
+                                                      ITEM_PER_THREAD,              \
+                                                      decltype(grid_stride)::value, \
+                                                      T>),                          \
+                dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),            \
+                dim3(CSRMMNN_DIM),                                                  \
+                0,                                                                  \
+                handle->stream,                                                     \
+                conj_A,                                                             \
+                conj_B,                                                             \
+                m,                                                                  \
+                n,                                                                  \
+                k,                                                                  \
+                nnz,                                                                \
+                batch_count_C,                                                      \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),       \
+                offsets_batch_stride_A,                                             \
+                columns_values_batch_stride_A,                                      \
+                csr_row_ptr,                                                        \
+                csr_col_ind,                                                        \
+                csr_val,                                                            \
+                coord0,                                                             \
+                coord1,                                                             \
+                dense_B,                                                            \
+                ldb,                                                                \
+                batch_stride_B,                                                     \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),        \
+                dense_C,                                                            \
+                ldc,                                                                \
+                batch_stride_C,                                                     \
+                order_C,                                                            \
+                descr->base,                                                        \
+                handle->pointer_mode == rocsparse_pointer_mode_host);               \
+            return rocsparse_status_success;                                        \
+        }))
 
     template <uint32_t BLOCKSIZE,
               typename T,
@@ -280,78 +289,93 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-#define LAUNCH_CSRMMNT_MERGE_MAIN_KERNEL(WF_SIZE, ITEM_PER_THREAD, LOOPS)                \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
-        (rocsparse::csrmmnt_merge_path_main_kernel<WF_SIZE, ITEM_PER_THREAD, LOOPS, T>), \
-        dim3(rocsparse::get_grid_size_x(handle, block_count, WF_SIZE),                   \
-             get_grid_size_y<J>(handle, batch_count_C)),                                 \
-        dim3(WF_SIZE),                                                                   \
-        0,                                                                               \
-        handle->stream,                                                                  \
-        conj_A,                                                                          \
-        conj_B,                                                                          \
-        (J)0,                                                                            \
-        main,                                                                            \
-        m,                                                                               \
-        n,                                                                               \
-        k,                                                                               \
-        nnz,                                                                             \
-        batch_count_C,                                                                   \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                    \
-        offsets_batch_stride_A,                                                          \
-        columns_values_batch_stride_A,                                                   \
-        csr_row_ptr,                                                                     \
-        csr_col_ind,                                                                     \
-        csr_val,                                                                         \
-        coord0,                                                                          \
-        coord1,                                                                          \
-        dense_B,                                                                         \
-        ldb,                                                                             \
-        batch_stride_B,                                                                  \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                     \
-        dense_C,                                                                         \
-        ldc,                                                                             \
-        batch_stride_C,                                                                  \
-        order_C,                                                                         \
-        descr->base,                                                                     \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_CSRMMNT_MERGE_MAIN_KERNEL(WF_SIZE, ITEM_PER_THREAD, LOOPS)                          \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                                   \
+        handle, block_count, WF_SIZE, [&](auto grid_stride, uint32_t grid_x) -> rocsparse_status { \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+                (rocsparse::csrmmnt_merge_path_main_kernel<WF_SIZE,                                \
+                                                           ITEM_PER_THREAD,                        \
+                                                           LOOPS,                                  \
+                                                           decltype(grid_stride)::value,           \
+                                                           T>),                                    \
+                dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),                           \
+                dim3(WF_SIZE),                                                                     \
+                0,                                                                                 \
+                handle->stream,                                                                    \
+                conj_A,                                                                            \
+                conj_B,                                                                            \
+                (J)0,                                                                              \
+                main,                                                                              \
+                m,                                                                                 \
+                n,                                                                                 \
+                k,                                                                                 \
+                nnz,                                                                               \
+                batch_count_C,                                                                     \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                      \
+                offsets_batch_stride_A,                                                            \
+                columns_values_batch_stride_A,                                                     \
+                csr_row_ptr,                                                                       \
+                csr_col_ind,                                                                       \
+                csr_val,                                                                           \
+                coord0,                                                                            \
+                coord1,                                                                            \
+                dense_B,                                                                           \
+                ldb,                                                                               \
+                batch_stride_B,                                                                    \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                       \
+                dense_C,                                                                           \
+                ldc,                                                                               \
+                batch_stride_C,                                                                    \
+                order_C,                                                                           \
+                descr->base,                                                                       \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                              \
+            return rocsparse_status_success;                                                       \
+        }))
 
-#define LAUNCH_CSRMMNT_MERGE_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD)         \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
-        (rocsparse::                                                                         \
-             csrmmnt_merge_path_remainder_kernel<CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3(rocsparse::get_grid_size_x(                                                     \
-                 handle, (block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1, CSRMMNT_DIM),      \
-             get_grid_size_y<J>(handle, batch_count_C)),                                     \
-        dim3(CSRMMNT_DIM),                                                                   \
-        0,                                                                                   \
-        handle->stream,                                                                      \
-        conj_A,                                                                              \
-        conj_B,                                                                              \
-        main,                                                                                \
-        m,                                                                                   \
-        n,                                                                                   \
-        k,                                                                                   \
-        nnz,                                                                                 \
-        batch_count_C,                                                                       \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                        \
-        offsets_batch_stride_A,                                                              \
-        columns_values_batch_stride_A,                                                       \
-        csr_row_ptr,                                                                         \
-        csr_col_ind,                                                                         \
-        csr_val,                                                                             \
-        coord0,                                                                              \
-        coord1,                                                                              \
-        dense_B,                                                                             \
-        ldb,                                                                                 \
-        batch_stride_B,                                                                      \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                         \
-        dense_C,                                                                             \
-        ldc,                                                                                 \
-        batch_stride_C,                                                                      \
-        order_C,                                                                             \
-        descr->base,                                                                         \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
+#define LAUNCH_CSRMMNT_MERGE_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD)          \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                              \
+        handle,                                                                               \
+        (block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1,                                      \
+        CSRMMNT_DIM,                                                                          \
+        [&](auto grid_stride, uint32_t grid_x) -> rocsparse_status {                          \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
+                (rocsparse::csrmmnt_merge_path_remainder_kernel<CSRMMNT_DIM,                  \
+                                                                WF_SIZE,                      \
+                                                                ITEM_PER_THREAD,              \
+                                                                decltype(grid_stride)::value, \
+                                                                T>),                          \
+                dim3(grid_x, get_grid_size_y<J>(handle, batch_count_C)),                      \
+                dim3(CSRMMNT_DIM),                                                            \
+                0,                                                                            \
+                handle->stream,                                                               \
+                conj_A,                                                                       \
+                conj_B,                                                                       \
+                main,                                                                         \
+                m,                                                                            \
+                n,                                                                            \
+                k,                                                                            \
+                nnz,                                                                          \
+                batch_count_C,                                                                \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                 \
+                offsets_batch_stride_A,                                                       \
+                columns_values_batch_stride_A,                                                \
+                csr_row_ptr,                                                                  \
+                csr_col_ind,                                                                  \
+                csr_val,                                                                      \
+                coord0,                                                                       \
+                coord1,                                                                       \
+                dense_B,                                                                      \
+                ldb,                                                                          \
+                batch_stride_B,                                                               \
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                  \
+                dense_C,                                                                      \
+                ldc,                                                                          \
+                batch_stride_C,                                                               \
+                order_C,                                                                      \
+                descr->base,                                                                  \
+                handle->pointer_mode == rocsparse_pointer_mode_host);                         \
+            return rocsparse_status_success;                                                  \
+        }))
 
     template <uint32_t BLOCKSIZE,
               typename T,

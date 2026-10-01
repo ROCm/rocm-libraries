@@ -75,7 +75,7 @@ namespace rocsparse
 
         // bid is the nnz block this call operates on and nblocks the logical nnz block
         // count, both supplied by the __global__ wrapper, which grid-strides over the
-        // full 64-bit nblocks because grid.x is clamped at the launch site
+        // full 64-bit nblocks when grid.x is clamped at the launch site
         // (AISPARSE-672). nblocks is also the row stride of the block reduction
         // buffers; it used to be read off hipGridDim_x, which is only equal to
         // nblocks while the grid is unclamped.
@@ -99,12 +99,6 @@ namespace rocsparse
                   * conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
         }
 
-        // Barrier before the shared_row write, not only after it. The __global__
-        // wrapper now calls this function once per nnz block in a grid-stride loop,
-        // so without a leading barrier this write races with the shared_row[tid + 1]
-        // read at the end of the previous block's column loop (AISPARSE-672). The
-        // remainder kernel below already had the barrier in this position.
-        __syncthreads();
         shared_row[tid] = row_ind;
         __syncthreads();
 
@@ -556,8 +550,8 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
 
         // bid is the nnz block this call operates on, supplied by the __global__
-        // wrapper which grid-strides over the full 64-bit block count because grid.x
-        // is clamped at the launch site (AISPARSE-672).
+        // wrapper which grid-strides over the full 64-bit block count when grid.x is
+        // clamped at the launch site (AISPARSE-672).
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);

@@ -464,7 +464,7 @@ namespace rocsparse
         const int wid = tid / (WF_SIZE);
 
         // block_base is the grid.x iteration supplied by the __global__ wrapper,
-        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // which grid-strides when grid.x is clamped. bid is 64-bit to match the width
         // of block_count below: a clamped grid with a 32-bit bid would still
         // truncate (AISPARSE-671).
         const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
@@ -685,7 +685,7 @@ namespace rocsparse
         const int wid = tid / (WF_SIZE);
 
         // block_base is the grid.x iteration supplied by the __global__ wrapper,
-        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // which grid-strides when grid.x is clamped. bid is 64-bit to match the width
         // of block_count below: a clamped grid with a 32-bit bid would still
         // truncate (AISPARSE-671).
         const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
@@ -916,7 +916,7 @@ namespace rocsparse
         const int wid = tid / (WF_SIZE);
 
         // block_base is the grid.x iteration supplied by the __global__ wrapper,
-        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // which grid-strides when grid.x is clamped. bid is 64-bit to match the width
         // of block_count below: a clamped grid with a 32-bit bid would still
         // truncate (AISPARSE-671).
         const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
