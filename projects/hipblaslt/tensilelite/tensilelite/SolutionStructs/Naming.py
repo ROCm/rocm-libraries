@@ -295,9 +295,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       if state.get(key, 0) != 0:
         requiredParametersTemp.add(key)
 
-    # Same for the 32-bit GL2 prefetch increment.
+    # Same for the 32-bit GL2 prefetch increment and the vgpr-pair GL2 prefetch address.
     if not state.get("PrefetchGL2Inc64Bit", False):
       requiredParametersTemp.discard("PrefetchGL2Inc64Bit")
+    if not state.get("PrefetchGL2SAddr", False):
+      requiredParametersTemp.discard("PrefetchGL2SAddr")
 
     # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
     # would rename all of them.
