@@ -925,7 +925,11 @@ curated set, or `"full"`, the whole pruned knob space) when the stream is
 created. Each result's stored request is pinned to its spec
 (`core.pin_to_spec`): for a tuned spec that includes its `tuning_id` and
 knobs, so `dispatch_*(result.request)` reselects exactly what ran and
-`request_hash` tells two configurations of one candidate apart.
+`request_hash` tells two configurations of one candidate apart. A spec with no
+`tuning_id` resets them to `"auto"` / `()`, so a stale pin on the input request
+is not carried along, and knobs that do not normalize raise rather than being
+dropped. A negative sample count is refused (`sample_count`); 0 walks the
+whole stream.
 
 Section 7.5 completes the picture with the launch side — how a harness turns
 these candidates into timed, verified measurements.
@@ -1437,6 +1441,12 @@ class UnifiedSpace(WavesPerEuSpace):            # outer knob: waves_per_eu
         wpe = knobs.pop("waves_per_eu", None)
         return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, wpe))
 
+    def inert(self, base, kernel):              # a KQ pad the kernel lays out as none
+        ...
+
+    def validate(self, base, kernel):           # gfx950 2D: LDS budget, padded K vs aliased Q
+        ...
+
     def production(self, base, axes, is_valid):  # the curated stacks
         return _production_knob_sets(self.variant)
 
@@ -1475,8 +1485,23 @@ single point is fully searchable -- production stacks by default, the pruned
 product (sampled) at the `full` level -- while production traffic keeps taking
 the heuristic's choice through the route registry.
 
+`validate` exists because the tiled 2D validator does not model LDS: an
+over-budget spec only fails in codegen, and a padded K LDS that Q aliases
+computes wrong output. The LDS model is the pool the LLVM lowering packs
+(`_gfx950_2d_lds_bytes`, pinned to the lowered IR by a test), and `is_valid`
+applies it while walking, so the LDS-saving enabler axes that lead the axis
+order can still make a large tile legal.
+
+`WavesPerEuSpace` (`attention/waves.py`) is a thin `KnobSpace` subclass both
+attention spaces derive from. It is where `waves_per_eu` meets the generic
+outer-knob hooks: it sets `outer_knob = "waves_per_eu"` and the
+`{variant_id}_wpe{N}` stem and its prefix, so `rocke.dispatch.tuning` itself
+names no kernel field. Each space still supplies its own `outer_values`: the
+unified tables in `waves.py`, or values derived from the dense base spec's WPE.
+
 The dense variants are the same shape with `DenseSpace` (whose `base` is the
-variant's default kernel spec for the request) and `make_dense_candidate`.
+variant's default kernel spec for the request) and `make_dense_candidate`; it
+derives from `WavesPerEuSpace` too.
 
 ### 9.3 Attention coverage today
 
@@ -1660,7 +1685,9 @@ its field-complete kernel cache key (addressing width included), not
 
 A tuned attention spec (dense or unified) is one registered variant plus a
 **canonical knob dict**: the kernel fields set away from the variant's default
-spec, `waves_per_eu` included.
+spec, `waves_per_eu` included. `waves_per_eu` is the attention spaces' outer
+knob and shows in the stem (`library/dispatch/attention/waves.py`); the
+generic form is `{stem}@{config_key}` (section 14).
 
 ```text
 tuning_id  = "{variant_id}_wpe{N}@{config_key}"
@@ -1670,9 +1697,11 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
 ```
 
 - **What the hash covers** is that explicit, versioned list, never `asdict`
-  of a spec. Adding a field to a kernel spec does not change existing ids;
-  changing the payload or the canonical-knob rules bumps `TUNING_ID_VERSION`
-  (currently 2: the defaults fingerprint was added).
+  of a spec. The defaults fingerprint covers every declared default, so adding
+  a defaulted field to a kernel spec, or changing a default, changes every id
+  of that variant and old pins are refused (see "Drift across releases"
+  below); changing the payload or the canonical-knob rules bumps
+  `TUNING_ID_VERSION` (currently 2: the defaults fingerprint was added).
 - **Problem-independent.** Problem fields (batch, lengths, heads) are not in
   it, so one `config_key` names the same configuration on every problem the
   variant admits. The `wpe{N}` stem is display: it shows the resolved value,
@@ -1686,9 +1715,14 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
   to the default are dropped: values equal to the default spec, restated
   policies, knobs the body does not read for that spec, knobs out of scope for
   this problem, knobs only another codepath emits, gated sub-knobs with the
-  gate off. Knobs that are illegal are refused with a reason:
-  `KNOWN_WRONG_KNOBS`, fields that are not knobs of the variant, changing a
-  knob the variant's codepath fixes, anything the kernel validator rejects.
+  gate off, a gfx950 KQ LDS pad the kernel lays out as none (double-buffered K,
+  native-FP8 K, misaligned slabs). Knobs that are illegal are refused with a
+  reason: `KNOWN_WRONG_KNOBS`, fields that are not knobs of the variant,
+  changing a knob the variant's codepath fixes, anything the kernel validator
+  rejects, and on the gfx950 2D path a spec over the LDS budget or a padded K
+  that Q aliases. Values are first converted to the type their axis declares
+  (`True` / `1`, `2` / `2.0` name one configuration, since they hash alike);
+  a value with no lossless conversion is refused.
 - **Per-problem defaults are recorded.** Knobs are overrides of the
   variant's default spec. Where that default is resolved per problem (gfx942
   dense picks persistence from the work size and `waves_per_eu` from the
@@ -1731,7 +1765,8 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
 - **Dispatch results pin the exact spec.** A result's stored request carries
   the tuning id and knobs of the spec that ran, so `request_hash` tells two
   configurations of one candidate apart and the stored request reselects the
-  same spec. The explanation lists `tuning_id` and `spec_hash`.
+  same spec; an untuned spec resets them to `"auto"` / `()`. The explanation
+  lists `tuning_id` and `spec_hash`.
 
 ### 11.2 Planned consumer: data-driven selection
 

@@ -105,7 +105,10 @@ Production `algorithm="auto"` selection never sees the opt-in candidates.
 A swept configuration is built in four layers. A registered candidate fixes a
 coarse geometry, `select_spec` fills in the problem, a walk over the arch's
 knob axes varies the tuning fields, and a `waves_per_eu` loop runs inside each
-knob set:
+knob set. That loop is the shared `KnobSpace` outer-knob hook: both attention
+spaces derive from `WavesPerEuSpace` (`waves.py`), which names `waves_per_eu`
+as the outer knob and puts it in the id stem, and each supplies its own WPE
+values:
 
 ```text
 candidate            one geometry variant, fixed at registration
@@ -117,7 +120,8 @@ candidate            one geometry variant, fixed at registration
 
 The axes and production stacks are data in `axes.py`; `dense_rules.py` and
 `unified_rules.py` state attention's legality rules as `KnobSpace`
-subclasses; `candidate.py` turns a variant into a registered candidate.
+subclasses (through `waves.py`'s `WavesPerEuSpace`); `candidate.py` turns a
+variant into a registered candidate.
 Walking, sampling, canonicalizing and naming are the shared
 `rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
 catalogs live in the arch modules.
@@ -193,8 +197,13 @@ base values. The checks run in this order:
   codepath (softmax interleave off the transposed body, `sched_barrier` off
   the 16x16 loop), because they would re-emit the same IR under a new name.
   Then `tuning_specs.py` builds the kernel spec, so the spec's `__post_init__`
-  and the kernel's `supports_tiled_*` run. Dispatch adds no legality rule of
-  its own: whatever the kernel accepts is offered.
+  and the kernel's `supports_tiled_*` run. On gfx950 2D, `UnifiedSpace.validate`
+  then checks what that validator does not model: the LDS footprint
+  (`_gfx950_2d_lds_bytes`, the pool the LLVM lowering packs) against the
+  arch's LDS capacity, and a padded K LDS that Q aliases, which computes wrong
+  output. Both were confirmed on MI355X: the over-budget specs fail codegen,
+  and padded-K / aliased-Q specs mismatched the reference (most of them, some
+  nondeterministically).
 - **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
   knobs to the base spec, so the dataclass validators run. It drops any
   setting that would compile to the same IR as another under a new symbol:
@@ -220,14 +229,20 @@ The walk prunes; canonicalization normalizes. Every spec a candidate hands out
 `KnobSpace.canonicalize` (through `DenseSpace` or `UnifiedSpace`), from the
 knob dict (`waves_per_eu` included):
 
+- **converted** first to the type the knob's axis declares (the WPE to the
+  type of its values): `True` and `1`, or `2` and `2.0`, hash alike, so they
+  must name one configuration; a value with no lossless conversion is refused;
 - **dropped**, because the result compiles to the kernel without them: values
   equal to the default spec (or to the codepath's fixed value); on dense,
   restated policies and the inert rules above; on unified, knobs only another
-  codepath emits and gated sub-knobs whose gate is off;
+  codepath emits, gated sub-knobs whose gate is off, and on gfx950 2D a KQ LDS
+  pad the kernel lays out as no pad (native-FP8 K, misaligned slabs, or more
+  than one K buffer);
 - **refused**, with the reason: `KNOWN_WRONG_KNOBS`, fields no axis of that
   variant sets (problem fields, variant geometry, untunable knobs, knobs out
-  of scope for the problem), changing a knob the codepath fixes, and whatever
-  the kernel spec or validator rejects.
+  of scope for the problem), changing a knob the codepath fixes, whatever the
+  kernel spec or validator rejects, and on gfx950 2D a spec over the LDS
+  budget or a padded K that Q aliases.
 
 What remains is the canonical knob dict the spec carries as `knobs`, and the
 input to its `tuning_id`.
@@ -250,15 +265,17 @@ lazy, so a walk is never materialized unless the caller asks for it.
 
 The level reaches the candidates through `configure_sweep(level,
 tuning_sample)`. It sets a context variable that `sweep_space` reads, and
-returns the sample count, which is always 0 at `production`.
+returns the sample count, which is always 0 at `production`; a negative
+`tuning_sample` is refused.
 `CandidateRegistry.iter_combos` calls `sample_space(req, n, seed)` when that
 count is positive and `sweep_space(req)` otherwise.
 
 Selection pins a spec the same way for dense and unified:
 
 - `algorithm` (`attention_dense` or `unified_tuning`) plus `spec_id` pin a
-  candidate. An opt-in candidate admits a request only when both name it, so
-  an unpinned request always routes to the unified path.
+  candidate. An opt-in candidate admits a request only when both name it (its
+  refusal names both), so an unpinned request always routes to the unified
+  path.
 - `tuning_knobs`, when set, is canonicalized directly into the spec:
   constant time, no walk. With a non-`auto` `tuning_id` it must
   reproduce that id, or the candidate refuses the request.
@@ -445,8 +462,11 @@ from the gfx942 spec rather than from a free field.
   production stacks, and the held-out knob sets.
 - `dense_rules.py` — dense scope, policy and inert-knob rules, stated as
   the `DenseSpace` hooks.
-- `unified_rules.py` — unified geometry variants and codepath rules, stated
-  as the `UnifiedSpace` hooks.
+- `unified_rules.py` — unified geometry variants, codepath rules, and the
+  gfx950 2D LDS / KQ-pad legality, stated as the `UnifiedSpace` hooks.
+- `waves.py` — `waves_per_eu` as the attention spaces' outer knob: the WPE
+  sweep values and `WavesPerEuSpace`, which sets the outer knob and the
+  `{variant_id}_wpe{N}` id stem for both spaces.
 - `candidate.py` — `make_tuning_candidate` and `make_dense_candidate`, both
   over `rocke.dispatch.tuning.make_tuned_candidate`.
 - `tuning_specs.py` — shared explicit kernel-spec/build construction.
