@@ -12,6 +12,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _PKG_PARENT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir)
 )
@@ -74,7 +76,7 @@ class _FakeModuleWithoutCounter(_FakeModule):
     getRequiredSgprCount = None
 
 
-class TestRefreshSgprCount(unittest.TestCase):
+class TestRefreshSgprCount(AdaptorTestCase):
     def test_lowers_the_count_to_what_the_code_names(self):
         sig = _FakeSignature(totalSgprs=80)
         wrapper = StinkyAsmModuleWithAdapterSignature(_FakeModule(required=78), sig)
@@ -116,7 +118,7 @@ class TestRefreshSgprCount(unittest.TestCase):
         self.assertEqual(module.requiredCalls, [])
 
 
-class TestApplyOptimizationConfig(unittest.TestCase):
+class TestApplyOptimizationConfig(AdaptorTestCase):
     def test_forwards_module_options_and_drops_textblock_copy(self):
         class _Sig:
             def __init__(self):

@@ -35,6 +35,8 @@ import shutil
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
@@ -88,7 +90,7 @@ def _assembler_path():
 _ASM_PATH = _assembler_path()
 
 
-class _IsaCase(unittest.TestCase):
+class _IsaCase(AdaptorTestCase):
     """Base restoring the process-global ISA state after each test.
 
     ``rocisa_stinkytofu_adaptor.base`` is a module-level singleton, so a test

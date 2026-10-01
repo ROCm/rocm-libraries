@@ -10,6 +10,8 @@ import pickle
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
@@ -18,7 +20,7 @@ if _PKG_PARENT not in sys.path:
 from rocisa_stinkytofu_adaptor.label import LabelManager  # noqa: E402
 
 
-class TestLabelManagerAddName(unittest.TestCase):
+class TestLabelManagerAddName(AdaptorTestCase):
     def test_first_call_inserts_at_zero(self):
         lm = LabelManager()
         lm.addName("foo")
@@ -44,7 +46,7 @@ class TestLabelManagerAddName(unittest.TestCase):
         self.assertEqual(lm._labels, {"foo": 1, "bar": 0})
 
 
-class TestLabelManagerGetName(unittest.TestCase):
+class TestLabelManagerGetName(AdaptorTestCase):
     def test_first_call_inserts_at_zero_and_returns_bare_name(self):
         lm = LabelManager()
         self.assertEqual(lm.getName("foo"), "foo")
@@ -65,7 +67,7 @@ class TestLabelManagerGetName(unittest.TestCase):
         self.assertEqual(lm.getName("foo"), "foo_2")
 
 
-class TestLabelManagerGetNameInc(unittest.TestCase):
+class TestLabelManagerGetNameInc(AdaptorTestCase):
     def test_first_call_returns_bare_name(self):
         lm = LabelManager()
         self.assertEqual(lm.getNameInc("foo"), "foo")
@@ -89,7 +91,7 @@ class TestLabelManagerGetNameInc(unittest.TestCase):
         self.assertEqual(lm.getNameInc("foo"), "foo_1")
 
 
-class TestLabelManagerGetNameIndex(unittest.TestCase):
+class TestLabelManagerGetNameIndex(AdaptorTestCase):
     def test_index_zero_returns_bare_name(self):
         lm = LabelManager()
         lm.addName("foo")
@@ -125,7 +127,7 @@ class TestLabelManagerGetNameIndex(unittest.TestCase):
         self.assertEqual(lm._labels, before)
 
 
-class TestLabelManagerGetUniqueName(unittest.TestCase):
+class TestLabelManagerGetUniqueName(AdaptorTestCase):
     def test_monotonic_shared_counter(self):
         lm = LabelManager()
         self.assertEqual(
@@ -148,7 +150,7 @@ class TestLabelManagerGetUniqueName(unittest.TestCase):
         self.assertEqual(lm.getUniqueNamePrefix("X"), "X_1")
 
 
-class TestLabelManagerGetUniqueNamePrefix(unittest.TestCase):
+class TestLabelManagerGetUniqueNamePrefix(AdaptorTestCase):
     def test_starts_with_prefix(self):
         lm = LabelManager()
         name = lm.getUniqueNamePrefix("loop")
@@ -161,7 +163,7 @@ class TestLabelManagerGetUniqueNamePrefix(unittest.TestCase):
         self.assertEqual(lm._labels[name], 0)
 
 
-class TestLabelManagerDeepCopy(unittest.TestCase):
+class TestLabelManagerDeepCopy(AdaptorTestCase):
     def test_deepcopy_preserves_counters(self):
         lm = LabelManager()
         lm.addName("foo")
@@ -194,7 +196,7 @@ class TestLabelManagerDeepCopy(unittest.TestCase):
         self.assertEqual(lm.getUniqueNamePrefix("X"), "X_2")
 
 
-class TestLabelManagerPickle(unittest.TestCase):
+class TestLabelManagerPickle(AdaptorTestCase):
     def test_pickle_roundtrip_preserves_counters(self):
         lm = LabelManager()
         lm.addName("foo")
@@ -232,7 +234,7 @@ class TestLabelManagerPickle(unittest.TestCase):
         self.assertEqual(clone.getUniqueNamePrefix("X"), "X_2")
 
 
-class TestLabelManagerRepr(unittest.TestCase):
+class TestLabelManagerRepr(AdaptorTestCase):
     def test_repr_contains_class_name_and_state(self):
         lm = LabelManager()
         lm.addName("foo")
@@ -241,7 +243,7 @@ class TestLabelManagerRepr(unittest.TestCase):
         self.assertIn("foo", r)
 
 
-class TestLabelManagerPublicSurface(unittest.TestCase):
+class TestLabelManagerPublicSurface(AdaptorTestCase):
     def test_no_public_getData_method(self):
         self.assertFalse(hasattr(LabelManager(), "getData"))
 
@@ -255,7 +257,7 @@ class TestLabelManagerPublicSurface(unittest.TestCase):
         self.assertFalse(hasattr(_label, "magicGenerator"))
 
 
-class TestLabelManagerScenarios(unittest.TestCase):
+class TestLabelManagerScenarios(AdaptorTestCase):
     def test_loop_label_collision_disambiguation(self):
         lm = LabelManager()
         outer = lm.getNameInc("LoopTop")
