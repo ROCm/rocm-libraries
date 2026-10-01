@@ -5,15 +5,17 @@
 # Scale GR/LR emit for MX scale factor operands (MXSA/MXSB).
 #
 # HostPreSwizzle (gfx950 BLK32):
-#   GR: DTL with collective wave-group offsets into HPS-shaped LDS
+#   GR: DTL with collective wave-group offsets into HostPreSwizzle-shaped LDS
 #   LR: ds_read_b32 per scale group (laneId*4 + wave partition)
 #
-# NoSwizzle (VEC32 / scaleA=3) — Option B (canonical gather -> HPS LDS):
-#   Pure Option A (DTL with LDS==canonical global) cannot feed the existing
-#   laneId*4 / opsel packing: each lane's 4 MFMA scale bytes are non-contiguous
-#   in UMLDS=1 canonical layout (m, kb), (m+16, kb), (m, kb+4), (m+16, kb+4).
-#   Option B keeps the proven HPS LDS+LR shape and remaps at GR time:
-#     buffer_load_u8 x4 (canonical global) -> pack -> ds_store_b32 (HPS slot).
+# NoSwizzle (VEC32 / scaleA=3) — canonical gather -> HostPreSwizzle-shaped LDS:
+#   Pure DTL with LDS==canonical global cannot feed the existing laneId*4 /
+#   opsel packing: each lane's 4 MFMA scale bytes are non-contiguous in
+#   UMLDS=1 canonical layout (m, kb), (m+16, kb), (m, kb+4), (m+16, kb+4).
+#   NoSwizzle therefore keeps the proven HostPreSwizzle LDS+LR shape and
+#   remaps at GR time:
+#     buffer_load_u8 x4 (canonical global) -> pack -> ds_store_b32
+#     (HostPreSwizzle-shaped slot).
 #
 # Uses ti.sharedVgprGROffset / ti.sharedVgprLROffset (compat properties)
 # since MXScaleTilePair has gr=None, lr=None.
@@ -46,7 +48,7 @@ def scaleGRPtrIncBytes(ti, kernel):
 
     * HostPreSwizzle / InMemorySwizzle: one swizzle granule
       (lrSubtileSize * lrGlobalSubtileGrid[1]).
-    * NoSwizzle Option B: canonical K-step (scaleDepthU * bpe).
+    * NoSwizzle: canonical K-step (scaleDepthU * bpe).
   """
   if _isMxSwizzledScaleFormat(kernel):
     return int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
@@ -225,9 +227,10 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
   module = Module()
   tc = ti.tc
 
-  # HPS/IMS: one swizzle granule (StreamK USO requires DepthU % 256 == 0 so a
-  # K-cut lands on a granule boundary; StreamK._depthUForTc applies matching
-  # *32). NoSwizzle: canonical scaleDepthU*bpe (StreamK._depthUForTc unscaled).
+  # HostPreSwizzle / InMemorySwizzle: one swizzle granule (StreamK USO requires
+  # DepthU % 256 == 0 so a K-cut lands on a granule boundary;
+  # StreamK._depthUForTc applies matching *32). NoSwizzle: canonical
+  # scaleDepthU*bpe (StreamK._depthUForTc unscaled).
   inc = scaleGRPtrIncBytes(ti, kernel)
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
@@ -249,7 +252,7 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
                src0=sgpr(f"LocalWriteBaseAddr{tc}"), src1=sgpr(f"Swap{tc}"),
                comment=""))
   else:
-    # Option B: GR uses VGPR LDS write offsets (same layout as LR).
+    # NoSwizzle: GR uses VGPR LDS write offsets (same layout as LR).
     module.addComment0("Emit code to swap %s GR vgpr LDS offsets"%tc)
     for i in range(len(ti.sharedVgprGROffset)):
       vOff = ti.sharedVgprGROffset[i]
@@ -354,14 +357,14 @@ def graTileAssignmentScale(writer, kernel):
 
 
 ##################################################
-# NoSwizzle Option B: init GR LDS write offsets in HPS-friendly layout.
+# NoSwizzle: init GR LDS write offsets in HostPreSwizzle-friendly layout.
 # Each lane will gather 4 canonical scale bytes and ds_store them here.
 #
 def _graTileAssignmentScaleNoSwizzleCommon(tc, writer, kernel, waveIdVgpr, laneOffsetVgpr, tmpSgpr):
-  """Init sharedVgprGROffset / GROffsetSwap for NoSwizzle Option B (HPS-shaped LDS)."""
+  """Init sharedVgprGROffset / GROffsetSwap for NoSwizzle (HostPreSwizzle-shaped LDS)."""
   module = Module()
   ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-  module.addComment0("NoSwizzle scale GR LDS write offset for %s (HPS-shaped)" % tc)
+  module.addComment0("NoSwizzle scale GR LDS write offset for %s (HostPreSwizzle-shaped)" % tc)
 
   # Reuse wave-partition math by writing into GR offset via a temporary ti_ alias:
   # Compute partition * totalScaleBytes into sharedVgprGROffset.
@@ -402,11 +405,11 @@ def _graTileAssignmentScaleNoSwizzleCommon(tc, writer, kernel, waveIdVgpr, laneO
 
 
 def graTileAssignmentScaleNoSwizzle(writer, kernel):
-  """Init NoSwizzle scale GR LDS write offsets (Option B HPS-shaped slots)."""
+  """Init NoSwizzle scale GR LDS write offsets (HostPreSwizzle-shaped slots)."""
   module = Module()
   if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
     return module
-  module.addComment0("NoSwizzle scale GR tile assignment (Option B remap into HPS LDS)")
+  module.addComment0("NoSwizzle scale GR tile assignment (remap into HostPreSwizzle-shaped LDS)")
   wavesize = kernel["WavefrontSize"]
   waveIdVgpr = writer.vgprPool.checkOut(1, tag="graNoSwizzle_waveId")
   module.add(VLShiftRightB32(dst=vgpr(waveIdVgpr), shiftHex=hex(wavesize.bit_length()-1),
@@ -490,7 +493,7 @@ def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
 def lraTileAssignmentScale(writer, kernel):
   """Dispatch scale LR tile assignment.
 
-  Option B NoSwizzle remaps into the same HPS-shaped LDS layout, so LR
+  NoSwizzle remaps into the same HostPreSwizzle-shaped LDS layout, so LR
   offsets are identical for HostPreSwizzle and NoSwizzle.
   """
   return lraTileAssignmentScaleSwizzled(writer, kernel)
@@ -537,8 +540,8 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
 # Scale GR: Load scale bytes from global memory to LDS.
 #
 # HostPreSwizzle: BufferLoadB128 DTL (vaddr = global + LDS offset).
-# NoSwizzle Option B: per-lane gather of 4 canonical bytes + ds_store into
-# the HPS-shaped LDS slot (sharedVgprGROffset).
+# NoSwizzle: per-lane gather of 4 canonical bytes + ds_store into the
+# HostPreSwizzle-shaped LDS slot (sharedVgprGROffset).
 #
 def globalReadDoScaleSubtile(tc, writer, kernel):
   module = Module()
@@ -573,12 +576,12 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 
 
 def _globalReadDoScaleNoSwizzle(tc, writer, kernel):
-  """Option B NoSwizzle GR: gather 4 canonical scale bytes/lane into HPS LDS.
+  """NoSwizzle GR: gather 4 canonical scale bytes/lane into HostPreSwizzle-shaped LDS.
 
   Per scale group g and lane L in a wave partition:
     m0 = m_base + (L % 16);  k_lo = k_base + (L // 16)
     bytes = scale(m0,k_lo), scale(m0+16,k_lo), scale(m0,k_lo+4), scale(m0+16,k_lo+4)
-  which matches MFMA opsel packing used by the HPS LR path.
+  which matches MFMA opsel packing used by the HostPreSwizzle LR path.
   """
   module = Module()
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
@@ -599,7 +602,7 @@ def _globalReadDoScaleNoSwizzle(tc, writer, kernel):
   mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=False)
 
   module.addComment0(
-      "Scale GR: %s NoSwizzle Option B (canonical gather -> HPS LDS), %u groups"
+      "Scale GR: %s NoSwizzle (canonical gather -> HostPreSwizzle-shaped LDS), %u groups"
       % (tc, numScaleGroups))
 
   # Compact VGPR temps (peak matters for occupancy). Reuse waveId slot as partIdx.
@@ -694,7 +697,7 @@ def _globalReadDoScaleNoSwizzle(tc, writer, kernel):
     module.add(DSStoreB32(dstAddr=vgpr(tileInfo.sharedVgprGROffset[0]),
                src=vgpr(vBytes[0]),
                ds=DSModifiers(offset=dsOff),
-               comment="scale%s[g%u]: ds_store HPS slot"% (tc, gid)))
+               comment="scale%s[g%u]: ds_store HostPreSwizzle-shaped slot"% (tc, gid)))
 
   module.add(SWaitCnt(dscnt=0, comment="scale%s: wait ds_store gathers"%tc))
 
@@ -802,7 +805,7 @@ def globalReadScaleSwizzledDTLInitCommonSgpr(writer, kernel):
 
 
 def globalReadScaleNoSwizzleInitCommonSgpr(writer, kernel):
-  """NoSwizzle Option B uses VGPR LDS write offsets; no M0/SGPR DTL bases."""
+  """NoSwizzle uses VGPR LDS write offsets; no M0/SGPR DTL bases."""
   module = Module()
   module.addComment0("NoSwizzle scale GR: LDS write offsets set in graTileAssignmentScaleNoSwizzle")
   return module

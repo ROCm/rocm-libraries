@@ -4,7 +4,7 @@
 
 HostPreSwizzle / InMemorySwizzle pair KernelWriter's <<5 StridesMXS scaling with
 a *32 on _DepthUMXS* so StreamKLocalStart offsets stay in data-K units.
-NoSwizzle Option B keeps canonical scale strides; applying *32 there over-
+NoSwizzle keeps canonical scale strides; applying *32 there over-
 advances scale SRDs for any nonzero StreamKLocalStart.
 """
 
@@ -39,7 +39,7 @@ def test_depthu_for_tc_swizzled_applies_x32(fmt, tc):
 
 @pytest.mark.parametrize("tc", ["MXSA", "MXSB"])
 def test_depthu_for_tc_noswizzle_uses_canonical(tc):
-    """NoSwizzle must not apply the HPS *32 under UseSubtileImpl."""
+    """NoSwizzle must not apply the HostPreSwizzle *32 under UseSubtileImpl."""
     kernel = _mx_kernel("NoSwizzle")
     assert StreamK._depthUForTc(kernel, tc) == 8
 

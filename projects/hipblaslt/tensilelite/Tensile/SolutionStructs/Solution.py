@@ -186,7 +186,7 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
       reject(state, printRejectionReason,
              "MXScaleFormat=NoSwizzle is not supported on gfx1250")
       return False
-    # gfx950 / UseSubtileImpl + NoSwizzle is implemented via Option-B gather
+    # gfx950 / UseSubtileImpl + NoSwizzle is implemented via canonical gather
     # emit (SubtileScaleEmit). Auto still prefers HostPreSwizzle on gfx950
     # BufferLoad; explicit NoSwizzle is allowed for VEC32 / scaleA=3.
 

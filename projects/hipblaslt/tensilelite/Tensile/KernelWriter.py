@@ -5333,7 +5333,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # HostPreSwizzle / InMemorySwizzle pack scales so M-strides are expressed
     # in data-K units (× MXBlock). NoSwizzle keeps canonical scale strides
-    # (K/MXBlock elements); scaling them by 32 breaks Option-B gather addressing.
+    # (K/MXBlock elements); scaling them by 32 breaks NoSwizzle gather addressing.
     # TODO: Move this calculation to host-side?
     mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
     if (kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]
@@ -7609,7 +7609,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Scale LDS footprint:
         #   HostPreSwizzle/InMemorySwizzle: extra space for wide collective DTL
         #     (loadWidthGR * wavefront * numWaves).
-        #   NoSwizzle Option B: remaps into the same HPS-shaped LDS slots, so
+        #   NoSwizzle: remaps into the same HostPreSwizzle-shaped LDS slots, so
         #     keep the same allocation (not the smaller canonical MT*Ks size).
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves

@@ -6133,8 +6133,8 @@ namespace TensileLite
                 // MX StreamK USO admits NoSwizzle (0) and HostPreSwizzle (1)
                 // under the envelope below (mxBlock 32, MatrixInstK 128,
                 // DepthU % 256 == 0). StreamK._depthUForTc is format-gated:
-                // HPS/IMS use *32 DepthU-sized K-steps; NoSwizzle Option B
-                // keeps the canonical _DepthUMXS* step that matches
+                // HostPreSwizzle/InMemorySwizzle use *32 DepthU-sized K-steps;
+                // NoSwizzle keeps the canonical _DepthUMXS* step that matches
                 // SubtileScaleEmit.emitScaleGRPtrUpdate.
                 //
                 // InMemorySwizzle (2) remains refused until audited (gfx1250

@@ -535,7 +535,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
 
     # Post-pass: adjust WaitGR vmcnt for buffer_loads the scheduler placed
     # before it within this subIterK. Only SWaitCntEx with adjustVmcnt=True
-    # (WaitGR) participates — plain SWaitCnt (e.g. Option-B scale gather
+    # (WaitGR) participates — plain SWaitCnt (e.g. NoSwizzle scale gather
     # drains with vlcnt=0) must keep their emitted count. Defaulting
     # adjustVmcnt to True previously weakened those drains to vmcnt(N)
     # (= number of prior loads), which returns immediately and packs

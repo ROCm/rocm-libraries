@@ -480,7 +480,7 @@ class StreamK(Component):
             (<<5) so M-strides are in data-K units; apply *32 to
             _DepthUMXS{A,B} (= DepthU/MXBlock) to recover a DepthU-sized
             StreamK K-step that matches those strides.
-          * NoSwizzle Option B: keeps canonical scale strides and advances
+          * NoSwizzle: keeps canonical scale strides and advances
             the SRD by scaleDepthU*bpe per unroll
             (SubtileScaleEmit.emitScaleGRPtrUpdate). Use the unscaled
             _DepthUMXS{A,B} so StreamKLocalStart offsets the correct K window.

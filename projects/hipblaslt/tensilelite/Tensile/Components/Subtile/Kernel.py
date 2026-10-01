@@ -344,7 +344,7 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB').
 
   Geometry is selected by data dtype (B4 vs B8). MXScaleFormat selects the
-  emit path (HostPreSwizzle DTL vs NoSwizzle Option-B gather) rather than a
+  emit path (HostPreSwizzle DTL vs NoSwizzle canonical gather) rather than a
   distinct tile-pair for TN BufferLoad FP4; both formats share MXS*_B4/B8.
   """
   data_tc = 'A' if tc == 'MXSA' else 'B'
@@ -695,9 +695,9 @@ class TileInfo:
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
-      # Option B (NoSwizzle) only: double-buffer swap mask for GR ds_store.
+      # NoSwizzle only: double-buffer swap mask for GR ds_store.
       # HostPreSwizzle / InMemorySwizzle use SGPR LocalWriteBaseAddr swap and
-      # must not take this VGPR or later numbering drifts from pre-Option-B asm.
+      # must not take this VGPR or later numbering drifts from pre-NoSwizzle asm.
       if kernel.get("MXScaleFormat", "NoSwizzle") == "NoSwizzle":
         self._sharedVgprGROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffsetSwap")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
@@ -820,7 +820,7 @@ class TileInfo:
 
   @property
   def sharedVgprGROffsetSwap(self):
-    """Double-buffer swap mask for NoSwizzle Option-B scale GR ds_store."""
+    """Double-buffer swap mask for NoSwizzle scale GR ds_store."""
     return getattr(self, '_sharedVgprGROffsetSwap', [])
 
   @property
@@ -1302,10 +1302,10 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0). Scale increments
   must match SubtileScaleEmit.emitScaleGRPtrUpdate's format gate:
   HostPreSwizzle/InMemorySwizzle use `lrSubtileSize*lrGlobalSubtileGrid[1]`
-  (swizzle granule); NoSwizzle Option B uses canonical `scaleDepthU*bpe`.
+  (swizzle granule); NoSwizzle uses canonical `scaleDepthU*bpe`.
   So the rewind is numUnroll[tensor] * (per-inc bytes). Verified by codegen + a
   runtime SrdX-AddressX probe: each of the four SRDs is over-advanced by exactly
-  one macro-DU (256B for the MT256x256 MXFP8 repro under HPS).
+  one macro-DU (256B for the MT256x256 MXFP8 repro under HostPreSwizzle).
 
   Gated at runtime on this workgroup having actually run >=1 main macro iteration.
   The gate is the *per-WG* main-iter count (`mainIterSgpr`, a snapshot of
@@ -1321,8 +1321,9 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   skipped). Single-DU never reaches here (not _is_multi_du()).
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
-  # scaleGRPtrIncBytes mirrors emitScaleGRPtrUpdate (HPS/IMS granule vs
-  # NoSwizzle scaleDepthU*bpe). Using the HPS granule for NoSwizzle undoes the
+  # scaleGRPtrIncBytes mirrors emitScaleGRPtrUpdate (HostPreSwizzle /
+  # InMemorySwizzle granule vs NoSwizzle scaleDepthU*bpe). Using the
+  # HostPreSwizzle granule for NoSwizzle undoes the
   # wrong byte count on SrdMXSA/SrdMXSB after a PGR=1 multi-DU partial tail.
   incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
           ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
