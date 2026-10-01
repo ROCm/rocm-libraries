@@ -895,28 +895,43 @@ int runGenerator(const std::vector<std::string>& args)
         // then grown only toward what they left short of `--count`, and what it returns excludes
         // points they already hold. It still walks through those points: they are served, and
         // treating them as refused would cut the walk off from exactly the region it is in.
+        //
+        // A source whose share is 0 is not collected at all. Gathered anyway, it held points the
+        // corpus would never take, cut the search's target by them, kept the search from
+        // returning them, and won them from the enabled sources in deduplication: a disabled
+        // model pool naming one of two kernel geometries left a corpus of one.
+        const auto enabled = [&](const char* source) {
+            return hipdnn_corpus_gen::sourceEnabled(options.shares, source);
+        };
         hipdnn_corpus_gen::SourcePools pools;
         std::set<std::string> pooled;
-        auto harvested = hipdnn_corpus_gen::collectPacks(metadata, packPaths, /*maxBytes=*/0);
-        for(auto& entry : harvested.first)
+        if(enabled("kernel"))
         {
-            if(admit(entry, false))
+            auto harvested = hipdnn_corpus_gen::collectPacks(metadata, packPaths, /*maxBytes=*/0);
+            for(auto& entry : harvested.first)
             {
-                pooled.insert(hipdnn_corpus_gen::detail::describe(entry.point));
-                pools["kernel"].push_back(std::move(entry));
+                if(admit(entry, false))
+                {
+                    pooled.insert(hipdnn_corpus_gen::detail::describe(entry.point));
+                    pools["kernel"].push_back(std::move(entry));
+                }
             }
-        }
-        for(const auto& report : harvested.second)
-        {
-            sourceReports["packs"].push_back(report.asJson());
-            if(!report.shutOut.empty())
+            for(const auto& report : harvested.second)
             {
-                std::cerr << "  " << report.shutOut << "\n";
+                sourceReports["packs"].push_back(report.asJson());
+                if(!report.shutOut.empty())
+                {
+                    std::cerr << "  " << report.shutOut << "\n";
+                }
             }
         }
 
         for(const auto& path : options.modelShapes)
         {
+            if(!enabled("model"))
+            {
+                continue;
+            }
             hipdnn_corpus_gen::ModelShapeReport report;
             auto shapes = hipdnn_corpus_gen::readModelShapes(metadata, path, report);
             for(auto& entry : shapes)
@@ -947,16 +962,18 @@ int runGenerator(const std::vector<std::string>& args)
         const hipdnn_corpus_gen::ProblemOracle alreadyPooled = [&](const ProblemPoint& point) {
             return pooled.count(hipdnn_corpus_gen::detail::describe(point)) > 0;
         };
-        if(coverageIsPack)
-        {
-            // The pack is the whole of what this engine serves; a search could only
-            // rediscover it. Nothing to explore, and nothing short about that.
-            result.corpus.operation = metadata.operation;
-        }
-        else
+        // The pack is the whole of what a pack-coverage engine serves; a search could only
+        // rediscover it. A sweep with no share has nothing to contribute either. In both cases
+        // nothing is explored, and nothing is short about that.
+        const bool searched = !coverageIsPack && enabled("sweep");
+        if(searched)
         {
             result.corpus
                 = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits, alreadyPooled);
+        }
+        else
+        {
+            result.corpus.operation = metadata.operation;
         }
 
         const auto problems = result.corpus.problems();
@@ -1000,7 +1017,8 @@ int runGenerator(const std::vector<std::string>& args)
                           << " cells";
             }
         }
-        if(result.corpus.constraintRejections > 0 || result.corpus.constraintAdmissions == 0)
+        if(searched
+           && (result.corpus.constraintRejections > 0 || result.corpus.constraintAdmissions == 0))
         {
             std::cerr << " [constraints admitted " << result.corpus.constraintAdmissions
                       << ", refused " << result.corpus.constraintRejections << "]";
@@ -1066,7 +1084,7 @@ int runGenerator(const std::vector<std::string>& args)
         }
 
         std::map<std::string, int64_t> dropped;
-        const auto deduplicated = hipdnn_corpus_gen::deduplicate(pools, dropped);
+        const auto deduplicated = hipdnn_corpus_gen::deduplicate(pools, options.shares, dropped);
 
         // 0 means everything the pools hold, which is the honest default: a corpus is bounded
         // by what the engine serves, not by a number anyone picked. Asking for more than that

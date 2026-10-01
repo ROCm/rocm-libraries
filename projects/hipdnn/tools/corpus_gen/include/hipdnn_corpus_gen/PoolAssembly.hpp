@@ -56,6 +56,19 @@ inline const std::map<std::string, double>& defaultShares()
     return shares;
 }
 
+/// Whether @p shares lets @p source into the corpus at all: a share above zero. A source the
+/// shares do not name is off, the same as one given exactly zero.
+///
+/// Asked before a source's pool is collected, not after: a disabled pool that is gathered
+/// anyway still claims its points in @ref deduplicate and is still subtracted from what the
+/// search is asked to find, so switching a source off would delete the enabled sources'
+/// copies of those points and shrink the corpus by exactly the overlap.
+inline bool sourceEnabled(const std::map<std::string, double>& shares, const std::string& source)
+{
+    const auto found = shares.find(source);
+    return found != shares.end() && found->second > 0.0;
+}
+
 /// One candidate problem, with the provenance that makes the corpus auditable.
 struct PoolEntry
 {
@@ -133,7 +146,7 @@ inline std::map<std::string, int64_t> allocate(int64_t count,
         {
             const auto found = capacity.find(source);
             if(found != capacity.end() && allocation[source] < found->second
-               && shareOf(source) > 0.0)
+               && sourceEnabled(shares, source))
             {
                 open.push_back(source);
             }
@@ -155,16 +168,23 @@ inline std::map<std::string, int64_t> allocate(int64_t count,
     return allocation;
 }
 
-/// @brief One entry per distinct problem, earlier sources winning.
+/// @brief One entry per distinct problem, earlier sources winning among the enabled ones.
 ///
 /// Deduplication is on the whole point -- every declared parameter, categorical and numeric --
 /// because every one of them changes which kernel is fastest. Two entries differing only in
 /// provenance are one problem measured twice: the same graph benchmarked twice under two names,
 /// which inflates a corpus and biases whichever regime it lands in.
 ///
-/// @p dropped receives the per-source count of entries removed, so the manifest can say what
-/// the overlap between sources actually was rather than leaving a short corpus unexplained.
-inline SourcePools deduplicate(const SourcePools& pools, std::map<std::string, int64_t>& dropped)
+/// A source @p shares disables (see @ref sourceEnabled) is dropped whole before anything is
+/// compared, so it cannot take a point from a source that is on: a disabled model pool naming
+/// one of two kernel geometries used to win that geometry, and the corpus came back with one.
+///
+/// @p dropped receives the per-source count of entries removed as duplicates, so the manifest
+/// can say what the overlap between sources actually was rather than leaving a short corpus
+/// unexplained.
+inline SourcePools deduplicate(const SourcePools& pools,
+                               const std::map<std::string, double>& shares,
+                               std::map<std::string, int64_t>& dropped)
 {
     std::set<std::string> seen;
     SourcePools unique;
@@ -175,7 +195,7 @@ inline SourcePools deduplicate(const SourcePools& pools, std::map<std::string, i
         std::vector<PoolEntry> kept;
         int64_t duplicates = 0;
         const auto found = pools.find(source);
-        if(found != pools.end())
+        if(found != pools.end() && sourceEnabled(shares, source))
         {
             for(const auto& entry : found->second)
             {

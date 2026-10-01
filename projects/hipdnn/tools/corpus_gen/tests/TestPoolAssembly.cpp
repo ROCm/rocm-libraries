@@ -164,7 +164,7 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
     pools["sweep"] = {entryAt("sweep", 1, "r"), entryAt("sweep", 4, "r")};
 
     std::map<std::string, int64_t> dropped;
-    const auto unique = deduplicate(pools, dropped);
+    const auto unique = deduplicate(pools, defaultShares(), dropped);
 
     EXPECT_EQ(dropped.at("model"), 0);
     EXPECT_EQ(dropped.at("kernel"), 1);
@@ -173,6 +173,33 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
     EXPECT_EQ(unique.at("kernel").size(), 1u);
     EXPECT_EQ(unique.at("kernel").front().source, "kernel");
     EXPECT_EQ(unique.at("sweep").size(), 1u);
+}
+
+TEST(TestPoolAssembly, ADisabledSourceCannotTakeAPointFromAnEnabledOne)
+{
+    // Kernel-only, against a pack of two geometries, with a model pool that happens to name
+    // one of them. The model pool won that geometry in deduplication and was then given no
+    // share, so the corpus came back with one problem of the two the pack holds.
+    const std::map<std::string, double> kernelOnly{{"model", 0.0}, {"kernel", 1.0}, {"sweep", 0.0}};
+    SourcePools pools;
+    pools["model"] = {entryAt("model", 2, "r")};
+    pools["kernel"] = {entryAt("kernel", 2, "r"), entryAt("kernel", 3, "r")};
+    pools["sweep"] = {entryAt("sweep", 3, "r")};
+
+    std::map<std::string, int64_t> dropped;
+    const auto unique = deduplicate(pools, kernelOnly, dropped);
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select(unique, 2, kernelOnly, allocation);
+
+    ASSERT_EQ(selected.size(), 2U);
+    std::set<int64_t> batches;
+    for(const auto& entry : selected)
+    {
+        EXPECT_EQ(entry.source, "kernel");
+        batches.insert(std::get<int64_t>(entry.point.at("batch")));
+    }
+    EXPECT_EQ(batches, (std::set<int64_t>{2, 3}));
+    EXPECT_EQ(dropped.at("kernel"), 0) << "nothing enabled duplicates a kernel geometry";
 }
 
 TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)

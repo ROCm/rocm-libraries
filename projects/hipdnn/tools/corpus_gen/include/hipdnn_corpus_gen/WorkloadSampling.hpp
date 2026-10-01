@@ -91,9 +91,10 @@ inline std::optional<int64_t> integerAt(const ProblemPoint& point, const std::st
 /// Converts one declared archetype value to a parameter value, following `$q.<other>` against
 /// what has already been drawn.
 ///
-/// Returns nullopt when a reference names something not yet drawn. Parsing rejects that case,
-/// so reaching it means the declaration order changed underneath -- worth failing the draw
-/// rather than substituting a floor and calling the result an anchored shape.
+/// Returns nullopt when a reference names something not yet drawn. The archetype's draw order
+/// puts every referent first and loading refuses a reference it cannot order, so reaching it
+/// means that order was bypassed -- worth failing the draw rather than substituting a floor and
+/// calling the result an anchored shape.
 inline std::optional<ParameterValue> archetypeValue(const nlohmann::json& declared,
                                                     const ProblemPoint& drawnSoFar)
 {
@@ -144,9 +145,10 @@ inline std::optional<ProblemPoint> drawFromArchetype(const OperationMetadata& me
 {
     ProblemPoint point;
 
-    // Declaration order, so `$q.<other>` sees its referent already drawn.
-    for(const auto& parameter : metadata.parameters)
+    // Referents first (Archetype::drawOrder), so `$q.<other>` sees its referent already drawn.
+    for(const auto index : archetype.drawOrder)
     {
+        const auto& parameter = metadata.parameters.at(index);
         const auto fixed = categorical.find(parameter.name);
         const auto declared = archetype.values.find(parameter.name);
 
@@ -262,8 +264,9 @@ inline ProblemPoint perturbWithinNeighbourhood(const OperationMetadata& metadata
                                                std::mt19937_64& rng)
 {
     ProblemPoint point;
-    for(const auto& parameter : metadata.parameters) // declaration order, for mirrors
+    for(const auto index : metadata.perturbationOrder) // followed parameters first, for mirrors
     {
+        const auto& parameter = metadata.parameters.at(index);
         const auto found = anchor.find(parameter.name);
         if(found == anchor.end())
         {

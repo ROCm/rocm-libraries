@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <fstream>
 #include <set>
 #include <string>
 
@@ -73,6 +74,18 @@ int64_t at(const ProblemPoint& point, const std::string& name)
     return std::get<int64_t>(point.at(name));
 }
 
+/// A shipped declaration, read as the generator reads it.
+OperationMetadata shipped(const std::string& operation)
+{
+    const auto path
+        = std::string(HIPDNN_CORPUS_GEN_OPERATIONS_DIR) + "/" + operation + ".opmeta.json";
+    std::ifstream file(path);
+    EXPECT_TRUE(file.is_open()) << path;
+    const auto load = parseOperationMetadata(nlohmann::json::parse(file));
+    EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+    return load.metadata.value_or(OperationMetadata{});
+}
+
 } // namespace
 
 TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
@@ -106,6 +119,98 @@ TEST(TestWorkloadSampling, AReferencedValueFollowsWhatWasActuallyDrawn)
         = detail::drawFromArchetype(metadata, metadata.archetypes.front(), ProblemPoint{}, rng);
     ASSERT_TRUE(drawn.has_value());
     EXPECT_EQ(at(*drawn, "W"), at(*drawn, "H"));
+}
+
+TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysParseIn)
+{
+    // The parser keeps a JSON object's keys sorted, so `seqlen_k` comes before the `seqlen_q`
+    // it copies. Drawing in that order left every `seqlen_k: ["$q.seqlen_q"]` archetype with
+    // nothing to copy: six of seven SDPA anchors drew nothing, and only decode -- the one with
+    // literal lengths -- reached the corpus.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = shipped(operation);
+        ASSERT_FALSE(metadata.archetypes.empty()) << operation;
+        ProblemPoint categorical{{"alignment", std::string{"top_left"}},
+                                 {"dtype", std::string{"bf16"}}};
+        if(metadata.find("generate_stats") != nullptr)
+        {
+            categorical["generate_stats"] = false;
+        }
+
+        std::mt19937_64 rng(4);
+        for(const auto& archetype : metadata.archetypes)
+        {
+            for(int i = 0; i < 20; ++i)
+            {
+                const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
+                ASSERT_TRUE(drawn.has_value()) << operation << " " << archetype.name;
+                if(archetype.values.at("seqlen_k").front() == "$q.seqlen_q")
+                {
+                    EXPECT_EQ(at(*drawn, "seqlen_k"), at(*drawn, "seqlen_q"))
+                        << operation << " " << archetype.name;
+                }
+            }
+        }
+    }
+}
+
+TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderItsKeysParseIn)
+{
+    // The same sorted order moved `seqlen_k` before the `seqlen_q` it mirrors, so it kept the
+    // anchor's length while `seqlen_q` scaled away from it -- 1024 against 2048 is a ratio the
+    // declaration never offered.
+    const auto metadata = shipped("sdpa_fwd");
+    std::mt19937_64 rng(5);
+    const ProblemPoint anchor{{"batch", int64_t{4}},
+                              {"heads", int64_t{32}},
+                              {"heads_kv", int64_t{8}},
+                              {"seqlen_q", int64_t{2048}},
+                              {"seqlen_k", int64_t{2048}},
+                              {"head_dim", int64_t{128}},
+                              {"is_causal", true},
+                              {"alignment", std::string{"top_left"}},
+                              {"dtype", std::string{"bf16"}},
+                              {"generate_stats", false}};
+
+    const std::set<int64_t> ratios{1, 2, 4, 16};
+    for(int i = 0; i < 100; ++i)
+    {
+        const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
+        const auto q = at(moved, "seqlen_q");
+        const auto k = at(moved, "seqlen_k");
+        EXPECT_TRUE(k % q == 0 && ratios.count(k / q) == 1)
+            << "seqlen_k=" << k << " does not follow seqlen_q=" << q;
+    }
+}
+
+TEST(TestWorkloadSampling, AReferenceCycleIsRefusedAtLoad)
+{
+    // No order draws either side of a cycle first. Accepted, the archetype would draw nothing
+    // and its combinations would fall back to exploration without a word.
+    const auto refusesCycle = [](const std::string& json) {
+        const auto load = parseOperationMetadata(nlohmann::json::parse(json));
+        EXPECT_FALSE(load.ok());
+        bool found = false;
+        for(const auto& error : load.errors)
+        {
+            found = found || error.find("cycle") != std::string::npos;
+        }
+        EXPECT_TRUE(found) << "expected an error naming the cycle";
+    };
+
+    const std::string head = R"({
+      "schema_version": "1.1", "operation": "bad",
+      "parameters": { "A": { "type": "int64" }, "B": { "type": "int64" } },
+      "stratification_axis": "working_set", "regimes": {},
+      "graph_builder": { "function": "b", "source": "x.hpp", "arguments": [] },)";
+
+    refusesCycle(head + R"( "archetypes": [ { "name": "a",
+                              "values": { "A": ["$q.B"], "B": ["$q.A"] } } ],
+                            "mixture": { "archetypes": 0.5, "exploration": 0.5 } })");
+    refusesCycle(head + R"( "neighbourhood": {
+                              "A": { "kind": "mirror", "of": "B" },
+                              "B": { "kind": "mirror", "of": "A" } } })");
 }
 
 TEST(TestWorkloadSampling, AnArchetypeThatContradictsTheCombinationDeclinesRatherThanOverrides)

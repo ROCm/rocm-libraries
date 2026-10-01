@@ -295,14 +295,18 @@ struct Neighbourhood
 /// being sampled from its own marginal.
 ///
 /// A value may be `$q.<other>`, which copies whatever that parameter was drawn as -- how a
-/// square image or a self-attention sequence length is said. References resolve after their
-/// referent, so `W: ["$q.H"]` requires H to be declared first.
+/// square image or a self-attention sequence length is said. The referent must be one the
+/// archetype sets, and the references must not form a cycle; both are refused at load.
 struct Archetype
 {
     std::string name;
     std::string source; ///< where the shape came from; provenance, not decoration
     std::string note;
     std::map<std::string, std::vector<nlohmann::json>> values;
+
+    /// Indices into `OperationMetadata::parameters` in the order a draw takes them: every
+    /// referent before the parameter that copies it (see detail::dependencyOrder).
+    std::vector<size_t> drawOrder;
 };
 
 /// What fractions of a combination's budget come from where.
@@ -372,6 +376,11 @@ struct OperationMetadata
     /// and silent about what anyone runs.
     std::vector<Archetype> archetypes;
     std::map<std::string, Neighbourhood> neighbourhood;
+
+    /// Indices into `parameters` in the order a perturbation moves them: every parameter a
+    /// `mirror` follows before its follower, so the follower sees the moved value rather than
+    /// the anchor's (see detail::dependencyOrder).
+    std::vector<size_t> perturbationOrder;
     Mixture mixture;
 
     const Parameter* find(const std::string& name) const
@@ -411,6 +420,69 @@ inline std::string queryReference(const std::string& text)
 {
     constexpr std::string_view PREFIX = "$q.";
     return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
+}
+
+/// @brief @p parameters' indices in an order where each comes after every parameter it reads.
+///
+/// @p reads maps a parameter to the parameters its value is taken from -- an archetype's
+/// `$q.<other>`, a neighbourhood's `mirror` -- and a name absent from @p parameters is ignored
+/// here because the caller has already refused it. Ties keep declaration order, so a parameter
+/// that reads nothing is drawn exactly where it always was and a seed reproduces the same draw.
+///
+/// The order cannot come from the declaration itself: `parameters` is a JSON object, and the
+/// parser does not keep an object's key order. Sorted by name, `seqlen_k` came before the
+/// `seqlen_q` it copies, and every SDPA archetype that said so drew nothing.
+///
+/// Returns nullopt when the reads form a cycle, with @p unresolved listing every parameter that
+/// could not be placed, quoted, for the load error.
+inline std::optional<std::vector<size_t>>
+    dependencyOrder(const std::vector<Parameter>& parameters,
+                    const std::map<std::string, std::vector<std::string>>& reads,
+                    std::string& unresolved)
+{
+    std::vector<size_t> order;
+    order.reserve(parameters.size());
+    std::vector<bool> placed(parameters.size(), false);
+
+    const auto isPlaced = [&](const std::string& name) {
+        for(size_t index = 0; index < parameters.size(); ++index)
+        {
+            if(parameters[index].name == name)
+            {
+                return static_cast<bool>(placed[index]);
+            }
+        }
+        return true; // undeclared: refused by the caller, not an ordering constraint
+    };
+    const auto ready = [&](size_t index) {
+        const auto found = reads.find(parameters[index].name);
+        return found == reads.end()
+               || std::all_of(found->second.begin(), found->second.end(), isPlaced);
+    };
+
+    while(order.size() < parameters.size())
+    {
+        size_t next = 0;
+        while(next < parameters.size() && (placed[next] || !ready(next)))
+        {
+            ++next;
+        }
+        if(next == parameters.size())
+        {
+            unresolved.clear();
+            for(size_t index = 0; index < parameters.size(); ++index)
+            {
+                if(!placed[index])
+                {
+                    unresolved += (unresolved.empty() ? "'" : ", '") + parameters[index].name + "'";
+                }
+            }
+            return std::nullopt;
+        }
+        placed[next] = true;
+        order.push_back(next);
+    }
+    return order;
 }
 
 /// The neighbourhood kind a declaration names, or nullopt.
@@ -999,7 +1071,9 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 archetype.values.emplace(name, list.get<std::vector<nlohmann::json>>());
             }
 
-            // A reference must resolve, and must resolve to something already drawn.
+            // A reference must resolve to a parameter the archetype sets, and the draw takes
+            // referents first -- an order derived here, because the declaration has none.
+            std::map<std::string, std::vector<std::string>> reads;
             for(const auto& parameter : metadata.parameters)
             {
                 const auto found = archetype.values.find(parameter.name);
@@ -1030,7 +1104,21 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                                               + parameter.name + "' follow '" + referenced
                                               + "', which the archetype does not set");
                     }
+                    else
+                    {
+                        reads[parameter.name].push_back(referenced);
+                    }
                 }
+            }
+            std::string unresolved;
+            if(auto order = detail::dependencyOrder(metadata.parameters, reads, unresolved))
+            {
+                archetype.drawOrder = std::move(*order);
+            }
+            else
+            {
+                load.errors.push_back("archetype '" + archetype.name
+                                      + "' has references that form a cycle among " + unresolved);
             }
             metadata.archetypes.push_back(std::move(archetype));
         }
@@ -1128,6 +1216,27 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 break;
             }
             metadata.neighbourhood.emplace(name, std::move(hood));
+        }
+    }
+
+    // A follower moves after what it follows, whatever order the parser left the keys in.
+    {
+        std::map<std::string, std::vector<std::string>> reads;
+        for(const auto& [name, hood] : metadata.neighbourhood)
+        {
+            if(hood.kind == Neighbourhood::Kind::MIRROR && !hood.mirrors.empty())
+            {
+                reads[name].push_back(hood.mirrors);
+            }
+        }
+        std::string unresolved;
+        if(auto order = detail::dependencyOrder(metadata.parameters, reads, unresolved))
+        {
+            metadata.perturbationOrder = std::move(*order);
+        }
+        else
+        {
+            load.errors.push_back("neighbourhood mirrors form a cycle among " + unresolved);
         }
     }
 
