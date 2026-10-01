@@ -32,12 +32,7 @@ struct RTCKernelChirp : public RTCKernel
 
     static inline KIntType itype(const std::string& gpu_arch, const size_t& N)
     {
-        // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-        size_t u32_idx_limit = gpu_arch.find("gfx1250") != std::string::npos
-                                   ? static_cast<size_t>(INT32_MAX)
-                                   : static_cast<size_t>(UINT32_MAX);
-
-        return N > u32_idx_limit ? KIntType::U64 : KIntType::U32;
+        return N > static_cast<size_t>(UINT32_MAX) ? KIntType::U64 : KIntType::U32;
     }
 
     // no DeviceCallIn is available at chirp generation time -
