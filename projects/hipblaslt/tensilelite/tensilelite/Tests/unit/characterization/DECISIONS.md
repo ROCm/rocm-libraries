@@ -695,3 +695,13 @@ tests carry the evidence for this change.
 **ADR:** [`adr/0032-leave-epilogues-out-by-default.md`](adr/0032-leave-epilogues-out-by-default.md)
 
 **Decision:** geko's merge adds the epilogue settings (`Activation`, `ActivationType`, `UseBias`, `BiasDataTypeList`, `UseScaleAlphaVec`, `UseScaleAB`) to every library after tuning, so carrying them (D48) made the extracted config tune the shipped epilogue kernel rather than the kernel the run tuned. They are now removed unless `--keep-epilogues` is given (a handwritten custom kernel keeps them), a benchmark header's bias types go with them, and an empty `BiasTypeArgs` is no longer written. The gfx950 `test_TensileLibLogicToYaml` golden loses those four lines, `test_benchmark_tree_to_config` no longer expects the header's bias types, and the `main()` stubs take the new argument; the kept behavior moves to new tests. Intended behavior change.
+## D50 — Accept basename identity changes from the LDSTrInstA/LDSTrInstB split
+
+**ADR:** [`adr/0033-ldstrinst-ab-split-basename-identity-change.md`](adr/0033-ldstrinst-ab-split-basename-identity-change.md)
+
+**Decision:** Accept the `basename`-only golden changes on stable
+architectures (gfx90a, gfx942) and other targets (gfx950, gfx1250) that
+result from splitting the single `LDSTrInst` parameter into per-tensor
+`LDSTrInstA`/`LDSTrInstB` fields that now feed the solution naming hash.
+These targets have no LDSTr hardware, so `err` codes and emitted assembly
+are unchanged; only the recorded hash text differs.
