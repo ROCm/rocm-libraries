@@ -520,10 +520,11 @@ namespace
         rocblas_status metric_status      = rocblas_get_performance_metric(prob.handle, &metric);
         if(metric_status != rocblas_status_success)
         {
+            // metric keeps its initialiser: rocblas_get_performance_metric writes through
+            // the pointer only on its success path, so there is nothing to put back.
             rocblas_cerr << "rocblas error: '" << rocblas_status_to_string(metric_status)
                          << "':" << metric_status << " at " << __FILE__ << ":" << __LINE__
                          << std::endl;
-            metric = rocblas_default_performance_metric;
         }
         //If flag is set use CUEfficiency performance metric
         if(prob.flags & rocblas_gemm_flags_use_cu_efficiency)
