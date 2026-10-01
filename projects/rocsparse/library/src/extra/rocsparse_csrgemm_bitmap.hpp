@@ -87,7 +87,7 @@ namespace rocsparse
                                           = std::numeric_limits<size_t>::max());
         ~csrgemm_bitmap_workspace();
 
-        csrgemm_bitmap_workspace(const csrgemm_bitmap_workspace&)            = delete;
+        csrgemm_bitmap_workspace(const csrgemm_bitmap_workspace&) = delete;
         csrgemm_bitmap_workspace& operator=(const csrgemm_bitmap_workspace&) = delete;
 
         // The entry offsets, word offsets and first words of nslot rows, and the scan over the
