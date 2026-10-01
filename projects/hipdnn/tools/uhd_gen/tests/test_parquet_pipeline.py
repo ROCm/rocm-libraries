@@ -237,6 +237,9 @@ def test_knobs_reads_the_published_dataset(tmp_path, capsys):
     """`knobs` analyses the corpus `train` fits, so `--input dataset.parquet` has to mean the
     same file in both. Read with `pd.read_csv` it died inside pandas on the Parquet magic bytes.
     """
+    # The CLI imports the trainer and the FlatBuffer converter.
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
 
     collected = _collected(tmp_path / "bench.csv")
@@ -266,6 +269,9 @@ def test_merge_joins_published_datasets_and_publishes_one(tmp_path):
     merged file keeps the format its name claims -- a `.parquet` written as CSV is a file `train`
     hands straight to `read_parquet`.
     """
+    # The CLI imports the trainer and the FlatBuffer converter.
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
 
     paths = []
