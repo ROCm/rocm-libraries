@@ -423,6 +423,20 @@ from the configured install prefix by default; building its executable, copying 
 into a build tree, or using its runtime override does not satisfy that path. Keep the
 configured prefix aligned with `$INSTALL`.
 
+**Reusing a build directory is allowed; reusing an install prefix is not.** An earlier
+build tree of the same `$REPO` checkout (for example a develop warm-up build) may be
+reconfigured and built incrementally. The pack step tracks its whole authored root:
+`hkp_wire_pack_target()` in `descriptor-packaging/cmake/HkpPackaging.cmake` globs every
+source file with `CONFIGURE_DEPENDS`, writes the input set to a manifest so a removed
+descriptor also forces a repack, and wipes its `OUT_ROOT` before packing. The
+production-root checks re-run configure when a KDP or UED is added or edited. Reconfigure
+with every stage 4 flag stated explicitly, `CMAKE_INSTALL_PREFIX="$INSTALL"` included,
+because the cache keeps whatever an earlier configure set. Use a fresh build directory for a
+different checkout or toolchain (CMake rejects a cache from another source tree). Install
+each candidate into an empty `$INSTALL`: `cmake --install` copies files but never deletes
+one, so a descriptor removed since an earlier install into that prefix would stay there.
+Record whether the build directory was reused.
+
 Set `FINAL_DESCRIPTOR_ROOT` to the installed per-arch shard. Every root is staged per
 architecture, `embedded_source` included: the packer stamps the shard architecture onto
 a passthrough descriptor and records the authored values in its provenance block, so
@@ -626,6 +640,14 @@ executable/plugin/config paths and the intended quick/standard selection. Then e
 ```bash
 ctest --test-dir "$CTEST_ROOT" --no-tests=error -V -R "^${DEVICE_TEST}$"
 ```
+
+The device CTest can print nothing for a long time before its first case. Before
+`--gtest_filter` applies, `hipdnn_integration_tests` registers every bundle under its
+bundle root, expanding each sweep (`registerBundleTests()` runs before `RUN_ALL_TESTS()`
+in `dnn-providers/integration-tests/src/main.cpp`; discovery is in `harness/bundle/BundleDiscovery.hpp`).
+While it is working, the process stays busy on CPU and reads `sweep.json` files under the
+bundle root; on Linux, `ls -l /proc/<pid>/fd` shows the file it is reading. A silent
+process that is busy reading bundles is still working; a silent idle one needs a look.
 
 Keep verbose output in the retained log. **`--output-on-failure` hides passing suites'
 case counts; an all-skip suite can still report CTest PASS.** Record selected, served,
