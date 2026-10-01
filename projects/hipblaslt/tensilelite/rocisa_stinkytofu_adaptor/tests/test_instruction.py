@@ -56,6 +56,7 @@ from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     GLOBALModifiers,
     MUBUFModifiers,
+    EXEC,
     RegisterContainer,
     VCC,
     SMEMModifiers,
@@ -1903,6 +1904,45 @@ class TestVectorCmpXConstruction(unittest.TestCase):
                 m = Module()
                 m.add(cls(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestVectorCmpXGfx1250Legalize(unittest.TestCase):
+    """gfx1250 has CMPXWritesSGPR=0: v_cmpx renders as v_cmp + s_mov exec (cmp.hpp)."""
+
+    def setUp(self):
+        from rocisa_stinkytofu_adaptor import base as _base
+        self._base = _base
+        self._saved_kernel = _base.getKernel()
+        self._saved_current_isa = _base._current_isa
+        self._saved_is_init = _base._is_init
+        _base.init((12, 5, 0), "", False)
+
+    def tearDown(self):
+        self._base.setKernelInfo(self._saved_kernel)
+        self._base._current_isa = self._saved_current_isa
+        self._base._is_init = self._saved_is_init
+
+    @staticmethod
+    def _lines(inst):
+        return [l.split("//")[0].rstrip() for l in str(inst).splitlines()]
+
+    def test_exec_dst_wave32(self):
+        self._base.setKernel((12, 5, 0), 32)
+        inst = VCmpXEqU32(dst=EXEC(), src0=vgpr(7), src1=sgpr(3), comment="c")
+        self.assertEqual(self._lines(inst),
+                         ["v_cmp_eq_u32 vcc_lo, v7, s3", "s_mov_b32 exec_lo, vcc_lo"])
+
+    def test_exec_dst_wave64(self):
+        self._base.setKernel((12, 5, 0), 64)
+        inst = VCmpXGtU32(dst=EXEC(), src0=vgpr(7), src1=0)
+        self.assertEqual(self._lines(inst),
+                         ["v_cmp_gt_u32 vcc, v7, 0", "s_mov_b64 exec, vcc"])
+
+    def test_sgpr_dst_wave32(self):
+        self._base.setKernel((12, 5, 0), 32)
+        inst = VCmpXLtU64(dst=sgpr(10), src0=vgpr(4, 2), src1=sgpr(6, 2))
+        self.assertEqual(self._lines(inst),
+                         ["v_cmp_lt_u64 s10, v[4:5], s[6:7]", "s_mov_b32 exec_lo, s10"])
 
 
 # ===========================================================================
