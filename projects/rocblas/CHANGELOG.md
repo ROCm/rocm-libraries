@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
+### Resolved issues
+
+* Fix `rocblas_device_malloc_alloc` reporting success for an allocation that failed, when the handle was created with stream-ordered allocation enabled (`ROCBLAS_STREAM_ORDER_ALLOC`) and is managing its own device memory. A failing `hipMallocAsync` left the allocation marked successful, so the call returned `rocblas_status_success` along with an allocation object whose pointers were null, and a caller that checked the status would go on to use them. It now returns `rocblas_status_memory_error` and leaves the out parameter null.
+
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
