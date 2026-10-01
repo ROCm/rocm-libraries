@@ -2261,7 +2261,7 @@ struct FmhaFwdKernel
             // The pipeline operator() is templated on kHasBlockMask. We runtime-branch on
             // block_mask_row_ptr nullness and dispatch to the matching specialization so that
             // the dense path (the common case) compiles to the same code as before block
-            // sparsity was added — no extra registers, no per-iteration skip check.
+            // sparsity was added - no extra registers, no per-iteration skip check.
             const bool has_block_mask_runtime = (block_mask_row_ptr != nullptr);
             auto invoke_fmha_pipeline         = [&](auto&&... args) -> decltype(auto) {
                 if constexpr(kPassHdimTailArgs)
@@ -3394,7 +3394,7 @@ struct FmhaFwdKernel
                 {
                     // Runtime-branch on block_mask_row_ptr nullness and dispatch to the
                     // matching pipeline specialization. Dense path (the common case) compiles
-                    // to the same code as before block sparsity was added — no extra
+                    // to the same code as before block sparsity was added - no extra
                     // registers, no per-iteration skip check.
                     if(block_mask_row_ptr != nullptr)
                         return FmhaPipeline{}.template operator()<true>(
