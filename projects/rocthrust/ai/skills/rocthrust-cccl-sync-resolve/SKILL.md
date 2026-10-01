@@ -26,8 +26,12 @@ If any of these don't hold, STOP and ask the human before proceeding.
 
 ## Per-commit loop
 
-1. **Read the next item.** Take the first unticked line, e.g.
-   `- [ ] <sha> <subject>`.
+1. **Read the next item, then STOP.** Take the first unticked line, e.g.
+   `- [ ] <sha> <subject>`. Tell the human which item is next (SHA,
+   subject, `SCOPE`, any ⚠ flag) and wait for them to say go before
+   running step 2 or looking at the commit at all. Do this at the start of
+   every item, including straight after ticking the previous one; never
+   roll on into the next item on your own.
 
 2. **Show the upstream commit**, scoped to the Thrust subtree and with
    destination paths already translated:
@@ -130,8 +134,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    the list will handle it — don't pre-emptively "fix" it out of order.
 
 5. **STOP and confirm the classification and porting approach with the
-   human before editing anything**, unless the human has explicitly asked
-   to run through several commits autonomously in this session.
+   human before editing anything.
 
 6. **Apply the change** to the translated local path(s) and `git add` them.
    For adaptation cases, the change is hand-written to match the upstream
