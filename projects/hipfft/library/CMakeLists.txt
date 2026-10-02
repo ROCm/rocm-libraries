@@ -103,13 +103,12 @@ endif()
 
 set(static_depends)
 
-# Target compile definitions
-if( BUILD_WITH_COMPILER STREQUAL "HOST-DEFAULT" )
-  if( BUILD_WITH_LIB STREQUAL "ROCM" )
-    target_compile_definitions( hipfft PRIVATE __HIP_PLATFORM_AMD__ )
-  else()
-    target_compile_definitions( hipfft PRIVATE __HIP_PLATFORM_NVIDIA__ )
-  endif()
+# Target compile definitions — when hipcc is not the compiler, CMake must
+# provide the platform defines that hipcc would have injected automatically.
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  target_compile_definitions( hipfft PUBLIC ${HIPFFT_CUDA_COMPILER_DEFINES} )
+elseif( BUILD_WITH_COMPILER STREQUAL "HOST-DEFAULT" )
+  target_compile_definitions( hipfft PRIVATE __HIP_PLATFORM_AMD__ )
 endif()
 
 if( HIPFFT_MPI_ENABLE )
@@ -138,8 +137,10 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
     if( WIN32 )
       target_link_libraries( ${lib} PRIVATE hip::device )
     endif()
-    target_link_libraries( ${lib} PUBLIC hip::host )
   endif()
+  # hip::host provides HIP headers on both backends; hipcc used to inject
+  # these automatically, now CMake must link the target explicitly.
+  target_link_libraries( ${lib} PUBLIC hip::host )
 
   target_compile_options( ${lib} PRIVATE ${WARNING_FLAGS} )
 

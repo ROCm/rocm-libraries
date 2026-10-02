@@ -130,10 +130,12 @@ else()
   set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE )
 endif()
 
-# Load hip headers now that the backend is decided. Using hip CONFIG avoids
-# any hipconfig/hipcc subprocess; hip::host is needed for public HIP headers
-# on both backends.
+# hip::host is needed for HIP headers on both backends; load it unconditionally.
 find_package( hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm )
+
+if( USE_CUDA )
+  set( HIPFFT_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__ )
+endif()
 
 # Set internal BUILD_WITH_COMPILER.
 # Only use HIP-nvcc mode (which wraps flags with -Xcompiler=/-Xlinker=) when
