@@ -71,7 +71,8 @@ from ..Common.ValidParameters import validParameters, \
                                             _skipTypeCheck, \
                                             normalizeSwInstructionPrefetch, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
-                                            SW_INSTRUCTION_PREFETCH_AUTO
+                                            SW_INSTRUCTION_PREFETCH_AUTO, \
+                                            stinkySchedulingKnobUnset
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -3302,6 +3303,14 @@ class Solution(collections.abc.Mapping):
         return
       if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
         state["TDMLoadWaveSync"] = False
+    # These knobs are consumed only as StinkyTofu ModuleOptions. A non-sentinel
+    # value on any other scheduler would be silently ignored, so reject it.
+    if state["ScheduleIterAlg"] != 4:
+      for knob, unset in stinkySchedulingKnobUnset.items():
+        if state.get(knob, unset) != unset:
+          reject(state, printRejectionReason,
+                 "%s requires ScheduleIterAlg=4 (StinkyTofu backend)" % knob)
+          return
     # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
     tdmFuse: int = state.get("TDMFuse", 0)
     if tdmFuse:
