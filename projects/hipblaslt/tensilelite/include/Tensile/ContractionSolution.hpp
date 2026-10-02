@@ -165,7 +165,19 @@ namespace TensileLite
         X_MACRO(StrideE2) \
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2)
+        X_MACRO(StrideMetadata2) \
+        /* rocRoller workgroup-mapping kernargs. Custom-kernel launch only. */ \
+        X_MACRO(WorkgroupMapping) \
+        X_MACRO(MagicMultipleWgm) \
+        X_MACRO(MagicShiftAndSignWgm) \
+        X_MACRO(MagicMultipleNumTilesN) \
+        X_MACRO(MagicShiftAndSignNumTilesN) \
+        X_MACRO(QuotientTilesMByWgm) \
+        X_MACRO(MagicMultipleWgmTail) \
+        X_MACRO(MagicShiftAndSignWgmTail) \
+        X_MACRO(QuotientTilesByBlock) \
+        X_MACRO(MagicMultipleWgmMainBlock) \
+        X_MACRO(MagicShiftAndSignWgmMainBlock)
 
     enum class CustomArgSemantic
     {
