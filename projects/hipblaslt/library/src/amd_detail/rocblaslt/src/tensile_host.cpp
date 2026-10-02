@@ -308,6 +308,36 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     }
 }
 
+TensileLibraryRoot findTensileLibraryRoot()
+{
+    TensileLibraryRoot root;
+    // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
+    // process in a secure execution context cannot be redirected to an
+    // attacker-controlled code-object directory via inherited
+    // environment. Probe the privilege state once and reuse it for both
+    // the lookup and the suppression diagnostic.
+    const bool  is_privileged = rocblaslt_process_is_privileged();
+    const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
+    if(env)
+    {
+        root.path            = env;
+        root.fromEnvironment = true;
+        return root;
+    }
+    root.suppressed
+        = rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
+    // Find the location of librocblaslt.so
+    // Fall back on hard-coded path if static library or not found
+    std::optional<std::filesystem::path> default_lib_path;
+#ifdef HIPBLASLT_STATIC_LIB
+    default_lib_path = HIPBLASLT_LIB_PATH;
+#endif
+    if(auto maybe_path
+       = rocblaslt_find_library_relative_path(/*relpath=*/std::nullopt, default_lib_path))
+        root.path = std::move(*maybe_path);
+    return root;
+}
+
 namespace
 {
     template <typename T>
@@ -2959,42 +2989,28 @@ namespace
         void initialize(TensileLite::hip::SolutionAdapter& adapter, int32_t deviceId)
         {
             bool enableYaml = false;
-            bool staticLib  = false;
             bool lazyLoad   = ROCBLASLT_TENSILE_LAZY_LOAD;
 #ifdef TENSILE_YAML
             enableYaml = true;
 #endif
-#ifdef HIPBLASLT_STATIC_LIB
-            staticLib = true;
-#endif
-
-            std::filesystem::path path;
 
             // The name of the current GPU platform
             std::string processor = rocblaslt_internal_get_arch_name();
 
-            // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
-            // process in a secure execution context cannot be redirected to an
-            // attacker-controlled code-object directory via inherited
-            // environment. Probe the privilege state once and reuse it for both
-            // the lookup and the suppression diagnostic.
-            const bool  is_privileged = rocblaslt_process_is_privileged();
-            const char* env
-                = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
-            if(env)
+            auto                  root = findTensileLibraryRoot();
+            std::filesystem::path path = std::move(root.path);
+            if(root.fromEnvironment)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
                     std::ostringstream msg;
-                    msg << "Using HIPBLASLT_TENSILE_LIBPATH=" << env << std::endl;
+                    msg << "Using HIPBLASLT_TENSILE_LIBPATH=" << path.string() << std::endl;
                     log_info(__func__, msg.str());
                 }
-                path = env;
             }
             else
             {
-                if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH",
-                                                              is_privileged))
+                if(root.suppressed)
                 {
                     std::ostringstream msg;
                     msg << "Ignoring HIPBLASLT_TENSILE_LIBPATH because the process is running "
@@ -3004,16 +3020,6 @@ namespace
                         << std::endl;
                     log_error(__func__, msg.str());
                 }
-                // Find the location of librocblaslt.so
-                // Fall back on hard-coded path if static library or not found
-                std::optional<std::filesystem::path> default_lib_path;
-                if(staticLib)
-                {
-                    default_lib_path = HIPBLASLT_LIB_PATH;
-                }
-                if(auto maybe_path = rocblaslt_find_library_relative_path(
-                       /*relpath=*/std::nullopt, default_lib_path))
-                    path = std::move(*maybe_path);
                 // Optionally, look for a per-architecture sub-directory under the library
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform

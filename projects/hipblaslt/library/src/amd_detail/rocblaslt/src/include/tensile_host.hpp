@@ -46,6 +46,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <atomic>
+#include <filesystem>
 
 // Return the value category for a value, as a double precision value, such
 // such as whether it's 0, 1, -1 or some other value. Tensile uses a double
@@ -365,3 +366,15 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 bool                   value);
+
+// Where the Tensile library is looked up: HIPBLASLT_TENSILE_LIBPATH, which
+// names an architecture's library directory itself, unless the process is
+// privileged; else the library root next to libhipblaslt, which holds one
+// subdirectory per library architecture. The path is empty if none exists.
+struct TensileLibraryRoot
+{
+    std::filesystem::path path;
+    bool                  fromEnvironment = false;
+    bool                  suppressed      = false; // the variable was set but ignored
+};
+TensileLibraryRoot findTensileLibraryRoot();

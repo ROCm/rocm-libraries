@@ -583,7 +583,7 @@ endif()
 unset(_hipblaslt_export_targets)
 unset(_hipblaslt_export_depends)
 
-if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER OR HIPBLASLT_ENABLE_JIT)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
@@ -592,11 +592,16 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
+endif()
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
+endif()
+if(HIPBLASLT_ENABLE_JIT)
+    include(hipblaslt-jit-knowledge)
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
