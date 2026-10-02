@@ -38,6 +38,17 @@
 namespace stinkytofu {
 namespace dag {
 
+/// Register-file-aware key for the data-ready (RAW) and elapse-touch maps, and
+/// for HazardFlag::regKey.
+///
+/// Keying on reg.idx alone conflates register files: a WMMA writing its
+/// accumulator v[12:20) would stamp indices 12..19 and falsely gate a later SALU
+/// reading s14/s15 — same indices, different file. Folding the register type in
+/// keeps vector, scalar and accumulator registers of one index apart.
+inline int regDepKey(RegType type, uint32_t idx) {
+    return (static_cast<int>(type) << 20) | static_cast<int>(idx & 0xFFFFF);
+}
+
 // Defined in RegionDAG.hpp, which includes THIS header -- forward-declared to keep the
 // dependency one-way. Region pre-scans in derived queues read the same graph the
 // scheduler drains, rather than rebuilding their own view of it.
@@ -65,6 +76,16 @@ struct DAGNode {
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
+    // Issue cycles spent immediately before this node, by instructions the caller
+    // keeps out of the DAG but will re-emit in front of it. The queue charges them
+    // to the window this node closes, so the window is not over-filled by work the
+    // queue never saw: it stops filling that many cycles earlier.
+    //
+    // Zero for every caller that hands the queue its whole instruction stream,
+    // which is why the scheduler is unaffected. RepairMatrixCoexecPass sets it on
+    // each wait anchor, because a wait is re-emitted in front of its anchor and
+    // still costs an issue cycle there.
+    int preIssueCycles = 0;
     // Hardware hazard: the exact (rule, register) pairs this node writes that some
     // later consumer reads, per the arch's hazard rule table (a fixed producer->consumer cycle
     // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
@@ -80,7 +101,7 @@ struct DAGNode {
     std::vector<HazardFlag> hazardFlags;
     // Set by the pre-scan (see scheduleRegionWithMovableSideEffects) only when this
     // node has hazardFlags: the latest CDNA5ReadyQueue::clock_ value at which this
-    // producer may still be deferred. Computed as X - rule.cycles - (this producer's
+    // producer may still be deferred. Computed as X - rule.distance - (this producer's
     // own issue/latency cost), where X is the hazarded consumer's estimated absolute
     // cycle position (a forward prefix sum over the region in original program
     // order) — i.e. "this producer must FINISH by t = X - cycles" (the gate is

@@ -1,0 +1,54 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --StinkyDAGSchedulerPass --print-output
+#
+# Scheduling an already-scheduled region is a fixed point.
+#
+# The pass is listed twice, so the second run sees the first run's output. The
+# expectations below are the single-run schedule, which means they only hold if
+# the second run leaves it alone.
+#
+# This matters beyond the scheduler. A repair pass built on the same ready queue
+# re-schedules a segment under added constraints, so if re-scheduling drifted it
+# would move code on every run for no reason, and no amount of edge-level
+# correctness would make that stable. The fixed point is the property that makes
+# driving the queue a second time a repair rather than a reshuffle.
+#
+# CHECK-LABEL: @dag_scheduler_idempotent
+# Each global load keeps its LDS store behind it, then the barrier pair, then the
+# loads the WMMA actually waits on.
+# CHECK: buffer_load_b128
+# CHECK-NEXT: ds_store_b128
+# CHECK-NEXT: buffer_load_b128
+# CHECK-NEXT: ds_store_b128
+# CHECK-NEXT: buffer_load_b128
+# CHECK-NEXT: ds_store_b128
+# CHECK-NEXT: buffer_load_b128
+# CHECK-NEXT: ds_store_b128
+# CHECK-NEXT: s_barrier_signal
+# CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: v_wmma_f32_16x16x16_bf16
+# Nothing is emitted twice, and no filler is introduced on the second pass.
+# CHECK-NOT: v_wmma_f32_16x16x16_bf16
+# CHECK-NOT: v_nop
+
+st.func @dag_scheduler_idempotent() {
+^entry:
+  v[50:53] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v10, v[50:53]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[54:57] = "st.buffer_load_b128"(v8, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v10, v[54:57]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[58:61] = "st.buffer_load_b128"(v9, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[62:65] = "st.buffer_load_b128"(v9, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+  v[20:23] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:27] = "st.ds_load_b128"(v12) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[30:33] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

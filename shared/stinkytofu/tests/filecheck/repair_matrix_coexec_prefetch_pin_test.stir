@@ -1,0 +1,44 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RepairMatrixCoexecPass --print-output
+#
+# A prefetch hint stays in the window the scheduler put it in -- it neither
+# drifts past the matrix op ahead of it nor hoists over the one behind it.
+#
+# global_prefetch_b8 is not a segment boundary, carries no waitcnt counter and
+# writes no register, so nothing in the register DAG orders it at all. Two rules
+# in dag/WaitAnchors.hpp hold it, one per direction, and both are needed: the pin
+# edge (kPinRules) keeps it ahead of the next matrix op, and the skeleton chain
+#    10|# (addMatrixMemoryOrderEdges) keeps it behind the previous one. A hint hoisted
+# out of its window loses the lead time it was given just as effectively as one
+# deferred past its anchor.
+#
+# The first hint is the last non-matrix instruction before an anchor, which makes
+# it the cheapest thing for the queue to defer. The second sits behind a 56-cycle
+# load in a window of its own, which is what makes hoisting it attractive.
+#
+# CHECK-LABEL: @repair_matrix_coexec_prefetch_pin
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: global_prefetch_b8
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# The second hint stays in this window: behind the anchor above, ahead of the one
+# below. Hoisting it would put it before that first matrix op.
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: global_prefetch_b8
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Neither hint is left anywhere else.
+# CHECK-NOT: global_prefetch_b8
+
+st.func @repair_matrix_coexec_prefetch_pin() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  s60 = "st.s_mov_b32"(60) { issueCycles = 1, latencyCycles = 2 }
+  "st.global_prefetch_b8"(v[990:991], off) { issueCycles = 1, latencyCycles = 1, mod.global = { offset = 0, th = "TH_LOAD_NT", scope = "SCOPE_SE" } }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.global_prefetch_b8"(v[992:993], off) { issueCycles = 1, latencyCycles = 1, mod.global = { offset = 0, th = "TH_LOAD_NT", scope = "SCOPE_SE" } }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

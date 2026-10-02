@@ -59,6 +59,7 @@
 #include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/RepairMatrixCoexecPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -71,7 +72,6 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
-#include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
 
 namespace stinkytofu {
@@ -217,12 +217,11 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
             // The wait insertion above leaves each final wait immediately before the
             // WMMA that consumes its loads, so that WMMA has nothing to issue behind
-            // it. Repair moves this many non-WMMA instructions past each anchor to
-            // refill those slots, without changing any wait immediate.
-            if (runScheduler && moduleOptions.WaitRepairSlotsToMovePastAnchor > 0) {
-                innerPM.addPass(createWaitAwareScheduleRepairPass(
-                    moduleOptions.WaitRepairSlotsToMovePastAnchor));
-            }
+            // it. Repair replays the region through the same arch ready queue the
+            // scheduler used, refilling those co-issue windows without changing any
+            // wait immediate. Gated on runScheduler because there is nothing to
+            // repair in IR that was never scheduled.
+            if (runScheduler) innerPM.addPass(createRepairMatrixCoexecPass());
 
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));

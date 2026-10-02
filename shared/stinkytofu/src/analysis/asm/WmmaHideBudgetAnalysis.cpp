@@ -293,4 +293,67 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
     return budget;
 }
 
+namespace {
+/// Cycles of \p matrixOp's shadow another instruction could issue into: the
+/// window past its own issue cycles, less what the hardware reserves outright.
+int issuableWindowCycles(const StinkyInstruction& matrixOp) {
+    const uint16_t blocked = matrixOp.getHwInstDesc()->blockedScaleMask;
+    int cycles = 0;
+    for (int pos = matrixOp.issueCycles; pos < matrixOp.latencyCycles; ++pos)
+        if (!isBlockedWindowCycle(pos, matrixOp.latencyCycles, blocked)) ++cycles;
+    return cycles;
+}
+
+/// Co-issue slots \p matrixOp offers.
+int coexecSlots(const StinkyInstruction& matrixOp) {
+    return __builtin_popcount(static_cast<unsigned>(matrixOp.coIssueWindow));
+}
+}  // namespace
+
+MatrixCoexecOccupancy measureMatrixCoexecOccupancy(
+    const std::vector<StinkyInstruction*>& instructions) {
+    MatrixCoexecOccupancy out;
+    const StinkyInstruction* openWindow = nullptr;
+    int placed = 0;
+    int valu = 0;
+
+    auto closeWindow = [&]() {
+        if (openWindow == nullptr) return;
+        ++out.windows;
+        if (placed == 0) ++out.emptyWindows;
+        const int issuable = issuableWindowCycles(*openWindow);
+        out.issuableCycles += issuable;
+        out.placedCycles += std::min(placed, issuable);
+        const int slots = coexecSlots(*openWindow);
+        out.valuSlots += slots;
+        out.valuFills += std::min(valu, slots);
+    };
+
+    for (StinkyInstruction* inst : instructions) {
+        if (inst == nullptr) continue;
+        if (isMatrixInstruction(*inst)) {
+            closeWindow();
+            ++out.matrixOps;
+            openWindow = inst;
+            placed = 0;
+            valu = 0;
+            continue;
+        }
+        if (openWindow == nullptr) continue;  // leading work belongs to no window
+        placed += inst->issueCycles;
+        if (fillsCoexecSlot(*inst)) ++valu;
+    }
+    // The trailing interval has no closing matrix op, so it is not a window.
+    return out;
+}
+
+void dumpMatrixCoexecOccupancy(const MatrixCoexecOccupancy& occupancy, const char* label,
+                                std::ostream& os) {
+    const int backToBack = occupancy.emptyWindows;
+    os << "[MatrixCoexec " << label << "] matrixOps=" << occupancy.matrixOps
+       << " windows=" << occupancy.windows << " emptyWindows=" << backToBack
+       << " issueCycles=" << occupancy.placedCycles << "/" << occupancy.issuableCycles
+       << " valuSlots=" << occupancy.valuFills << "/" << occupancy.valuSlots << "\n";
+}
+
 }  // namespace stinkytofu

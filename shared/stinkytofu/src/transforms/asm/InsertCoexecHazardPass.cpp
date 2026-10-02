@@ -33,6 +33,7 @@
 #define DEBUG_TYPE "InsertCoexecHazardPass"
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -68,10 +69,6 @@ inline int popcount16(uint16_t v) {
 inline bool isSlotFiller(const StinkyInstruction& inst) {
     return isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst) ||
            inst.getUnifiedOpcode() == GFX::v_nop;
-}
-
-inline bool isCoexecutableVALU(const StinkyInstruction& inst) {
-    return (isVectorALU(inst) || isTranscendental(inst)) && !isMatrixInstruction(inst);
 }
 
 // WMMA producer D feeds a WMMA consumer's A/B (or SWMMAC index). D->C
@@ -251,7 +248,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                                                             /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::PERM,
                                                             /*consumerIsWmma=*/false));
-                } else if (isCoexecutableVALU(*inst)) {
+                } else if (fillsCoexecSlot(*inst)) {
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
                                                             /*consumerIsWmma=*/false));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::PERM,

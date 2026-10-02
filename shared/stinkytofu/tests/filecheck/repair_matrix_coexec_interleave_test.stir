@@ -1,0 +1,41 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RepairMatrixCoexecPass --print-output
+#
+# Matrix ops stop sitting back to back once there is work to put between them.
+#
+# The input has three matrix ops in a row and then four independent v_adds, so
+# two windows are empty: the scheduler holds a matrix op back while any non-matrix
+# work is pickable, and that is not true here. Driving the segment through the
+# architecture ready queue moves the VALU work up into a window instead.
+#
+# This is the case that motivated replacing the earlier repair pass: measuring a
+# budget against its own input gives a window that contributed nothing a budget of
+# zero, so both empty windows stay empty and a VALU fill is lost. Capacity comes
+# from the arch rules here, not from the input.
+#
+# CHECK-LABEL: @repair_matrix_coexec_interleave
+# CHECK: v_wmma_f32_16x16x32_bf16
+# The deferred VALU work is pulled into the first window.
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# The wait is still immediately before the anchor it was attached to.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# Nothing is left over behind the last anchor.
+# CHECK-NOT: v_add_f32
+
+st.func @repair_matrix_coexec_interleave() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v500 = "st.v_add_f32"(v600, v601) { issueCycles = 1, latencyCycles = 5 }
+  v501 = "st.v_add_f32"(v602, v603) { issueCycles = 1, latencyCycles = 5 }
+  v502 = "st.v_add_f32"(v604, v605) { issueCycles = 1, latencyCycles = 5 }
+  v503 = "st.v_add_f32"(v606, v607) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[48:63] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[400:407], v[48:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

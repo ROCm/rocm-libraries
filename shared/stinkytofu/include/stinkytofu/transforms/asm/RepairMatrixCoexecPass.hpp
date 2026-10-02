@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
 #pragma once
 
 #include <memory>
@@ -30,13 +29,22 @@
 namespace stinkytofu {
 class Pass;
 
-/// Post-waitcnt validation pass for GFX1250.
+/// Restore matrix co-issue after wait insertion, using the scheduler's own rules.
 ///
-/// Runs after StinkyWaitCntInsertionPass. Replays each repair segment through a
-/// stable DAG queue that preserves original program order, then reattaches exact
-/// wait groups immediately before their WMMA anchors. The pass is disabled when
-/// kSlotsToMovePastAnchor is zero or negative.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createWaitAwareScheduleRepairPass(
-    int kSlotsToMovePastAnchor = 1);
+/// Later passes insert instructions into a schedule the DAG scheduler built
+/// against a hardware co-issue model, and final waits in particular leave matrix
+/// ops with nothing to issue in their latency shadow. This pass replays each
+/// segment through the same architecture ready queue the scheduler uses, so the
+/// rules live in one place: a new rule, or a new architecture, needs no change
+/// here.
+///
+/// The wait contract is preserved exactly. Waits are kept out of the DAG and
+/// re-emitted immediately before their original anchors with their immediates
+/// untouched, and no instruction crosses a segment boundary.
+///
+/// Replaced the earlier repair pass, which targeted a slot count measured
+/// against its own input rather than the hardware's capacity; see
+/// docs/developer/repair-matrix-coexec-pass.md.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRepairMatrixCoexecPass();
 
 }  // namespace stinkytofu

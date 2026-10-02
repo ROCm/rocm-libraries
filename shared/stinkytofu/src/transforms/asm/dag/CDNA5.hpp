@@ -42,9 +42,11 @@
 #include <utility>
 #include <vector>
 
+#include "ArchReadyQueue.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
+#include "stinkytofu/analysis/asm/CoexecWindow.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -152,16 +154,6 @@ inline int deriveWarGateWmmas(int wmmaLatency, int wmmaIssueCycles) {
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
-
-// Register-file-aware key for the data-ready (RAW) and elapse-touch maps. These
-// maps were keyed on reg.idx alone, which conflates register files: e.g. a WMMA
-// writing its accumulator v[12:20) would stamp indices 12..19 and falsely gate
-// a later SALU that reads s14/s15 (same indices, different file). Fold the
-// register type into the key so vector, scalar, and accumulator registers of
-// the same index never collide.
-static inline int regDepKey(RegType type, uint32_t idx) {
-    return (static_cast<int>(type) << 20) | static_cast<int>(idx & 0xFFFFF);
-}
 
 // Scheduling rule (2): simulate producer completion over [blockBegin,
 // regionStart) — outstanding data-ready latencies decrease by each
@@ -543,17 +535,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
 
     // --- VALU co-issue timeline tracker ---
-    uint16_t activeCoIssueWindow_ = 0;
-    int coIssueCyclePos_ = 0;
-    int activeWmmaLatency_ = 0;
+    // The active matrix op's latency shadow: which cycles can be issued into,
+    // which of them a VALU can co-execute in, and where the timeline stands. The
+    // ISA half of the co-issue model, shared with every other caller that needs
+    // it (see CoexecWindow); everything around it here is this queue's policy.
+    CoexecWindow window_;
     // HwInstDesc::blockedScaleMask of the active matrix op: cycles of its window
     // that no instruction of any kind can be issued into, anchored at the window
-    // END (bit 0 = last cycle). activeCoIssueWindow_ cannot express this -- it
-    // only gates VALU, while a scale WMMA's LD_SCALE sub-issue blocks SALU and
-    // memory picks just as much.
-    uint16_t activeWmmaBlockedScale_ = 0;
-    // WMMA that opened the current latency window (valid while coIssueCyclePos_ <
-    // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap
+    // WMMA that opened the current latency window (valid while the window is
+    // open). Used to detect ds_load dest / WMMA src VGPR overlap
     // hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
@@ -597,7 +587,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsIssuedThisRegion_ = 0;
     int wmmaTotalThisRegion_ = 0;
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
-    // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
+    // Kept separate from the window position, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
@@ -617,6 +607,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // construction (runtime, since the rule count is per-arch), indexed by the
     // same ruleIdx the scheduler pre-scan assigns.
     std::vector<std::map<int, int>> hazardGates_;
+    // What the caller asked of this queue; see ArchReadyQueueOptions.
+    ArchReadyQueueOptions options_;
 
     // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers,
     // tracked so decidePromote() doesn't need to scan every queue each pick to
@@ -768,17 +760,18 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int computeWmmaWindowsNeeded(int dsLoadCount) const;
     bool isValuPickable() const;
     bool isBlockedCycle(int pos) const;
-    int freeCoIssueSpace() const;
+    int freeCoexecSpace() const;
     DAGNode* popNonWmma(DAGNode* node, int pickKind);
 
     void restoreCrossBBStateFromLoop();
 
    public:
-    explicit CDNA5ReadyQueue(const PassContext& passCtx)
+    explicit CDNA5ReadyQueue(const PassContext& passCtx, ArchReadyQueueOptions options = {})
         : ReadyQueue(passCtx),
           config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
           hw_(passCtx.getHWModel()),
           hazardGates_(hw_.hazards.numRules),
+          options_(options),
           pipeOpGates_(hw_.hazards.numRules),
           pipeOpCount_(hw_.hazards.numRules, 0),
           pipeOpDistance_(hw_.hazards.numRules, 0) {}
@@ -819,28 +812,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
 // WMMA). No instruction of any pipe can issue there. The mask is end-anchored,
 // so bit 0 is the window's last cycle.
 bool CDNA5ReadyQueue::isBlockedCycle(int pos) const {
-    return isBlockedWindowCycle(pos, activeWmmaLatency_, activeWmmaBlockedScale_);
+    return window_.isBlockedCycle(pos);
 }
 
 // Cycles of genuinely free latency shadow left in the active op's window: it
 // ends at the window close, or at the first blocked cycle if one comes sooner.
-int CDNA5ReadyQueue::freeCoIssueSpace() const {
-    for (int pos = coIssueCyclePos_; pos < activeWmmaLatency_; ++pos)
-        if (isBlockedCycle(pos)) return pos - coIssueCyclePos_;
-    return activeWmmaLatency_ - coIssueCyclePos_;
+int CDNA5ReadyQueue::freeCoexecSpace() const {
+    return window_.freeSpace();
 }
 
 // Advance the co-issue timeline and the elapse-time clock, and decay the RAW
 // data-ready counters by \p cycles.
 void CDNA5ReadyQueue::advanceTime(int cycles) {
-    // Never let the timeline come to rest on a blocked cycle -- every pick path
-    // reads coIssueCyclePos_ to decide what may issue next, and nothing may issue
-    // there. Roll on to the next issuable cycle instead; the skipped cycles still
-    // elapse, the hardware is just spending them itself.
-    int landing = coIssueCyclePos_ + cycles;
-    while (isBlockedCycle(landing)) ++landing;
-    cycles = landing - coIssueCyclePos_;
-    coIssueCyclePos_ += cycles;
+    // The window skips cycles nothing can issue into, so it decides how far the
+    // timeline really moved; everything below is paid in those cycles.
+    const int before = window_.position();
+    window_.advance(cycles);
+    cycles = window_.position() - before;
     clock_ += cycles;
     globalReadInflight_.advance(cycles);
     dsReadInflight_.advance(cycles);
@@ -867,24 +855,7 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
 // During an active WMMA window, only allowed positions contribute to VALU
 // progress.
 int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
-    if (issueCycles <= 0) return 0;
-    if (coIssueCyclePos_ >= activeWmmaLatency_) return issueCycles;
-
-    int elapsed = 0;
-    int issued = 0;
-    constexpr int kCoIssueBits = (int)(sizeof(activeCoIssueWindow_) * 8);
-
-    while (issued < issueCycles) {
-        const int pos = coIssueCyclePos_ + elapsed;
-        bool canIssue = true;
-        if (pos < activeWmmaLatency_) {
-            canIssue = (pos < kCoIssueBits) && (((activeCoIssueWindow_ >> pos) & 1u) != 0u) &&
-                       !isBlockedCycle(pos);
-        }
-        if (canIssue) issued++;
-        elapsed++;
-    }
-    return elapsed;
+    return window_.valuAdvanceCycles(issueCycles);
 }
 
 // After a picked instruction: advance the co-issue timeline. Barriers use
@@ -903,8 +874,7 @@ void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
 
 // True if VALU can be picked in the current co-issue timeline position.
 bool CDNA5ReadyQueue::isValuPickable() const {
-    if (coIssueCyclePos_ >= activeWmmaLatency_) return true;
-    return (activeCoIssueWindow_ >> coIssueCyclePos_) & 1;
+    return window_.valuPickable();
 }
 
 // Remove a specific non-WMMA node from its queue by kind (0=global, 1=local,
@@ -1047,7 +1017,7 @@ int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
 // WMMA is still reading.
 bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     if (node == nullptr || activeWmmaNode_ == nullptr) return false;
-    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
+    if (window_.closed()) return false;
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
         for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
@@ -1152,7 +1122,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
                                        bool allowHiddenStall) const {
     // A stall is only hidden if the instruction can actually issue when it
     // expires, so the shadow stops at the first blocked cycle.
-    const int coIssueSpace = freeCoIssueSpace();
+    const int coexecSpace = freeCoexecSpace();
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
     int bestWait = 0;
@@ -1162,7 +1132,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
         // not clobber a live WMMA src (then the stall is free).
-        if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
+        if (wait > 0 && (!allowHiddenStall || coexecSpace <= 0 || wait > coexecSpace ||
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
@@ -1226,20 +1196,24 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         if (shortfall > 0) pendingFillerVNops_ = shortfall;
     }
 
-    // consume the time that is not used by the WMMA
-    if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
+    // The instructions the caller re-emits ahead of this node issue in the window
+    // that is closing, so they are charged here rather than to the new one. When
+    // the gate above reserved room for them this just consumes cycles the window
+    // close would have consumed anyway; when the window is already full it is real
+    // added time, which is what keeps clock_ honest.
+    if (node->preIssueCycles > 0) advanceTime(node->preIssueCycles);
 
-    activeCoIssueWindow_ = node->inst->coIssueWindow;
-    coIssueCyclePos_ = 0;
-    activeWmmaLatency_ = node->inst->latencyCycles;
-    // Set before the advanceTime() below so those cycles are never picked into.
-    activeWmmaBlockedScale_ = node->inst->getHwInstDesc()->blockedScaleMask;
+    // consume the time that is not used by the WMMA
+    if (!window_.closed()) advanceTime(window_.latency() - window_.position());
+
+    // reset() rather than open(): the issue cycles have to land on clock_ and the
+    // decay counters as well as on the window, which is what advanceTime() below
+    // does. Resetting first means the new window's blocked cycles are already in
+    // place, so those cycles are never picked into.
+    window_.reset(*node->inst);
     activeWmmaNode_ = node;
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     dsSchedulingBudgetUsed_ = 0;
-    // Advance by WMMA issue cycles after opening a new timeline window.
-    // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
-    // issue.
     advanceTime(node->inst->issueCycles);
     wmmaIssueConfig.issuedCount--;
 
@@ -1337,9 +1311,9 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int dsThrottleWait = 0;
     if (dsBaseOk) {
         dsThrottleWait = std::max(dsCapWait, dsReadThrottleWait());
-        const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
-        int schedulingSpace = activeWmmaLatency_ - schedulingPos;
-        for (int pos = schedulingPos; pos < activeWmmaLatency_; ++pos) {
+        const int schedulingPos = window_.position() + dsSchedulingBudgetUsed_;
+        int schedulingSpace = window_.latency() - schedulingPos;
+        for (int pos = schedulingPos; pos < window_.latency(); ++pos) {
             if (isBlockedCycle(pos)) {
                 schedulingSpace = pos - schedulingPos;
                 break;
@@ -1354,13 +1328,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         // throttled ds_load keeps falling through to Phase G, which charges it
         // to the throttle clock (DsReadThrottle_PhaseGFallbackUsesOnlyThrottleClock).
         //
-        // It is needed because activeWmmaLatency_ is 0 out of window, so the
+        // It is needed because the window length is 0 out of window, so the
         // comparison below is false for every wait and would drop the ds_load
         // -- the veto this change removed, reached by another route.
-        const bool outOfWmmaWindow = activeWmmaLatency_ <= 0 && dsReadThrottleWait() == 0;
+        const bool outOfWmmaWindow = window_.latency() <= 0 && dsReadThrottleWait() == 0;
         const bool fitsSchedulingBudget =
             dsThrottleWait == 0 || outOfWmmaWindow ||
-            (schedulingPos < activeWmmaLatency_ &&
+            (schedulingPos < window_.latency() &&
              dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
@@ -2016,8 +1990,19 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-        const bool blockWmmaForActiveWindow =
-            (coIssueCyclePos_ < activeWmmaLatency_) && (smallestPickable != nullptr);
+        // Measured in free shadow rather than raw window position, because the
+        // reservation has to be in cycles something can actually issue into: the
+        // timeline skips blocked cycles outright, so comparing positions against
+        // the window end would let a one-cycle reservation be absorbed by the
+        // blocked cycle and change nothing.
+        //
+        // preIssueCycles reserves that much free shadow for instructions the caller
+        // re-emits in front of this candidate (a wait, for the repair pass).
+        // Without it the window fills to its last issuable cycle and those
+        // instructions push the candidate past the close -- over-filling the window
+        // by work the queue never saw.
+        const bool windowHasRoom = freeCoexecSpace() > bestWMMA->preIssueCycles;
+        const bool blockWmmaForActiveWindow = windowHasRoom && (smallestPickable != nullptr);
 
         bool blockWmmaForAtLeastOneNonWmmaInterleaving = false;
         if (lastPickedNode_ != nullptr) {
@@ -2034,8 +2019,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         const int hideBudget = cumulativeWmmaHideBudget_;
         const int dsLoadBudget = cumulativeWmmaDsLoadBudget_;
+        // The budget counts over the region, so unlike the window gate it does not
+        // clear when a window closes: left alone it keeps holding this matrix op and
+        // the fill phases keep stuffing an already-full window. For a caller that is
+        // repairing a schedule which already met the quota, the window is the
+        // authority -- see ArchReadyQueueOptions::fullWindowOverridesHideBudget.
         const bool blockWmmaForHideBudget =
-            hasPickableNonWmma &&
+            hasPickableNonWmma && (windowHasRoom || !options_.fullWindowOverridesHideBudget) &&
             (nonWmmaIssuedThisRegion_ < hideBudget || dsLoadIssuedThisRegion_ < dsLoadBudget);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
                              << " bestLatency=" << bestLatency
@@ -2079,7 +2069,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
 
         // Phase C — inside WMMA latency window.
-        if (coIssueCyclePos_ < activeWmmaLatency_) {
+        if (!window_.closed()) {
             DAGNode* smallestPickable = nullptr;
             int pickKind = -1;
             int pickWait = 0;
@@ -2100,7 +2090,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
 
-            advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
+            advanceTime(window_.latency() - window_.position());
         }
 
         // Phase D — outside WMMA latency.
@@ -2253,10 +2243,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     for (auto& gate : pipeOpGates_) gate.clear();
     std::fill(pipeOpCount_.begin(), pipeOpCount_.end(), 0);
 
-    activeCoIssueWindow_ = 0;
-    coIssueCyclePos_ = 0;
-    activeWmmaLatency_ = 0;
-    activeWmmaBlockedScale_ = 0;
+    window_ = CoexecWindow{};
     activeWmmaNode_ = nullptr;
     nonWmmaFillsSinceActiveWmma_ = 0;
     dsSchedulingBudgetUsed_ = 0;

@@ -949,7 +949,7 @@ StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
 /// Any counter drain the wait-cnt pass may have parked ahead of an anchor.
 /// `s_wait_tensorcnt` carries IF_WaitTensorCnt, disjoint from IF_WaitCnt, so
 /// `isWaitCnt()` alone misses it -- and it is the drain that matters most here.
-/// Same idiom as WaitAwareScheduleRepairPass and StinkyRemoveWaitCntPass.
+/// Same idiom as StinkyRemoveWaitCntPass.
 bool isAnyCounterDrain(const StinkyInstruction& inst) {
     return isWaitCnt(inst) || inst.is(InstFlag::IF_WaitTensorCnt);
 }

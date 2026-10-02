@@ -555,12 +555,12 @@ class RemoveDscntPass : public StinkyInstPass {
             if (isBranch(*inst)) break;
 
             // --- advance the cycle counter (WMMA co-exec aware) ---
-            const bool isCoIssued =
+            const bool isCoexecuted =
                 isVectorALU(*inst) && !isMatrixInstruction(*inst) &&
                 canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
                                         activeWmmaValuSlots);
-            if (isCoIssued) {
-                // Co-issued VALU is packed into the active WMMA window and does
+            if (isCoexecuted) {
+                // Co-executed VALU is packed into the active WMMA window and does
                 // not advance the global cycle counter.
                 activeWmmaCoExecAdvance += std::max(1, inst->issueCycles);
             } else if (isMatrixInstruction(*inst)) {
