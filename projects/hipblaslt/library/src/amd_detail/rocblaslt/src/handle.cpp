@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "handle.h"
+#include "../../hipblaslt-jit-debug.hpp"
 #include "../../hipblaslt-jit-mode.hpp"
 #include "check_numerics_matrix.hpp"
 #include "definitions.h"
@@ -78,6 +79,10 @@ _rocblaslt_handle::_rocblaslt_handle()
 
     // Reports an invalid or ignored HIPBLASLT_JIT when the first handle is created.
     static_cast<void>(hipblaslt_jit::mode());
+#ifdef HIPBLASLT_ENABLE_JIT
+    // Likewise HIPBLASLT_JIT_DEBUG, which also writes its process line then.
+    static_cast<void>(hipblaslt_jit::debug::categories());
+#endif
 
     // ASIC revision
     asic_rev = properties.asicRevision;

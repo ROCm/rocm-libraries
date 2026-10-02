@@ -29,6 +29,7 @@ if(HIPBLASLT_ENABLE_JIT)
     add_dependencies(hipblaslt _rocisa)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-debug.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
@@ -120,11 +121,28 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
     add_executable(hipblaslt-jit-component-test
         "${PROJECT_SOURCE_DIR}/clients/tests/jit/jit_component_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-debug.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-defaults.cpp")
-    target_include_directories(hipblaslt-jit-component-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_include_directories(hipblaslt-jit-component-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
+    target_compile_definitions(hipblaslt-jit-component-test PRIVATE HIPBLASLT_ENABLE_JIT)
     target_link_libraries(hipblaslt-jit-component-test PRIVATE
         roc::hipblaslt hip::host Threads::Threads)
     target_compile_features(hipblaslt-jit-component-test PRIVATE cxx_std_17)
+
+    # Compiles HIPBLASLT_JIT_DEBUG parsing, the line sink and the child observer directly.
+    add_executable(hipblaslt-jit-debug-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/jit_debug_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-debug.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp")
+    target_include_directories(hipblaslt-jit-debug-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
+    target_compile_definitions(hipblaslt-jit-debug-test PRIVATE HIPBLASLT_ENABLE_JIT)
+    target_link_libraries(hipblaslt-jit-debug-test PRIVATE Threads::Threads)
+    target_compile_features(hipblaslt-jit-debug-test PRIVATE cxx_std_17)
 
     # Compiles the comgr builder directly; runs without a GPU unless --gpu is given.
     add_executable(hipblaslt-jit-code-object-test
@@ -142,7 +160,8 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
     target_compile_features(hipblaslt-jit-generic-api-test PRIVATE cxx_std_17)
     target_link_libraries(hipblaslt-jit-generic-api-test PRIVATE roc::hipblaslt hip::device)
     set_target_properties(hipblaslt-jit-mock-backend-test hipblaslt-jit-component-test
-                          hipblaslt-jit-code-object-test hipblaslt-jit-generic-api-test PROPERTIES
+                          hipblaslt-jit-debug-test hipblaslt-jit-code-object-test
+                          hipblaslt-jit-generic-api-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
 
     # Compiles the JIT solution library directly; runs without a GPU.
@@ -150,13 +169,16 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
         add_executable(hipblaslt-jit-library-test
             "${PROJECT_SOURCE_DIR}/clients/tests/jit/jit_library_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-debug.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
         target_include_directories(hipblaslt-jit-library-test PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
-        target_compile_definitions(hipblaslt-jit-library-test PRIVATE HIPBLASLT_JIT_LIBRARY_TESTING)
+        target_compile_definitions(hipblaslt-jit-library-test PRIVATE
+            HIPBLASLT_ENABLE_JIT HIPBLASLT_JIT_LIBRARY_TESTING)
         target_link_libraries(hipblaslt-jit-library-test PRIVATE
             roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} ZLIB::ZLIB amd_comgr
             hip::device Threads::Threads)
