@@ -2844,7 +2844,7 @@ private:
             PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
         if(m_test_lambda && !m_skip_tests)
-        {   
+        {
             primbench::log("Running tests");
             m_test_lambda();
         }
@@ -3860,8 +3860,7 @@ private:
         s.skip_header
             = cli.get<bool>("skip-header", s.skip_header, "Skip printing the header to output.");
 
-        s.skip_tests
-            = cli.get<bool>("skip-tests", s.skip_tests, "Skip running correctness tests.");
+        s.skip_tests = cli.get<bool>("skip-tests", s.skip_tests, "Skip running correctness tests.");
     }
 
     /// Only keep filtered specializations, based on their name.
