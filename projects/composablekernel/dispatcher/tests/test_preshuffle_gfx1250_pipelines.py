@@ -28,6 +28,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 import codegen_common as cc  # noqa: E402
+from arch_filter import ArchFilter, KernelConfig, OperatorType  # noqa: E402
 from unified_gemm_codegen import GemmVariant, UnifiedGemmCodegen  # noqa: E402
 
 
@@ -212,6 +213,36 @@ class TestRejectRules(unittest.TestCase):
         self.assertEqual(self._ok("comp_async", tile_k=192), "")
 
 
+class TestTileRules(unittest.TestCase):
+    """Tiles the kernels static_assert on or overflow LDS with, caught before codegen."""
+
+    def _errors(self, pipeline, **tile):
+        scheduler, epilogue = _traits(pipeline)
+        pad = _full_pads(pipeline)
+        t = {**TILE, **tile}
+        cfg = KernelConfig(
+            "fp16", "fp16", "fp16", t["tile_m"], t["tile_n"], t["tile_k"], t["warp_m"],
+            t["warp_n"], t["warp_k"], t["warp_tile_m"], t["warp_tile_n"], t["warp_tile_k"],
+            pipeline=pipeline, epilogue=epilogue, scheduler=scheduler, layout="rcr",
+            operator=OperatorType.GEMM_PRESHUFFLE, pad_m=pad, pad_n=pad, pad_k=pad,
+        )
+        return " ".join(ArchFilter("gfx1250").validate_kernel(cfg).errors)
+
+    def test_packed_b_m0_m1_m2(self):
+        for pipeline in cc.PACKED_B_PIPELINES:
+            self.assertIn("packed-B", self._errors(pipeline, tile_k=192))
+            self.assertEqual(self._errors(pipeline, tile_k=128), "")
+
+    def test_comp_async_wave_cover(self):
+        self.assertIn("whole wave", self._errors("comp_async", tile_k=192))
+        self.assertEqual(self._errors("comp_async", tile_k=128), "")
+
+    def test_comp_async_padded_lds(self):
+        # 128x192x256 fp16 needs 168928 B of padded LDS, over the 163840 B half.
+        self.assertIn("LDS capacity", self._errors("comp_async", tile_n=192, tile_k=256))
+        self.assertEqual(self._errors("comp_async", tile_k=256), "")
+
+
 class TestCodegen(unittest.TestCase):
     def test_rejected_configs_emit_nothing(self):
         cases = [("preshuffle_tdm", "gfx942", "rcr", False),
@@ -235,6 +266,11 @@ class TestCodegen(unittest.TestCase):
         for pipeline in cc.TDM_PIPELINES:
             with self.subTest(pipeline=pipeline, tile_k=192):
                 self.assertEqual(_generate(pipeline, "gfx1250", tile_k=192), [])
+        for pipeline in cc.PACKED_B_PIPELINES + ("comp_async",):
+            with self.subTest(pipeline=pipeline, tile_k=192):
+                self.assertEqual(_generate(pipeline, "gfx1250", tile_k=192), [])
+        with self.subTest(pipeline="comp_async", tile="128x192x256"):
+            self.assertEqual(_generate("comp_async", "gfx1250", tile_n=192, tile_k=256), [])
 
     def test_accepted_configs_emit_one_kernel(self):
         # Only preshufflev2 / preshuffle_tdm read host-packed B.

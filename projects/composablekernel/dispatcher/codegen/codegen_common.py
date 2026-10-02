@@ -1547,6 +1547,176 @@ def preshuffle_pipeline_reject_reason(
     return ""
 
 
+# =============================================================================
+# Preshuffle Validation (copied from tile_engine/ops/commons/gemm_validation_utils.py)
+# =============================================================================
+
+ELEMENT_SIZE_MAP = {
+    "fp16": 2,
+    "bf16": 2,
+    "fp32": 4,
+    "fp64": 8,
+    "fp8": 1,
+    "bf8": 1,
+    "int8": 1,
+}
+
+
+def _validate_preshuffle_vector_load(
+    warp_tile_m: int,
+    warp_tile_k: int,
+    datatype: str,
+    m_iter_per_warp: float,
+    wave_size: int = 64,
+    vector_load_size: int = 16,
+) -> bool:
+    """
+    Validate vector load alignment for preshuffle pipeline.
+
+    Checks: (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp / wave_size) % vector_load_size == 0
+    """
+    elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
+    access_size = (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp) / wave_size
+    return access_size % vector_load_size == 0
+
+
+def _validate_preshuffle_m0_m1_m2(
+    tile_m: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    datatype: str,
+    vector_load_size: int = 16,
+    warp_size: int = 64,
+) -> bool:
+    """
+    Validate M0, M1, M2 configuration for preshuffle matrix A row-major layout.
+    Ensures proper memory access pattern alignment.
+    """
+    try:
+        elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
+        MPerBlock = tile_m
+
+        # Calculate K1
+        K1 = vector_load_size / elem_size
+        if K1 != int(K1):
+            return False
+        K1 = int(K1)
+
+        # Calculate K0
+        if tile_k % K1 != 0:
+            return False
+        K0 = tile_k // K1
+
+        # Calculate M2
+        if warp_size % K0 != 0:
+            return False
+        M2 = warp_size // K0
+
+        # Calculate number of warps
+        NumWarps = warp_m * warp_n * warp_k
+        M0 = NumWarps
+
+        # Calculate M1
+        if (M2 * M0) == 0:
+            return False
+        if MPerBlock % (M2 * M0) != 0:
+            return False
+        M1 = MPerBlock // (M2 * M0)
+
+        # Validate: M0 * M1 * M2 == MPerBlock
+        return (M0 * M1 * M2) == MPerBlock
+
+    except (ZeroDivisionError, ValueError):
+        return False
+
+
+def is_preshuffle_config_valid(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    datatype: str,
+    warp_size: int = 64,
+) -> bool:
+    """
+    Comprehensive preshuffle configuration validation.
+    Copied from tile_engine/ops/commons/gemm_validation_utils.py
+    """
+    # Basic divisibility checks
+    if tile_m % (warp_m * warp_tile_m) != 0:
+        return False
+    if tile_n % (warp_n * warp_tile_n) != 0:
+        return False
+    if tile_k % (warp_k * warp_tile_k) != 0:
+        return False
+
+    # Calculate m_iter_per_warp
+    m_iter_per_warp = tile_m / (warp_m * warp_tile_m)
+
+    # Validate vector load alignment
+    if not _validate_preshuffle_vector_load(
+        warp_tile_m,
+        warp_tile_k,
+        datatype,
+        m_iter_per_warp,
+        wave_size=warp_size,
+        vector_load_size=16,
+    ):
+        return False
+
+    # Validate M0/M1/M2 configuration
+    if not _validate_preshuffle_m0_m1_m2(
+        tile_m,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        datatype,
+        vector_load_size=16,
+        warp_size=warp_size,
+    ):
+        return False
+
+    return True
+
+
+def warp_size_for_arch(gpu_target: str) -> int:
+    return 64 if gpu_target.startswith("gfx9") else 32
+
+
+def preshuffle_tile_reject_reason(
+    pipeline, gpu_target, dtype, tile_m, tile_n, tile_k, warp_m, warp_n, warp_k,
+    warp_tile_m, warp_tile_n, warp_tile_k,
+) -> str:
+    """Tile rules the preshuffle kernels static_assert on; "" when the tile is valid."""
+    warp_size = warp_size_for_arch(gpu_target)
+    if pipeline in PACKED_B_PIPELINES and not is_preshuffle_config_valid(
+        tile_m, tile_n, tile_k, warp_m, warp_n, warp_k, warp_tile_m, warp_tile_n,
+        warp_tile_k, dtype, warp_size,
+    ):
+        return (
+            f"preshuffle {pipeline} packed-B M0/M1/M2 or vector-load rule rejects "
+            f"{tile_m}x{tile_n}x{tile_k}"
+        )
+    # comp_async loads A (tile_m x tile_k) and B (tile_n x tile_k) through
+    # warp-raked distributions whose K threads must tile a whole wave.
+    if pipeline == "comp_async" and not all(
+        _validate_preshuffle_m0_m1_m2(
+            mn, tile_k, warp_m, warp_n, warp_k, dtype, warp_size=warp_size
+        )
+        for mn in (tile_m, tile_n)
+    ):
+        return f"preshuffle comp_async tile {tile_m}x{tile_n}x{tile_k} does not cover a whole wave"
+    return ""
+
+
 def iter_quant_axes(
     config: dict,
     *,

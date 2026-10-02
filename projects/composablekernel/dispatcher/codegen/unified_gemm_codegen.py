@@ -47,6 +47,8 @@ from codegen_common import (
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
     normalize_gfx_arch,
+    is_preshuffle_config_valid,  # noqa: F401 (re-exported)
+    warp_size_for_arch,
 )
 
 # Pipelines a preshuffle config may name explicitly; anything else is a
@@ -69,146 +71,6 @@ except ImportError:
     ArchFilter = None
     ArchKernelConfig = None
     OperatorType = None
-
-
-# =============================================================================
-# Preshuffle Validation (copied from tile_engine/ops/commons/gemm_validation_utils.py)
-# =============================================================================
-
-ELEMENT_SIZE_MAP = {
-    "fp16": 2,
-    "bf16": 2,
-    "fp32": 4,
-    "fp64": 8,
-    "fp8": 1,
-    "bf8": 1,
-    "int8": 1,
-}
-
-
-def _validate_preshuffle_vector_load(
-    warp_tile_m: int,
-    warp_tile_k: int,
-    datatype: str,
-    m_iter_per_warp: float,
-    wave_size: int = 64,
-    vector_load_size: int = 16,
-) -> bool:
-    """
-    Validate vector load alignment for preshuffle pipeline.
-
-    Checks: (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp / wave_size) % vector_load_size == 0
-    """
-    elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
-    access_size = (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp) / wave_size
-    return access_size % vector_load_size == 0
-
-
-def _validate_preshuffle_m0_m1_m2(
-    tile_m: int,
-    tile_k: int,
-    warp_m: int,
-    warp_n: int,
-    warp_k: int,
-    datatype: str,
-    vector_load_size: int = 16,
-    warp_size: int = 64,
-) -> bool:
-    """
-    Validate M0, M1, M2 configuration for preshuffle matrix A row-major layout.
-    Ensures proper memory access pattern alignment.
-    """
-    try:
-        elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
-        MPerBlock = tile_m
-
-        # Calculate K1
-        K1 = vector_load_size / elem_size
-        if K1 != int(K1):
-            return False
-        K1 = int(K1)
-
-        # Calculate K0
-        if tile_k % K1 != 0:
-            return False
-        K0 = tile_k // K1
-
-        # Calculate M2
-        if warp_size % K0 != 0:
-            return False
-        M2 = warp_size // K0
-
-        # Calculate number of warps
-        NumWarps = warp_m * warp_n * warp_k
-        M0 = NumWarps
-
-        # Calculate M1
-        if (M2 * M0) == 0:
-            return False
-        if MPerBlock % (M2 * M0) != 0:
-            return False
-        M1 = MPerBlock // (M2 * M0)
-
-        # Validate: M0 * M1 * M2 == MPerBlock
-        return (M0 * M1 * M2) == MPerBlock
-
-    except (ZeroDivisionError, ValueError):
-        return False
-
-
-def is_preshuffle_config_valid(
-    tile_m: int,
-    tile_n: int,
-    tile_k: int,
-    warp_m: int,
-    warp_n: int,
-    warp_k: int,
-    warp_tile_m: int,
-    warp_tile_n: int,
-    warp_tile_k: int,
-    datatype: str,
-    warp_size: int = 64,
-) -> bool:
-    """
-    Comprehensive preshuffle configuration validation.
-    Copied from tile_engine/ops/commons/gemm_validation_utils.py
-    """
-    # Basic divisibility checks
-    if tile_m % (warp_m * warp_tile_m) != 0:
-        return False
-    if tile_n % (warp_n * warp_tile_n) != 0:
-        return False
-    if tile_k % (warp_k * warp_tile_k) != 0:
-        return False
-
-    # Calculate m_iter_per_warp
-    m_iter_per_warp = tile_m / (warp_m * warp_tile_m)
-
-    # Validate vector load alignment
-    if not _validate_preshuffle_vector_load(
-        warp_tile_m,
-        warp_tile_k,
-        datatype,
-        m_iter_per_warp,
-        wave_size=warp_size,
-        vector_load_size=16,
-    ):
-        return False
-
-    # Validate M0/M1/M2 configuration
-    if not _validate_preshuffle_m0_m1_m2(
-        tile_m,
-        tile_k,
-        warp_m,
-        warp_n,
-        warp_k,
-        datatype,
-        vector_load_size=16,
-        warp_size=warp_size,
-    ):
-        return False
-
-    return True
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -2063,7 +1925,7 @@ class UnifiedGemmCodegen:
                         trait=trait,
                         variant=variant,
                         preshuffle=trait.pipeline in PACKED_B_PIPELINES,
-                        block_size=tile.warp_m * tile.warp_n * tile.warp_k * (64 if self.gpu_target.startswith("gfx9") else 32),
+                        block_size=tile.warp_m * tile.warp_n * tile.warp_k * warp_size_for_arch(self.gpu_target),
                         permute_n=bool(self.config.get("permute_n", False)),
                     )
                 )
@@ -2290,24 +2152,6 @@ class UnifiedGemmCodegen:
                 GemmVariant.STREAM_K: OperatorType.GEMM_STREAMK,
             }
             operator = variant_to_operator.get(variant, OperatorType.GEMM)
-
-        # Packed-B preshuffle validation (comprehensive CK-specific checks); the
-        # ordinary-B compute pipelines use the standard GEMM rules.
-        if variant == GemmVariant.PRESHUFFLE and pipeline in PACKED_B_PIPELINES:
-            if not is_preshuffle_config_valid(
-                tile_m=tile.tile_m,
-                tile_n=tile.tile_n,
-                tile_k=tile.tile_k,
-                warp_m=tile.warp_m,
-                warp_n=tile.warp_n,
-                warp_k=tile.warp_k,
-                warp_tile_m=tile.warp_tile_m,
-                warp_tile_n=tile.warp_tile_n,
-                warp_tile_k=tile.warp_tile_k,
-                datatype=self.datatype,
-                warp_size=64 if self.gpu_target.startswith("gfx9") else 32,
-            ):
-                return False
 
         return self.arch_filter.is_kernel_valid(
             datatype_a=dtype_a,

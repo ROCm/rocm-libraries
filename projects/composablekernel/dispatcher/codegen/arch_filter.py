@@ -40,7 +40,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import logging
-from codegen_common import PACKED_B_PIPELINES, preshuffle_pipeline_reject_reason
+from codegen_common import (
+    PACKED_B_PIPELINES,
+    preshuffle_pipeline_reject_reason,
+    preshuffle_tile_reject_reason,
+)
 
 from codegen_common import (
     CommonTypeMappings,
@@ -794,6 +798,19 @@ class ArchFilter:
                 warp_tile_k=config.warp_tile_k,
                 warp_k=config.warp_k,
                 tile_k=config.tile_k,
+            ) or preshuffle_tile_reject_reason(
+                config.pipeline,
+                self.gpu_arch,
+                config.datatype_b,
+                config.tile_m,
+                config.tile_n,
+                config.tile_k,
+                config.warp_m,
+                config.warp_n,
+                config.warp_k,
+                config.warp_tile_m,
+                config.warp_tile_n,
+                config.warp_tile_k,
             )
             if reason:
                 result.add_error(reason)
@@ -895,7 +912,7 @@ class ArchFilter:
         uses_gfx1250_base_lds = is_gfx1250_tdm or (
             is_gfx1250
             and config.pipeline == "comp_async"
-            and config.operator == OperatorType.GEMM
+            and config.operator in (OperatorType.GEMM, OperatorType.GEMM_PRESHUFFLE)
         )
         if uses_gfx1250_base_lds:
             # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
