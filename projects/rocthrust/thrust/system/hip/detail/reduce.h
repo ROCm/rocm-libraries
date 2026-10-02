@@ -52,15 +52,14 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 THRUST_NAMESPACE_BEGIN
 
-// forward declare generic reduce
-// to circumvent circular dependency
+// Forward declare generic reduce circumvent circular dependency.
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
 T THRUST_HOST_DEVICE
 reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
@@ -68,6 +67,15 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        InputIterator last,
        T init,
        BinaryFunction binary_op);
+
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
+void THRUST_HOST_DEVICE reduce_into(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator output,
+  T init,
+  BinaryFunction binary_op);
 
 namespace hip_rocprim
 {
@@ -168,7 +176,7 @@ THRUST_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, In
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
   return hip_rocprim::reduce_n(policy, first, num_items, init, binary_op);
 }
 

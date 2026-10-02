@@ -63,8 +63,8 @@ template <typename KeysIt,
 inline void
 __partial_sort(thrust::hip_rocprim::par_t policy, KeysIt first, KeysIt middle, KeysIt last, CompareOp compare_op)
 {
-  const size_t count = static_cast<size_t>(thrust::distance(first, last));
-  const size_t n     = static_cast<size_t>(thrust::distance(first, middle));
+  const size_t count = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t n     = static_cast<size_t>(_THRUST_STD::distance(first, middle));
 
   if (count == 0 || n == 0)
   {
@@ -107,8 +107,8 @@ inline void __partial_sort_copy(
   RandomIt d_last,
   CompareOp compare_op)
 {
-  const size_t count   = static_cast<size_t>(thrust::distance(first, last));
-  const size_t d_count = static_cast<size_t>(thrust::distance(d_first, d_last));
+  const size_t count   = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t d_count = static_cast<size_t>(_THRUST_STD::distance(d_first, d_last));
 
   if (count == 0 || d_count == 0)
   {
@@ -146,8 +146,8 @@ template <typename KeysIt,
             nullptr>
 inline void __nth_element(thrust::hip_rocprim::par_t policy, KeysIt first, KeysIt nth, KeysIt last, CompareOp compare_op)
 {
-  const size_t count = static_cast<size_t>(thrust::distance(first, last));
-  const size_t n     = static_cast<size_t>(thrust::distance(first, nth));
+  const size_t count = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t n     = static_cast<size_t>(_THRUST_STD::distance(first, nth));
 
   if (count == 0)
   {
@@ -319,7 +319,7 @@ inline void partial_sort(execution::parallel_unsequenced_policy policy, KeysIt f
 {
   ::hipstd::warn_if_no_xnack();
   using item_type = thrust::detail::it_value_t<KeysIt>;
-  std::partial_sort(policy, first, middle, last, thrust::less<item_type>());
+  std::partial_sort(policy, first, middle, last, _THRUST_STD::less<item_type>());
 }
 // END PARTIAL_SORT
 
@@ -392,7 +392,7 @@ inline void partial_sort_copy(
 {
   ::hipstd::warn_if_no_xnack();
   using item_type = thrust::detail::it_value_t<ForwardIt>;
-  std::partial_sort_copy(policy, first, last, d_first, d_last, thrust::less<item_type>());
+  std::partial_sort_copy(policy, first, last, d_first, d_last, _THRUST_STD::less<item_type>());
 }
 // END PARTIAL_SORT_COPY
 
@@ -539,7 +539,7 @@ inline void nth_element(execution::parallel_unsequenced_policy policy, KeysIt fi
 {
   ::hipstd::warn_if_no_xnack();
   using item_type = thrust::detail::it_value_t<KeysIt>;
-  std::nth_element(policy, first, nth, last, thrust::less<item_type>());
+  std::nth_element(policy, first, nth, last, _THRUST_STD::less<item_type>());
 }
 // END NTH_ELEMENT
 } // namespace std

@@ -56,6 +56,8 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(tuple)
+#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -65,9 +67,6 @@ class zip_iterator;
 
 namespace detail
 {
-template <typename... Ts>
-using minimum_category = minimum_type<Ts...>;
-
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename IteratorTuple>
 struct make_zip_iterator_base
@@ -78,8 +77,15 @@ struct make_zip_iterator_base
 template <typename... Its>
 struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
 {
+  // We need this to make proxy iterators work because those have a void reference type
+  template <class Iter>
+  using zip_iterator_reference_t =
+    _THRUST_STD::conditional_t<_THRUST_STD::is_same_v<it_reference_t<Iter>, void>,
+                               decltype(*_THRUST_STD::declval<Iter>()),
+                               it_reference_t<Iter>>;
+
   // reference type is the type of the tuple obtained from the iterator's reference types.
-  using reference = tuple_of_iterator_references<it_reference_t<Its>...>;
+  using reference = tuple_of_iterator_references<zip_iterator_reference_t<Its>...>;
 
   // Boost's Value type is the same as reference type. using value_type = reference;
   using value_type = _THRUST_STD::tuple<it_value_t<Its>...>;
@@ -88,15 +94,10 @@ struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
   using difference_type = it_difference_t<_THRUST_STD::tuple_element_t<0, _THRUST_STD::tuple<Its...>>>;
 
   // Iterator system is the minimum system tag in the iterator tuple
-  using system = _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_system_t<Its>...>,
-                                               any_system_tag,
-                                               _THRUST_STD::__type_quote_trait<minimum_system>>;
+  using system = minimum_system_t<iterator_system_t<Its>...>;
 
   // Traversal category is the minimum traversal category in the iterator tuple
-  using traversal_category =
-    _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_traversal_t<Its>...>,
-                                  random_access_traversal_tag,
-                                  _THRUST_STD::__type_quote_trait<minimum_category>>;
+  using traversal_category = minimum_type<iterator_traversal_t<Its>...>;
 
   // The iterator facade type from which the zip iterator will be derived.
   using type =
@@ -122,7 +123,7 @@ public:
   template <typename Iterator>
   inline THRUST_HOST_DEVICE void operator()(Iterator& it) const
   {
-    thrust::advance(it, m_step);
+    _THRUST_STD::advance(it, m_step);
   }
 
 private:
@@ -191,7 +192,7 @@ struct tuple_meta_accumulate;
 template <class BinaryMetaFun, typename StartType>
 struct tuple_meta_accumulate<thrust::tuple<>, BinaryMetaFun, StartType>
 {
-  using type = typename thrust::detail::identity_<StartType>::type;
+  using type = typename _THRUST_STD::type_identity<StartType>::type;
 };
 
 template <class BinaryMetaFun, typename StartType, typename T, typename... Ts>
@@ -489,6 +490,16 @@ public:
       : m_iterator_tuple(iterator_tuple)
   {}
 
+  //! This constructor creates a new \p zip_iterator from multiple iterators.
+  //!
+  //! \param iterators The iterators to zip.
+  template <class... Iterators,
+            _THRUST_STD::enable_if_t<(sizeof...(Iterators) != 0), int>                                  = 0,
+            _THRUST_STD::enable_if_t<_THRUST_STD::is_constructible_v<IteratorTuple, Iterators...>, int> = 0>
+  inline THRUST_HOST_DEVICE zip_iterator(Iterators&&... iterators)
+      : m_iterator_tuple(_THRUST_STD::forward<Iterators>(iterators)...)
+  {}
+
   //! This copy constructor creates a new \p zip_iterator from another \p zip_iterator.
   //!
   //! \param other The \p zip_iterator to copy.
@@ -551,7 +562,7 @@ private:
   template <size_t... Is>
   inline THRUST_HOST_DEVICE void advance_impl(typename super_t::difference_type n, index_sequence<Is...>)
   {
-    (..., thrust::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
+    (..., _THRUST_STD::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
   }
 #endif
 
@@ -619,6 +630,9 @@ private:
 
   //! \endcond
 };
+
+template <class... Iterators>
+THRUST_HOST_DEVICE zip_iterator(Iterators...) -> zip_iterator<_THRUST_STD::tuple<Iterators...>>;
 
 //! \p make_zip_iterator creates a \p zip_iterator from a \p tuple of iterators.
 //!

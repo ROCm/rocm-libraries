@@ -219,18 +219,18 @@ struct bit_rshift
     return compose(functor{}, a, b);                                                                             \
   }
 
-MAKE_BINARY_COMPOSITE(==, thrust::equal_to<>)
-MAKE_BINARY_COMPOSITE(!=, thrust::not_equal_to<>)
-MAKE_BINARY_COMPOSITE(<, thrust::less<>)
-MAKE_BINARY_COMPOSITE(<=, thrust::less_equal<>)
-MAKE_BINARY_COMPOSITE(>, thrust::greater<>)
-MAKE_BINARY_COMPOSITE(>=, thrust::greater_equal<>)
+MAKE_BINARY_COMPOSITE(==, _THRUST_STD::equal_to<>)
+MAKE_BINARY_COMPOSITE(!=, _THRUST_STD::not_equal_to<>)
+MAKE_BINARY_COMPOSITE(<, _THRUST_STD::less<>)
+MAKE_BINARY_COMPOSITE(<=, _THRUST_STD::less_equal<>)
+MAKE_BINARY_COMPOSITE(>, _THRUST_STD::greater<>)
+MAKE_BINARY_COMPOSITE(>=, _THRUST_STD::greater_equal<>)
 
-MAKE_BINARY_COMPOSITE(+, thrust::plus<>)
-MAKE_BINARY_COMPOSITE(-, thrust::minus<>)
-MAKE_BINARY_COMPOSITE(*, thrust::multiplies<>)
-MAKE_BINARY_COMPOSITE(/, thrust::divides<>)
-MAKE_BINARY_COMPOSITE(%, thrust::modulus<>)
+MAKE_BINARY_COMPOSITE(+, _THRUST_STD::plus<>)
+MAKE_BINARY_COMPOSITE(-, _THRUST_STD::minus<>)
+MAKE_BINARY_COMPOSITE(*, _THRUST_STD::multiplies<>)
+MAKE_BINARY_COMPOSITE(/, _THRUST_STD::divides<>)
+MAKE_BINARY_COMPOSITE(%, _THRUST_STD::modulus<>)
 
 MAKE_BINARY_COMPOSITE(+=, plus_equal)
 MAKE_BINARY_COMPOSITE(-=, minus_equal)
@@ -238,12 +238,12 @@ MAKE_BINARY_COMPOSITE(*=, multiplies_equal)
 MAKE_BINARY_COMPOSITE(/=, divides_equal)
 MAKE_BINARY_COMPOSITE(%=, modulus_equal)
 
-MAKE_BINARY_COMPOSITE(&&, thrust::logical_and<>)
-MAKE_BINARY_COMPOSITE(||, thrust::logical_or<>)
+MAKE_BINARY_COMPOSITE(&&, _THRUST_STD::logical_and<>)
+MAKE_BINARY_COMPOSITE(||, _THRUST_STD::logical_or<>)
 
-MAKE_BINARY_COMPOSITE(&, thrust::bit_and<>)
-MAKE_BINARY_COMPOSITE(|, thrust::bit_or<>)
-MAKE_BINARY_COMPOSITE(^, thrust::bit_xor<>)
+MAKE_BINARY_COMPOSITE(&, _THRUST_STD::bit_and<>)
+MAKE_BINARY_COMPOSITE(|, _THRUST_STD::bit_or<>)
+MAKE_BINARY_COMPOSITE(^, _THRUST_STD::bit_xor<>)
 MAKE_BINARY_COMPOSITE(<<, bit_lshift)
 MAKE_BINARY_COMPOSITE(>>, bit_rshift)
 
@@ -347,10 +347,10 @@ struct bit_not
   }
 
 MAKE_UNARY_COMPOSITE(+, unary_plus)
-MAKE_UNARY_COMPOSITE(-, thrust::negate<>)
+MAKE_UNARY_COMPOSITE(-, _THRUST_STD::negate<>)
 MAKE_UNARY_COMPOSITE(++, prefix_increment)
 MAKE_UNARY_COMPOSITE(--, prefix_decrement)
-MAKE_UNARY_COMPOSITE(!, thrust::logical_not<>)
+MAKE_UNARY_COMPOSITE(!, _THRUST_STD::logical_not<>)
 MAKE_UNARY_COMPOSITE(~, bit_not)
 
 #undef MAKE_UNARY_COMPOSITE

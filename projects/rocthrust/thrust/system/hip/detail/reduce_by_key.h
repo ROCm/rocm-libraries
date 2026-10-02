@@ -59,7 +59,7 @@
 #    include _THRUST_STD_INCLUDE(iterator)
 #  endif
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
@@ -184,7 +184,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 
   using size_type = thrust::detail::it_difference_t<KeysInputIt>;
 
-  size_type num_items       = thrust::distance(keys_first, keys_last);
+  size_type num_items       = _THRUST_STD::distance(keys_first, keys_last);
   size_t temp_storage_bytes = 0;
   hipStream_t stream        = hip_rocprim::stream(policy);
   bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
@@ -352,7 +352,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
 {
   using KeyT = thrust::detail::it_value_t<KeyInputIt>;
   return hip_rocprim::reduce_by_key(
-    policy, keys_first, keys_last, values_first, keys_output, values_output, equal_to<KeyT>());
+    policy, keys_first, keys_last, values_first, keys_output, values_output, _THRUST_STD::equal_to<KeyT>());
 }
 
 } // namespace hip_rocprim

@@ -40,7 +40,6 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
@@ -60,10 +59,10 @@ namespace __copy
 {
 template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
-  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::true_type)
+  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, _THRUST_STD::true_type)
 {
   using InputTy = thrust::detail::it_value_t<InputIt>;
-  const auto n  = thrust::distance(first, last);
+  const auto n  = _THRUST_STD::distance(first, last);
   if (n > 0)
   {
     hipError_t status;
@@ -80,9 +79,9 @@ OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
 
 template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
-  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::false_type)
+  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, _THRUST_STD::false_type)
 {
-  return hip_rocprim::transform(policy, first, last, result, ::internal::identity{});
+  return hip_rocprim::transform(policy, first, last, result, _THRUST_STD::identity{});
 }
 
 template <class Derived, class InputIt, class OutputIt>
