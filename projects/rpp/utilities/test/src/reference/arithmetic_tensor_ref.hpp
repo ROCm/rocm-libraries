@@ -96,21 +96,16 @@ inline double arithmetic_tensor_scalar(double a, double b, ArithmeticTensorOp op
 // Stores the exact result into T: round-to-nearest + saturate for the integer dtypes, a plain
 // (unclamped) conversion for the floating-point ones. Rpp16f is a class type, so it takes the
 // non-integral branch.
-template <typename T, bool Integral = std::is_integral<T>::value>
-struct ArithmeticTensorStore {
-    static T apply(double v) {
-        return from_double<T>(v);
-    }
-};
-
 template <typename T>
-struct ArithmeticTensorStore<T, true> {
-    static T apply(double v) {
+T arithmetic_tensor_store(double v) {
+    if constexpr (std::is_integral_v<T>) {
         const double lo = static_cast<double>(std::numeric_limits<T>::lowest());
         const double hi = static_cast<double>(std::numeric_limits<T>::max());
         return static_cast<T>(clampd(std::nearbyint(v), lo, hi));
+    } else {
+        return from_double<T>(v);
     }
-};
+}
 
 template <typename T>
 void arithmetic_tensor_reference(const T* src1, const T* src2, T* dst, const RpptGenericDesc& out,
@@ -120,7 +115,7 @@ void arithmetic_tensor_reference(const T* src1, const T* src2, T* dst, const Rpp
         out, s1, s2, [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2, const NdDims&) {
             const double v =
                 arithmetic_tensor_scalar(to_double(src1[idx1]), to_double(src2[idx2]), op);
-            dst[outIdx] = ArithmeticTensorStore<T>::apply(v);
+            dst[outIdx] = arithmetic_tensor_store<T>(v);
         });
 }
 
