@@ -71,6 +71,9 @@ def main():
             "bundle-failures",
             "helper-failures",
             *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
+            "hipkittens-backend",
+            "hipkittens-gemm",
+            "hipkittens-install",
             "disabled-api",
         ),
         help="Run only the selected regression routes (default: all)",
@@ -415,6 +418,41 @@ def main():
             )
         )
 
+    # Built only with HIPBLASLT_JIT_ENABLE_HIPKITTENS; the kernels need gfx950.
+    hipkittens_test = staging / "hipblaslt-jit-hipkittens-test"
+    skipped = {}
+    for name in ("hipkittens-backend", "hipkittens-gemm", "hipkittens-install"):
+        if not hipkittens_test.exists():
+            skipped[name] = "the build has no HipKittens backend"
+        elif args.architecture != "gfx950":
+            skipped[name] = f"HipKittens has no {args.architecture} kernel"
+    commands += [
+        (
+            "hipkittens-backend",
+            [str(hipkittens_test), "host", str(output / "hipkittens-backend")],
+            {},
+            300,
+        ),
+        (
+            "hipkittens-gemm",
+            [str(hipkittens_test), "gpu"],
+            {"HIPBLASLT_JIT_LIBRARY_PATH": str(output / "hipkittens-library")},
+            900,
+        ),
+        (
+            "hipkittens-install",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_install.py"),
+                str(build),
+                str(hipkittens_test),
+                str(output / "hipkittens-install"),
+            ],
+            {},
+            900,
+        ),
+    ]
+
     bench_script = source / "projects/hipblaslt/clients/bench/test_jit_gemm.py"
     commands.append(
         (
@@ -447,6 +485,9 @@ def main():
                 name == "splitk-api" and any(case in args.case for case in replays)
             )
         ):
+            continue
+        if name in skipped:
+            print(f"SKIP {name}: {skipped[name]}", flush=True)
             continue
         print(f"RUN {name} on native {args.architecture}", flush=True)
         (output / f"{name}-command.json").write_text(json.dumps(command, indent=2))
@@ -481,6 +522,7 @@ def main():
                     "-B",
                     str(build),
                     "-DHIPBLASLT_ENABLE_JIT=OFF",
+                    "-DHIPBLASLT_JIT_ENABLE_HIPKITTENS=OFF",
                 ],
                 env=env,
                 stdout=log,
