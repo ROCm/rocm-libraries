@@ -17,15 +17,16 @@ vLLM v1 serving path rather than in isolated microbenchmarks alone.
 | Regime | compute-bound, ~5500 FLOP/byte | bandwidth-bound, ~4 FLOP/byte |
 | Reported as | TFLOP/s | **GB/s** — see [§5.1](#51-why-decode-must-be-reported-in-gbs) |
 | Isolated best | **1.57×** at S=1024, **1.14×** at S=8192 | **1.09×** at Sk=32768 |
-| End-to-end | **1.109× TTFT** at a 30720-token prompt | **1.019× ITL** at ctx32k |
+| End-to-end | **1.073× TTFT** at a 30720-token prompt | **1.024× ITL** at ctx32k |
 | Default | on (`ROCKE_MIN_SEQLEN=512`) | off (`ROCKE_PAGED_DECODE=1` to enable) |
 
 **Together, on one Qwen3-8B request at batch 1 —** `generate(30720 prompt tokens, 304
-output tokens)` takes **68.93 s** with both kernels gated off and **64.57 s** with both
-on: a **1.0676×** speedup on the number a user actually waits for, and **10.79 → 10.98
-generated tokens/s**. Across the context ladder the geomean is **1.0231×**. The two wins
-are **additive** — measured combined speedup lands within 0.11 points of the product of
-the two single-kernel speedups at every context length ([§7](#7-both-kernels-together)).
+output tokens)` takes **62.09 s** with both kernels gated off and **59.12 s** with both
+on: a **1.0503×** speedup on the number a user actually waits for, and **10.83 → 11.06
+generated tokens/s**. Across the context ladder the geomean is **1.0201×**. The two wins
+are **additive to within 0.04 points** of the product of the two single-kernel speedups
+through ctx16k; at ctx32k the product over-predicts by ~0.4 points
+([§7](#7-both-kernels-together)).
 
 > All e2e figures on this page are **batch 1**. This part serves one user at a time, so
 > batching is not the operating point; where a batched number exists it is labelled.
@@ -222,15 +223,16 @@ minimum of 3 reps, dispatch counters asserted, **all arms token-identical**.
 
 ### 4.1 The TTFT ladder, shipped config vs matched Triton control
 
-From the combined harness ([§7](#7-both-kernels-together)), `prefill_only` arm, B=1:
+From the combined sweep ([§7](#7-both-kernels-together), reproduced by
+[`e2e_combined_bench.py`](e2e_combined_bench.py)), `prefill_only` arm, B=1:
 
 | context | prompt tokens | Triton TTFT (ms) | swapqk TTFT (ms) | speedup |
 |---|---:|---:|---:|---:|
-| ctx2k | 2048 | 1688.9 | 1655.8 | 1.0200× |
-| ctx4k | 4096 | 3292.7 | 3220.0 | 1.0226× |
-| ctx8k | 8192 | 7020.9 | 6760.0 | 1.0386× |
-| ctx16k | 16384 | 16774.3 | 15557.1 | 1.0782× |
-| ctx32k | 30720 | 40985.8 | 36966.5 | **1.1087×** |
+| ctx2k | 2048 | 1596.3 | 1566.4 | 1.0191× |
+| ctx4k | 4096 | 2988.4 | 2923.8 | 1.0221× |
+| ctx8k | 8192 | 6266.1 | 6052.6 | 1.0353× |
+| ctx16k | 16384 | 14485.5 | 13586.7 | 1.0662× |
+| ctx32k | 30720 | 34107.2 | 31784.4 | **1.0731×** |
 
 The win **grows with prompt length** because attention is O(S²) while the rest of the
 layer is O(S) — its share of prefill rises with S, and so does the share of the win that
@@ -358,24 +360,25 @@ the evidence: the small-Sk numbers are noise around a null.
 Qwen3-8B, B=1, `decode_only` arm against a matched control (same backend, decode gate
 off so AMD's HIP kernel runs). **ITL measured as a slope**, `(t_hi − t_lo)/256` from two
 measured generation lengths in the same session — see
-[§10](#10-measurement-discipline) rule 14.
+[§10](#10-measurement-discipline) rule 14. Same sweep as §7, reproduced by
+[`e2e_combined_bench.py --ctx-sweep`](e2e_combined_bench.py).
 
 | context | ITL, HIP (ms) | ITL, rocKE (ms) | speedup |
 |---|---:|---:|---:|
-| ctx2k | 71.912 | 71.905 | 1.0001× |
-| ctx4k | 73.358 | 73.307 | 1.0007× |
-| ctx8k | 76.379 | 76.046 | 1.0044× |
-| ctx16k | 82.293 | 81.771 | 1.0064× |
-| ctx32k | 92.674 | 90.977 | **1.0187×** |
+| ctx2k | 71.534 | 71.417 | 1.0016× |
+| ctx4k | 72.987 | 72.798 | 1.0026× |
+| ctx8k | 75.760 | 75.505 | 1.0034× |
+| ctx16k | 81.853 | 81.119 | 1.0090× |
+| ctx32k | 92.309 | 90.106 | **1.0244×** |
 
-**The isolated 1.094× becomes 1.9% of ITL, and that is arithmetic, not disappointment.**
-Fit the control column: `ITL ≈ 70.35 ms + 7.25e-4 ms/token`. The intercept is everything
+**The isolated 1.094× becomes 2.4% of ITL, and that is arithmetic, not disappointment.**
+Fit the control column: `ITL ≈ 69.96 ms + 7.26e-4 ms/token`. The intercept is everything
 that is not attention — ~16.4 GB of weights streamed every single step. KV at 30720
-tokens is ~4.5 GB against that, so attention is **2.1% of ITL at ctx2k and 24.0% at
-ctx32k**. It closes exactly: 36 layers × (679 − 619 µs) ≈ 2.1 ms off a 92.7 ms step;
-measured 92.674 → 90.977.
+tokens is ~4.5 GB against that, so attention is **2.1% of ITL at ctx2k and 24.2% at
+ctx32k**. It closes: 36 layers × (679 − 619 µs) ≈ 2.16 ms off a 92.3 ms step; measured
+92.309 → 90.106, a 2.20 ms reduction.
 
-The 7.25e-4 ms/token slope implies **203 GB/s** of KV streaming inside the real model,
+The 7.26e-4 ms/token slope implies **203 GB/s** of KV streaming inside the real model,
 which agrees with the isolated rig's ~200 GB/s — the kernel does in vLLM what it does on
 the bench.
 
@@ -395,6 +398,7 @@ empty.
 This is the only measurement that answers "how much faster is my model?". One `LLM`
 instance, four arms patched as module attributes between `generate()` calls, all
 interleaved in a single session, **token-identical across arms** under greedy decode.
+Reproduced by [`e2e_combined_bench.py --ctx-sweep`](e2e_combined_bench.py).
 
 | arm | `_SWAPQK_MIN_SEQLEN` | `_PAGED_DECODE` |
 |---|---|---|
@@ -411,37 +415,41 @@ byte-identical to stock vLLM with a different backend selected.
 
 | context | P | `stock` | `both` | **speedup** | `prefill_only` | `decode_only` | product |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| ctx2k | 2048 | 23457.0 | 23433.8 | **1.0010×** | 1.0017× | 0.9998× | 1.0015 |
-| ctx4k | 4096 | 25499.7 | 25422.9 | **1.0030×** | 1.0023× | 1.0006× | 1.0028 |
-| ctx8k | 8192 | 30138.4 | 29802.4 | **1.0113×** | 1.0084× | 1.0031× | 1.0115 |
-| ctx16k | 16384 | 41683.1 | 40312.4 | **1.0340×** | 1.0300× | 1.0042× | 1.0343 |
-| ctx32k | 30720 | 68929.7 | 64566.9 | **1.0676×** | 1.0592× | 1.0068× | 1.0664 |
+| ctx2k | 2048 | 23261.4 | 23212.7 | **1.0021×** | 1.0012× | 1.0012× | 1.0023 |
+| ctx4k | 4096 | 25125.4 | 24977.2 | **1.0059×** | 1.0025× | 1.0035× | 1.0061 |
+| ctx8k | 8192 | 29231.9 | 28897.7 | **1.0116×** | 1.0077× | 1.0034× | 1.0112 |
+| ctx16k | 16384 | 39340.5 | 38142.4 | **1.0314×** | 1.0247× | 1.0069× | 1.0318 |
+| ctx32k | 30720 | 62094.5 | 59118.5 | **1.0503×** | 1.0433× | 1.0104× | 1.0542 |
 
-Geomean across the ladder: **1.0231×**.
+Geomean across the ladder: **1.0201×**.
 
-**The two kernels are additive.** The `both` column and the product of the two
-single-kernel columns agree to within **0.11 points at every context length** — measured
-interference ranges from −0.05% to +0.11%. There is no interaction term to model: the
-prefill kernel does not change what decode reads, and decode does not change what prefill
-wrote.
+**The two kernels are additive through ctx16k.** The `both` column and the product of the
+two single-kernel columns agree to within **0.04 points** at ctx2k–ctx16k. There is no
+interaction term to model: the prefill kernel does not change what decode reads, and
+decode does not change what prefill wrote.
+
+At **ctx32k the product over-predicts by ~0.4 points** (1.0542 against a measured
+1.0503) — the two wins sub-add slightly at the longest context. That is ~8% of a
+5-point win, and it is the one row on this page where the composition is not clean. It
+is reported rather than explained; the mechanism is not established.
 
 **Generation rate**, the number a user perceives during streaming:
 
 | context | `stock` | `both` |
 |---|---:|---:|
-| ctx2k | 13.91 tok/s | 13.91 tok/s |
-| ctx8k | 13.09 tok/s | 13.14 tok/s |
-| ctx32k | 10.79 tok/s | **10.98 tok/s** |
+| ctx2k | 13.98 tok/s | 14.00 tok/s |
+| ctx8k | 13.20 tok/s | 13.26 tok/s |
+| ctx32k | 10.83 tok/s | **11.06 tok/s** |
 
 **ctx2k is a negative control and it behaves like one.** Both kernels are predicted to do
 nothing at 2048 tokens — the prompt is short enough that prefill attention is a rounding
-error, and the KV working set is inside the MALL. It reports 1.0010× and 13.91 → 13.91
+error, and the KV working set is inside the MALL. It reports 1.0021× and 13.98 → 14.00
 tok/s. An artifact that reports ≈0 where ≈0 is expected is what makes the ctx32k row
 credible.
 
 **There is deliberately no single combined scalar.** Total latency is
 `≈ TTFT(P) + (G−1)·ITL`, and that reweights the two kernels by an order of magnitude
-across the ladder — at ctx32k the win is 1.0592 prefill × 1.0068 decode, so it is
+across the ladder — at ctx32k the win is 1.0433 prefill × 1.0104 decode, so it is
 overwhelmingly a prefill win at B=1. Quote a context length, never an average.
 
 ### 7.1 Why the sweep runs under PIECEWISE cudagraphs
@@ -496,10 +504,10 @@ work per CTA.
 | VGPR / scratch | 216 / 0 | 216 / 0 | 256 / 168 B |
 
 `SQ_WAVES` is identical across all arms — same launch geometry, so this is the kernel.
-The gap to Triton on the texture-address path (the discriminator identified in the
-whitepaper) closes from **2.30× to 1.16×**. It was thought this would need a d-blocked
-epilogue to fit under the 256-VGPR wave32 ceiling; it did not — VGPR stayed at 216 with
-zero scratch at F=1, 2 and 4.
+The gap to Triton on the texture-address path (`TA_TA_BUSY`, the discriminator between
+the two implementations) closes from **2.30× to 1.16×**. It was thought this would need
+a d-blocked epilogue to fit under the 256-VGPR wave32 ceiling; it did not — VGPR stayed
+at 216 with zero scratch at F=1, 2 and 4.
 
 **Fusion is a constant factor, not a scaling fix.** It is a 1.46×/1.40× win at
 S=1024/2048 but a 0.82×/0.59× *loss* versus Triton at S=4096/8192 (crossover ≈ 3.3K),
@@ -799,11 +807,11 @@ like when you find one.
 
 ### 9.10 Expecting the decode win to track the bandwidth share
 
-The isolated decode kernel wins 1.094× at Sk=32768. Attention is 24.0% of ITL at that
-context. The tempting arithmetic — 24% of a 9.4% improvement ≈ 2.3% — is close enough to
-the measured 1.9% to feel like it works, and it does *not* generalise: at ctx8k the same
-arithmetic predicts ~0.4% and measures 0.44%, but at ctx2k it predicts ~0.1% and the
-measurement is indistinguishable from zero in either direction.
+The isolated decode kernel wins 1.094× at Sk=32768. Attention is 24.2% of ITL at that
+context. The tempting arithmetic — 24.2% of a 9.4% improvement ≈ 2.3% — is close enough
+to the measured 2.4% to feel like it works, and it does *not* generalise: at ctx8k the
+same arithmetic predicts 0.7% (7.9% share) and measures 0.34%, over-predicting by 2×.
+At ctx2k it predicts 0.2% and the measurement is barely above zero.
 
 The rule this produced is [§10](#10-measurement-discipline) rule 15: an isolated kernel
 speedup is an *upper bound* on the e2e effect, never an estimate of it. Compute the
@@ -883,7 +891,7 @@ Three more that decode added:
 And one reporting rule specific to this pair of kernels:
 
 > **Never confuse the three token rates.** An attention-only rate derived from an
-> isolated decode benchmark runs ~4× high (44.8 tok/s at ctx32k against a real 10.98).
+> isolated decode benchmark runs ~4× high (44.8 tok/s at ctx32k against a real 11.06).
 > A whole-request `tok_per_s` is dragged down by prefill. Only `decode_tok_per_s`
 > (`B × 1000 / ITL`) is the generation rate a user perceives. The three differ by
 > multiples, not percentages.
@@ -901,17 +909,6 @@ unified pool — it has PPID 1 and comm `VLLM::EngineCor`, so it does *not* matc
 | Document | What it covers |
 |---|---|
 | [`case_study_singlewave_fmha.md`](case_study_singlewave_fmha.md) | The earlier single-wave WMMA campaign and the ~11 TF plateau it reached — historical record, superseded by the swapqk rewrite |
-| [`swapqk_vs_triton_whitepaper.md`](../../../../docs/swapqk_vs_triton_whitepaper.md) | The SwapQK algorithm, the WMMA fragment layout, the original gap analysis, and §0's retractions |
-| [`status_plus_next_steps_08_11_2026.md`](../../../../docs/status_plus_next_steps_08_11_2026.md) | First operational record: the seven measurement defects, the 3.4% e2e regression, the priority list |
-| [`readme_repro_08_12_2026.md`](../../../../docs/readme_repro_08_12_2026.md) | Reproducing the published numbers — which reproduced, which did not, and the `qk_douter` verdict (§8.1) |
-| [`rocke_backend_impact_08_12_2026.md`](../../../../docs/rocke_backend_impact_08_12_2026.md) | The dense-vs-paged Triton finding (§9.7), in full |
-| [`status_plus_next_steps_08_12_2026.md`](../../../../docs/status_plus_next_steps_08_12_2026.md) | Second operational record; P0 closed |
-| [`gqa_head_fusion_08_16_2026.md`](../../../../docs/gqa_head_fusion_08_16_2026.md) | GQA head fusion (§8.2), the causal-trim bug, the scheduler sign flip, the swizzle probe |
-| [`long_seq_scaling_08_17_2026.md`](../../../../docs/long_seq_scaling_08_17_2026.md) | Why swapqk fell behind past ~3.3K: the L0 thrash diagnosis, with occupancy/spills/LDS/bandwidth all ruled out |
-| [`adaptive_block_n_08_18_2026_not_necessary.md`](../../../../docs/adaptive_block_n_08_18_2026_not_necessary.md) | Sequence-adaptive `block_n` (§9.2) — shipped, then superseded the same day |
-| [`k_lds_staging_08_18_2026_v02.md`](../../../../docs/k_lds_staging_08_18_2026_v02.md) | Staging K in LDS (§8.3), and why the same lever lost 3× the first time |
-| [`paged_v_gather_08_19_2026.md`](../../../../docs/paged_v_gather_08_19_2026.md) | Paged V (§8.4), the full e2e sweep, and the waterfall trap |
-| [`paged_decode_splitk_09_09_2026.md`](../../../../docs/paged_decode_splitk_09_09_2026.md) | The decode kernel end to end: split-K design, `d_lanes`, `num_splits`, the MALL boundary, and the GB/s-vs-TFLOP/s framing |
 
 ---
 
@@ -968,23 +965,27 @@ python -m builders.gfx1151.attention.paged_decode_splitk_verify \
 Reports max abs error against a float64 CPU reference and the achieved GB/s — **not**
 TFLOP/s, for the reason in [§5.1](#51-why-decode-must-be-reported-in-gbs).
 
-**End-to-end.** The CI benchmark scripts in
-[`rocke/integrations/rocm-ci-dashboard/`](../../../../integrations/rocm-ci-dashboard/)
-are the maintained path; each emits one self-describing JSON artifact and each measures
-its own arm **and the paired control interleaved in one session**, so every reported
-speedup is a within-session ratio:
-
-| script | measures |
-|---|---|
-| `01` / `02` | isolated prefill attention, Triton vs swapqk |
-| `05` / `06` | Qwen3-8B combined prefill + decode, four arms (`--ctx-sweep` produces [§7](#7-both-kernels-together)) |
-| `07` / `08` | isolated paged decode, HIP vs rocKE split-K |
+**End-to-end.** One sweep produces all three e2e ladders — [§4.1](#41-the-ttft-ladder-shipped-config-vs-matched-triton-control)
+from the `prefill_only` arm, [§6](#6-decode-end-to-end-results) from `decode_only`, and
+[§7](#7-both-kernels-together) from all four:
 
 ```bash
-./06_e2e_qwen3_8b_combined_rocke.sh --ctx-sweep     # ~95 min, run detached
+python -m builders.gfx1151.attention.e2e_combined_bench --ctx-sweep   # ~95 min
 ```
 
-Before any sweep: `uptime` and `rocm-smi --showpids`. If the latter is not *"No KFD PIDs
+It needs a vLLM source checkout on `PYTHONPATH` exporting the `ROCKE_GFX1151` backend —
+that is the `~/vllm` entry above, and the backend it selects is the file committed here as
+[`rocke/integrations/vllm/rocm_rocke_attn.py`](../../../../integrations/vllm/rocm_rocke_attn.py).
+The sweep builds one `LLM`, patches the arms as module attributes between `generate()`
+calls, interleaves them in a single session, and **asserts the `ROCKE_STATS` dispatch
+counters on every measurement** — so a silently-declined gate fails the run instead of
+being reported as a result. Defaults are the published ones: `PIECEWISE` cudagraphs
+([§7.1](#71-why-the-sweep-runs-under-piecewise-cudagraphs)), minimum of 3 reps after a
+discarded warmup, ITL as a slope between two measured generation lengths
+([§10](#10-measurement-discipline)). Drop `--ctx-sweep` for the four named workloads, and
+run it detached — it is long enough that a dropped SSH session would kill it.
+
+Before any GPU run: `uptime` and `rocm-smi --showpids`. If the latter is not *"No KFD PIDs
 currently running"*, an orphan is holding ~88 GB and the run will die at startup.
 
 ---
