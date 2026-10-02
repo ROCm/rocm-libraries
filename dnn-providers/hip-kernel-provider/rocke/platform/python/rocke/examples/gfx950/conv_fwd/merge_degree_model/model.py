@@ -274,8 +274,14 @@ class Constants:
     """
 
     FIELDS = (
-        "b_aload_issue", "w_memory", "r_reuse", "d_cta_fixed", "cupar",
-        "c_footprint", "a_util", "q_brake",
+        "b_aload_issue",
+        "w_memory",
+        "r_reuse",
+        "d_cta_fixed",
+        "cupar",
+        "c_footprint",
+        "a_util",
+        "q_brake",
     )
 
 
@@ -293,11 +299,7 @@ def admissible(groups, tile_n, y, x, max_degree=64):
     """
     if y * x <= 1:
         return [1]
-    return [
-        gm
-        for gm in DEGREES
-        if gm <= min(tile_n, max_degree) and groups % gm == 0
-    ]
+    return [gm for gm in DEGREES if gm <= min(tile_n, max_degree) and groups % gm == 0]
 
 
 def cost(gm, *, groups, m, y, x, stride, tile_m, tile_n, tile_k, esize=2, k=DEFAULT):
@@ -312,8 +314,8 @@ def cost(gm, *, groups, m, y, x, stride, tile_m, tile_n, tile_k, esize=2, k=DEFA
     kpad = tile_k * -(-(y * x * gm) // tile_k)
 
     # A-load quality, both saturating in Gm but at different points.
-    vw = min(gm, VEC_BYTES // esize)          # vector width, saturates at dwordx4
-    u = min(1.0, gm * esize / LINE_BYTES)     # line utilisation, saturates later
+    vw = min(gm, VEC_BYTES // esize)  # vector width, saturates at dwordx4
+    u = min(1.0, gm * esize / LINE_BYTES)  # line utilisation, saturates later
 
     # The brake: elements of A a CTA must hold live, times the element size.
     footprint = tile_m * y * x * gm * esize
@@ -337,8 +339,19 @@ def cost(gm, *, groups, m, y, x, stride, tile_m, tile_n, tile_k, esize=2, k=DEFA
     return math.ceil(ctas / k.cupar) * per_cta
 
 
-def pick(groups, m, y, x, stride, tile_m, tile_n, tile_k=64, esize=2, k=DEFAULT,
-         max_degree=64):
+def pick(
+    groups,
+    m,
+    y,
+    x,
+    stride,
+    tile_m,
+    tile_n,
+    tile_k=64,
+    esize=2,
+    k=DEFAULT,
+    max_degree=64,
+):
     """Argmin of the cost over admissible degrees.
 
     Ties go to the smaller degree -- DEGREES is ascending and the comparison
@@ -350,8 +363,17 @@ def pick(groups, m, y, x, stride, tile_m, tile_n, tile_k=64, esize=2, k=DEFAULT,
     best, best_cost = 1, None
     for gm in admissible(groups, tile_n, y, x, max_degree):
         c = cost(
-            gm, groups=groups, m=m, y=y, x=x, stride=stride,
-            tile_m=tile_m, tile_n=tile_n, tile_k=tile_k, esize=esize, k=k,
+            gm,
+            groups=groups,
+            m=m,
+            y=y,
+            x=x,
+            stride=stride,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            esize=esize,
+            k=k,
         )
         if best_cost is None or c < best_cost * (1.0 - 1e-9):
             best, best_cost = gm, c

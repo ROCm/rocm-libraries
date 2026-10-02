@@ -48,10 +48,20 @@ def configs_for(spec, d):
         base = best[1]
         out.append(
             Config(
-                g["name"], g["n"], g["hi"], g["wi"], g["groups"], g["y"],
-                g["x"], g["stride"], g["dtype"],
-                {k: v / base for k, v in best.items()}, "measured",
-                mo=g["m"], dilation=g["dilation"], wo_=g["wo"],
+                g["name"],
+                g["n"],
+                g["hi"],
+                g["wi"],
+                g["groups"],
+                g["y"],
+                g["x"],
+                g["stride"],
+                g["dtype"],
+                {k: v / base for k, v in best.items()},
+                "measured",
+                mo=g["m"],
+                dilation=g["dilation"],
+                wo_=g["wo"],
             )
         )
     return out
@@ -99,8 +109,7 @@ def main():
 
     def tab_one(spec, which="test"):
         tm, tn, tk = (int(v) for v in spec.split("/")[0].split("x"))
-        sel = [c for c in by_tile[spec]
-               if (c.name in test_names) == (which == "test")]
+        sel = [c for c in by_tile[spec] if (c.name in test_names) == (which == "test")]
         return fitfast.tabulate(sel, tile_m=tm, tile_n=tn, tile_k=tk), sel
 
     Ttr = tab("train")
@@ -109,13 +118,13 @@ def main():
     shipped = np.array([getattr(model.DEFAULT, f) for f in fitfast.FIELDS])
 
     print("refitting on pooled TRAIN ...", flush=True)
-    p, key = fitfast.restarts(Ttr, args.draws, seeds, args.combine,
-                              brake=args.brake)
+    p, key = fitfast.restarts(Ttr, args.draws, seeds, args.combine, brake=args.brake)
     print(f"  pooled train geomean {key[0]:.4f}")
-    print("  shipped: " + "  ".join(f"{f}={v:.5g}"
-                                    for f, v in zip(fitfast.FIELDS, shipped)))
-    print("  refit  : " + "  ".join(f"{f}={v:.5g}"
-                                    for f, v in zip(fitfast.FIELDS, p)))
+    print(
+        "  shipped: "
+        + "  ".join(f"{f}={v:.5g}" for f, v in zip(fitfast.FIELDS, shipped))
+    )
+    print("  refit  : " + "  ".join(f"{f}={v:.5g}" for f, v in zip(fitfast.FIELDS, p)))
 
     print()
     print("=" * 92)
@@ -142,8 +151,7 @@ def main():
         # pooled number, the form transfers and only the constants were off; if
         # it is far above, the form itself is missing a tile_m mechanism.
         Tt, _ = tab_one(spec, "train")
-        po, _ = fitfast.restarts(Tt, args.draws, seeds, args.combine,
-                                 brake=args.brake)
+        po, _ = fitfast.restarts(Tt, args.draws, seeds, args.combine, brake=args.brake)
         go = ev(po)
         tot_s.append(gs)
         tot_r.append(gr)

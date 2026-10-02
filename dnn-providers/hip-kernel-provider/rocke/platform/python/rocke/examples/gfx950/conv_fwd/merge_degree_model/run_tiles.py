@@ -47,8 +47,15 @@ def main():
             print(f"[skip] {spec} — {csv.name} exists", flush=True)
             continue
         cmd = [
-            sys.executable, str(HERE / "measure_degrees.py"), args.shapes,
-            "--tile", spec, "-o", str(csv), "--jobs", str(args.jobs),
+            sys.executable,
+            str(HERE / "measure_degrees.py"),
+            args.shapes,
+            "--tile",
+            spec,
+            "-o",
+            str(csv),
+            "--jobs",
+            str(args.jobs),
         ]
         print(f"[run ] {spec:<20} ({src})", flush=True)
         t0 = time.time()

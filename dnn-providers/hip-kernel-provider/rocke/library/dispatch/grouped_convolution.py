@@ -1003,9 +1003,7 @@ def _fwd_merge_admissible(groups: int, tile_n: int, y: int, x: int) -> tuple:
     """
     if y * x <= 1:
         return (1,)
-    return tuple(
-        gm for gm in _FWD_MERGE_DEGREES if gm <= tile_n and groups % gm == 0
-    )
+    return tuple(gm for gm in _FWD_MERGE_DEGREES if gm <= tile_n and groups % gm == 0)
 
 
 def _fwd_merge_cost(

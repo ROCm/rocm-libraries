@@ -76,13 +76,20 @@ def legacy_pick(groups, m, y, x, tile_m, tile_n):
 
 
 def geomean(xs):
-    return math.exp(sum(math.log(max(v, 1e-9)) for v in xs) / len(xs)) if xs else float("nan")
+    return (
+        math.exp(sum(math.log(max(v, 1e-9)) for v in xs) / len(xs))
+        if xs
+        else float("nan")
+    )
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--verbose", action="store_true",
-                    help="list every shape the shipped policy leaves >5% short")
+    ap.add_argument(
+        "--verbose",
+        action="store_true",
+        help="list every shape the shipped policy leaves >5% short",
+    )
     args = ap.parse_args()
 
     cfgs = corpus_fwd.measured()
@@ -97,8 +104,15 @@ def main():
     for c in cfgs:
         m = c.m()
         shipped = fwd_group_merge_for_geometry(
-            c.groups, m, tm, tn, y=c.y, x=c.x, stride=c.stride,
-            esize=c.esize, tile_k=tk,
+            c.groups,
+            m,
+            tm,
+            tn,
+            y=c.y,
+            x=c.x,
+            stride=c.stride,
+            esize=c.esize,
+            tile_k=tk,
         )
         local = model.pick(c.groups, m, c.y, c.x, c.stride, tm, tn, tk, c.esize)
         if shipped != local:
@@ -124,8 +138,10 @@ def main():
         fr = [r[0].realised(r[idx]) for r in rows]
         exact = sum(r[idx] == r[0].oracle for r in rows)
         short = sum(f < 0.95 for f in fr)
-        print(f"{label:<12} {geomean(fr):>9.4f} {exact:>6}/{len(rows):<3} "
-              f"{short:>11} {min(fr):>8.3f}")
+        print(
+            f"{label:<12} {geomean(fr):>9.4f} {exact:>6}/{len(rows):<3} "
+            f"{short:>11} {min(fr):>8.3f}"
+        )
 
     if args.verbose:
         print()
@@ -137,8 +153,10 @@ def main():
         for frac, c, gm in bad:
             if frac >= 0.95:
                 break
-            print(f"  {c.name:<38} picked {gm:<3} oracle {c.oracle:<3} "
-                  f"realised {frac:.3f}")
+            print(
+                f"  {c.name:<38} picked {gm:<3} oracle {c.oracle:<3} "
+                f"realised {frac:.3f}"
+            )
 
     return 1 if drift else 0
 

@@ -62,8 +62,14 @@ def load(path):
             if not mm:
                 continue
             key = (
-                row["shape"], row["dtype"], row["sH"], row["sW"],
-                row["pH"], row["pW"], row["dH"], row["dW"],
+                row["shape"],
+                row["dtype"],
+                row["sH"],
+                row["sW"],
+                row["pH"],
+                row["pW"],
+                row["dH"],
+                row["dW"],
             )
             if key not in geom:
                 n, hi, wi, _c, _k, y, x, g = (int(v) for v in mm.groups())
@@ -77,9 +83,19 @@ def load(path):
                 if dh != 1:
                     nm += f"_d{dh}"
                 geom[key] = dict(
-                    name=nm, groups=g, m=n * ho * wo, y=y, x=x, stride=sw,
+                    name=nm,
+                    groups=g,
+                    m=n * ho * wo,
+                    y=y,
+                    x=x,
+                    stride=sw,
                     esize=2 if row["dtype"] != "fp32" else 4,
-                    n=n, hi=hi, wi=wi, wo=wo, dilation=dh, dtype=row["dtype"],
+                    n=n,
+                    hi=hi,
+                    wi=wi,
+                    wo=wo,
+                    dilation=dh,
+                    dtype=row["dtype"],
                 )
             gm = int(row["group_merge"] or 1)
             groups[key][gm] = max(groups[key].get(gm, 0.0), tf)
@@ -123,8 +139,14 @@ def main():
             for gm, tf in best.items():
                 best_at[g["name"]][(spec, gm)] = tf
             pick = model.pick(
-                groups=g["groups"], m=g["m"], y=g["y"], x=g["x"],
-                stride=g["stride"], tile_m=tm, tile_n=tn, tile_k=tk,
+                groups=g["groups"],
+                m=g["m"],
+                y=g["y"],
+                x=g["x"],
+                stride=g["stride"],
+                tile_m=tm,
+                tile_n=tn,
+                tile_k=tk,
                 esize=g["esize"],
             )
             if pick not in best:

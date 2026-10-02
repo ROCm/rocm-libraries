@@ -155,8 +155,14 @@ def _measured(path=None, tile_m=64, tile_n=64):
                 if not mm:
                     continue
                 key = (
-                    row["shape"], row["dtype"], row["sH"], row["sW"],
-                    row["pH"], row["pW"], row["dH"], row["dW"],
+                    row["shape"],
+                    row["dtype"],
+                    row["sH"],
+                    row["sW"],
+                    row["pH"],
+                    row["pW"],
+                    row["dH"],
+                    row["dW"],
                 )
                 gm = int(row["group_merge"] or 1)
                 slot = groups.setdefault(key, {})
@@ -170,9 +176,7 @@ def _measured(path=None, tile_m=64, tile_n=64):
         if 1 not in best or best[1] <= 0.0:
             continue  # no unmerged baseline measured -> no normalisable curve
         shape, dtype, sh, sw, ph, pw, dh, dw = key
-        n, hi, wi, _c, _k, y, x, g = (
-            int(v) for v in _SHAPE_RE.match(shape).groups()
-        )
+        n, hi, wi, _c, _k, y, x, g = (int(v) for v in _SHAPE_RE.match(shape).groups())
         sh, sw, ph, pw, dh, dw = (int(v) for v in (sh, sw, ph, pw, dh, dw))
         ho = (hi + 2 * ph - dh * (y - 1) - 1) // sh + 1
         wo = (wi + 2 * pw - dw * (x - 1) - 1) // sw + 1
@@ -186,10 +190,21 @@ def _measured(path=None, tile_m=64, tile_n=64):
             name += f"_{dtype}"
         out.append(
             Config(
-                name, n, hi, wi, g, y, x, sh, dtype,
+                name,
+                n,
+                hi,
+                wi,
+                g,
+                y,
+                x,
+                sh,
+                dtype,
                 # The normalisation. Everything downstream is a ratio.
                 {deg: v / base for deg, v in best.items()},
-                "measured", mo=n * ho * wo, dilation=dh, wo_=wo,
+                "measured",
+                mo=n * ho * wo,
+                dilation=dh,
+                wo_=wo,
             )
         )
     return out

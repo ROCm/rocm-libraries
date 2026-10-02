@@ -147,20 +147,31 @@ def main():
 
     argv = [
         "benchmark_implicit_gemm_conv",
-        "--miopen-file", args.shapes,
-        "--direction", "fwd",
-        "--arch", args.arch,
-        "--group-merge-window", "-1",   # full degree axis: no policy feedback
-        "--unmerged-frac", "1.0",
-        "--warmup", str(args.warmup),
-        "--iters", str(args.iters),
-        "--jobs", str(args.jobs),
-        "--csv", args.out,
-        "--top", "8",
+        "--miopen-file",
+        args.shapes,
+        "--direction",
+        "fwd",
+        "--arch",
+        args.arch,
+        "--group-merge-window",
+        "-1",  # full degree axis: no policy feedback
+        "--unmerged-frac",
+        "1.0",
+        "--warmup",
+        str(args.warmup),
+        "--iters",
+        str(args.iters),
+        "--jobs",
+        str(args.jobs),
+        "--csv",
+        args.out,
+        "--top",
+        "8",
         # The CSV cap defaults to 5 ranked rows per case, which silently drops
         # the *slowest* degrees -- and on depthwise the slowest is Gm=1, the
         # baseline every curve is normalised against. Keep the whole sweep.
-        "--csv-top", "999",
+        "--csv-top",
+        "999",
         # Verifies every kernel, not just the first (the flag's help text is
         # stale). A merged degree that is fast because the diagonal mask is
         # wrong must not be allowed to set an oracle.
