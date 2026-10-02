@@ -1,0 +1,77 @@
+# hipccl-config.cmake
+#
+# Mirrors hipccl3's find_package(CCCL COMPONENTS [Thrust] [CUB] [libcudacxx])
+# -style entry point (NVIDIA CCCL). This does NOT redefine rocprim/hipcub/
+# rocthrust's targets - it delegates to each component's own already-existing
+# <component>-config.cmake (installed alongside this file, one directory up,
+# by each sub-project's own rocm_export_targets() call) via
+# find_dependency(), then exposes a combined hipccl::hipccl INTERFACE target
+# for convenience. find_package(rocprim)/find_package(hipcub)/
+# find_package(rocthrust) keep working standalone, unchanged.
+#
+# Usage:
+#   find_package(hipccl)                          # all components
+#   find_package(hipccl COMPONENTS rocprim hipcub) # just these two
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(_hipccl_supported_components rocprim hipcub rocthrust)
+
+# find_package(hipccl) with no COMPONENTS given still populates
+# <package>_FIND_COMPONENTS as empty, not "all" - default to everything,
+# matching CCCL's plain `find_package(CCCL)` pulling in every component.
+if(NOT hipccl_FIND_COMPONENTS)
+  set(hipccl_FIND_COMPONENTS ${_hipccl_supported_components})
+endif()
+
+foreach(_hipccl_comp ${hipccl_FIND_COMPONENTS})
+  if(NOT _hipccl_comp IN_LIST _hipccl_supported_components)
+    set(hipccl_${_hipccl_comp}_FOUND FALSE)
+    if(hipccl_FIND_REQUIRED_${_hipccl_comp})
+      set(hipccl_NOT_FOUND_MESSAGE
+        "hipccl: unsupported component \"${_hipccl_comp}\" requested (supported: ${_hipccl_supported_components})")
+    endif()
+    continue()
+  endif()
+
+  find_dependency(${_hipccl_comp} CONFIG)
+  set(hipccl_${_hipccl_comp}_FOUND ${${_hipccl_comp}_FOUND})
+endforeach()
+
+# --- hipccl_FOUND ---
+# Deliberately hand-rolled rather than find_package_handle_standard_args()
+# (that macro is oriented around traditional Find<Pkg>.cmake MODULE scripts;
+# this is a Config-mode file, and the logic needed here - "FOUND iff every
+# requested-and-required component was found" - is simple enough to not need
+# it).
+set(hipccl_FOUND TRUE)
+foreach(_hipccl_comp ${hipccl_FIND_COMPONENTS})
+  if(NOT hipccl_${_hipccl_comp}_FOUND AND (hipccl_FIND_REQUIRED OR hipccl_FIND_REQUIRED_${_hipccl_comp}))
+    set(hipccl_FOUND FALSE)
+  endif()
+endforeach()
+
+if(NOT hipccl_FOUND AND hipccl_FIND_REQUIRED)
+  if(NOT hipccl_NOT_FOUND_MESSAGE)
+    set(hipccl_NOT_FOUND_MESSAGE "hipccl: one or more required components could not be found")
+  endif()
+  message(FATAL_ERROR "${hipccl_NOT_FOUND_MESSAGE}")
+endif()
+
+# --- Combined convenience target ---
+# Only created once all three real components have been found/requested
+# together - mirrors CCCL::CCCL.
+if(hipccl_rocprim_FOUND AND hipccl_hipcub_FOUND AND hipccl_rocthrust_FOUND
+   AND NOT TARGET hipccl::hipccl)
+  add_library(hipccl::hipccl INTERFACE IMPORTED)
+  target_link_libraries(hipccl::hipccl INTERFACE
+    roc::rocprim
+    hip::hipcub
+    roc::rocthrust
+  )
+endif()
+
+unset(_hipccl_supported_components)
+unset(_hipccl_comp)
