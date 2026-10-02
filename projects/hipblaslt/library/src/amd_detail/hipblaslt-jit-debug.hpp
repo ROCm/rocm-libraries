@@ -215,12 +215,16 @@ namespace hipblaslt_jit::debug
         {
             return m_record;
         }
-        // A matmul line is written for the first call with key in the process;
-        // later calls fold into a "matmul.aggregate" line per key, at most one
-        // per second.
+        // A matmul line is written for the first call with key in the process,
+        // and for calls that generated or are notable; later calls fold into a
+        // "matmul.aggregate" line per key, at most one per second.
         void aggregateBy(std::string key)
         {
             m_key = std::move(key);
+        }
+        void notable() noexcept
+        {
+            m_notable = true;
         }
 
     private:
@@ -230,6 +234,7 @@ namespace hipblaslt_jit::debug
         std::function<size_t()> m_returned;
         bool                    m_progress;
         std::string             m_key;
+        bool                    m_notable = false;
         Clock::time_point       m_start;
         std::string             m_outerQuery, m_outerProblem;
         Scope                   m_scope;

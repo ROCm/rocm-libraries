@@ -1173,7 +1173,8 @@ namespace hipblaslt_jit::debug
                 m_record.write(line, &first);
                 if(!m_key.empty())
                 {
-                    if(firstOf("matmul\n" + m_key))
+                    const bool first = firstOf("matmul\n" + m_key);
+                    if(first || m_notable || m_record.has("gen"))
                         line.write();
                     else
                         aggregate("matmul.aggregate", "key", m_key, total);

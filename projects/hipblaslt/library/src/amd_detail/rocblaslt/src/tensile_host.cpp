@@ -41,6 +41,7 @@
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
+#include "../../hipblaslt-jit-debug.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
 #include "../../hipblaslt-jit-heuristic.hpp"
@@ -3251,7 +3252,19 @@ namespace
                 adapter = new TensileLite::hip::SolutionAdapter;
 
                 // Initialize the adapter and possibly the library
+#ifdef HIPBLASLT_ENABLE_JIT
+                namespace debug  = hipblaslt_jit::debug;
+                const bool timed = debug::on(debug::Timing);
+                const auto start = timed ? debug::Clock::now() : debug::Clock::time_point();
+#endif
                 host.initialize(*adapter, device);
+#ifdef HIPBLASLT_ENABLE_JIT
+                if(timed)
+                    debug::Line(debug::Timing, "library.init")
+                        .add("device", device)
+                        .json("ns", "{\"total\":" + std::to_string(debug::since(start)) + "}")
+                        .write();
+#endif
 
                 // Atomically change the adapter stored for this device ID
                 a.adapter.store(adapter, std::memory_order_release);
@@ -3730,14 +3743,35 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        std::shared_ptr<void>              gemmData)
 {
 #ifdef HIPBLASLT_ENABLE_JIT
+    // A matmul line for null algorithms and JIT solutions, at most one per
+    // problem and algorithm unless the call generated or loaded code.
+    std::optional<hipblaslt_jit::debug::Query> matmul;
+    if(hipblaslt_jit::debug::categories() && (algo == nullptr || isJitSolution(algo)))
+    {
+        int32_t index = 0;
+        if(algo)
+            std::memcpy(&index, algo->data, sizeof(index));
+        matmul.emplace(
+            "matmul", 1, [&algo] { return size_t(algo != nullptr); }, algo == nullptr);
+        matmul->aggregateBy(describeJitProblem(prob)
+                            + (!algo                   ? " heuristic"
+                               : isJitAlgorithm(algo) ? " explicit"
+                                                      : " index=" + std::to_string(index)));
+        hipblaslt_jit::debug::problem(describeJitProblem(prob));
+    }
     if(isJitAlgorithm(algo))
     {
         jit::GemmRequest                           request(prob);
         std::shared_ptr<const jit::PreparedLaunch> launch;
         auto                                       status = jit::prepareJit(
             handle, *algo, request, prob.workspace, prob.workspaceSize, prob.stream, launch);
-        return status == rocblaslt_status_success ? jit::runJit(handle, *algo, *launch, prob.stream)
-                                                  : status;
+        HIPBLASLT_JIT_DEBUG_LAP("prepare");
+        if(status == rocblaslt_status_success)
+        {
+            status = jit::runJit(handle, *algo, *launch, prob.stream);
+            HIPBLASLT_JIT_DEBUG_LAP("run");
+        }
+        return status;
     }
 #endif
     rocblaslt_status status = rocblaslt_status_internal_error;
@@ -3748,19 +3782,30 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(algo == nullptr && hipblaslt_jit::mode() != hipblaslt_jit::Mode::Off)
         {
             std::optional<hipblaslt_jit::LookupOnly> lookupOnly;
-            if(isCapturing(prob.stream))
+            const bool                               capturing = isCapturing(prob.stream);
+            if(capturing)
                 lookupOnly.emplace();
+            HIPBLASLT_JIT_DEBUG_LAP("capture_check");
+            if(matmul)
+                hipblaslt_jit::debug::set("capturing", capturing ? "true" : "false");
             int count = 0;
             if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback)
+            {
                 getBestSolutions(prob, handle, gemmData, 1, &selected, &count, prob.workspaceSize);
+                HIPBLASLT_JIT_DEBUG_LAP("get_best");
+                HIPBLASLT_JIT_DEBUG_NOTE("from.best", count);
+            }
             if(count == 0 && !jitAfterEquality(handle, prob))
             {
                 auto jitProb = prob;
                 jitHeuristicFill(
                     handle, jitProb, gemmData, 1, prob.workspaceSize, &selected, &count);
+                HIPBLASLT_JIT_DEBUG_LAP("jit");
             }
             if(lookupOnly && lookupOnly->skipped)
             {
+                if(matmul)
+                    matmul->notable();
                 const auto message
                     = "generation skipped during stream capture for " + describeJitProblem(prob);
                 if(count == 0)
@@ -3771,6 +3816,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             if(count == 0)
                 return rocblaslt_status_not_implemented;
             algo = &selected.algo;
+            if(matmul)
+            {
+                int32_t index = 0;
+                std::memcpy(&index, algo->data, sizeof(index));
+                hipblaslt_jit::debug::set("selected", std::to_string(index));
+            }
         }
 #endif
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -3783,6 +3834,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         std::shared_ptr<TensileLite::Hardware> hardware;
 
         auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device, algo);
+        HIPBLASLT_JIT_DEBUG_LAP("library");
 
         if(!library)
         {
@@ -3987,8 +4039,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            HIPBLASLT_JIT_DEBUG_LAP("prepare");
+#ifdef HIPBLASLT_ENABLE_JIT
+            // The lazy load launchKernels would do, done first so it is timed apart.
+            if(matmul && hipblaslt_jit::debug::on(hipblaslt_jit::debug::Timing) && !isPreloaded
+               && isJitSolution(algo) && !kernels.empty() && !kernels[0].codeObjectFile.empty())
+            {
+                const bool already = adapter->FindCodeObject(kernels[0].codeObjectFile);
+                HIPBLASLT_JIT_DEBUG_LAP("code_object_load");
+                hipblaslt_jit::debug::set("loaded", already ? "\"already\"" : "\"now\"");
+                if(!already)
+                    matmul->notable();
+            }
+#endif
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            HIPBLASLT_JIT_DEBUG_LAP("enqueue");
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
@@ -5030,11 +5096,15 @@ namespace
                 solutions.resize(count);
             return solutions;
         };
-        ProviderSolutions found;
+        ProviderSolutions   found;
+        hipblaslt_jit::debug::Phase equality("equality");
         found.equality = find(TensileLite::ProviderRows::EqualityOnly, requestedAlgoCount);
+        equality.stop();
+        hipblaslt_jit::debug::Phase others("others");
         if(found.equality.size() < requestedAlgoCount)
             found.others = find(TensileLite::ProviderRows::ExceptEquality,
                                 requestedAlgoCount - found.equality.size());
+        others.stop();
 
         if(reportEmpty && found.empty())
             reportNoSolutionFound(tensile_prob);
@@ -5120,8 +5190,10 @@ namespace
             *returnAlgoCount += added;
         };
         append(found.equality);
+        HIPBLASLT_JIT_DEBUG_NOTE("from.equality", *returnAlgoCount);
         const int jitFirst = *returnAlgoCount;
         auto      jitProb  = prob;
+        hipblaslt_jit::debug::Phase jit("jit");
         jitHeuristicFill(handle,
                          jitProb,
                          gemmData,
@@ -5129,12 +5201,18 @@ namespace
                          maxWorkSpaceBytes,
                          heuristicResultsArray,
                          returnAlgoCount);
+        jit.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.jit", *returnAlgoCount - jitFirst);
+        const int                   othersFirst = *returnAlgoCount;
+        hipblaslt_jit::debug::Phase others("others");
         keepOthers(handle,
                    heuristicResultsArray + jitFirst,
                    *returnAlgoCount - jitFirst,
                    requestedAlgoCount - *returnAlgoCount,
                    found.others);
         append(found.others);
+        others.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.others", *returnAlgoCount - othersFirst);
         for(int i = *returnAlgoCount; i < requestedAlgoCount; ++i)
             heuristicResultsArray[i].state = rocblaslt_status_invalid_value;
 
@@ -5185,18 +5263,27 @@ namespace
         };
         append(found.equality);
         const auto jitFirst = heuristicResults.size();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.equality", static_cast<int64_t>(jitFirst));
+        hipblaslt_jit::debug::Phase jit("jit");
         jitHeuristicFill(handle,
                          rocblaslt::RocGemmType::ROCBLASLT_GEMM,
                          gemmData,
                          requestedAlgoCount,
                          workspaceBytes,
                          heuristicResults);
+        jit.stop();
+        const auto othersFirst = heuristicResults.size();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.jit", static_cast<int64_t>(othersFirst - jitFirst));
+        hipblaslt_jit::debug::Phase others("others");
         keepOthers(handle,
                    heuristicResults.data() + jitFirst,
                    heuristicResults.size() - jitFirst,
                    requestedAlgoCount - heuristicResults.size(),
                    found.others);
         append(found.others);
+        others.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.others",
+                                 static_cast<int64_t>(heuristicResults.size() - othersFirst));
 
         return library || !heuristicResults.empty() ? rocblaslt_status_success
                                                     : rocblaslt_status_invalid_pointer;
@@ -6122,8 +6209,11 @@ namespace
         std::vector<rocblaslt_matmul_heuristic_result> added;
         if(needed == 0 || request.problem.m == 0 || request.problem.n == 0)
             return added;
+        if(hipblaslt_jit::debug::categories())
+            hipblaslt_jit::debug::problem(describeJitProblem(request.problem));
         auto fill = hipblaslt_jit::fillHeuristic(
             request, handle->device, needed, maxWorkSpaceBytes, excludeKernels);
+        hipblaslt_jit::debug::Phase supportPhase("jit_support");
         for(auto index : fill.indices)
         {
             rocblaslt_matmul_heuristic_result result;
@@ -6139,6 +6229,10 @@ namespace
             result.state         = rocblaslt_status_success;
             added.push_back(result);
         }
+        supportPhase.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("jit.kept", static_cast<int64_t>(added.size()));
+        HIPBLASLT_JIT_DEBUG_NOTE("jit.dropped",
+                                 static_cast<int64_t>(fill.indices.size() - added.size()));
 
         const auto problem  = describeJitProblem(request.problem);
         const auto severity = added.empty() ? hipblaslt_jit::Severity::Error

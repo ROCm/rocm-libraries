@@ -569,9 +569,35 @@ namespace hipblaslt_jit
                     std::string(what) + " not found at " + path + "; set " + variable};
         }
 
+        std::pair<std::shared_ptr<const Jit>, Status> buildProcessJit();
+
+        // With timing, a setup line reports the first processJit call.
         std::pair<std::shared_ptr<const Jit>, Status> makeProcessJit()
         {
+            if(!debug::on(debug::Timing))
+                return buildProcessJit();
+            debug::Record record;
+            auto          made = [&] {
+                debug::Scope scope(&record);
+                return buildProcessJit();
+            }();
+            debug::Line line(debug::Timing, "setup");
+            line.add("status", made.second.ok() ? "ok" : "failed");
+            if(!made.second.ok())
+                line.add("message", made.second.message);
+            uint64_t total = 0;
+            for(const char* phase : {"tool_check", "backend", "store", "components"})
+                total += record.nanoseconds(phase);
+            const std::pair<const char*, uint64_t> first{"total", total};
+            record.write(line, &first);
+            line.write();
+            return made;
+        }
+
+        std::pair<std::shared_ptr<const Jit>, Status> buildProcessJit()
+        {
             namespace tensilelite = hipblaslt_ext::experimental::jit::tensilelite;
+            debug::Phase         toolCheck("tool_check");
             tensilelite::Options options;
             options.pythonExecutable
                 = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_DEFAULT_PYTHON);
@@ -590,11 +616,21 @@ namespace hipblaslt_jit
                                 "HIPBLASLT_JIT_TENSILE_SOURCE")};
             if(!fs::is_regular_file(tensilelite::findProgram(options.cxxCompiler), error))
                 return {nullptr, missing("C++ compiler", options.cxxCompiler, "HIPBLASLT_JIT_CXX")};
+            toolCheck.stop();
+            debug::set("python", debug::Line::quote(options.pythonExecutable));
+            debug::set("tensile_source", debug::Line::quote(options.tensileSourceDirectory));
+            debug::set("cxx", debug::Line::quote(options.cxxCompiler));
             try
             {
+                // The backend hashes the generator sources for its version.
+                debug::Phase backendPhase("backend");
                 auto backend = std::make_shared<const tensilelite::TensileLiteBackend>(options);
-                auto store
+                backendPhase.stop();
+                debug::Phase storePhase("store");
+                auto         store
                     = makeLibraryStore(JitLibrary::process(), backend->info(), jitCodeObjectVersion);
+                storePhase.stop();
+                debug::Phase components("components");
                 return {std::make_shared<const Jit>(Jit::Components{std::move(backend),
                                                                     makeOrigamiPredictor(),
                                                                     makeTensileLiteDefaults(),
