@@ -25,6 +25,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.ValidParameters import stinkySchedulingKnobUnset
 
 from .Problem import ProblemType
 
@@ -236,6 +237,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.add("TDMFuse")
   else:
     requiredParametersTemp.discard("TDMFuse")
+
+  # Unset StinkyTofu scheduling knobs leave the backend heuristic in place, so
+  # tagging them would rename every kernel. A YAML override changes the
+  # schedule and must stay in the name, or tuning forks collapse onto one kernel.
+  for knob, unset in stinkySchedulingKnobUnset.items():
+    if state.get(knob, unset) == unset:
+      requiredParametersTemp.discard(knob)
 
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":

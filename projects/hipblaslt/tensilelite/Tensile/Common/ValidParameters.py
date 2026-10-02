@@ -1251,7 +1251,36 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use iterate-mode for A
     # 2: Use iterate-mode for B
     # 3: Use iterate-mode for both A and B
-    "TDMIterateMode": [-1, 0, 1, 2, 3]
+    "TDMIterateMode": [-1, 0, 1, 2, 3],
+    # StinkyTofu ModuleOptions forwarded by KernelWriter. The sentinel leaves
+    # SchedulingKnobHeuristics / dynamic drain in place. Any other value is a
+    # user override and a distinct kernel (see stinkySchedulingKnobUnset).
+    #
+    # ClusterBarrierRule3SignalLeadCycles: -1 unset (policy picks 100 or 200);
+    #   0 co-locates the Rule 3 signal with its wait; 1..900 is the lead in
+    #   estimated cycles, matching kRule3SignalMaxLeadCycles.
+    # DsReadThrottleLatency: -1 unset; 1..4096 pins the ds_read credit lifetime.
+    #   0 is not a useful override (stinkytofu treats <=0 as unset).
+    # DsReadPerWmma: -1 unset; 0..32 pins ds_reads per WMMA. 0 is a valid
+    #   extreme. This is the deprecated ModuleOptions spelling of DsReadPerCap;
+    #   stinkytofu still honors it when DsReadPerCap is unset.
+    # DsReadDrainLatency: 0 derives the barrier drain from the matching
+    #   ds_reads; 1..1024 pins that latency.
+    "ClusterBarrierRule3SignalLeadCycles": [-1] + list(range(0, 901)),
+    "DsReadThrottleLatency": [-1] + list(range(1, 4097)),
+    "DsReadPerWmma": [-1] + list(range(0, 33)),
+    "DsReadDrainLatency": list(range(0, 1025)),
+}
+
+
+# Sentinel values that mean "do not override StinkyTofu". Must match the
+# ModuleOptions defaults: -1 for the scheduling knobs in
+# MODULE_OPTIONS_WITH_DEFAULTS_LIST, and 0 for DsReadDrainLatency (int{}).
+stinkySchedulingKnobUnset = {
+    "ClusterBarrierRule3SignalLeadCycles": -1,
+    "DsReadThrottleLatency": -1,
+    "DsReadPerWmma": -1,
+    "DsReadDrainLatency": 0,
 }
 
 
