@@ -18,7 +18,8 @@ tree. This prints the parts a reviewer compares before and after an extension:
     kernel counts (for attention: the head configurations);
   * the catalog digest of the bundle directory, computed exactly as RUNBOOK stage 8's
     recipe does: sha256 of the `sha256sum` lines (`<sha256>  ./<path>`) of every
-    `*.json`, in byte order of path;
+    regular `*.json` file (symlinks excluded, as `find -type f` does), in byte order
+    of path;
   * optionally, `hipdnn_validate_descriptors <root> --expect-engine <engine> --json`:
     its success flag and its diagnostics counted by severity, with each distinct WARN
     or ERROR message (file path folded) and how often it occurred.
@@ -76,11 +77,15 @@ def find_bundle(root: Path, engine: str | None) -> Path:
 
 
 def catalog_digest(bundle: Path) -> str:
-    """RUNBOOK stage 8's catalog digest of `bundle`."""
+    """RUNBOOK stage 8's catalog digest of `bundle`.
+
+    The recipe lists files with `find -type f`, which leaves out symlinks, so a symlinked
+    JSON file is left out here too.
+    """
     files = sorted(
         (("./" + p.relative_to(bundle).as_posix()).encode(), p)
         for p in bundle.rglob("*.json")
-        if p.is_file()
+        if p.is_file() and not p.is_symlink()
     )
     if not any(rel.endswith(b".kdp.json") for rel, _ in files):
         raise InventoryError(f"no *.kdp.json under {bundle}")
@@ -146,7 +151,10 @@ def run_validator(validator: Path, root: Path, engine: str | None) -> dict:
     argv = [str(validator), str(root), "--json"]
     if engine:
         argv += ["--expect-engine", engine]
-    result = subprocess.run(argv, capture_output=True, text=True)
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True)
+    except OSError as e:
+        raise InventoryError(f"cannot run validator {validator}: {e}") from e
     try:
         report = json.loads(result.stdout)
     except json.JSONDecodeError as e:

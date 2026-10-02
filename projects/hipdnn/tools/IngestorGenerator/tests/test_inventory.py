@@ -131,6 +131,38 @@ def test_catalog_digest_matches_the_runbook_recipe(tmp_path):
     assert f"catalog digest: {expected}" in result.stdout
 
 
+def _digest_line(result: subprocess.CompletedProcess) -> str:
+    assert result.returncode == 0, result.stderr
+    return next(
+        line for line in result.stdout.splitlines() if line.startswith("catalog digest")
+    )
+
+
+def test_a_symlinked_json_is_left_out_of_the_digest_as_find_type_f_does(tmp_path):
+    bundle = _tree(tmp_path)
+    before = _digest_line(_run(str(tmp_path), "--engine", _ENGINE))
+    try:
+        (bundle / "linked.json").symlink_to(bundle / "a.kdp.json")
+    except OSError as e:
+        pytest.skip(f"cannot create a symlink here: {e}")
+
+    after = _digest_line(_run(str(tmp_path), "--engine", _ENGINE))
+
+    assert after == before
+
+
+def test_a_validator_that_cannot_be_launched_is_an_inventory_failure(tmp_path):
+    _tree(tmp_path)
+
+    result = _run(
+        str(tmp_path), "--engine", _ENGINE, "--validator", str(tmp_path / "missing")
+    )
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("FAIL: cannot run validator")
+    assert "Traceback" not in result.stderr
+
+
 def _fake_validator(tmp_path: Path, report: dict, exit_code: int) -> Path:
     script = tmp_path / "fake_validator.py"
     script.write_text(
