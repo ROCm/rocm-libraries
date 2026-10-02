@@ -54,7 +54,7 @@ gesvdjBatch       -> Singular Value Decomposition (Jacobi iteration) batch versi
 (note: several can be selected)
 
 precisions to use
-valid options are: (default is s,d)
+valid options are: (default is s, d)
 s -> real single precision
 d -> real double precision
 c -> complex single precision
@@ -76,7 +76,7 @@ EOF
 # --------------------------------- #
 # Show help message if requested
 # --------------------------------- #
-if [ $1 == "-h" ]; then
+if [ "${1:-}" = "-h" ]; then
     show_help
     exit 0
 fi

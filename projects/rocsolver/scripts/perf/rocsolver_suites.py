@@ -47,7 +47,7 @@ def get_ld(s):
     """
     Gets leading dimension depending on the size.
     All the used sizes "n" are even. Relatively better performance is observed when the leading dimension "ld" is
-    not exaclty equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
+    not exactly equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
     This could be revisited and changed in the future
     """
     if s < 4000: ld = s + 1

@@ -97,7 +97,7 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
         if exitcode != 0:
             sys.exit("hipsolver-bench call failure: {}".format(err))
         try:
-            time = float(err) #prefered case should be float(out)
+            time = float(err) #preferred case should be float(out)
         except ValueError:
             time="n/a"
         # write results

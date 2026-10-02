@@ -47,7 +47,7 @@ def get_ld(s):
     """
     Gets leading dimension depending on the size. 
     All the used sizes "n" are even. Relatively better performance is observed when the leading dimension "ld" is 
-    not exaclty equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
+    not exactly equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
     This could be revisited and changed in the future   
     """
     if s < 4000: ld = s + 1
@@ -890,7 +890,7 @@ def gesvdjBatch_suite(*, suite, precision, case):
     for s_evect in ['vect', 'novect']:
         evect = get_evect(s_evect, 'orig')
         for s, bc in size:
-            if s < 33: # only sizes n <= 32 are currently supportted by cuda
+            if s < 33: # only sizes n <= 32 are currently supported by cuda
                 ld = get_ld(s)
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': s_evect, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --jobz {evect} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
