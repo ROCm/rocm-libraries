@@ -5,8 +5,8 @@ SPDX-License-Identifier: MIT
 
 # GPU CI with pinned rocKE reference kernels
 
-This is the methodology and extension guide. See [the SDPA guide](sdpa-reference.md)
-for commands and current bundle details, and [GPU attention coverage](gpu-attention-coverage.md)
+This is the methodology and extension guide. See [the SDPA guide](sdpa-test-reference.md)
+for commands and current bundle details, and [GPU attention coverage](gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
 As of 2026-10-02, the implemented lane covers eight gfx942 SDPA configurations.
@@ -435,8 +435,8 @@ difference a regression.
 ## 9. Validation evidence and practical reproduction
 
 The current baseline, archive identity, numerical measurements, and CI results are
-recorded in [the SDPA guide](sdpa-reference.md#validation-evidence). The
-[coverage map](gpu-attention-coverage.md) distinguishes declared shapes from
+recorded in [the SDPA guide](sdpa-test-reference.md#validation-evidence). The
+[coverage map](gpu-attention-test-coverage.md) distinguishes declared shapes from
 executed tests and retains the gaps in older Torch-dependent suites.
 
 GPU qualification and audit work used Enroot under Slurm. Request the intended GPU,

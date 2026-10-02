@@ -133,7 +133,7 @@ The reference suite uses NumPy PCG64 seed 0, standard-normal float32 samples,
 then fp16/bf16 rounding and exact digest checks. Original Torch tests generate
 random samples on the GPU through Torch. The samples differ even when the seed
 number is equal. There is one qualified input recipe per row, not a seed sweep.
-See [the SDPA guide](sdpa-reference.md) for the oracle and accuracy budget.
+See [the SDPA guide](sdpa-test-reference.md) for the oracle and accuracy budget.
 
 ## GPU test files
 
@@ -406,4 +406,4 @@ and provider C++ integration outside this GPU attention map.
 
 This map does not inventory convolution tests. A convolution reference cohort
 needs its own operation-specific coverage map, as described in the
-[strategy and extension guide](gpu-ci-pinned-rocke-reference-plan.md#add-convolution-or-another-operation).
+[strategy and extension guide](gpu-ci-pinned-rocke-test-reference-plan.md#add-convolution-or-another-operation).

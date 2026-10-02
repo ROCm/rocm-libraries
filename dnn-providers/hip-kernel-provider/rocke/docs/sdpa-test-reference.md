@@ -23,9 +23,9 @@ passed through the kernel ABI. It preserves the original maximum absolute error
 tolerances (`0.02` for fp16, `0.04` for bf16); it does not claim identical Torch
 random inputs or bitwise equivalence between NumPy and Torch's reference outputs.
 
-See [GPU attention coverage](gpu-attention-coverage.md#the-eight-required-cases)
+See [GPU attention coverage](gpu-attention-test-coverage.md#the-eight-required-cases)
 for the exact eight configurations and broader gaps, and the
-[strategy and extension guide](gpu-ci-pinned-rocke-reference-plan.md) for adding
+[strategy and extension guide](gpu-ci-pinned-rocke-test-reference-plan.md) for adding
 architectures and operations. This is not a drop-in replacement for the skipped
 Torch suites: it covers equivalent base configurations with different samples,
 not their full shape, structural, or interoperability coverage.

@@ -427,6 +427,6 @@ reference them, don't copy them here.*
 
 ## Pinned-reference documentation
 
-- [SDPA implementation and usage](docs/sdpa-reference.md)
-- [GPU attention coverage and gaps](docs/gpu-attention-coverage.md)
-- [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-reference-plan.md)
+- [SDPA implementation and usage](docs/sdpa-test-reference.md)
+- [GPU attention coverage and gaps](docs/gpu-attention-test-coverage.md)
+- [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-test-reference-plan.md)
