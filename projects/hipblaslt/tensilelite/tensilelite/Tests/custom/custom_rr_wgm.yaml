@@ -74,7 +74,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -169,7 +169,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -264,7 +264,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 32, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -359,7 +359,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -454,7 +454,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -549,7 +549,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 32, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -644,7 +644,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 64, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -739,7 +739,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [32, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -834,7 +834,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [32, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -929,7 +929,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [64, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [32, 32, 64, 1]
         - PreloadKernArgs: [False]
@@ -1024,7 +1024,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1119,7 +1119,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1214,7 +1214,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [128, 32, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1309,7 +1309,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [16, 256, 128]
             threads: [128, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1404,7 +1404,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1499,7 +1499,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1594,7 +1594,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [256, 32, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1689,7 +1689,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [32, 128, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1784,7 +1784,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [32, 256, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
@@ -1879,7 +1879,7 @@ BenchmarkProblems:
                     { type: float32, semantic: Alpha } ]
             macrotile: [32, 64, 128]
             threads: [256, 1, 1]
-            grid: [TilesX, TilesY, Batch]
+            grid: [TilesXY, One, Batch]
         - MatrixInstruction:
           - [16, 16, 128, 1]
         - PreloadKernArgs: [False]
