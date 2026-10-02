@@ -76,6 +76,55 @@ def _mapped_lib(stem: str) -> Optional[str]:
     return None
 
 
+def _rocm_sdk_core_dirs() -> List[str]:
+    """Package dirs of the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core``, or [].
+
+    Located with ``importlib.util.find_spec``, which does not import the package.
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("_rocm_sdk_core")
+    except Exception:
+        return []
+    if spec is None or not spec.submodule_search_locations:
+        return []
+    return list(spec.submodule_search_locations)
+
+
+def _in_rocm_sdk_core(path: str) -> bool:
+    """True if ``path`` lies inside the ``_rocm_sdk_core`` package (symlinks resolved)."""
+    rp = os.path.realpath(path)
+    for loc in _rocm_sdk_core_dirs():
+        root = os.path.realpath(loc)
+        if rp == root or rp.startswith(root + os.sep):
+            return True
+    return False
+
+
+def _rocm_sdk_core_release() -> Optional[tuple]:
+    """``(major, minor)`` ROCm release of TheRock's ``rocm-sdk-core`` wheel, or None.
+
+    ``rocm_sdk.__version__`` (e.g. ``'10.1.0a20260822'``) when ``rocm_sdk`` is
+    already imported (TheRock's ``import torch`` imports it), else the installed
+    ``rocm-sdk-core`` distribution's version. Neither imports anything. The
+    libs in ``_rocm_sdk_core`` belong to this release; ``torch.version.hip`` on
+    those wheels is the HIP version, a different scheme.
+    """
+    version = getattr(sys.modules.get("rocm_sdk"), "__version__", None)
+    if not version:
+        try:
+            from importlib import metadata
+
+            version = metadata.version("rocm-sdk-core")
+        except Exception:
+            return None
+    nums = re.findall(r"\d+", str(version))
+    if len(nums) < 2:
+        return None
+    return (int(nums[0]), int(nums[1]))
+
+
 def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
     """``lib<stem>.so*`` from the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core/lib``.
 
@@ -89,15 +138,7 @@ def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
     """
     if _IS_WINDOWS:
         return None
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("_rocm_sdk_core")
-    except Exception:
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    for loc in spec.submodule_search_locations:
+    for loc in _rocm_sdk_core_dirs():
         matches = glob.glob(os.path.join(loc, "lib", f"lib{stem}.so*"))
         if matches:
             return min(matches, key=lambda p: (len(p), p))
@@ -162,15 +203,7 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     """
     if not _IS_WINDOWS:
         return None
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("_rocm_sdk_core")
-    except Exception:
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    for loc in spec.submodule_search_locations:
+    for loc in _rocm_sdk_core_dirs():
         bindir = os.path.join(loc, "bin")
         direct = os.path.join(bindir, f"{stem}.dll")
         if os.path.exists(direct):

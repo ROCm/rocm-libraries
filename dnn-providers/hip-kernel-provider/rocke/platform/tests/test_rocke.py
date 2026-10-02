@@ -6850,6 +6850,61 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             sdk_stub.__version__ = "10.1.0a20260822"
             self.assertTrue(rc._torch_comgr_is_stale())
 
+    def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):
+        import importlib
+        import os
+        import sys
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
+        # package. Its version came from the /opt/rocm fallback instead of the
+        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
+        # capability guards for a comgr that was not the one loaded.
+        with tempfile.TemporaryDirectory() as tmp:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            with mock.patch.dict(
+                sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
+                rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
+            ), mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=[]
+            ), mock.patch.object(
+                comgr_mod, "_lib", None
+            ), mock.patch.dict(
+                os.environ
+            ):
+                sys.modules.pop("_rocm_sdk_core", None)
+                importlib.invalidate_caches()
+                os.environ.pop("ROCKE_COMGR_LIB", None)
+                self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+                for sdk_version, expected in (
+                    ("10.1.0a20260822", (10, 1)),
+                    ("10.2.0a20261001", (10, 2)),
+                ):
+                    with self.subTest(rocm_sdk=sdk_version):
+                        sdk_stub.__version__ = sdk_version
+                        self.assertEqual(
+                            comgr_mod.resolved_lib_rocm_version(), expected
+                        )
+                # rocm_sdk not imported (e.g. ROCKE_COMGR_LIB points into the
+                # wheel): the installed rocm-sdk-core distribution names it.
+                del sdk_stub.__version__
+                with mock.patch(
+                    "importlib.metadata.version", return_value="10.1.0a20260822"
+                ) as dist_version:
+                    self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (10, 1))
+                dist_version.assert_called_with("rocm-sdk-core")
+
 
 # ---------------------------------------------------------------------
 # Build smoke tests for the FMHA / Sage / sparse-attention instance

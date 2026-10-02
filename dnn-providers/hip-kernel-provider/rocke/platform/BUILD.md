@@ -110,12 +110,25 @@ runtime resolves them WITHOUT importing torch
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
 2. the lib torch uses, only if torch is already imported (the resolver never
    imports torch to obtain it): the copy already mapped into the process, else
-   `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*`;
+   `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*`.
+   Exception for comgr only: a stale torch comgr moves below every step 3
+   candidate (see below);
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` ->
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first (a packaged ROCm 7.2 keeps the runtime under a versioned
    `core-*/lib`, not always plain `/opt/rocm/lib`);
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): torch's
+ROCm release (`rocm_sdk.__version__` on TheRock wheels, else
+`torch.version.hip`) is compared with the release of the first step 3 install
+whose version is readable. If both are known and torch's is older, torch's comgr
+is tried after every step 3 candidate (still before step 4), because an older
+comgr rejects ISAs newer than its ROCm. In a TheRock torch process the wheel's
+comgr is already loaded `RTLD_GLOBAL`, so the demotion loads a second LLVM and
+the process aborts with `LLVM ERROR: support is already registered for
+analysis` (seen with a ROCm 10.1 wheel on a ROCm 10.2 host). There, set
+`ROCKE_COMGR_LIB` to the wheel's `_rocm_sdk_core/lib/libamd_comgr.so.3`.
 
 torch is therefore **optional** — required only for the `torch.fx` fusion
 frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager
