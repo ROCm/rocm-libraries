@@ -216,7 +216,9 @@ class BaseTuner(ABC):
         pass
 
     @abstractmethod
-    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool] | List[str]:
+    def _get_restrictions(
+        self, types: Dict[str, Any]
+    ) -> Callable[[dict], bool] | List[str]:
         """Define constraints for what parameter combinations are valid during tuning.
 
         Two options:
@@ -297,9 +299,7 @@ class BaseTuner(ABC):
             None,
         )
         if config is None:
-            warnings.warn(
-                f"No existing configuration found for types '{types}'"
-            )
+            warnings.warn(f"No existing configuration found for types '{types}'")
             return
 
         # Get the base tuning archs and force set the range of the tune parameters
@@ -457,7 +457,7 @@ class BaseTuner(ABC):
             for i, (k, v) in enumerate(types.items()):
                 new_content += f'"{k}": "{v}",'
                 if i < len(types) - 1:
-                    new_content += '\n'
+                    new_content += "\n"
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:
@@ -468,8 +468,8 @@ class BaseTuner(ABC):
 
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
-        monorepo_dir = (pathlib.Path(BASE_DIR) / "../../..").resolve()
-        rocprim_dir = monorepo_dir / "projects/rocprim"
+        monorepo_dir = (pathlib.Path(BASE_DIR) / "../../../../..").resolve()
+        rocprim_dir = (pathlib.Path(BASE_DIR) / "..").resolve()
         return [
             "-fPIC",
             "-std=c++17",
