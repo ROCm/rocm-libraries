@@ -77,6 +77,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
@@ -240,11 +241,11 @@ protected:
     std::vector<autotune::detail::PlanSpec> _planSpecs;
 
     int64_t _maxWorkspaceAllowed = -1; // Workspace threshold; -1 = no limit.
-        // Set by deselect_workspace_greater_than().
-        // Last-write-wins semantics.
+    // Set by deselect_workspace_greater_than().
+    // Last-write-wins semantics.
     std::unordered_set<int64_t> _barredEngineIds; // Engine ID exclusion set.
-        // Set by deselect_engines().
-        // Accumulates across calls.
+    // Set by deselect_engines().
+    // Accumulates across calls.
 
     void resetActivePlanState()
     {
@@ -388,6 +389,7 @@ protected:
                                              1,
                                              static_cast<const void*>(&engineDesc.get())),
                                          "Failed to set engine on the engine config descriptor.");
+        HIPDNN_CHECK_ERROR(applyRankingMetric(engineConfigDesc->get()));
 
         // Validate and apply knob settings
         std::unordered_map<KnobType_t, Knob> existingKnobs;
@@ -496,6 +498,28 @@ private:
     std::optional<int64_t> _preferredEngineId;
 
     bool _isOverrideShapeEnabled = false;
+
+    /// Metric requested through set_ranking_metric(); empty when none was, which leaves
+    /// HIPDNN_HEUR_RANKING_METRIC and the backend default to decide.
+    std::string _rankingMetric;
+
+    // Explicit-engine configs must carry the metric too; heuristic results already do.
+    Error applyRankingMetric(hipdnnBackendDescriptor_t engineConfigDesc) const
+    {
+        if(_rankingMetric.empty())
+        {
+            return {};
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(
+                engineConfigDesc,
+                HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                HIPDNN_TYPE_CHAR,
+                static_cast<int64_t>(_rankingMetric.size()),
+                _rankingMetric.c_str()),
+            "Failed to set ranking metric on the engine config descriptor.");
+        return {};
+    }
 
     // Get the active plan's engine config descriptor. Throws if no active plan exists.
     // Returns a borrowed pointer; invalidated by any operation that resets _compiledPlans
@@ -1024,6 +1048,7 @@ private:
                                              1,
                                              static_cast<const void*>(&engineDesc.get())),
                                          "Failed to set engine on the engine config descriptor.");
+        HIPDNN_CHECK_ERROR(applyRankingMetric(engineConfigDesc->get()));
 
         CompiledPlan plan;
         plan.engineConfigDesc = std::move(engineConfigDesc);
@@ -1384,7 +1409,6 @@ private:
                 for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
                 {
                     auto& spec = filteredSpecs[specIdx];
-
                     if(!spec.supportsExhaustive)
                     {
                         HIPDNN_FE_LOG_INFO("autotune: engine "
@@ -2456,7 +2480,7 @@ public:
 
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
 
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
@@ -2587,7 +2611,7 @@ public:
 
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
 
         HIPDNN_CHECK_ERROR(initializeEngineConfig(engineHeuristicDesc.get()));
 
@@ -2706,7 +2730,7 @@ public:
 
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true, _rankingMetric));
 
         HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
 
@@ -3421,7 +3445,7 @@ public:
 
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
+            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
 
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigDescs;
         std::vector<int64_t> engineIds;
@@ -6598,6 +6622,37 @@ public:
 
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;
+    }
+
+    /**
+     * @brief Choose the ranking metric engine selection and kernel choice optimize.
+     *
+     * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
+     * Applies to later heuristic queries and explicit-engine configurations; engines with no
+     * model for the metric rank last. HIPDNN_HEUR_RANKING_METRIC overrides it for heuristic
+     * selection.
+     *
+     * @param metric A registered ranking metric name
+     * @return ErrorCode::INVALID_VALUE, with the metric unchanged, for an unregistered name
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error set_ranking_metric(std::string metric)
+    {
+        if(hipdnn_data_sdk::utilities::findRankingMetric(metric) == nullptr)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unregistered ranking metric '" + metric + "'"};
+        }
+        _rankingMetric = std::move(metric);
+        return {};
+    }
+
+    /// The ranking metric this Graph requests: the one passed to set_ranking_metric(), or
+    /// the registry default ("tflops") when none was.
+    std::string get_ranking_metric() const // NOLINT(readability-identifier-naming)
+    {
+        return _rankingMetric.empty()
+                   ? std::string(hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)
+                   : _rankingMetric;
     }
 
 #ifdef HIPDNN_ENABLE_SDPA

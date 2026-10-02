@@ -13,9 +13,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
@@ -46,8 +48,8 @@ TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "misspelled selector";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = "hipdnn.kernel_ingestor.test.misspelled";
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = "hipdnn.kernel_ingestor.test.misspelled";
 
     try
     {
@@ -312,8 +314,8 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "test heuristic";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = SCORE_SYMBOL;
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = SCORE_SYMBOL;
 
     const auto heuristic = makeKernelHeuristic(descriptor);
 
@@ -324,16 +326,181 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
-TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
+/// A native cost scorer in milliseconds; 256 is the fast kernel. Registered per test because
+/// the registry is process-wide.
+constexpr const char* MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.milliseconds";
+
+class ScopedMillisecondsScorer
 {
-    // HeuristicKind::MODEL has no adapter yet; fails at assembly time, not first rank().
+public:
+    ScopedMillisecondsScorer()
+    {
+        ScoreRegistry::registerSymbol(
+            MILLISECONDS_SYMBOL,
+            +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+                switch(kernel.getIntMetadata(BLOCK_SIZE))
+                {
+                case 256:
+                    return 1.0;
+                case 64:
+                    return 10.0;
+                default:
+                    return 0.0; // no measurement
+                }
+            });
+    }
+    ~ScopedMillisecondsScorer()
+    {
+        ScoreRegistry::unregisterSymbol(MILLISECONDS_SYMBOL);
+    }
+    ScopedMillisecondsScorer(const ScopedMillisecondsScorer&) = delete;
+    ScopedMillisecondsScorer& operator=(const ScopedMillisecondsScorer&) = delete;
+};
+
+HeuristicDescriptor millisecondsDescriptor(const std::string& metric)
+{
+    HeuristicDescriptor descriptor;
+    descriptor.id = HEURISTIC_ID;
+    descriptor.name = "native cost scorer";
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = MILLISECONDS_SYMBOL;
+    descriptor.objective = "min";
+    descriptor.score = {metric, !metric.empty(), "identity"};
+    return descriptor;
+}
+
+/// Covers both direct-scorer routes: the metric-less ranker the factory builds, and a metric's
+/// ranker wrapped by UhdKernelHeuristic.
+TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+
+    Catalog catalog;
+    const auto slowId = testId(0x01);
+    const auto fastId = testId(0x02);
+    catalog.entries = {makeDefinition(slowId, 64), makeDefinition(fastId, 256)};
+
+    for(const std::string metric : {"", "time"})
+    {
+        SCOPED_TRACE("metric '" + metric + "'");
+        const auto heuristic = makeKernelHeuristic(millisecondsDescriptor(metric));
+        ASSERT_NE(heuristic, nullptr);
+        const MatchContext context{graph, 0, properties, metric.empty() ? "tflops" : "time"};
+
+        const auto ranked = heuristic->rank(catalog, context);
+        ASSERT_EQ(ranked.size(), 2U);
+        EXPECT_EQ(ranked.front().kernelId, fastId) << "the 10 ms kernel outranked the 1 ms one";
+    }
+}
+
+/// Reports physical milliseconds, not the negated ordering key, which would read as negative
+/// time.
+TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMilliseconds)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+
+    const auto heuristic = makeKernelHeuristic(millisecondsDescriptor("time"));
+    std::string modelId;
+    const auto calibrated = heuristic->calibratedRanking(catalog, context, modelId);
+
+    ASSERT_EQ(calibrated.size(), 2U);
+    EXPECT_EQ(calibrated.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(calibrated.front().score, 1.0);
+    EXPECT_DOUBLE_EQ(calibrated.back().score, 10.0);
+    EXPECT_EQ(modelId, toString(HEURISTIC_ID));
+}
+
+/// The inverse transform must precede the "no measurement" zero test: log(1 ms) = 0 is a
+/// measurement.
+TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
+{
+    constexpr const char* LOG_MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.log_milliseconds";
+    ScoreRegistry::registerSymbol(
+        LOG_MILLISECONDS_SYMBOL,
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+            return std::log(kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 1.0 : 10.0);
+        });
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+
+    auto descriptor = millisecondsDescriptor("time");
+    descriptor.nativeSymbol = LOG_MILLISECONDS_SYMBOL;
+    descriptor.score.transform = "log";
+    const auto heuristic = makeKernelHeuristic(descriptor);
+    std::string modelId;
+    const auto calibrated = heuristic->calibratedRanking(catalog, context, modelId);
+
+    ASSERT_EQ(calibrated.size(), 2U) << "a 1 ms winner was taken for an unmeasured one";
+    EXPECT_EQ(calibrated.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(calibrated.front().score, 1.0);
+    EXPECT_NEAR(calibrated.back().score, 10.0, 1e-12);
+    ScoreRegistry::unregisterSymbol(LOG_MILLISECONDS_SYMBOL);
+}
+
+/// Under `min` a zero cost means no measurement; negated it would be -0 and outrank every
+/// priced kernel.
+TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)
+{
+    const ScopedMillisecondsScorer scorer;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto unpricedId = testId(0x01);
+    const auto slowId = testId(0x02);
+    catalog.entries = {makeDefinition(unpricedId, 128), makeDefinition(slowId, 64)};
+
+    const auto heuristic = makeKernelHeuristic(millisecondsDescriptor(""));
+    const auto ranked = heuristic->rankScored(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, slowId);
+    EXPECT_DOUBLE_EQ(ranked.back().score, 0.0) << "the unpriced kernel reported a figure of merit";
+}
+
+TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)
+{
+    // An unregistered NATIVE symbol is a build error, but a missing MODEL artifact is a
+    // deployment fact: degrade to declared order (RFC 0019 §5).
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = "some/model/artifact.bin";
+    descriptor.adapter = UhdAdapter::TREE_DATA;
+    descriptor.modelArtifactPath = "some/model/artifact.bin";
+    descriptor.featuresSignature = {R"("$kernel.tile_m")"};
+    descriptor.featuresHash = "sha256:whatever";
 
-    EXPECT_THROW(makeKernelHeuristic(descriptor), std::invalid_argument);
+    std::shared_ptr<IKernelHeuristic> heuristic;
+    ASSERT_NO_THROW(heuristic = makeKernelHeuristic(descriptor));
+    ASSERT_NE(heuristic, nullptr);
+
+    // Ranking still works, and gives the order an engine with no model would give.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowPriorityId = testId(0x01);
+    const auto highPriorityId = testId(0x02);
+    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
+
+    const auto ranked = heuristic->rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicFallsBackWhenNoDescriptorIsSupplied)
@@ -411,14 +578,108 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
+    // 0 is RFC 0019 §5 step 7's "no measurement"; traceDecidedBy() tells a fallback apart from
+    // a model that scored zero.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
-              heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)));
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
+                     0.0);
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)),
+                     0.0);
+
+    // Equal priority, so the ascending-id tiebreak must decide, not a leaked NaN.
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const auto ranked = heuristic.rankScored(catalog, context);
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
+    EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "the fallback invented a figure of merit";
+}
+
+/// RFC 0019 §5 step 7: a throwing scorer degrades to static order and never fails the
+/// request. Mimics the native scorer reading a `block_size` the kernel does not declare.
+class ThrowingHeuristic : public IKernelHeuristic
+{
+public:
+    double score(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& /*kernel*/) const override
+    {
+        throw std::out_of_range("kernel has no metadata field 'block_size'");
+    }
+};
+
+TEST(TestIngestorKernelHeuristic, AThrowingScorerDegradesInsteadOfFailingTheRequest)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+
+    // Step 7's guarantee: the request survives.
+    std::vector<ScoredKernel> ranked;
+    ASSERT_NO_THROW(ranked = heuristic.rankScored(catalog, context));
+
+    // Static order is priority then id; priorities are equal, so ascending id decides.
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "a failed ranking reported a figure of merit";
+
+    // The whole ranking degrades, not just the candidates that threw.
+    EXPECT_DOUBLE_EQ(ranked.back().score, 0.0);
+}
+
+TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
+{
+    // Silent degradation would hide that the engine ranks on declared order (RFC 0019 §12).
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+    (void)heuristic.rankScored(catalog, context);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "scorer threw while ranking"));
+    EXPECT_TRUE(recorder.hasLogContaining("block_size")) << "the cause was not carried through";
+
+    // Once: the cause is a property of the descriptor set and recurs for every graph.
+    const auto after = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    (void)heuristic.rankScored(catalog, context);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), after) << "the report repeated";
+}
+
+TEST(TestIngestorKernelHeuristic, RankAlsoSurvivesAThrowingScorer)
+{
+    // Production calls rank(), which derives from rankScored and must share its guard.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+    std::vector<KernelDefinition> ordered;
+    ASSERT_NO_THROW(ordered = heuristic.rank(catalog, context));
+    ASSERT_EQ(ordered.size(), 2U);
+    EXPECT_EQ(ordered.front().kernelId, testId(0x01));
 }
 
 } // namespace

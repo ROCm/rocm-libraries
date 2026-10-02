@@ -1,0 +1,34 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "engine_config.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum PredictionKind: ubyte { ENGINE = 0, CONFIGURATION = 1 }
+enum PredictionStatus: ubyte { UNAVAILABLE = 0, AVAILABLE = 1, INVALID = 2 }
+
+// Prediction and discovery use the same transport. Describing an engine publishes
+// its binding and input features without loading/evaluating a model or ranking
+// configurations. Availability of a prediction never determines applicability.
+table EnginePrediction {
+    engine_id: int64;
+    kind: PredictionKind;
+    status: PredictionStatus;
+    // The prediction in `metric`'s registered units (RFC 0019 section 4.4), after
+    // applying the inverse model transform. Meaningful only when AVAILABLE.
+    value: double;
+    uhd_id: string;
+    reason: string;
+    // Required for an AVAILABLE configuration prediction; selection must survive
+    // plan construction unchanged. ENGINE predictions do not select a config.
+    engine_config: EngineConfig;
+    binding_json: string;
+    // Published feature names, without a leading '$', mapped to scalar values.
+    features_json: string;
+    // The registered ranking metric `value` is in. Always the metric the request named;
+    // an answer in any other metric is invalid rather than converted.
+    metric: string;
+}
+
+root_type EnginePrediction;
