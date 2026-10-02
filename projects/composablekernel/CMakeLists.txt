@@ -515,7 +515,9 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
     # instance translation units" -- which is what the instance-factory guards need to know.
     # CK_USE_GFX1250 itself cannot be exported: ck/ck.hpp:205 keys the host half of
     # CK_ENABLE_CLUSTER_LAUNCH on it and the device half on __gfx125__, so exporting it
-    # desynchronises the two on every non-gfx1250 offload pass.
+    # desynchronises the two on every non-gfx1250 offload pass. CK_GFX1250_SUPPORT is not
+    # reused either: dispatcher/bindings/ctypes/CMakeLists.txt undefines and redefines it per
+    # target architecture, so it does not say what this library build contains.
     add_definitions(-DCK_HAS_GFX1250_INSTANCES)
     set(CK_HAS_GFX1250_INSTANCES "ON")
     add_definitions(-DCK_USE_NATIVE_MX_SUPPORT)
