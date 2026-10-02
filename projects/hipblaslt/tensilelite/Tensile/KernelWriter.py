@@ -2166,11 +2166,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             # rest mfma help to schedule those localReads
             else:
               readLeftLREven = numReadsInst / (numMfmaPerIter - i)
-          # Suppress ALL next-loop reads at iterations after barrier; they are
-          # flushed after the MFMAs complete for this iteration.
-          if deferNextLoopReadsWAR and iteration > isBarrier:
-            readLeftLREven = 0
-            readLeftLROPT = 0
           # if there are too many localreads, change strategy to even.
           readLeft = checkLocalReadFIFOFull(mfmaIndex, self.localReadNextLoopFIFO, localReadItemsNextLoop, readLeftLROPT, readLeftLREven)
         for j in range(readLeft):
