@@ -43,6 +43,7 @@
 
 #include <any>
 #include <mutex>
+#include <optional>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
@@ -1728,6 +1729,28 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     return tensors[0].to_vector();
 }
 
+// Precomputed config-tower fast path.
+//
+// The config tower is a pure function of (arch, solver, kernel-config): its output does not
+// depend on the convolution problem. The set of kernel configs a solver can emit is finite, so
+// all config-tower embeddings can be computed once, offline, and shipped as a lookup table
+// ({arch}_{solver}_kernel_config_embeddings.bin). At runtime we hash each encoded candidate
+// vector and read back the stored 64-d embedding -- bit-for-bit what the fdeep config encoder
+// would have produced -- without loading or running the neural model. When the table covers
+// every candidate this lets us drop the ~450 KB-per-solver _kernel_config_encoder.tn.model
+// from the shipped artifacts entirely.
+//
+// Returns nullopt on any miss (table absent, or a candidate not in the table) so the caller
+// transparently falls back to the fdeep path; this keeps the change backward compatible and
+// is the seam the precompute-config-tower work fills in. Stub for now.
+std::optional<std::vector<std::vector<float>>>
+TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& /*encoded_candidates*/,
+                                const std::string& /*arch*/,
+                                const std::string& /*solver*/)
+{
+    return std::nullopt;
+}
+
 std::vector<std::vector<float>>
 EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
                              const std::string& arch,
@@ -1737,6 +1760,10 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
     if(encoded_candidates.empty() || encoded_candidates[0].empty())
         MIOPEN_THROW(miopenStatusInternalError,
                      "Empty candidates provided to kernel config encoder");
+
+    // Fast path: use shipped precomputed embeddings and skip the neural config tower entirely.
+    if(auto precomputed = TryEncodeKernelConfigsFromTable(encoded_candidates, arch, solver))
+        return std::move(*precomputed);
 
     std::string key = arch + "_" + solver + "_kernel_config_encoder";
     std::string path =
