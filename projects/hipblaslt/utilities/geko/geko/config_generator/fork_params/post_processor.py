@@ -18,6 +18,36 @@ def mark_post_process(fn):
     return fn
 
 
+# ---------------------------------------------------------------------
+# Non-temporal load/store hints
+# ---------------------------------------------------------------------
+# The four NonTemporal* ForkParameters control the non-temporal cache
+# hint on the A / B / C / D global accesses.  When the input config sets
+# ``IGNORE_NON_TEMPORAL: True`` these are marked ``active=False`` so the
+# YAML writer comments them out and the search-space count drops them.
+NON_TEMPORAL_PARAMS = frozenset({
+    "NonTemporalA",
+    "NonTemporalB",
+    "NonTemporalC",
+    "NonTemporalD",
+})
+
+
+def _apply_ignore_non_temporal_filter(
+    fork_params: Dict[str, ForkParameter],
+) -> Dict[str, ForkParameter]:
+    """Mark the NonTemporal* fork params inactive (``IGNORE_NON_TEMPORAL``).
+
+    Applied regardless of subtile mode; runs last so it overrides any earlier
+    pinning of these axes.
+    """
+    for name in NON_TEMPORAL_PARAMS:
+        fp = fork_params.get(name)
+        if fp is not None:
+            fp.active = False
+    return fork_params
+
+
 class BasePostProcessor(BaseParamBuilder):
     """Base class for post-processing MI groups and fork params.
 
@@ -53,6 +83,15 @@ class BasePostProcessor(BaseParamBuilder):
             fork_params, mi_groups = self._apply_mt_du(fork_params, mi_groups, mt_du)
         for method_name in self._post_process_methods:
             fork_params, mi_groups = getattr(self, method_name)(fork_params, mi_groups, ctx)
+        if self.config.get("IGNORE_NON_TEMPORAL", False):
+            fork_params = _apply_ignore_non_temporal_filter(fork_params)
+
+        # Remove DepthU from fork_params if present in all MI groups
+        if "DepthU" in fork_params and all(
+            "DepthU" in entry for entry in mi_groups
+        ):
+            del fork_params["DepthU"]
+
         return fork_params, mi_groups
 
     # -----------------------------------------------------------------
