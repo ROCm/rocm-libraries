@@ -569,6 +569,30 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
 
+// Fused multi-kernel Bluestein with non-unit strides.  The inner-batched cases
+// (idist=odist=1, istride=ostride=batch) used to fault on the GPU because the
+// L1D_CC dist-1 reshape broke the fused stages' convolution buffer layouts.
+const auto fused_bluestein_non_unit_stride_tokens = {
+    // clang-format off
+    "complex_forward_len_4182_single_ip_batch_2456_istride_2456_CI_ostride_2456_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4167_single_op_batch_1039_istride_1039_CI_ostride_1039_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4128_single_ip_batch_8092_istride_8092_CI_ostride_8092_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4097_single_ip_batch_2_istride_2_CI_ostride_2_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_4097_single_ip_batch_2_istride_2_CI_ostride_2_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4099_double_ip_batch_64_istride_64_CI_ostride_64_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_8191_single_op_batch_8_istride_8_CI_ostride_8_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // general non-unit stride and non-unit dist
+    "complex_inverse_len_8191_double_ip_batch_8_istride_2_CI_ostride_2_CI_idist_16382_odist_16382_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4182_single_op_batch_8_istride_3_CI_ostride_3_CI_idist_12562_odist_12562_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    fused_bluestein_non_unit_stride,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, fused_bluestein_non_unit_stride_tokens)),
+    accuracy_test::TestName);
+
 // MaxKernelStride boundary. batch 1 => dist contributes nothing to ptrdiff,
 // so buffers stay tiny while the packed dist crosses UINT32_MAX.
 // 4294967295 stays i32; 4294967296 flips to i64.
