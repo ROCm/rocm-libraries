@@ -120,6 +120,32 @@ def as_manifest(table: dict) -> dict:
     return manifest
 
 
+def merge_manifests(manifests) -> dict:
+    """One addressing table from several collections' `as_manifest` records.
+
+    Each collection observes only the candidates its own graphs enumerated, so collections
+    of one corpus measured in shards record different SUBSETS of the engine's numbering --
+    not different numberings. They are merged under `observe`'s rule: a pin two collections
+    both saw must address the same value, and a contradiction is refused, because it means
+    the engine numbered differently between them and one side's rows address other kernels.
+    """
+    table: dict = {}
+    for index, manifest in enumerate(manifests):
+        for name, record in (manifest or {}).items():
+            entry = table.setdefault(name, {})
+            for item in record.get("values", []):
+                pinned, observed = item["pin"], _hashable(item["value"])
+                known = entry.get(pinned)
+                if known is not None and known != observed:
+                    raise ValueError(
+                        f"knob {name!r} ordinal {pinned} addressed {known!r} in one collection and "
+                        f"{observed!r} in another (collection {index}); the engine numbered them "
+                        "differently, so they cannot train one model"
+                    )
+                entry[pinned] = observed
+    return as_manifest(table)
+
+
 def unaddressable(exposed_knobs, table: dict) -> list[str]:
     """Exposed knobs no candidate ever pinned.
 

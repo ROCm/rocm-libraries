@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Score a trained UHD against the best kernel that was actually measured.
 
-RFC 0019.13 §11.2. Training reports RMSE on `log1p(target)`; the runtime decision is
+RFC 0019.13 §11.2. Training reports RMSE on `log(target)`; the runtime decision is
 *pick the best kernel for this problem*, and RMSE can improve while that decision gets
 worse. This module computes the metrics that answer the decision question directly:
 
@@ -43,6 +43,9 @@ import pandas as pd
 from .correctness import known_wrong
 from .corpus_io import read_corpus_frame
 from .ranking_metrics import RANKING_METRICS
+from .score_transform import INVERTIBLE as INVERTIBLE_TRANSFORMS
+from .score_transform import TRAINED as TRAINED_TRANSFORM
+from .score_transform import inverse as invert_score
 
 logger = logging.getLogger(__name__)
 
@@ -1379,7 +1382,7 @@ def _flatbuffer_scorer(
     expected_hash: str | None = None,
     model_hash: str | None = None,
     objective: str | None = None,
-    score_transform: str = "log1p",
+    score_transform: str = TRAINED_TRANSFORM,
     physical: bool,
 ) -> Scorer:
     """Score with the artifact that actually ships.
@@ -1390,7 +1393,7 @@ def _flatbuffer_scorer(
 
     Only the induced ORDER matters (see `Scorer`), so the ensemble is summed exactly as
     `TreeDataAdapter::score()` does -- unit learning rate, LightGBM having folded the
-    shrinkage into the dumped leaf values -- and the log1p inverse is applied for
+    shrinkage into the dumped leaf values -- and the transform's inverse is applied for
     callers who want the value, not because ranking needs it.
 
     The bytes pass the loader's own checks first (`verify_tree_artifact`: declared digest,
@@ -1501,7 +1504,7 @@ def _flatbuffer_scorer(
         return total
 
     def recover(raw: np.ndarray) -> np.ndarray:
-        return np.expm1(raw) if score_transform == "log1p" else raw
+        return invert_score(raw, score_transform)
 
     def score(frame: pd.DataFrame) -> np.ndarray:
         matrix = build_feature_matrix(
@@ -1546,11 +1549,9 @@ def _flatbuffer_scorer(
         within = groups.get(float(chosen))
         raw[inside] = ensemble(within, matrix, inside) if within else layer_one[inside]
 
-        scores = recover(raw)
-        # expm1(-inf) is -1.0, a finite value that would outrank a genuinely negative score.
-        # Restoring -inf keeps a rejected group unusable, which is what `rankScored` expects.
-        scores[raw == -np.inf] = -np.inf
-        return scores
+        # A rejected group's -inf survives the inverse (score_transform.inverse), so it stays
+        # unusable, which is what `rankScored` expects.
+        return recover(raw)
 
     return score
 
@@ -1562,7 +1563,7 @@ def _booster_scorer(
     *,
     signature: list | None = None,
     feature_evaluator: str | None = None,
-    score_transform: str = "log1p",
+    score_transform: str = TRAINED_TRANSFORM,
 ) -> Scorer:
     import lightgbm as lgb
 
@@ -1580,7 +1581,7 @@ def _booster_scorer(
                 feature_evaluator=feature_evaluator,
             )
         )
-        return np.expm1(values) if score_transform == "log1p" else values
+        return invert_score(values, score_transform)
 
     return score
 
@@ -1675,13 +1676,14 @@ def load_model(
         # reinterpret the descriptor it was shipped with.
         transform = (descriptor.get("score") or {}).get("transform") or "identity"
     else:
+        # A manifest without the key predates `log`: every model trained then was log1p.
         transform = manifest.get("score_transform", "log1p")
-    if transform not in ("identity", "log1p"):
+    if transform not in INVERTIBLE_TRANSFORMS:
         # The engine's transform vocabulary is wider (score_transform::isSupported);
         # what is missing here is this module's inverse, not the descriptor's validity.
         raise ValueError(
-            f"uhd_gen can only score identity or log1p transforms; this descriptor "
-            f"declares {transform!r}, which the runtime loads but `evaluate` cannot invert"
+            f"uhd_gen can only score {', '.join(INVERTIBLE_TRANSFORMS)} transforms; this "
+            f"descriptor declares {transform!r}, which the runtime loads but `evaluate` cannot invert"
         )
     if runtime_predictions is not None:
         if not immediate:

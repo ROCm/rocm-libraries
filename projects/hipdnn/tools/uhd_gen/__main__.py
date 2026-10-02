@@ -82,6 +82,7 @@ from .features import (
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
+from . import score_transform
 from .train_uhd import build_feature_matrix, train_model
 
 logging.basicConfig(
@@ -202,6 +203,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_generate_arguments(generate)
 
+    from .sizing import add_size_arguments, run_size
+
+    size = subparsers.add_parser(
+        "size",
+        help="how many more unique shapes an L1 model needs, and from which regimes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_size_arguments(size)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -241,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "generate":
         return run_generate(args)
+    if args.command == "size":
+        return run_size(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
@@ -985,7 +997,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "score": {
             **({"metric": args.metric} if args.metric else {}),
             "calibrated": args.calibrated,
-            "transform": "log1p",
+            "transform": score_transform.TRAINED,
         },
         # RFC 0019 §7.2: the body naming the artifact carries the digest of its bytes,
         # which TreeDataAdapter recomputes before parsing and refuses on mismatch. It
@@ -1023,7 +1035,7 @@ def _run_train(args: argparse.Namespace) -> int:
         # refuses cross-engine comparison between models trained on different ones, so
         # a consumer has to be able to read it off the artifact rather than infer it.
         "timing_statistic": args.timing_statistic,
-        "score_transform": "log1p",
+        "score_transform": score_transform.TRAINED,
         "group_by": groups or [],
         # The feature layer 1 groups on, and the count it produced. Recorded because the
         # artifact alone gives an evaluator only a slot index, and a slot index cannot say

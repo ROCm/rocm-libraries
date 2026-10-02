@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import logging
@@ -13,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -52,14 +54,34 @@ MANIFEST = "manifest.json"
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--graphs",
         nargs="+",
-        required=True,
         help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
         "as graphs/*.fb -- or directories. A hipdnn_corpus_gen root (or its "
         "manifest.json) is read through the manifest's graph list; any other "
         "directory is searched recursively",
+    )
+    inputs.add_argument(
+        "--collection",
+        nargs="+",
+        metavar="DIR",
+        help="Train from recorded collections (written by --collect-only) instead of "
+        "measuring; several are merged into one measurement of each configuration "
+        "on each shape, the newest winning",
+    )
+    parser.add_argument(
+        "--collect-only",
+        action="store_true",
+        help="Measure --graphs, write the collection to --output-dir, and stop",
+    )
+    parser.add_argument(
+        "--shard",
+        metavar="K/N",
+        help="With --collect-only: measure the K-th of N slices of --graphs "
+        "(0-based, every N-th graph in path order), so N GPUs can collect "
+        "one corpus in parallel as N collections",
     )
     parser.add_argument(
         "--descriptor-tree",
@@ -71,9 +93,8 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--engine-id",
-        required=True,
         type=int,
-        help="Public hipDNN engine ID used by hipdnn_bench",
+        help="Public hipDNN engine ID used by hipdnn_bench (required to measure)",
     )
     parser.add_argument(
         "--bench", default="hipdnn_bench", help="Public hipdnn_bench executable"
@@ -116,6 +137,14 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "--feature-evaluator", help="Shared hipdnn_uhd_features executable"
     )
     parser.add_argument("--eval-fraction", type=float, default=0.2)
+    parser.add_argument(
+        "--recall",
+        action="store_true",
+        help="The engine's shape space is closed -- it serves only the shapes it was "
+        "compiled for (a pack-bound engine) -- so no unseen shape can reach the "
+        "model. Train on every shape and report accuracy over all of them as "
+        "recall, instead of holding --eval-fraction of them out of the model",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
@@ -187,6 +216,261 @@ def _absent_as_null(value):
     if isinstance(value, list):
         return [_absent_as_null(item) for item in value]
     return value
+
+
+#: The recorded form of one measuring run, read back by `--collection`.
+COLLECTION_SCHEMA = "uhd_gen.collection/1"
+COLLECTION_MANIFEST = "collection_manifest.json"
+
+
+def _corpus_name(sources: list, source) -> str:
+    """One corpus per metric source, named plainly when there is only one."""
+    return "corpus" if len(sources) == 1 else f"corpus_{source}"
+
+
+def write_collection(
+    stage: Path,
+    *,
+    collected_at: str,
+    role: str,
+    engine: str | None,
+    engine_id: int,
+    sources: list,
+    rows: dict,
+    published: set,
+    commands: list,
+    graph_inputs: list,
+    provenance,
+    knob_encodings: dict,
+    shipping_knobs: list,
+    collection_knobs: list,
+    kernel_fields: set,
+    shard: str | None = None,
+    failed_graphs: list | None = None,
+) -> dict:
+    """Write what a measuring run produced so a later `--collection` can train from it.
+
+    Everything training reads from a collection is here, and nothing training decides is:
+    no split, no feature recipe, no model. For an engine-immediate collection the binding
+    is checked now, so a collection that cannot train (mixed selector revisions within one
+    run) is refused while it is still one run's problem rather than a merge's.
+    """
+    immediate = role == ROLE
+    selector_revision = None
+    for source in sources:
+        frame = pd.DataFrame(rows[source])
+        if immediate:
+            _, binding = training_binding(normalize_corpus(frame))
+            if provenance is not None and binding["trained_against"] != provenance:
+                raise ValueError(
+                    "the engine's descriptor provenance changed between metric collections"
+                )
+            provenance = binding["trained_against"]
+            selector_revision = binding["selector_revision"]
+        name = _corpus_name(sources, source)
+        frame.to_csv(stage / f"{name}.csv", index=False)
+        _write_json(stage / f"{name}.json", _absent_as_null(rows[source]))
+    every = [row for source in sources for row in rows[source]]
+    manifest = {
+        "schema": COLLECTION_SCHEMA,
+        "collected_at": collected_at,
+        "role": role,
+        "engine": engine,
+        "engine_id": engine_id,
+        "engine_name": next(
+            (row.get("engine_name") for row in every if row.get("engine_name")), None
+        ),
+        "sources": sources,
+        "trained_against": provenance,
+        "selector_revision": selector_revision,
+        "arches": sorted({row["arch"] for row in every}),
+        "devices": sorted({str(row["device"]) for row in every}),
+        "graph_count": len({row["benchmark"] for row in every}),
+        "row_counts": {str(source): len(rows[source]) for source in sources},
+        "published": sorted(published),
+        "kernel_fields": sorted(kernel_fields),
+        "knob_encodings": knob_encodings,
+        "shipping_knobs": shipping_knobs,
+        "collection_knobs": collection_knobs,
+        "graphs": graph_inputs,
+        "commands": commands,
+        # Graphs skipped within the --max-graph-failures budget, each with its error: what
+        # this collection does not cover, recorded where training will read it.
+        "failed_graphs": list(failed_graphs or []),
+    }
+    if shard:
+        # Which slice of its corpus this is: N shards of one corpus are N collections, and
+        # together -- not alone -- they are the corpus's measurement.
+        manifest["shard"] = shard
+    _write_json(stage / COLLECTION_MANIFEST, manifest)
+    return manifest
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """`K/N` -> (K, N), with 0 <= K < N."""
+    try:
+        index, count = (int(part) for part in str(text).split("/"))
+    except ValueError:
+        raise ValueError(f"--shard takes K/N, not {text!r}") from None
+    if count < 1 or not 0 <= index < count:
+        raise ValueError(f"--shard {text}: need 0 <= K < N")
+    return index, count
+
+
+def _measurement_key(row: dict) -> tuple:
+    """What a measurement is of: a configuration on a shape, on an architecture.
+
+    A shape is a graph -- the graph id is content-derived, so the same geometry has the
+    same id wherever it was generated -- and the same shape on another arch is another
+    problem. A catalog sweep times many kernel configurations on one shape, and each is a
+    row of its own; an L1 row carries no configuration (the engine chose it), so its key
+    is the shape alone.
+    """
+    return (
+        str(row["benchmark"]),
+        str(row["arch"]),
+        str(row.get("kernel")),
+        str(row.get("knob_settings")),
+    )
+
+
+def one_measurement_per_shape(measured: list) -> tuple[list, int]:
+    """Keep one measurement of each configuration on each shape: the newest session's.
+
+    `measured` is `(session, row)` in the order measured, a session being one run on one
+    device. Returns (rows, dropped). A configuration measured twice on a shape -- on two
+    GPUs of the arch, or in two collections -- is one training problem, not two: kept
+    twice it is weighted twice, and split across the held-out boundary it scores the
+    model on a problem it was trained on (the split keys on (graph, device), and another
+    GPU of the same arch is another device). Distinct configurations on the same shape
+    are distinct rows and are all kept. Older measurements stay in their collections;
+    this only picks the label.
+
+    A repeat taken under another binding (selector revision, descriptor set) is refused,
+    not superseded: dropping it would hide the mix the corpus check exists to refuse.
+    """
+    newest: dict = {}
+    binding: dict = {}
+    for session, row in measured:
+        key = _measurement_key(row)
+        if binding.setdefault(key, row.get("binding")) != row.get("binding"):
+            raise ValueError(
+                f"{key[0]} on {key[1]} was measured under two engine bindings; "
+                "the selector or descriptor provenance changed between measurements"
+            )
+        newest[key] = session
+    kept = [
+        row for session, row in measured if newest[_measurement_key(row)] == session
+    ]
+    return kept, len(measured) - len(kept)
+
+
+def load_collections(paths: list, *, role: str, sources: list) -> dict:
+    """Merge recorded collections into one measurement per shape, the newest winning.
+
+    Collections are taken oldest to newest by `collected_at` (not the order named), and
+    `one_measurement_per_shape` keeps the newest measurement of each configuration on
+    each shape. The count of rows set aside is returned, so the model can say how much of
+    the store it did not use.
+
+    Refused rather than merged: different roles or engines, different trained_against
+    (a model is bound to one selector revision or descriptor set), different knob
+    addressing, and a requested metric a collection did not measure.
+    """
+    loaded = []
+    for supplied in paths:
+        directory = Path(supplied).resolve()
+        manifest = json.loads(
+            (directory / COLLECTION_MANIFEST).read_text(encoding="utf-8")
+        )
+        if manifest.get("schema") != COLLECTION_SCHEMA:
+            raise ValueError(f"{directory} is not a {COLLECTION_SCHEMA} collection")
+        loaded.append((manifest["collected_at"], str(directory), manifest))
+    if not loaded:
+        raise ValueError("--collection names no collection")
+    loaded.sort(key=lambda item: (item[0], item[1]))
+    first = loaded[0][2]
+    for _, directory, manifest in loaded:
+        if manifest["role"] != role:
+            raise ValueError(
+                f"{directory} was collected for {manifest['role']}, not {role}"
+            )
+        for key, what in (
+            ("engine_name", "engine"),
+            ("engine_id", "engine id"),
+            ("selector_revision", "selector revision"),
+            ("trained_against", "trained_against provenance"),
+            ("collection_knobs", "collection knobs"),
+        ):
+            if manifest.get(key) != first.get(key):
+                raise ValueError(
+                    f"collections disagree on {what}: {first.get(key)!r} vs "
+                    f"{manifest.get(key)!r} ({directory}); a model is trained against one"
+                )
+        missing = [source for source in sources if source not in manifest["sources"]]
+        if missing:
+            raise ValueError(
+                f"{directory} did not measure {missing}; it holds {manifest['sources']}"
+            )
+    # Each collection records the addressing its own candidates showed: a subset of the
+    # engine's numbering, which shards of one corpus split between them. Merged, refusing a
+    # pin two of them read differently.
+    try:
+        knob_encodings = addressing.merge_manifests(
+            m.get("knob_encodings") for _, _, m in loaded
+        )
+    except ValueError as error:
+        raise ValueError(f"collections disagree on knob addressing: {error}") from None
+    rows, superseded, published = {source: [] for source in sources}, 0, set()
+    for source in sources:
+        measured = []
+        for order, (_, directory, manifest) in enumerate(loaded):
+            corpus = (
+                Path(directory) / f"{_corpus_name(manifest['sources'], source)}.json"
+            )
+            measured.extend(
+                ((order, str(row["device"])), row)
+                for row in json.loads(corpus.read_text(encoding="utf-8"))
+            )
+        rows[source], dropped = one_measurement_per_shape(measured)
+        superseded += dropped
+    for _, _, manifest in loaded:
+        published.update(manifest["published"])
+    return {
+        "rows": rows,
+        "published": published,
+        "superseded_rows": superseded,
+        "provenance": first["trained_against"],
+        "knob_encodings": knob_encodings,
+        "shipping_knobs": first["shipping_knobs"],
+        "collection_knobs": first["collection_knobs"],
+        "kernel_fields": set(first["kernel_fields"]),
+        "engine_id": first["engine_id"],
+        "graphs": [
+            dict(graph, collection=directory)
+            for _, directory, manifest in loaded
+            for graph in manifest["graphs"]
+        ],
+        "commands": [
+            dict(command, collection=directory)
+            for _, directory, manifest in loaded
+            for command in manifest["commands"]
+        ],
+        "failed_graphs": [
+            dict(failure, collection=directory)
+            for _, directory, manifest in loaded
+            for failure in manifest.get("failed_graphs") or []
+        ],
+        "collections": [
+            {
+                "path": directory,
+                "collected_at": collected_at,
+                "devices": manifest["devices"],
+                "rows": manifest["row_counts"],
+            }
+            for collected_at, directory, manifest in loaded
+        ],
+    }
 
 
 def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
@@ -539,6 +823,255 @@ def _catalog_label(
     return None, "robustMeanMs", False, "robustMeanMs"
 
 
+def read_regime_manifest(manifest: Path) -> dict:
+    """benchmark -> its regime columns, from one `hipdnn_corpus_gen` manifest.csv.
+
+    The manifest carries `regime` and then one column per facet the operation declares, up to
+    `source`. They go onto rows as envelope columns (`regime`, `regime.<facet>`,
+    `regime.operation`), never features.
+    """
+    labels: dict = {}
+    with Path(manifest).open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        columns = reader.fieldnames or []
+        if "benchmark" not in columns or "regime" not in columns:
+            return labels
+        end = (
+            columns.index("source")
+            if "source" in columns
+            else columns.index("regime") + 1
+        )
+        facets = columns[columns.index("regime") + 1 : end]
+        for record in reader:
+            labels[record["benchmark"]] = {
+                "regime": record["regime"],
+                **{f"regime.{facet}": record[facet] for facet in facets},
+                # Which declaration the label is under: a quota asks corpus_gen for a regime
+                # of one operation, and two operations may share a label.
+                **({"regime.operation": record["op"]} if record.get("op") else {}),
+            }
+    return labels
+
+
+def corpus_regimes(graph_paths) -> dict:
+    """Each graph's regime, as the corpus that generated it labelled it: benchmark -> columns.
+
+    `hipdnn_corpus_gen` writes `manifest.csv` beside `graphs/`. Its labels go onto every
+    measured row so `evaluate`'s per-regime table (RFC 0019.13 §11.2) exists for every model
+    trained from a collection, and a later sizing run can say which populations a model is
+    weak on without finding the corpus again.
+    """
+    labels: dict = {}
+    for directory in sorted(
+        {
+            parent
+            for path in graph_paths
+            for parent in (Path(path).parent, Path(path).parent.parent)
+        }
+    ):
+        if (directory / "manifest.csv").is_file():
+            labels.update(read_regime_manifest(directory / "manifest.csv"))
+    return labels
+
+
+def _measure(
+    args: argparse.Namespace, tree: Path, stage: Path, sources: list, immediate: bool
+) -> dict:
+    """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
+
+    Returns exactly what training reads, so `--collect-only` can write it down and
+    `--collection` can hand the same values back without measuring.
+    """
+    if args.engine_id is None:
+        raise ValueError("--engine-id is required to measure")
+    bench = shutil.which(args.bench)
+    if bench is None:
+        raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
+    graphs = discover_graphs(args.graphs)
+    if args.shard:
+        index, count = parse_shard(args.shard)
+        # Every N-th in path order, not a contiguous block: a corpus is written regime by
+        # regime, so a block would hand one GPU all the decode shapes.
+        total = len(graphs)
+        graphs = graphs[index::count]
+        if not graphs:
+            raise ValueError(f"shard {args.shard} of {total} graph(s) is empty")
+    collected_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    provenance, ued, exposed, kernel_fields, ordinals = None, {}, {}, set(), {}
+    if not immediate:
+        provenance = snapshot_provenance(tree, args.engine, args.arch)
+        ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
+        _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
+        kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+    # The tree this run measures is the ONE root the bench loads from: DIR replaces the
+    # provider's installed tree, while RUNTIME_DIR and PATH only add roots beside it, and
+    # the loader keeps the FIRST definition of an id. Inherited additive roots are
+    # cleared for both roles, and the measured tree goes in as the replacement, so an
+    # earlier root's selector can never stand in for the one being generated against --
+    # an L1 label is a measurement of the selection this tree makes, nothing else's.
+    environment = dict(os.environ)
+    environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
+    environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
+    if immediate:
+        environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
+    else:
+        collection_tree = stage / "collection_descriptors"
+        shutil.copytree(tree, collection_tree)
+        exposed = dict(ued)
+        # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
+        # equals the metadata tuple and every catalog entry is individually reachable.
+        # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
+        # and abort the run on the collision at _knob_tuple.
+        #
+        # Which of those fields ends up addressed BY AN ORDINAL is the engine's
+        # decision, not this tool's: a knob value is an int64 end to end, so the
+        # ingestor numbers each non-integer field over its own value set and reports
+        # the pin it chose on every enumerated candidate. The mapping is read back off
+        # the collection below (addressing.observe) rather than re-derived here, so
+        # there is no second numbering to disagree with the engine's.
+        exposed["knobs"] = [field["name"] for field in kmd["fields"]]
+        _write_json(collection_tree / ued_path.relative_to(tree), exposed)
+        _write_json(stage / "shipping_ued.json", ued)
+        environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
+    rows = {source: [] for source in sources}
+    commands, graph_inputs, failed_graphs = [], [], []
+    published = set()
+    for graph_index, graph in enumerate(graphs):
+        graph_rows = {source: [] for source in sources}
+        graph_names = set()
+        payload = graph.read_bytes()
+        # `hipdnn_bench` tells the two serialized forms apart by content rather than
+        # by extension, so a renamed file still loads; the staged copy follows the
+        # same rule and keeps whichever form the source was in.
+        binary = not payload.lstrip().startswith(b"{")
+        saved_graph = (
+            stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
+        )
+        saved_graph.parent.mkdir(exist_ok=True)
+        graph_input = {
+            "source": str(graph),
+            "copy": str(saved_graph.relative_to(stage)),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        graph_inputs.append(graph_input)
+        # One graph's failure costs that graph, not the run: a bench that crashes or a
+        # response that fails validation on one problem says nothing about the others.
+        # All of the graph's rows go together, for every device and metric, so the
+        # metrics' corpora stay over one problem set. The budget below still ends a run
+        # whose failures are systematic rather than incidental.
+        try:
+            if immediate and not binary:
+                graph_document = json.loads(payload.decode("utf-8"))
+                if not isinstance(graph_document, dict):
+                    raise ValueError("graph input must be a JSON object")
+                if not graph_document.get("id"):
+                    canonical = json.dumps(
+                        graph_document,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                    graph_document["id"] = str(
+                        uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical)
+                    )
+                _write_json(saved_graph, graph_document)
+            else:
+                # A serialized graph already carries its own id, and the bench preserves
+                # it across the deserialize/serialize round trip it does for L1, so there
+                # is nothing to inject: the identity the corpus records is the one the
+                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+                saved_graph.write_bytes(payload)
+            command = [
+                bench,
+                "--graph",
+                str(saved_graph),
+                "--engine-id",
+                str(args.engine_id),
+            ]
+            if args.plugin_dir:
+                command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
+            if args.workspace_limit is not None:
+                command.extend(["--workspace-limit", str(args.workspace_limit)])
+            for knob in args.knob:
+                command.extend(["--knob", knob])
+            for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
+                run_env = dict(environment)
+                if device is not None:
+                    run_env["HIP_VISIBLE_DEVICES"] = device
+                for source in sources:
+                    if immediate:
+                        collected, names = collect_immediate_graph(
+                            command,
+                            run_env,
+                            stage / "commands",
+                            commands,
+                            metric=source,
+                        )
+                    else:
+                        collected, names = collect_graph(
+                            command,
+                            run_env,
+                            stage / "commands",
+                            commands,
+                            addressing_table=ordinals,
+                            engine_descriptor_id=ued["id"],
+                        )
+                    graph_rows[source].extend(collected)
+                    graph_names.update(names)
+        except ValueError as error:
+            failed_graphs.append({**graph_input, "error": str(error)})
+            logger.warning("graph %s skipped: %s", graph, error)
+            continue
+        if immediate and not args.collect_only and not any(rows.values()):
+            # Settled on the first measured graph, not after the corpus: the id an opaque
+            # engine reads is its declaration and does not vary by graph, so a run that could
+            # only train an unread model stops here. A collect-only run trains nothing.
+            requested = _requested_uhd_ids(args.uhd_ids, list(sources))
+            for source in sources:
+                if graph_rows[source]:
+                    _declared_uhd_id(
+                        json.loads(graph_rows[source][0]["binding"]),
+                        source,
+                        requested.get(source),
+                    )
+        for source in sources:
+            rows[source].extend(graph_rows[source])
+        published.update(graph_names)
+    if len(failed_graphs) > args.max_graph_failures * len(graphs):
+        _write_json(stage / "failed_graphs.json", failed_graphs)
+        listed = "\n".join(
+            f"  {failure['source']}: {failure['error']}"
+            for failure in failed_graphs[:10]
+        )
+        more = (
+            f"\n  ... and {len(failed_graphs) - 10} more"
+            if len(failed_graphs) > 10
+            else ""
+        )
+        raise ValueError(
+            f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
+            f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
+            f"{listed}{more}"
+        )
+    regimes = corpus_regimes(graphs)
+    for source in sources:
+        for row in rows[source]:
+            row.update(regimes.get(str(row["benchmark"]), {}))
+    return {
+        "collected_at": collected_at,
+        "rows": rows,
+        "published": published,
+        "commands": commands,
+        "graph_inputs": graph_inputs,
+        "provenance": provenance,
+        "kernel_fields": kernel_fields,
+        "knob_encodings": addressing.as_manifest(ordinals),
+        "shipping_knobs": ued.get("knobs", []),
+        "collection_knobs": exposed.get("knobs", []),
+        "failed_graphs": failed_graphs,
+    }
+
+
 def discover_graphs(supplied: list[str]) -> list[Path]:
     """The graph files `--graphs` names, sorted and each once.
 
@@ -750,14 +1283,24 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError(
                 "--output-dir must be outside the shipping descriptor tree"
             )
-        if not 0 < args.eval_fraction < 1:
+        if not args.recall and not 0 < args.eval_fraction < 1:
             raise ValueError(
-                "generate requires a true problem holdout: 0 < --eval-fraction < 1"
+                "generate requires a true problem holdout: 0 < --eval-fraction < 1 "
+                "(or --recall for an engine whose shape space is closed)"
             )
-        bench = shutil.which(args.bench)
-        if bench is None:
-            raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
-        graphs = discover_graphs(args.graphs)
+        if args.shard and not args.collect_only:
+            raise ValueError("--shard slices a collection; it needs --collect-only")
+        if args.collect_only and args.collection:
+            raise ValueError(
+                "--collect-only measures --graphs; it cannot also read --collection"
+            )
+        if args.collection and (
+            args.knob or args.device or args.workspace_limit is not None
+        ):
+            raise ValueError(
+                "--knob, --device and --workspace-limit shape a measurement, and a "
+                "--collection run measures nothing"
+            )
         if immediate:
             if args.knob or args.dim_tile:
                 raise ValueError(
@@ -767,175 +1310,100 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError(
                     "--descriptor-tree must be an existing descriptor root (it may be empty)"
                 )
-            provenance, ued, exposed = None, {}, {}
-            kmd_fields, knobs = None, []
-            ordinals = {}
-        else:
-            provenance = snapshot_provenance(tree, args.engine, args.arch)
-            ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
-            _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
-            kmd_fields = [field["name"] for field in kmd["fields"]]
-            knobs = ued.get("knobs", [])
-            if not isinstance(knobs, list) or any(
-                not isinstance(knob, str) for knob in knobs
-            ):
-                raise ValueError("the shipping UED's knobs must be an array of strings")
-            ordinals = {}
-        output.parent.mkdir(parents=True, exist_ok=True)
-        stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
-        # The tree this run measures is the ONE root the bench loads from: DIR replaces the
-        # provider's installed tree, while RUNTIME_DIR and PATH only add roots beside it, and
-        # the loader keeps the FIRST definition of an id. Inherited additive roots are
-        # cleared for both roles, and the measured tree goes in as the replacement, so an
-        # earlier root's selector can never stand in for the one being generated against --
-        # an L1 label is a measurement of the selection this tree makes, nothing else's.
-        environment = dict(os.environ)
-        environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
-        environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
-        if immediate:
-            environment["HIPDNN_DESCRIPTOR_DIR"] = str(tree)
-        else:
-            collection_tree = stage / "collection_descriptors"
-            shutil.copytree(tree, collection_tree)
-            exposed = dict(ued)
-            # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
-            # equals the metadata tuple and every catalog entry is individually reachable.
-            # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
-            # and abort the run on the collision at _knob_tuple.
-            #
-            # Which of those fields ends up addressed BY AN ORDINAL is the engine's
-            # decision, not this tool's: a knob value is an int64 end to end, so the
-            # ingestor numbers each non-integer field over its own value set and reports
-            # the pin it chose on every enumerated candidate. The mapping is read back off
-            # the collection below (addressing.observe) rather than re-derived here, so
-            # there is no second numbering to disagree with the engine's.
-            exposed["knobs"] = [field["name"] for field in kmd["fields"]]
-            _write_json(collection_tree / ued_path.relative_to(tree), exposed)
-            _write_json(stage / "shipping_ued.json", ued)
-            environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
         # The catalog sweep times every candidate once, whatever the metric: one timing
         # run feeds every metric's label (RFC 0019 §13.4). An immediate run measures the
         # engine's own kernel choice, which follows the requested metric, so each metric
         # is its own measurement.
         sources = metrics if immediate else [None]
-        rows = {source: [] for source in sources}
-        commands, graph_inputs, failed_graphs = [], [], []
-        published = set()
-        for graph_index, graph in enumerate(graphs):
-            graph_rows = {source: [] for source in sources}
-            graph_names = set()
-            payload = graph.read_bytes()
-            # `hipdnn_bench` tells the two serialized forms apart by content rather than
-            # by extension, so a renamed file still loads; the staged copy follows the
-            # same rule and keeps whichever form the source was in.
-            binary = not payload.lstrip().startswith(b"{")
-            saved_graph = (
-                stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
-            )
-            saved_graph.parent.mkdir(exist_ok=True)
-            graph_input = {
-                "source": str(graph),
-                "copy": str(saved_graph.relative_to(stage)),
-                "sha256": hashlib.sha256(payload).hexdigest(),
-            }
-            graph_inputs.append(graph_input)
-            # One graph's failure costs that graph, not the run: a bench that crashes or a
-            # response that fails validation on one problem says nothing about the others.
-            # All of the graph's rows go together, for every device and metric, so the
-            # metrics' corpora stay over one problem set. The budget below still ends a run
-            # whose failures are systematic rather than incidental.
-            try:
-                if immediate and not binary:
-                    graph_document = json.loads(payload.decode("utf-8"))
-                    if not isinstance(graph_document, dict):
-                        raise ValueError("graph input must be a JSON object")
-                    if not graph_document.get("id"):
-                        canonical = json.dumps(
-                            graph_document,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                            allow_nan=False,
-                        )
-                        graph_document["id"] = str(
-                            uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical)
-                        )
-                    _write_json(saved_graph, graph_document)
-                else:
-                    # A serialized graph already carries its own id, and the bench preserves
-                    # it across the deserialize/serialize round trip it does for L1, so there
-                    # is nothing to inject: the identity the corpus records is the one the
-                    # benchmark reports back as `graph_id`, keyed to this copy's sha256.
-                    saved_graph.write_bytes(payload)
-                command = [
-                    bench,
-                    "--graph",
-                    str(saved_graph),
-                    "--engine-id",
-                    str(args.engine_id),
-                ]
-                if args.plugin_dir:
-                    command.extend(
-                        ["--plugin-dir", str(Path(args.plugin_dir).resolve())]
-                    )
-                if args.workspace_limit is not None:
-                    command.extend(["--workspace-limit", str(args.workspace_limit)])
-                for knob in args.knob:
-                    command.extend(["--knob", knob])
-                for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
-                    run_env = dict(environment)
-                    if device is not None:
-                        run_env["HIP_VISIBLE_DEVICES"] = device
-                    for source in sources:
-                        if immediate:
-                            collected, names = collect_immediate_graph(
-                                command,
-                                run_env,
-                                stage / "commands",
-                                commands,
-                                metric=source,
-                            )
-                        else:
-                            collected, names = collect_graph(
-                                command,
-                                run_env,
-                                stage / "commands",
-                                commands,
-                                addressing_table=ordinals,
-                                engine_descriptor_id=ued["id"],
-                            )
-                        graph_rows[source].extend(collected)
-                        graph_names.update(names)
-            except ValueError as error:
-                failed_graphs.append({**graph_input, "error": str(error)})
-                logger.warning("graph %s skipped: %s", graph, error)
-                continue
+        output.parent.mkdir(parents=True, exist_ok=True)
+        stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
+        superseded, collections = 0, None
+        if args.graphs:
+            measured = _measure(args, tree, stage, sources, immediate)
+            engine_id = args.engine_id
+            if args.collect_only:
+                manifest = write_collection(
+                    stage,
+                    collected_at=measured["collected_at"],
+                    role=args.role,
+                    engine=args.engine,
+                    engine_id=engine_id,
+                    sources=sources,
+                    rows=measured["rows"],
+                    published=measured["published"],
+                    commands=measured["commands"],
+                    graph_inputs=measured["graph_inputs"],
+                    provenance=measured["provenance"],
+                    knob_encodings=measured["knob_encodings"],
+                    shipping_knobs=measured["shipping_knobs"],
+                    collection_knobs=measured["collection_knobs"],
+                    kernel_fields=measured["kernel_fields"],
+                    shard=args.shard,
+                    failed_graphs=measured["failed_graphs"],
+                )
+                stage.rename(output)
+                stage = None
+                print(
+                    f"Collected {sum(manifest['row_counts'].values())} measurement(s) of "
+                    f"{manifest['graph_count']} graph(s): {output}"
+                )
+                return 0
+            graph_inputs = measured["graph_inputs"]
             for source in sources:
-                if immediate and not rows[source]:
-                    # Settled on the first measured graph, not after the corpus: the id is
-                    # the engine's declaration and does not vary by graph.
+                measured["rows"][source], dropped = one_measurement_per_shape(
+                    [(str(row["device"]), row) for row in measured["rows"][source]]
+                )
+                superseded += dropped
+        else:
+            # Measuring nothing: the rows, and everything training reads beside them, come
+            # back from the collections exactly as a measuring run would have produced them.
+            measured = load_collections(
+                args.collection, role=args.role, sources=sources
+            )
+            engine_id = (
+                args.engine_id if args.engine_id is not None else measured["engine_id"]
+            )
+            graph_inputs = measured["graphs"]
+            superseded, collections = (
+                measured["superseded_rows"],
+                measured["collections"],
+            )
+            logger.info(
+                "training from %d collection(s); %d row(s) superseded by a newer "
+                "measurement of the same configuration on the same shape",
+                len(collections),
+                superseded,
+            )
+        rows, published, commands = (
+            measured["rows"],
+            measured["published"],
+            measured["commands"],
+        )
+        provenance, kernel_fields = measured["provenance"], measured["kernel_fields"]
+        knob_encodings = measured["knob_encodings"]
+        shipping_knobs, collection_knobs = (
+            measured["shipping_knobs"],
+            measured["collection_knobs"],
+        )
+        # What the shipping UED exposes and the KMD declares, as the measurement recorded them:
+        # the catalog admission rule (feature_recipe) checks the recipe against both.
+        knobs = list(shipping_knobs)
+        kmd_fields = (
+            None
+            if immediate
+            else sorted(f.removeprefix("kernel.") for f in kernel_fields)
+        )
+        failed_graphs = measured.get("failed_graphs", [])
+        if immediate:
+            for source in sources:
+                if rows[source]:
+                    # The engine's declaration, read off its own response: it does not vary by
+                    # graph, so the first row of each metric settles it, measured or collected.
                     uhd_ids[source] = _declared_uhd_id(
-                        json.loads(graph_rows[source][0]["binding"]),
+                        json.loads(rows[source][0]["binding"]),
                         source,
                         uhd_ids.get(source),
                     )
-                rows[source].extend(graph_rows[source])
-            published.update(graph_names)
-        if len(failed_graphs) > args.max_graph_failures * len(graphs):
-            _write_json(stage / "failed_graphs.json", failed_graphs)
-            listed = "\n".join(
-                f"  {failure['source']}: {failure['error']}"
-                for failure in failed_graphs[:10]
-            )
-            more = (
-                f"\n  ... and {len(failed_graphs) - 10} more"
-                if len(failed_graphs) > 10
-                else ""
-            )
-            raise ValueError(
-                f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
-                f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
-                f"{listed}{more}"
-            )
 
         # One corpus per source, named plainly when there is only one.
         def staged(stem: str, source) -> str:
@@ -970,16 +1438,16 @@ def run_generate(args: argparse.Namespace) -> int:
         # Three conditions, because they are three different facts about a candidate and
         # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
         # measurement came back, and `numerically_valid is not False` says nothing showed
-        # the result to be wrong. The last one is the label gate for both roles -- a
-        # wrong-but-fast kernel holds the best time in its group, so admitting it trains the
-        # ranker to prefer it, and an engine whose immediate pick computed the wrong answer
-        # must not teach the estimator its time. Not-False rather than True: an undecidable
-        # verdict is null, and null is the pre-existing state of every corpus collected
-        # before there was a reference to check against (Open Question 19). Gating on it
-        # would train on nothing at all. The row itself is not dropped -- it is already in
-        # `corpus.json`/`corpus.csv` above, with its measurement suppressed and its marker,
-        # which is what §13.2 asks for. An immediate row is always `is_valid`
-        # (`normalize_row`), so only the verdict gates it.
+        # the result to be wrong. The last one is the label gate -- a wrong-but-fast kernel
+        # holds the best time in its group, so admitting it trains the ranker to prefer it.
+        # `ne(False)` rather than `eq(True)`: an undecidable verdict is null, and null is
+        # the pre-existing state of every corpus collected before there was a reference to
+        # check against (Open Question 19). Gating on it would train on nothing at all.
+        # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
+        # with its measurement suppressed and its marker, which is what §13.2 asks for.
+        # The verdict gates both roles: an engine whose immediate pick computed the wrong
+        # answer must not teach the estimator its time either. An immediate row is always
+        # `is_valid` (`normalize_row`), so only the verdict gates it.
         usable = {}
         for source, frame in frames.items():
             keep = ~known_wrong(frame)
@@ -1032,13 +1500,20 @@ def run_generate(args: argparse.Namespace) -> int:
         grouping = resolve_grouping(frames[sources[0]])
         train_frames = {}
         for source in sources:
-            split = split_problems(
-                problem_keys(frames[source], grouping), args.eval_fraction, args.seed
-            )
             candidates = usable[source]
-            train_frames[source] = candidates[
-                ~problem_keys(candidates, grouping).isin(split.eval_problems)
-            ]
+            if args.recall:
+                # Every shape the engine can ever be asked about is in the corpus: holding some
+                # out would ship a model that has not seen shapes it will certainly meet.
+                train_frames[source] = candidates
+            else:
+                split = split_problems(
+                    problem_keys(frames[source], grouping),
+                    args.eval_fraction,
+                    args.seed,
+                )
+                train_frames[source] = candidates[
+                    ~problem_keys(candidates, grouping).isin(split.eval_problems)
+                ]
             if len(set(problem_keys(train_frames[source], grouping))) < 5:
                 raise ValueError(
                     "generation needs at least five training graph/device groups plus held-out problems"
@@ -1139,6 +1614,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError(
                     f"training {requested} failed; no generated model was published"
                 )
+            # Recall scores every shape, all of them trained on: the question is how well the
+            # model reproduces the space it will serve, not how it extrapolates.
             eval_args = [
                 "evaluate",
                 "--input",
@@ -1146,7 +1623,7 @@ def run_generate(args: argparse.Namespace) -> int:
                 "--model-dir",
                 str(model_dir),
                 "--eval-fraction",
-                str(args.eval_fraction),
+                "1.0" if args.recall else str(args.eval_fraction),
                 "--seed",
                 str(args.seed),
                 "--include-per-problem",
@@ -1180,7 +1657,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 tuple(key) for key in report["split"]["eval_problem_keys"]
             }
             training_keys = set(problem_keys(source_train, grouping))
-            if training_keys & evaluated_keys:
+            # A held-out score must be held out; a recall score is by definition over trained shapes.
+            if not args.recall and training_keys & evaluated_keys:
                 raise ValueError("evaluation includes a problem seen during training")
             report["holdout_integrity"] = {
                 "status": "held_out",
@@ -1206,6 +1684,10 @@ def run_generate(args: argparse.Namespace) -> int:
                 "schema": "uhd_gen.generation/2",
                 "trained_against": provenance,
                 "graphs": graph_inputs,
+                # Where the measurements came from when this run measured nothing, and how many
+                # rows were set aside so each configuration on a shape is trained on once.
+                "collections": collections,
+                "superseded_rows": superseded,
                 # Graphs whose collection failed and were skipped, each with its error, within
                 # the --max-graph-failures budget; their staged copies stay under graphs/.
                 "failed_graphs": failed_graphs,
@@ -1226,15 +1708,18 @@ def run_generate(args: argparse.Namespace) -> int:
                 # report only the second without saying so.
                 "catalog_density": density.as_dict() if density else None,
                 "seed": args.seed,
-                "eval_fraction": args.eval_fraction,
-                "shipping_knobs": ued.get("knobs", []),
-                "collection_knobs": exposed.get("knobs", []),
+                "eval_fraction": None if args.recall else args.eval_fraction,
+                # "recall": trained on every shape and scored on all of them (a closed shape
+                # space); "holdout": scored on shapes the model never saw.
+                "evaluation": "recall" if args.recall else "holdout",
+                "shipping_knobs": shipping_knobs,
+                "collection_knobs": collection_knobs,
                 # What each knob's pinned integer addressed, as the engine reported it on the
                 # candidates this corpus enumerated. Recorded for reading, not for use: the
                 # runtime derives its own numbering, and an ordinal in a stored row is
                 # unreadable without knowing which value it named.
-                "knob_encodings": addressing.as_manifest(ordinals),
-                "engine_id": args.engine_id,
+                "knob_encodings": knob_encodings,
+                "engine_id": engine_id,
                 "training_arches": arches,
                 "promotion_role": args.role,
                 "promotion_arch": args.arch or arches[0],

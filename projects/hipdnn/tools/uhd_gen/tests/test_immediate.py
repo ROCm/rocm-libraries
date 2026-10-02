@@ -493,7 +493,7 @@ def test_time_l1_training_declares_the_metric_its_label_and_direction(
         (model_dir / "train_manifest.json").read_text(encoding="utf-8")
     )
     assert uhd["objective"] == "min"
-    assert uhd["score"] == {"metric": "time", "calibrated": True, "transform": "log1p"}
+    assert uhd["score"] == {"metric": "time", "calibrated": True, "transform": "log"}
     assert (
         manifest["target"],
         manifest["score_metric"],

@@ -167,9 +167,10 @@ TEST_F(TestUhdGenArtifact, TheRuntimeLoadsWhatTheToolWrote)
     // metric-less ranker and never answer a tflops request as that metric's own.
     EXPECT_EQ(config.scoreMetric, "tflops");
     EXPECT_EQ(config.objective, "max");
-    // uhd_gen trains on log1p(target) and says so, which is what lets a consumer recover
-    // the value in the metric's units.
-    EXPECT_EQ(config.scoreTransform, "log1p");
+    // uhd_gen trains on log(target) and says so, which is what lets a consumer recover the
+    // value in the metric's units -- and exp, its inverse, cannot yield a score the runtime
+    // refuses as non-positive, which expm1 (log1p's) could (uhd_gen/score_transform.py).
+    EXPECT_EQ(config.scoreTransform, "log");
     EXPECT_EQ(config.featuresSignature.size(), 2U);
 }
 

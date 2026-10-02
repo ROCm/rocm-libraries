@@ -916,6 +916,78 @@ publishes no `graph.flops` says in a warning that the model it produced ranks a 
 without being a calibrated L2 estimate. Do not relabel a latency or arbitrary-score model
 as TFLOPS.
 
+## Growing a training set
+
+Measuring and training are separate steps, so measurements outlive the model they were
+taken for and a later model can train on all of them:
+
+```bash
+# Measure a corpus once; the collection is the measurements plus everything training reads.
+python -m uhd_gen generate --collect-only --graphs corpus/sdpa_fwd/graphs \
+    --descriptor-tree tree --engine-id 4714091817493728420 --role predict_engine --output-dir col_1
+
+# Or across N GPUs: --shard K/N measures every N-th graph, one collection per shard.
+python -m uhd_gen generate --collect-only --shard 0/4 --graphs corpus/sdpa_fwd/graphs ... --output-dir col_1_s0
+
+# Train on any number of collections.
+python -m uhd_gen generate --collection col_1 col_2 col_3 --descriptor-tree tree ... --output-dir model
+```
+
+Training takes **one measurement of each configuration on each shape**: the newest session's
+(a session is one collection on one device). The same shape measured on two GPUs of an arch is
+one problem, not two. Kept twice, it would be weighted twice, and the held-out split, which is
+keyed on (graph, device), would score the model on a shape it trained on. For a catalog sweep,
+distinct kernel configurations on one shape are distinct rows. A repeat taken under another
+engine binding is refused rather than superseded. `superseded_rows` in the generation manifest
+counts what training set aside.
+
+A collected row carries its regime (`regime`, `regime.<facet>`, `regime.operation`) from the
+`manifest.csv` `hipdnn_corpus_gen` wrote beside the graphs. These are envelope columns, never
+features.
+
+### `size`: how many more shapes, and from which regimes
+
+```bash
+python -m uhd_gen size --collection col_1 col_2 col_3 \
+    --test-set store/test_set.json --create-test-set --target 0.70 --tolerance 0.10 \
+    --descriptor-tree tree --engine-id 4714091817493728420 --arch gfx950 --uhd-id <id> \
+    --output-dir sizing_1
+```
+
+1. **A pinned test set.** It is stratified by regime and created once. It is reused every
+   round, so rounds are comparable, and never replaced.
+2. **A learning curve.** `generate --collection` trains on nested subsets of the other shapes
+   (`--draws` random subsets per size), and `evaluate` scores each model on the test set.
+3. **A measured ceiling.** A repeat measurement (another collection or GPU) disagrees with the
+   label by two measurement errors, where a perfect model faces only one. The ceiling is how
+   often the disagreement over sqrt(2) is within the tolerance. When no shape was measured
+   twice, the ceiling is reported as unknown. When the curve already exceeds it, it is marked
+   as not binding and the fit estimates its own floor.
+4. **A fit.** miss(n) = floor + a·n^-b, with an interval from resampling the draws, solved for
+   `--target`. A target at or past the ceiling is refused, because better measurement reaches
+   it and more shapes cannot. Without a target, the plan is the next doubling.
+5. **Regime quotas.** Every regime is first brought to `--floor` training shapes (30). The rest
+   is split in proportion to each regime's test misses, shrunk toward the global rate for thin
+   regimes, and scaled up by the rate of usable rows.
+
+`sizing_report.json` (`uhd_gen.sizing/1`) holds the curve, the ceiling, the fit, the per-regime
+table, the recommendation and the prediction. `--previous` checks the last round's prediction
+against this round's result. `regime_quotas.json` is the input `hipdnn_corpus_gen` takes:
+
+```bash
+hipdnn_corpus_gen ... --regime-quotas sizing_1/regime_quotas.json \
+    --exclude-corpus corpus_1/sdpa_fwd/manifest.json --seed <new>
+```
+
+With quotas, corpus_gen fills each named regime first. A regime its first pass under-fills is
+searched again with the regime's declared equalities pinned (`seqlen_q == 1`) or tied
+(`heads_kv == heads`), so a walk can reach populations it would otherwise almost never meet.
+Every point still passes the engine, the constraints, `--keep` and `--exclude-corpus`.
+`manifest.json` `reports.regime_quota` records asked, delivered and saturated per regime, and
+the tool exits 3 when a quota is short without being shown saturated.
+
+L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
+
 ## Output
 
 `train` generates:
