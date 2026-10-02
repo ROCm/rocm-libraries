@@ -86,7 +86,7 @@ def solution(depth=64, problem_type=None):
     state = copy.deepcopy(defaultSolution)
     state.update({
         "Valid": True, "MacroTile0": 64, "MacroTile1": 64, "DepthU": depth,
-        "StreamK": 0, "GlobalSplitU": 1,
+        "TileProcessingStrategy": "None", "GlobalSplitU": 1,
         "AssertFree0ElementMultiple": 1, "AssertFree1ElementMultiple": 1,
         "AssertSummationElementMultiple": 1,
         "GlobalReadVectorWidthA": 1, "GlobalReadVectorWidthB": 1,
@@ -166,7 +166,7 @@ def test_streamk_prediction_requires_a_supported_contract(modeled_request, tmp_p
 
 @pytest.mark.parametrize("name,value", [
     ("NonTemporalA", 4), ("WorkGroupMapping", 1), ("StaggerU", 0),
-    ("_staggerStrideShift", 0), ("MacroTile0", 128), ("StreamK", 3),
+    ("_staggerStrideShift", 0), ("MacroTile0", 128), ("TileProcessingStrategy", "StreamK"),
 ])
 def test_changed_modeled_output_rejects_candidate(modeled_request, tmp_path, name, value):
     attempted = []
@@ -246,6 +246,10 @@ def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
     assert prediction["resolved_parameters"]["WorkGroupMapping"] == -2
     assert prediction["resolved_parameters"]["StaggerU"] == 4
     assert prediction["resolved_parameters"]["_staggerStrideShift"] == 1
+    assert prediction["selected_parameters"]["TileProcessingStrategy"] == "None"
+    assert prediction["resolved_parameters"]["TileProcessingStrategy"] == "None"
+    assert "StreamK" not in prediction["selected_parameters"]
+    assert "StreamK" not in prediction["resolved_parameters"]
 
 
 def test_source_only_generation_builds_ranked_bundles(modeled_request, tmp_path):
@@ -482,6 +486,36 @@ def test_unexpected_derivation_failure_does_not_try_next_candidate(prediction_re
     assert not (tmp_path / "selected.yaml").exists()
 
 
+def test_unsupported_execution_policy_rejects_only_that_candidate(prediction_request, tmp_path):
+    from Tensile.ExecutionPolicy import UnsupportedExecutionPolicy
+
+    calls = []
+
+    def derive(config, label):
+        calls.append(label)
+        if len(calls) == 1:
+            raise UnsupportedExecutionPolicy("WorkQueueStealing requires StreamK with DynamicWorkQueue or Hybrid")
+        return solution()
+
+    _, _, metadata = JG._select(prediction_request, tmp_path / "selected.yaml", derive)
+    assert len(calls) == 2
+    assert metadata["candidate_id"] == 2
+    assert metadata["rejections"] == [{
+        "candidate_id": 7,
+        "reason": "WorkQueueStealing requires StreamK with DynamicWorkQueue or Hybrid"}]
+
+
+def test_unsupported_execution_policy_from_tensile_rejects_candidate(modeled_request, tmp_path):
+    modeled_request["candidates"][0]["parameters"]["PrefetchAcrossPersistent"] = 1
+    manifest = compile_request(
+        modeled_request, tmp_path, "--source-only", "--offload-bundler", str(tmp_path / "missing"))
+    prediction = manifest["jit_prediction"]
+    assert prediction["candidate_id"] == 2
+    (rejection,) = prediction["rejections"]
+    assert rejection["candidate_id"] == 7
+    assert "PrefetchAcrossPersistent requires a persistent TileProcessingStrategy" in rejection["reason"]
+
+
 def test_all_rejected_creates_no_selected_yaml(prediction_request, tmp_path):
     def derive(config, label):
         raise SS.SingleSolutionRejected("coupled parameter constraint")
@@ -519,14 +553,14 @@ def test_shape_rejection_tries_the_next_supplied_candidate(prediction_request, t
     assert "LeadingFree0SizesGreaterOrEqual" in metadata["rejections"][0]["reason"]
 
 
-@pytest.mark.parametrize("kernargs,streamk,gsu,rejected", [
-    (1, 0, 1, False), (1, 0, 2, True), (1, 0, -1, False),
-    (1, 1, 2, False), (0, 0, 2, False),
+@pytest.mark.parametrize("kernargs,strategy,gsu,rejected", [
+    (1, "None", 1, False), (1, "None", 2, True), (1, "None", -1, False),
+    (1, "StreamK", 2, False), (0, "None", 2, False),
 ])
-def test_workgroup_limit_uses_shared_predicate_gating(prediction_request, kernargs, streamk, gsu, rejected):
+def test_workgroup_limit_uses_shared_predicate_gating(prediction_request, kernargs, strategy, gsu, rejected):
     prediction_request["problem"].update(m=64 * 2**24, n=64, k=512, batch=1)
     derived = solution()
-    derived.update(StreamK=streamk, GlobalSplitU=gsu, BufferLoad=False, BufferStore=False)
+    derived.update(TileProcessingStrategy=strategy, GlobalSplitU=gsu, BufferLoad=False, BufferStore=False)
     derived["InternalSupportParams"]["KernArgsVersion"] = kernargs
     reason = problem_rejection(derived, prediction_request)
     assert (reason is not None) is rejected

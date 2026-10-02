@@ -3,7 +3,7 @@
 
 # Native gfx1250 WMMA/Wave32 adaptation of single_solution_streamk.yaml.
 # Retains the 128x128 tile and deterministic partials shape (256x128x4096).
-# Use TENSILE_STREAMK_FIXED_GRID=16 TENSILE_STREAMK_DYNAMIC_GRID=0.
+# Use TENSILE_PERSISTENT_FIXED_GRID=16 TENSILE_PERSISTENT_DYNAMIC_GRID=0.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
@@ -38,9 +38,10 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [true]
         - StoreRemapVectorWidth: [0]
-        - StreamK: [3]
         - StreamKAtomic: [0]
+        - TileProcessingStrategy: [StreamK]
         - TransposeLDS: [0]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMapping: [1]
       BenchmarkFinalParameters:
         - ProblemSizes:

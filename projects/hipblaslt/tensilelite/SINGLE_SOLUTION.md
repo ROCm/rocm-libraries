@@ -116,7 +116,7 @@ reduction and reduction inside the main kernel. The unrelated `AdaptiveGemm`
 parameter chooses store-width paths. This builder does not force these
 parameters off.
 
-Output-amax currently requires `GlobalSplitU: 1`, `StreamK: 0`, and one batch.
+Output-amax currently requires `GlobalSplitU: 1`, `TileProcessingStrategy: None`, and one batch.
 Its reduction needs final output and does not combine batch offsets. Supporting
 those combinations requires changes to the reduction and runtime predicates.
 A consuming runtime must honor the same restrictions.
@@ -240,7 +240,9 @@ candidates that differ only in fields the kernel name does not encode, such as
 the matrix instruction's K, build the same kernel.
 `--source-only` applies as for `Tensile.SingleSolution`. The
 shared predicate definitions also control
-early rejection for vector widths, buffer offsets and workgroup counts. Checks
+early rejection for vector widths, buffer offsets and workgroup counts. A
+candidate whose parameters do not form a supported tile-processing strategy and
+work assignment is rejected with Tensile's reason. Checks
 requiring workspace, scalar values or device state remain with the host runtime,
 which evaluates the complete predicates before execution. The module does not
 run Origami or measure kernel latency. If all supplied candidates are rejected,

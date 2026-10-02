@@ -85,7 +85,7 @@ def main():
     api_test = build / "clients/staging/hipblaslt-jit-api-test"
     env = dict(os.environ)
     for key in tuple(env):
-        if key.startswith(("HIPBLASLT_JIT", "TENSILE_STREAMK_", "AMD_COMGR_")):
+        if key.startswith(("HIPBLASLT_JIT", "TENSILE_PERSISTENT_", "TENSILE_STREAMK", "AMD_COMGR_")):
             env.pop(key)
     env["XDG_CACHE_HOME"] = str(output / "xdg")
     env["PYTHONPATH"] = os.pathsep.join(
@@ -253,8 +253,8 @@ def main():
         ]
         streamk = (
             {
-                "TENSILE_STREAMK_FIXED_GRID": "16",
-                "TENSILE_STREAMK_DYNAMIC_GRID": "0",
+                "TENSILE_PERSISTENT_FIXED_GRID": "16",
+                "TENSILE_PERSISTENT_DYNAMIC_GRID": "0",
                 "TENSILE_DB": "64",
             }
             if feature == "streamk"

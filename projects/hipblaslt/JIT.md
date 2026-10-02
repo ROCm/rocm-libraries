@@ -124,8 +124,9 @@ selection fails. The direct entry point always requires an explicit recipe.
 An empty TensileLite `Options::configPath` requests Origami prediction. The
 private `origami.gemm.dp.v1` contract covers the existing data-parallel candidate
 domain. Origami ranks caller-supplied configurations; it does not synthesize
-their fields or choose whether to enable Stream-K. `StreamK=0` and occupancy 1
-remain explicit model inputs. Every applicable prediction is transferred;
+their fields or choose whether to enable Stream-K. Origami's `stream_k=0` and
+occupancy 1 remain explicit model inputs, and the recipe keeps TensileLite's
+non-persistent `TileProcessingStrategy=None`. Every applicable prediction is transferred;
 defaults supply only settings that this model does not predict.
 
 The inventory below follows `shared/origami/include/origami/{origami,gemm,streamk,types}.hpp`
@@ -140,9 +141,9 @@ though its fields originate in the caller's candidate catalog.
 | `select_workgroup_mapping`: `wgmxccchunk`, `wgmxccsplitk` | Retained in every candidate's `modeled.workgroup_mapping` | Nonzero values require the Stream-K mapping ABI and reject the current data-parallel candidate; neither is substituted with `WorkGroupMappingXCCGroup`. |
 | `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. |
 | `select_staggerU`: `staggerUStrideShift` | `StaggerUStride = DepthU × Tensile DataType bytes × 2^shift` | Check the derived `_staggerStrideShift`; zero stagger may normalize the byte stride without changing its meaning. |
-| `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `StreamK=0`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
+| `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `TileProcessingStrategy=None`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
 | `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
-| `streamk::select_hybrid_mode` | Static/dynamic schedule within StreamK=5 | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
+| `streamk::select_hybrid_mode` | Static/dynamic schedule of a Stream-K kernel with `WorkAssignment=Hybrid` | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
 | `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
 | Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The predictor uses the full instruction catalog plus ranking, preserving the selected MI. |
 | GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |
@@ -249,7 +250,8 @@ diagnostic manifests for reproduction.
 An empty GEMM output (M=0 or N=0) returns `HIPBLAS_STATUS_NOT_SUPPORTED` from
 the request factory without compilation. K=0 can use a recipe that implements
 beta*C. TensileLite owns its datatype, instruction and scale-layout restrictions;
-output-amax currently requires one batch, GlobalSplitU=1 and StreamK=0. The
+output-amax currently requires one batch, GlobalSplitU=1 and
+TileProcessingStrategy=None. The
 library propagates support failures, including a mismatch between the
 supplied physical MX scale layout and the compiled solution. Generation never
 benchmarks recipes or substitutes another recipe when the supplied one fails.

@@ -115,14 +115,14 @@ with gfx1250 overrides, so its latency estimates are not calibrated for gfx1250.
 The estimates omit bias, activation, scaling, auxiliary-output, and output-amax overhead.
 These affect ranking; TensileLite still checks whether the chosen recipe is legal for the target.
 
-Predicted recipes keep `GlobalSplitU: 1` and `StreamK: 0`, so they do not split
+Predicted recipes keep `GlobalSplitU: 1` and `TileProcessingStrategy: None`, so they do not split
 the K reduction across workgroups. Exploring split-K and Stream-K during
 prediction is outside this initial policy. For an exact recipe, use the
 `direct-gemm` case in the [JIT tests](../tests/jit/README.md) or
 `python -m Tensile.SingleSolution`. Explicit YAML bypasses prediction and can
 select split-K or Stream-K recipes accepted by the generator and runtime.
 
-Output-amax requires `GlobalSplitU: 1`, `StreamK: 0`, and one batch for either
+Output-amax requires `GlobalSplitU: 1`, `TileProcessingStrategy: None`, and one batch for either
 route. Its current reduction needs final output and does not combine batch
 offsets. Supporting those combinations requires changes to the reduction and
 its runtime predicates.

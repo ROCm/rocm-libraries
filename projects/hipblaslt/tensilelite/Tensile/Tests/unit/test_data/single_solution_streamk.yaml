@@ -5,7 +5,7 @@
 # HGEMM NN parameter group at line 239, choosing its 128x128 MFMA tile.
 # Test shape changed to M=256,N=128,K=4096: 2 tiles, 64 K-iterations per tile.
 # For a deterministic partials/synchronizer smoke test, process-local settings
-# TENSILE_STREAMK_FIXED_GRID=16 TENSILE_STREAMK_DYNAMIC_GRID=0 produce 8 WGs/tile
+# TENSILE_PERSISTENT_FIXED_GRID=16 TENSILE_PERSISTENT_DYNAMIC_GRID=0 produce 8 WGs/tile
 # with tree fixup. TENSILE_DB=64 prints kernel arguments for inspection.
 # This is an explicit-YAML test recipe; it does not alter predictor defaults.
 GlobalParameters:
@@ -41,9 +41,10 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [true]
         - StoreRemapVectorWidth: [0]
-        - StreamK: [3]
         - StreamKAtomic: [0]
+        - TileProcessingStrategy: [StreamK]
         - TransposeLDS: [0]
+        - WorkAssignment: [StaticGrid]
         - WorkGroupMapping: [1]
       BenchmarkFinalParameters:
         - ProblemSizes:

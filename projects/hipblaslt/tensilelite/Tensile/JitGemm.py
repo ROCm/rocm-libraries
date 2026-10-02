@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 from . import JitDebug, SingleSolution as SS
+from .ExecutionPolicy import UnsupportedExecutionPolicy
 
 
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
@@ -90,7 +91,7 @@ def _modeledParameters(request, candidate):
     _require(float(stride).is_integer(), "Modeled stagger stride is not an integral byte count")
     # Origami 0 and 1 both disable XCC remapping. Tensile's recipe uses 1 for
     # identity. Group=0 implements whole-grid contiguous grouping, not chunking.
-    return {"StreamK": 0, "GlobalSplitU": 1,
+    return {"TileProcessingStrategy": "None", "GlobalSplitU": 1,
             "WorkGroupMapping": mapping["wgm"],
             "WorkGroupMappingXCC": max(1, mapping["wgmxcc"]),
             "WorkGroupMappingXCCGroup": 0,
@@ -397,7 +398,8 @@ def _select(request, configPath, derive, ranking=None, _debug=JitDebug.NULL):
         config = _configuration(request, candidate)
         diagnostics = io.StringIO()
         try:
-            with _debug.span("derive", stage=False, rejects=(SS.SingleSolutionRejected,),
+            with _debug.span("derive", stage=False,
+                             rejects=(SS.SingleSolutionRejected, UnsupportedExecutionPolicy),
                              candidate=candidate["id"]) as span:
                 with contextlib.redirect_stdout(diagnostics), \
                         contextlib.redirect_stderr(diagnostics):
@@ -409,6 +411,12 @@ def _select(request, configPath, derive, ranking=None, _debug=JitDebug.NULL):
                                "reason": "\n".join(reasons)[:4096] or str(error),
                                "diagnostics": captured[:4096] + captured[-4096:]})
             tried(candidate, "rejected", "tensile", span)
+            continue
+        except UnsupportedExecutionPolicy as error:
+            # Known parameter values that Tensile cannot combine into a supported
+            # tile-processing strategy and work assignment.
+            rejections.append({"candidate_id": candidate["id"], "reason": str(error)})
+            tried(candidate, "rejected", "execution_policy", span)
             continue
         # Any other exception is a request/toolchain/implementation failure. It
         # propagates without trying another candidate or emitting a kernel.

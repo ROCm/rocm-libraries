@@ -160,7 +160,8 @@ def check_provenance(invocation, stdout, case, architecture):
                 "StaggerU": stagger["staggerU"], "StaggerUMapping": stagger["staggerUMapping"],
                 "_staggerStrideShift": stagger["staggerUStrideShift"],
                 "MacroTile0": modeled["macro_tile"][0], "MacroTile1": modeled["macro_tile"][1],
-                "DepthU": modeled["macro_tile"][2], "StreamK": 0, "GlobalSplitU": 1,
+                "DepthU": modeled["macro_tile"][2], "TileProcessingStrategy": "None",
+                "GlobalSplitU": 1,
                 "NonTemporalA": selected["NonTemporalA"], "NonTemporalB": selected["NonTemporalB"]}
     require(all(resolved.get(key) == value for key, value in expected.items()),
             "Derived recipe changed a modeled output")

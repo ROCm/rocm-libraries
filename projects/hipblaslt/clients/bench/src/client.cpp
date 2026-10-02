@@ -705,10 +705,16 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Select the StreamK=5 tile scheduling sub-path via the "
+         "Legacy alias for hybrid_assignment_policy via the "
          "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
-         "leaves the attribute unset so the library default (auto) applies.")
+         "leaves the attribute unset so the library default applies.")
+
+        ("hybrid_assignment_policy",
+         value<std::string>(&hipblaslt_bench_options::hybrid_assignment_policy_str())->default_value(""),
+         "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. "
+         "Default preserves the existing behavior, including the heuristic with a positive sm_count_target. "
+         "This option does not select a kernel family.")
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
@@ -902,13 +908,17 @@ try
         return -2;
     };
 
+    try
     {
-        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::streamk_tile_scheduling_mode_str(),
-                                               true,
-                                               "streamk_tile_scheduling must be one of off|0, on|1, auto|2.");
-        if(resolved == -2)
-            return 1;
-        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+        hipblaslt_bench_options::streamk_tile_scheduling_mode()
+            = hipblaslt_bench_options::resolve_hybrid_assignment_policy(
+                hipblaslt_bench_options::hybrid_assignment_policy_str(),
+                hipblaslt_bench_options::streamk_tile_scheduling_mode_str());
+    }
+    catch(std::invalid_argument const& error)
+    {
+        hipblaslt_cerr << error.what() << std::endl;
+        return 1;
     }
 
     {

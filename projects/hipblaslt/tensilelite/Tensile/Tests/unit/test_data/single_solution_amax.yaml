@@ -39,7 +39,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [8]
         - AdaptiveGemm: [0]
         - AdaptiveGemmGSUA: [0]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
       BenchmarkFinalParameters:
         - ProblemSizes:
             - Exact: [256, 128, 1, 128]
