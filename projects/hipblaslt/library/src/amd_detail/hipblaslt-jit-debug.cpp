@@ -1251,18 +1251,27 @@ namespace hipblaslt_jit::debug
         return s.record;
     }
 
-    void Generation::built(size_t rank, const char* status, const std::string& message)
+    void Generation::outcome(size_t rank, const char* outcome, const std::string& message)
     {
+        for(auto& s : m_solutions)
+            if(s->rank == rank)
+            {
+                s->status  = outcome;
+                s->message = message;
+            }
+    }
+
+    void Generation::built(size_t rank, const char* outcome, const std::string& message)
+    {
+        this->outcome(rank, outcome, message);
         for(auto& s : m_solutions)
         {
             if(s->rank != rank)
                 continue;
-            s->status  = status;
-            s->message = message;
             if(!(categories() & Progress))
                 return;
             Line line(Progress, "build.end");
-            line.add("rank", rank).add("kernel", s->kernel).add("status", s->status);
+            line.add("rank", rank).add("kernel", s->kernel).add("outcome", s->status);
             if(!message.empty())
                 line.add("message", message);
             if(categories() & Timing)
@@ -1299,7 +1308,9 @@ namespace hipblaslt_jit::debug
             return;
         Line line(Progress, "publish.done");
         line.add("status", status).add("solutions", solutions);
-        line.add("fresh", m_record.counted("fresh")).add("reused", m_record.counted("reused"));
+        for(const char* placement : {"fresh", "reused"})
+            if(m_record.has(placement))
+                line.add(placement, m_record.counted(placement));
         if(categories() & Timing)
             line.json("ns",
                       "{\"publish\":" + std::to_string(m_record.nanoseconds("publish"))
@@ -1346,9 +1357,7 @@ namespace hipblaslt_jit::debug
                     accounted += m_record.nanoseconds(stage);
                 m_record.add("other", total > accounted ? total - accounted : 0);
                 Line line(Timing, "generation");
-                line.add("requested", m_requested)
-                    .add("generated", m_solutions.size())
-                    .add("failures", m_failures);
+                line.add("requested", m_requested).add("failures", m_failures);
                 if(!m_problem.empty())
                     line.add("problem", m_problem);
                 const std::pair<const char*, uint64_t> first{"total", total};
@@ -1361,7 +1370,7 @@ namespace hipblaslt_jit::debug
                 line.add("outcome",
                          published > 0 ? (m_failures ? "partial" : "ok")
                                        : (m_failures ? "failed" : "empty"));
-                line.add("generated", m_solutions.size())
+                line.add("generated", m_record.counted("generated"))
                     .add("published", m_record.counted("published"))
                     .add("loaded", m_record.counted("loaded"))
                     .add("failures", m_failures);

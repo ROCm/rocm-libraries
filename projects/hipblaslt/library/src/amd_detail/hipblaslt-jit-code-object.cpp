@@ -9,6 +9,7 @@
 
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,30 @@ namespace hipblaslt_jit::code_object
         {
             throw Failure{status, std::move(message)};
         }
+
+        // Reads the clock only when the caller asked for Options::timings.
+        class Timer
+        {
+        public:
+            explicit Timer(const Options& options)
+                : m_on(options.timings != nullptr)
+            {
+                if(m_on)
+                    m_start = std::chrono::steady_clock::now();
+            }
+            uint64_t elapsed() const
+            {
+                if(!m_on)
+                    return 0;
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - m_start)
+                    .count();
+            }
+
+        private:
+            bool                                  m_on;
+            std::chrono::steady_clock::time_point m_start;
+        };
 
         std::string statusString(amd_comgr_status_t status)
         {
@@ -418,13 +443,16 @@ namespace hipblaslt_jit::code_object
             }
             addIncludes(input, options);
 
-            const auto info   = makeAction(target.isaName(), flags);
-            const auto output = run(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
+            const auto  info = makeAction(target.isaName(), flags);
+            const Timer timer(options);
+            const auto  output = run(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
                                     "assemble",
                                     info,
                                     input,
                                     flags,
                                     log);
+            if(options.timings)
+                options.timings->assemble += timer.elapsed();
             return {Status::Success, {}, relocatablesFrom(output, names)};
         }
 
@@ -473,6 +501,7 @@ namespace hipblaslt_jit::code_object
                     sources[i].text.data(),
                     sources[i].text.size());
                 addIncludes(input, options);
+                const Timer timer(options);
                 if(options.hipPipeline == HipPipeline::SourceToRelocatable)
                 {
                     const auto output = run(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE,
@@ -481,6 +510,8 @@ namespace hipblaslt_jit::code_object
                                             input,
                                             options_i,
                                             log);
+                    if(options.timings)
+                        options.timings->compileHip.emplace_back(sources[i].name, timer.elapsed());
                     result.objects.push_back(
                         std::move(relocatablesFrom(output, {sources[i].name}).front()));
                     continue;
@@ -497,6 +528,8 @@ namespace hipblaslt_jit::code_object
                                         bitcode,
                                         codegen,
                                         log);
+                if(options.timings)
+                    options.timings->compileHip.emplace_back(sources[i].name, timer.elapsed());
                 result.objects.push_back(
                     std::move(relocatablesFrom(output, {sources[i].name}).front()));
             }
@@ -525,13 +558,16 @@ namespace hipblaslt_jit::code_object
                     objects[i].bytes.data(),
                     objects[i].bytes.size());
             }
-            const auto info   = makeAction(target.isaName(), options.linkerFlags);
-            const auto output = run(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
+            const auto  info = makeAction(target.isaName(), options.linkerFlags);
+            const Timer timer(options);
+            const auto  output = run(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
                                     "link",
                                     info,
                                     input,
                                     options.linkerFlags,
                                     log);
+            if(options.timings)
+                options.timings->link += timer.elapsed();
             auto executables = collect(output, AMD_COMGR_DATA_KIND_EXECUTABLE);
             if(executables.size() != 1 || executables.front().second.empty())
                 fail(Status::NoOutput,

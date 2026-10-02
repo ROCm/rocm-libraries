@@ -11,30 +11,6 @@ namespace hipblaslt_jit
 {
     namespace
     {
-        const char* stageName(Stage stage)
-        {
-            switch(stage)
-            {
-            case Stage::Configure:
-                return "configure";
-            case Stage::Predict:
-                return "predict";
-            case Stage::Generate:
-                return "generate";
-            case Stage::Build:
-                return "build";
-            case Stage::Support:
-                return "support";
-            case Stage::Load:
-                return "load";
-            case Stage::Lookup:
-                return "lookup";
-            case Stage::Publish:
-                return "publish";
-            }
-            return "unknown stage";
-        }
-
         struct Reported
         {
             std::mutex            mutex;
@@ -63,7 +39,7 @@ namespace hipblaslt_jit
 
     std::string describe(const Status& status, const std::string& problem)
     {
-        auto text = std::string(stageName(status.stage)) + " failed for " + problem + ": "
+        auto text = std::string(toString(status.stage)) + " failed for " + problem + ": "
                     + status.message;
         if(!status.logPath.empty() && status.message.find(status.logPath) == std::string::npos)
             text += " (log: " + status.logPath + ")";

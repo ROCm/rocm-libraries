@@ -35,6 +35,9 @@ namespace hipblaslt_jit
         Publish,
     };
 
+    // "configure", "predict", ... as reports and debug lines name stages.
+    const char* toString(Stage stage) noexcept;
+
     struct Status
     {
         enum class Code

@@ -168,6 +168,7 @@ namespace
             {
                 debug::Generation generation(2);
                 generation.started(5);
+                debug::note("generated", 2);
                 {
                     debug::Scope scope(&generation.solution(0, "K0"));
                     debug::Phase build("build");

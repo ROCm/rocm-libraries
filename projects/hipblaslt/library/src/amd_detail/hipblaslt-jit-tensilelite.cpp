@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-library.hpp"
@@ -29,10 +30,12 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -71,6 +74,8 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
 
         void runGenerator(const Options& options, const char* module, int codeObjectVersion)
         {
+            namespace debug = hipblaslt_jit::debug;
+            debug::Phase prepare("child_prepare");
             require(!options.pythonExecutable.empty() && !options.tensileSourceDirectory.empty()
                         && !options.configPath.empty() && !options.outputPath.empty()
                         && !options.architecture.empty(),
@@ -120,7 +125,67 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 "PYTHONPATH",
                 fs::absolute(fs::u8path(options.tensileSourceDirectory)).u8string()
                     + (options.pythonPath.empty() ? "" : separator + options.pythonPath));
-            const auto result = hipblaslt_jit::process::run(request);
+            // The generator writes events.jsonl and timing.json there; the
+            // scratch keeps them after a failure.
+            const auto categories = debug::childCategories();
+            const auto debugDir   = cwd / "jit-debug";
+            if(!categories.empty())
+            {
+                debug::set("module", debug::Line::quote(module));
+                request.argv.insert(request.argv.end(),
+                                    {"--debug", categories, "--debug-dir", debugDir.u8string()});
+            }
+            prepare.stop();
+            std::optional<debug::ChildObserver> observer;
+            if(debug::on(debug::Progress))
+            {
+                debug::Line(debug::Progress, "child.start")
+                    .add("module", module)
+                    .add("log", request.logPath.u8string())
+                    .write();
+                try
+                {
+                    observer.emplace(debugDir / "events.jsonl");
+                }
+                catch(const std::system_error&)
+                {
+                }
+            }
+            debug::Phase child("child");
+            const auto   result = hipblaslt_jit::process::run(request);
+            child.stop();
+            if(observer)
+                observer->stop();
+            if(!categories.empty())
+            {
+                const auto* record     = debug::innermost();
+                const auto  childNanos = record ? record->nanoseconds("child") : 0;
+                debug::set("exit",
+                           "{\"started\":" + std::string(result.started ? "true" : "false")
+                               + ",\"code\":" + std::to_string(result.exitCode)
+                               + ",\"signal\":" + std::to_string(result.terminationSignal) + "}");
+                if(debug::on(debug::Timing))
+                {
+                    std::string why;
+                    auto timing = debug::childTiming(debugDir / "timing.json", childNanos, why);
+                    if(why.empty())
+                        debug::set("child", std::move(timing));
+                    else
+                        debug::set("child_timing", debug::Line::quote(why));
+                }
+                if(observer)
+                {
+                    debug::Line line(debug::Progress, "child.exit");
+                    line.add("started", result.started)
+                        .add("code", result.exitCode)
+                        .add("signal", result.terminationSignal)
+                        .add("events", observer->events())
+                        .add("dropped", observer->dropped());
+                    if(debug::on(debug::Timing))
+                        line.json("ns", "{\"child\":" + std::to_string(childNanos) + "}");
+                    line.write();
+                }
+            }
             if(!result.succeeded())
             {
                 std::ifstream log(request.logPath);
@@ -403,18 +468,23 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 try
                 {
                     if(request.prediction)
+                    {
+                        hipblaslt_jit::debug::Phase phase("request_write");
                         configured.configPath = writeJitGemmRequest(*gemm,
                                                                     configured,
                                                                     *request.prediction,
                                                                     request.count,
                                                                     request.excludeKernels);
+                    }
                     runGenerator(configured,
                                  request.prediction ? "Tensile.JitGemm" : "Tensile.SingleSolution",
                                  request.codeObjectVersion);
+                    hipblaslt_jit::debug::Phase phase("bundle_read");
                     solutions = readGeneratedSolutions(configured,
                                                        request.prediction != nullptr,
                                                        request.count,
                                                        request.excludeKernels);
+                    phase.stop();
                     std::string summary;
                     if(request.prediction)
                         summary = "Origami ranked "

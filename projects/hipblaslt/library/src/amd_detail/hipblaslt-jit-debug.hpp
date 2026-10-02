@@ -259,10 +259,13 @@ namespace hipblaslt_jit::debug
         }
         // Writes generation.start; candidates is 0 without a prediction.
         void started(size_t candidates);
-        // The record of the solution at rank, for a Scope around its build and support.
+        // The record of the solution at rank, for a Scope around its build and
+        // support. Writes build.start.
         Record& solution(size_t rank, const std::string& kernel);
-        void    built(size_t rank, const char* status, const std::string& message);
-        void    indexed(size_t rank, int32_t index);
+        // Sets the solution's outcome; built() also writes build.end.
+        void built(size_t rank, const char* outcome, const std::string& message);
+        void outcome(size_t rank, const char* outcome, const std::string& message = {});
+        void indexed(size_t rank, int32_t index);
         void    failure(const char* stage, const std::string& message);
         // publish.start; publish.done with the lock wait and the fresh and
         // reused counts the store noted; load.done.

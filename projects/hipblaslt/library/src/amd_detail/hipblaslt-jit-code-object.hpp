@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 // In-process code-object construction through AMD comgr. The build, link and
@@ -61,6 +62,14 @@ namespace hipblaslt_jit::code_object
         std::string text;
     };
 
+    // Host nanoseconds spent in comgr actions.
+    struct Timings
+    {
+        uint64_t                                      assemble = 0; // one action for all sources
+        std::vector<std::pair<std::string, uint64_t>> compileHip; // per HIP source name
+        uint64_t                                      link = 0;
+    };
+
     struct Relocatable
     {
         std::string       name;
@@ -107,6 +116,8 @@ namespace hipblaslt_jit::code_object
         // Prepends "-include __clang_hip_runtime_wrapper.h"; comgr omits the HIP
         // runtime wrapper that the clang driver normally injects.
         bool includeHipRuntimeWrapper = true;
+        // When set, successful comgr actions add their host time here.
+        Timings* timings = nullptr;
     };
 
     struct Result

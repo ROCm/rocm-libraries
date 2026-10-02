@@ -845,6 +845,41 @@ extern "C" __global__ void triple(const int* in, int* out, int n)
             return fromResult(e1 + e2);
         });
 
+        addTest("d_timings", [](const fs::path&) -> Outcome {
+            auto build = [](co::Timings* timings, std::vector<char>& bytes) -> std::string {
+                co::Options options = hipOptions();
+                options.timings     = timings;
+                auto a              = co::assembleRelocatables(
+                    {{"scale_add", asmKernel("scale_add", scaleOp(), 5)}}, target(), options);
+                auto h = co::compileHipRelocatables(
+                    {{"triple.hip", hipTripleSource}, {"reduce_partials.hip", hipHelperSource}},
+                    target(),
+                    options);
+                if(!a.ok() || !h.ok())
+                    return a.log + h.log;
+                auto objects = a.objects;
+                objects.insert(objects.end(), h.objects.begin(), h.objects.end());
+                auto linked = co::link(objects, target(), options);
+                if(!linked.ok())
+                    return linked.log;
+                bytes = std::move(linked.bytes);
+                return {};
+            };
+            co::Timings       timings;
+            std::vector<char> timed, untimed;
+            if(auto e = build(&timings, timed); !e.empty())
+                return {false, e};
+            if(auto e = build(nullptr, untimed); !e.empty())
+                return {false, e};
+            if(timed != untimed)
+                return {false, "Options::timings changed the linked code object"};
+            const auto& hip = timings.compileHip;
+            if(!timings.assemble || !timings.link || hip.size() != 2 || hip[0].first != "triple.hip"
+               || hip[1].first != "reduce_partials.hip" || !hip[0].second || !hip[1].second)
+                return {false, "expected one assemble, two HIP compile and one link time"};
+            return {true, "assemble, each HIP compile and link timed; output unchanged"};
+        });
+
         addTest("d_multi_hip_sources", [](const fs::path& dir) -> Outcome {
             std::string detail, error;
             for(auto pipeline : {co::HipPipeline::Staged, co::HipPipeline::SourceToRelocatable})
