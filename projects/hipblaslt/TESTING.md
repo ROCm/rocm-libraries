@@ -337,6 +337,34 @@ address-arithmetic overflow and workspace behavior specifically, and are used sp
 reason. There is real redundancy in the datatype sweeps, where many numerical variants exercise the
 same code path, and pruning that is a standing opportunity rather than an active project.
 
+**Exact checks at large sizes (`fast_check`).** For large shapes, `fast_check: 1` replaces the CPU
+reference with an exact probe check of every element of D (see
+[`clients/common/include/fast_check.hpp`](clients/common/include/fast_check.hpp)). It needs
+`initialization: integer_exact`, which today covers only A, B and C:
+
+| Operand | integer_exact values |
+| --- | --- |
+| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: A is zero except at 17 K indices |
+| B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
+| bias, scaleAlpha vector, E | not covered: the generic integer fill, 1 to 10 |
+| scaleA, scaleB, scaleC, scaleD | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`); fast_check does not accept them yet |
+| amaxD | not covered: starts at zero; fast_check does not accept it yet |
+
+Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
+and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
+f16, 2^31 for int32). At large K, D's type is the tighter limit: integers are exact up to 256 in
+bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. fast_check models
+the rounding into D, but each result outside D's exact range costs a K-length dot product on the
+host, so the large-K cases pick the pattern by output type:
+
+| Output | Standard pattern | Large K (28672 to 32768) |
+| --- | --- | --- |
+| f32, int32 | exact; typical results stay far below the accumulator limit | standard |
+| f16 | exact below K of about 256; rounding modelled above | `ternary` or `sparse_k` |
+| bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
+| fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
+| int8 | saturates; each saturated result is recomputed | `sparse_k` |
+
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
 no fallback for a misplaced file, so a packaging regression would otherwise surface as an opaque

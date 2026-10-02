@@ -173,6 +173,8 @@ namespace
                     name << "_C_EQUAL_D";
                 if(arg.placement[0])
                     name << "_PLACE_" << arg.placement;
+                if(arg.integer_exact_pattern[0])
+                    name << "_IE_" << arg.integer_exact_pattern;
                 // grouped gemm only supports ext
                 if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";
