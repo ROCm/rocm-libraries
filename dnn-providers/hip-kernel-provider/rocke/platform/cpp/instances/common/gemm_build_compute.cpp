@@ -418,8 +418,15 @@ void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
     const int per_tile = (ctx->tdm_waves > 1) ? 1 : 2;
     const int allowed = (D - 2) * per_tile;
     const int ahead_k = (D - 1) * ctx->block_k;
+    /* Origin of the loop's last tile, block_k-aligned from k_lo. A ragged K
+     * makes k_upper - block_k misaligned, which would load the last tile from
+     * the wrong K offset. */
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
+    rocke_value_t* last_tile
+        = rocke_b_div(b, rocke_b_sub(b, k_span, c_one_k), ctx->c_block_k);
     rocke_value_t* last_origin
-        = rocke_b_smax(b, ctx->k_lo, rocke_b_sub(b, ctx->k_upper, ctx->c_block_k));
+        = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
     rocke_value_t* c_ring;
     rocke_value_t* c_ahead;
     rocke_value_t* c_one;

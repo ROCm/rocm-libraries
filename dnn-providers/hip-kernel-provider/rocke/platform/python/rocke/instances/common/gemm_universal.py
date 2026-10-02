@@ -1717,6 +1717,37 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             else:
                 a_lds_wave_base = a_lds_par_base
                 b_lds_wave_base = b_lds_par_base
+
+            def _gfx1250_async_load(src, off_elems, smem, lds_row, col, cpol):
+                def _load() -> None:
+                    b.global_load_async_to_lds(
+                        src,
+                        off_elems,
+                        smem,
+                        [lds_row, col],
+                        width_bytes=_DTL_BYTES_PER_LANE,
+                        coherency=cpol,
+                    )
+
+                if not spec.trait.pad_k:
+                    _load()
+                    return
+                # The copy is unpredicated, so a chunk past K would read the next
+                # row's head (or past the buffer on the last row). Zero its LDS
+                # slot instead. A chunk is all-in or all-out only when K is a
+                # multiple of _DTL_HALVES, which the 16 B async copy needs anyway.
+                valid = b.cmp_lt(b.add(k_off, col), K)
+                with b.scf_if_else(valid) as (then_ctx, else_ctx):
+                    with then_ctx:
+                        _load()
+                    with else_ctx:
+                        b.smem_store_vN(
+                            smem,
+                            [lds_row, col],
+                            b.zero_vec(storage_dtype, _DTL_HALVES),
+                            _DTL_HALVES,
+                        )
+
             for p in range(_dtl_a_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
                 pass_lds_a = (
@@ -1750,13 +1781,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         lds_row = b.add(row, b.const_i32(lds_parity * block_m))
                     else:
                         lds_row = row
-                    b.global_load_async_to_lds(
-                        A,
-                        off_elems,
-                        A_smem,
-                        [lds_row, col],
-                        width_bytes=_DTL_BYTES_PER_LANE,
-                        coherency=spec.trait.dtl_cache_a,
+                    _gfx1250_async_load(
+                        A, off_elems, A_smem, lds_row, col, spec.trait.dtl_cache_a
                     )
                 else:
                     off_bytes = b.mul(off_elems, c2)
@@ -1797,13 +1823,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         lds_row = b.add(row, b.const_i32(lds_parity * block_n))
                     else:
                         lds_row = row
-                    b.global_load_async_to_lds(
-                        Bp,
-                        off_elems,
-                        B_smem,
-                        [lds_row, col],
-                        width_bytes=_DTL_BYTES_PER_LANE,
-                        coherency=spec.trait.dtl_cache_b,
+                    _gfx1250_async_load(
+                        Bp, off_elems, B_smem, lds_row, col, spec.trait.dtl_cache_b
                     )
                 else:
                     off_bytes = b.mul(off_elems, c2)
@@ -2466,7 +2487,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         per_tile = 1 if _tdm_waves > 1 else 2
         allowed = (D - 2) * per_tile
         ahead_k = (D - 1) * block_k
-        last_origin = b.smax(k_lo, b.sub(_k_upper, c_block_k))
+        # Origin of the loop's last tile, block_k-aligned from k_lo. A ragged K
+        # makes ``_k_upper - block_k`` misaligned, which would load the last
+        # tile from the wrong K offset.
+        last_origin = b.add(
+            k_lo,
+            b.mul(
+                b.div(b.sub(b.sub(_k_upper, k_lo), b.const_i32(1)), c_block_k),
+                c_block_k,
+            ),
+        )
 
         # Prologue: fill ring slots 0 .. D-2. Static parities, so these LDS
         # offsets fold to constants.

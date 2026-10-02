@@ -463,6 +463,39 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
 }
 
+/* gfx1250 direct-to-LDS copy of one chunk. Under pad_k a chunk past K would
+ * read the next row's head (or past the buffer on the last row), so its LDS
+ * slot is zeroed instead. A chunk is all-in or all-out only when K is a
+ * multiple of dtl_halves, which the 16 B async copy needs anyway. */
+static void rocke_gemm_gfx1250_async_load(rocke_gemm_build_ctx_t* ctx,
+                                          rocke_value_t* src,
+                                          rocke_value_t* off_elems,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* lds_row,
+                                          rocke_value_t* col,
+                                          rocke_value_t* k_off,
+                                          int cpol)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* lds_indices[2] = {lds_row, col};
+    if(!ctx->spec->trait.pad_k)
+    {
+        rocke_b_global_load_async_to_lds(
+            b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
+        return;
+    }
+    rocke_value_t* valid = rocke_b_cmp_lt(b, rocke_b_add(b, k_off, col), ctx->K);
+    rocke_if_else_t ife = rocke_b_scf_if_else(b, valid);
+    rocke_b_region_enter(b, ife.then_region);
+    rocke_b_global_load_async_to_lds(
+        b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, ife.else_region);
+    rocke_value_t* zero = rocke_b_zero_vec(b, ctx->storage_dtype, ctx->dtl_halves);
+    rocke_b_smem_store_vN(b, smem, lds_indices, 2, zero, ctx->dtl_halves);
+    rocke_b_region_leave(b);
+}
+
 /* ===================================================================== *
  *  emit_load_phase -- one K-tile's coalesced global->LDS copy.
  *
@@ -662,16 +695,14 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                 {
                     lds_row = rocke_b_add(b, row, rocke_b_const_i32(b, parity_imm * ctx->block_m));
                 }
-                rocke_value_t* lds_indices[2] = {lds_row, col};
-                rocke_b_global_load_async_to_lds(b,
-                                                 ctx->A,
-                                                 off_elems,
-                                                 ctx->A_smem,
-                                                 lds_indices,
-                                                 2,
-                                                 ctx->dtl_bytes_per_lane,
-                                                 spec->trait.dtl_cache_a,
-                                                 0);
+                rocke_gemm_gfx1250_async_load(ctx,
+                                              ctx->A,
+                                              off_elems,
+                                              ctx->A_smem,
+                                              lds_row,
+                                              col,
+                                              k_off,
+                                              spec->trait.dtl_cache_a);
             }
             else
             {
@@ -718,16 +749,14 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                 {
                     lds_row = rocke_b_add(b, row, rocke_b_const_i32(b, parity_imm * ctx->block_n));
                 }
-                rocke_value_t* lds_indices[2] = {lds_row, col};
-                rocke_b_global_load_async_to_lds(b,
-                                                 ctx->Bp,
-                                                 off_elems,
-                                                 ctx->B_smem,
-                                                 lds_indices,
-                                                 2,
-                                                 ctx->dtl_bytes_per_lane,
-                                                 spec->trait.dtl_cache_b,
-                                                 0);
+                rocke_gemm_gfx1250_async_load(ctx,
+                                              ctx->Bp,
+                                              off_elems,
+                                              ctx->B_smem,
+                                              lds_row,
+                                              col,
+                                              k_off,
+                                              spec->trait.dtl_cache_b);
             }
             else
             {
