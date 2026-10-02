@@ -805,13 +805,18 @@ def gemm_vector_size_sweep(vec: Sequence[int], dtype_a: str, dtype_b: str, dtype
     return [(a, b, c) for a in axes[0] for b in axes[1] for c in axes[2]]
 
 
+def gemm_contiguous_dims(layout: str) -> Tuple[str, str, str]:
+    """Contiguous dim (``"m"``/``"n"``/``"k"``) of A/B/C for a layout like ``"rcr"``."""
+    return ("k" if layout[0] == "r" else "m", "n" if layout[1] == "r" else "k", "n" if layout[2] == "r" else "m")
+
+
 def gemm_problem_vector_sizes(m: int, n: int, k: int, layout: str, dtype_a: str, dtype_b: str, dtype_c: str) -> Tuple[int, int, int]:
     """Widest width per operand that divides the problem's contiguous extent.
 
     ``layout`` is the A/B/C layout string (e.g. ``"rcr"``). A kernel whose
     widths divide these values accepts the problem.
     """
-    extents = ((k if layout[0] == "r" else m), (n if layout[1] == "r" else k), (n if layout[2] == "r" else m))
+    extents = tuple(dict(m=m, n=n, k=k)[d] for d in gemm_contiguous_dims(layout))
     dtypes = (dtype_a, dtype_b, dtype_c)
     return tuple(math.gcd(e, 16 // _VEC_ELEMENT_BYTES[d]) for e, d in zip(extents, dtypes))
 

@@ -484,6 +484,21 @@ class TestExpandSweep(unittest.TestCase):
                 self.assertEqual([c.vector_sizes for c in configs], [(0, 0, 0)])
                 self.assertTrue(all("_vec" not in c.name for c in configs))
 
+    def test_fixed_widths_pair_only_where_native_cannot_run(self):
+        built = [(c, None) for c in self.cfgs]
+        fixed = {i for i, c in enumerate(self.cfgs) if any(c.vector_sizes)}
+        probs = [
+            dict(M=512, N=512, K=512),  # aligned: the native kernels run it
+            dict(M=512, N=512, K=257),  # misaligned K: only fixed widths fit
+            dict(M=512, N=512, K=520),  # aligned widths, but unpadded natives need K % 64
+        ]
+        vfb = VectorFallback(probs, "rcr", "bf16", "standard")
+        self.assertEqual(vfb.expand_kwargs["vector_sizes"], self.vfb.expand_kwargs["vector_sizes"])
+        aligned, misaligned, untiled = vfb.pairs(probs, built)
+        self.assertTrue(aligned and not fixed & set(aligned))
+        self.assertTrue(misaligned and set(misaligned) <= fixed)
+        self.assertTrue(fixed <= set(untiled))
+
     def test_fixed_widths_force_padding(self):
         cfg = GemmKernelConfig(
             dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32",
