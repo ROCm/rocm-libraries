@@ -669,7 +669,7 @@ namespace rocalution
     {
         log_debug(this, "TNS::MoveToAcceleratorLocalData_()", this->build_);
 
-        this->TNS_.MoveToHost();
+        this->TNS_.MoveToAccelerator();
         this->L_.MoveToAccelerator();
         this->LT_.MoveToAccelerator();
         this->Dinv_.MoveToAccelerator();
