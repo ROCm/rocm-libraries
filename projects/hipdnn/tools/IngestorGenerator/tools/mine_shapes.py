@@ -262,9 +262,13 @@ def from_graph_corpus(root: Path, excluded: list | None = None) -> list[dict]:
         )
         # hipDNN graphs bind operands under the node's `inputs`; an older
         # spelling put the UIDs among the attributes. Read both, so a sink bound
-        # in `inputs` is not mined as use_sinks=False.
+        # in `inputs` is not mined as use_sinks=False. A null input slot means
+        # unbound there, so it never hides an attribute binding.
         node = sdpa[0] if sdpa else {}
-        bindings = {**attrs, **(node.get("inputs") or {})}
+        bindings = {
+            **attrs,
+            **{k: v for k, v in (node.get("inputs") or {}).items() if v is not None},
+        }
         by_uid = {t["uid"]: t for t in graph.get("tensors", []) if "uid" in t}
         selected = []
         for short, long in (("q", "query"), ("k", "key"), ("v", "value")):

@@ -777,6 +777,9 @@ def _hipdnn_graph(
         "attn_scale_value": 0.088,
         **(attrs or {}),
     }
+    for key, uid in (attrs or {}).items():
+        if key.endswith("_tensor_uid") and uid is not None:
+            tensors.append({"uid": uid, "name": key, "dims": [1], "strides": [1]})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -855,6 +858,16 @@ class TestOperandsBoundInNodeInputs:
     def test_a_sink_bound_in_node_inputs_is_mined_as_use_sinks(self, tmp_path):
         _hipdnn_graph(
             tmp_path / "graphs" / "sink.json", inputs={"sink_token_tensor_uid": 9}
+        )
+        rc, output, shapes, _ = _mine_graphs(tmp_path)
+        assert rc == 0, output
+        assert shapes[0]["use_sinks"] is True
+
+    def test_a_null_input_slot_does_not_hide_an_attribute_bound_sink(self, tmp_path):
+        """The helper's `inputs` carries `sink_token_tensor_uid: null`, as real graphs
+        do for an unbound slot. The legacy attribute binding must still count."""
+        _hipdnn_graph(
+            tmp_path / "graphs" / "sink.json", attrs={"sink_token_tensor_uid": 9}
         )
         rc, output, shapes, _ = _mine_graphs(tmp_path)
         assert rc == 0, output
