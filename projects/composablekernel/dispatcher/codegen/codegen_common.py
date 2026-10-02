@@ -790,19 +790,25 @@ def gemm_lockstep_vector_bytes(
     return min(v * _VEC_ELEMENT_BYTES[d] for v, d, _ in operands)
 
 
-def gemm_vector_size_sweep(vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str) -> List[Tuple[int, int, int]]:
+def gemm_vector_size_sweep(
+    vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str, tune_c: bool = False
+) -> List[Tuple[int, int, int]]:
     """Every width triple worth building for a problem that needs ``vec``.
 
     ``vec`` is ``gemm_problem_vector_sizes`` (largest legal width per tensor,
     capped at 16 bytes). An aligned tensor stays native (0); a misaligned one
     sweeps every power-of-two divisor of its largest legal width, so the tuner
-    can pick the fastest one. Only the offending tensor is narrowed.
+    can pick the fastest one. Only the offending tensor is narrowed. With
+    ``tune_c`` an aligned C sweeps too: C width only changes the epilogue
+    stores, while narrower A/B loads slow down the main loop.
     """
-    full = [16 // _VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c)]
-    if all(v >= f for v, f in zip(vec, full)):
-        return [(0, 0, 0)]
-    axes = [[f] if v >= f else [1 << i for i in range(v.bit_length())] for v, f in zip(vec, full)]
-    return [(a, b, c) for a in axes[0] for b in axes[1] for c in axes[2]]
+    full = tuple(16 // _VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c))
+    axes = [
+        [f] if v >= f and not (tune_c and i == 2) else [1 << j for j in range(v.bit_length())]
+        for i, (v, f) in enumerate(zip(vec, full))
+    ]
+    sweep = [(a, b, c) for a in axes[0] for b in axes[1] for c in axes[2] if (a, b, c) != full]
+    return sweep or [(0, 0, 0)]
 
 
 def gemm_contiguous_dims(layout: str) -> Tuple[str, str, str]:

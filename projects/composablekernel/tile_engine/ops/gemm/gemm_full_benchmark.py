@@ -446,7 +446,8 @@ def main():
 
     problems = load_problems(args.problems, args.variant)
     vfb = VectorFallback(
-        problems, args.layout, args.dtype, codegen_variant, args.no_vector_fallback
+        problems, args.layout, args.dtype, codegen_variant, args.no_vector_fallback,
+        args.tune_c_vector_width,
     )
 
     all_configs = []

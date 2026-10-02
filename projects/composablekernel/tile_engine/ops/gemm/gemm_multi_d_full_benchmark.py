@@ -318,7 +318,8 @@ def main():
 
     problems = load_problems(args.problems)
     vfb = VectorFallback(
-        problems, args.layout, args.dtype, "multi_d", args.no_vector_fallback
+        problems, args.layout, args.dtype, "multi_d", args.no_vector_fallback,
+        args.tune_c_vector_width,
     )
     all_configs = []
     for cfg_path in config_paths:

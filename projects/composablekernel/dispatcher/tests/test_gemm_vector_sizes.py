@@ -404,6 +404,13 @@ class TestWidthSweep(unittest.TestCase):
         self.assertEqual(gemm_vector_size_sweep((1, 1, 8), "bf16", "bf16", "bf16"), [(1, 1, 8)])
         self.assertEqual(len(gemm_vector_size_sweep((2, 4, 8), "bf16", "bf16", "bf16")), 6)
 
+    def test_tune_c_sweeps_aligned_c(self):
+        def sweep(vec):
+            return gemm_vector_size_sweep(vec, "bf16", "bf16", "bf16", tune_c=True)
+
+        self.assertEqual(sweep((8, 8, 8)), [(8, 8, 1), (8, 8, 2), (8, 8, 4)])
+        self.assertEqual(sweep((1, 1, 8)), [(1, 1, 1), (1, 1, 2), (1, 1, 4), (1, 1, 8)])
+
 
 class TestHeaderLookup(unittest.TestCase):
     """Name-based header fallbacks must never pick a reduced-width kernel."""
@@ -431,7 +438,7 @@ class TestExpandSweep(unittest.TestCase):
     def setUpClass(cls):
         from gemm_utils import expand_sweep
 
-        cfg = (
+        cls.ci_config = cfg = (
             DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm" / "configs"
             / "default_ci_config.json"
         )
@@ -498,6 +505,24 @@ class TestExpandSweep(unittest.TestCase):
         self.assertTrue(aligned and not fixed & set(aligned))
         self.assertTrue(misaligned and set(misaligned) <= fixed)
         self.assertTrue(fixed <= set(untiled))
+
+    def test_tune_c_keeps_c_widths_where_native_runs(self):
+        from gemm_utils import expand_sweep
+
+        probs = [dict(M=512, N=512, K=512), dict(M=512, N=512, K=257)]
+        vfb = VectorFallback(probs, "rcr", "bf16", "standard", tune_c=True)
+        cfgs = expand_sweep(
+            str(self.ci_config), "gfx950", dtype="bf16", layout="rcr", variant="standard",
+            **vfb.expand_kwargs,
+        )
+        aligned, misaligned = vfb.pairs(probs, [(c, None) for c in cfgs])
+
+        def ab_widths(idx):
+            return {cfgs[i].vector_sizes[:2] for i in idx if any(cfgs[i].vector_sizes)}
+
+        # Only C-narrowed variants join the natives on the aligned problem.
+        self.assertEqual(ab_widths(aligned), {(8, 8)})
+        self.assertEqual(ab_widths(misaligned), {(1, 1)})
 
     def test_fixed_widths_force_padding(self):
         cfg = GemmKernelConfig(

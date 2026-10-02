@@ -10,7 +10,8 @@ how many (tile, width) combinations were rejected or failed to compile, and
 pairs every problem only with the kernels whose widths divide its own. A
 fixed-width variant is not paired with a problem its own native config can
 already run: it moves the same bytes with more loads, so it would only add
-measurements there.
+measurements there. --tune-c-vector-width also builds narrower C widths for
+every problem and keeps them there, since a narrower C store can be faster.
 """
 
 import itertools
@@ -33,6 +34,13 @@ def add_vector_fallback_arg(parser):
         "contiguous A/B/C extents are not a multiple of the native width also get "
         "kernels with narrower fixed widths (gcd of extent and native width)",
     )
+    parser.add_argument(
+        "--tune-c-vector-width",
+        action="store_true",
+        help="Also build and time narrower C widths for every problem, aligned ones "
+        "included, where they can beat the native kernel by a few percent. Costs "
+        "more builds and measurements",
+    )
 
 
 def _base_key(cfg):
@@ -54,7 +62,7 @@ def _tile_fits(cfg, dims):
 class VectorFallback:
     """Per-run fallback state: problem widths, sweep kwargs and reject counts."""
 
-    def __init__(self, problems, layout, dtype, variant, disabled=False):
+    def __init__(self, problems, layout, dtype, variant, disabled=False, tune_c=False):
         out_dtype = CommonTypeMappings.get_output_dtype(dtype)
         # Per-problem widest legal A/B/C widths for the fixed-width sweep.
         self.prob_vecs = [
@@ -69,16 +77,17 @@ class VectorFallback:
             tuple(int(p[d.upper()]) for d in gemm_contiguous_dims(layout)) for p in problems
         ]
         self.enabled = not disabled and variant in VECTOR_SIZE_VARIANTS
+        self.tune_c = tune_c
         self.rejects = {}
         # An explicit native override must win over fixed widths in the JSON.
         self.expand_kwargs = {"vector_sizes": [(0, 0, 0)]} if disabled else {}
         if self.enabled:
             # Every power-of-two width <= the problem's, for misaligned tensors
-            # only; the per-problem winner among them is the width's cost.
+            # only (and C with tune_c); the per-problem winner among them is the width's cost.
             sweep = {
                 t
                 for v in self.prob_vecs
-                for t in gemm_vector_size_sweep(v, dtype, dtype, out_dtype)
+                for t in gemm_vector_size_sweep(v, dtype, dtype, out_dtype, tune_c)
             }
             self.expand_kwargs = dict(
                 vector_sizes=sorted({(0, 0, 0), *sweep}), rejects=self.rejects
@@ -122,7 +131,8 @@ class VectorFallback:
     def pairs(self, problems, built_kernels):
         """Kernel indices each problem may run (all kernels when disabled).
 
-        A fixed-width variant is dropped for problems its native config runs.
+        A fixed-width variant is dropped for problems its native config runs,
+        unless ``tune_c`` is set and it narrows only the native C width.
         """
         n_redundant = 0
         if self.enabled:
@@ -130,6 +140,11 @@ class VectorFallback:
             kernel_vecs = [cfg.effective_vector_sizes for cfg in cfgs]
             fixed = [any(cfg.vector_sizes) for cfg in cfgs]
             bases = [_base_key(cfg) for cfg in cfgs]
+            native_ab = {b: kv[:2] for b, f, kv in zip(bases, fixed, kernel_vecs) if not f}
+            gated = [
+                f and not (self.tune_c and native_ab.get(b) == kv[:2])
+                for b, f, kv in zip(bases, fixed, kernel_vecs)
+            ]
             pairs = []
             for prob, pv in zip(problems, self.prob_extents):
                 dims = dict(m=int(prob["M"]), n=int(prob["N"]), k=int(prob["K"]))
@@ -138,7 +153,7 @@ class VectorFallback:
                     b for b, f, ok, cfg in zip(bases, fixed, fits, cfgs)
                     if ok and not f and _tile_fits(cfg, dims)
                 }
-                idx = [i for i, ok in enumerate(fits) if ok and not (fixed[i] and bases[i] in served)]
+                idx = [i for i, ok in enumerate(fits) if ok and not (gated[i] and bases[i] in served)]
                 n_redundant += sum(fits) - len(idx)
                 pairs.append(idx)
         else:
