@@ -272,6 +272,19 @@ echo " ---- $NAME Done!"
 """
 
 
+def _tensile_pp(hip_s: str) -> str:
+    """PYTHONPATH for the emitted run script: tensilelite plus rocisa.
+
+    Same reason as geko.utils.tensile_pythonpath -- Tensile imports rocisa at import
+    time and the built package sits one level below the CMake directory of the same
+    name. inherit=False here because the emitted script must be reproducible on its
+    own rather than depending on whoever runs it.
+    """
+    from geko.utils import tensile_pythonpath
+
+    return tensile_pythonpath(hip_s, inherit=False)
+
+
 def write_run_script(
     filepath: str | Path,
     entity_name: str,
@@ -292,7 +305,7 @@ def write_run_script(
         client_path_str = f'--prebuilt-client {Path(client_path).resolve()}'
 
     run_command = (
-        f'PYTHONPATH={hip_s}/tensilelite/ '
+        f'PYTHONPATH={_tensile_pp(hip_s)} '
         f'{hip_s}/tensilelite/Tensile/bin/Tensile '
         f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
     )

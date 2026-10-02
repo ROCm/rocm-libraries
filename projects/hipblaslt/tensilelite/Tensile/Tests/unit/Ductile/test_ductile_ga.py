@@ -220,6 +220,23 @@ class TestGAPopSizeDecay:
         )
         assert ga.pop_size < 100
 
+    def test_small_space_keeps_pop_size_when_auto_pop_size_false(self):
+        # Same space/pop_size as test_small_space_reduces_pop_size, but with
+        # auto_pop_size=False the caller pinned pop_size explicitly, so the
+        # shrink heuristic must not fire.
+        keys = {"A": list(range(3)), "B": list(range(18)), "C": list(range(2))}
+        space = _make_space(keys=keys)
+        mating = _make_mating(space)
+        ga = GeneticAlgorithm(
+            space, mating,
+            evaluate=lambda x: np.ones((1, len(x))),
+            pop_size=100,
+            n_gen=1, seed=1, verbose=0,
+            auto_pop_size=False,
+        )
+        assert ga.pop_size == 100
+        assert ga._decay_type == "none"
+
 
 # ---------------------------------------------------------------------------
 # Weights processing

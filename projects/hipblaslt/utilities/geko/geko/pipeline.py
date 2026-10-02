@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, List, Mapping, Sequence
 
 import pandas as pd
 
@@ -360,6 +360,7 @@ def run_configure(
     verbose: int = 1,
     bench_freq: bool = False,
     device: int | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
 ) -> None:
     """Summarize the workload log, then write tuning YAML under workdir/optimizations.
 
@@ -382,6 +383,8 @@ def run_configure(
             because that branch skips benchmarking.
 
         device: Backward-compatible single-device alias. If set, overrides devices.
+        config_overrides: Input-config keys for optim.configure, e.g. the
+            LIST_FORWARDED_KEYS of a ``--list`` YAML.
 
     Raises:
         FileNotFoundError: hipBLASLt or log_file missing.
@@ -447,6 +450,7 @@ def run_configure(
         arch=arch,
         backend=backend,
         search_space=search_space,
+        config_overrides=config_overrides,
     )
     n_configs = len(gemm_configs)
 
@@ -468,6 +472,9 @@ def run_optimize(
     retry: bool = True,
     verbose: int = 1,
     bench_freq: bool = False,
+    stall_timeout: float = 900.0,
+    abort_after_consecutive_failures: int = 8,
+    max_shape_failures: int = 0,
 ) -> None:
     """Run optim.run, merge 3_LibraryLogic YAMLs, analyze, and optionally write final_libs.
 
@@ -487,6 +494,15 @@ def run_optimize(
         verbose: Logger level via _set_log_level.
         bench_freq: Forwarded to optim.analyze (controls HIPBLASLT_BENCH_FREQ
             during the post-optim benchmark sweep).
+        stall_timeout: Seconds a worker may go without writing to its
+            tensilelite log before it is killed and its slot released. 0
+            disables. Forwarded to optim.run.
+        abort_after_consecutive_failures: Stop scheduling new jobs after
+            this many consecutive job failures across all devices; 0
+            disables. Forwarded to optim.run.
+        max_shape_failures: Retire a shape after this many failed attempts
+            (tracked in a persistent .failcount file); 0 disables
+            retirement. Forwarded to optim.run.
 
     Raises:
         FileNotFoundError: hipBLASLt, workdir, optimizations/, or state file missing.
@@ -565,6 +581,9 @@ def run_optimize(
         client_build_dir=client_build_dir,
         n_slots=n_slots,
         retry=retry,
+        stall_timeout=stall_timeout,
+        abort_after_consecutive_failures=abort_after_consecutive_failures,
+        max_shape_failures=max_shape_failures,
     )
 
     _, n_completed, _ = optim.utils.check_progress(input_dir)

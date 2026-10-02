@@ -13,12 +13,14 @@ __all__ = [
     "load_prepared_config_from_yaml",
     "validate_input_config",
     "validate_mx_arch_support",
+    "resolve_mx_defaults",
     "apply_input_config_defaults",
     "get_gemm_problem",
     "gemm_configs_from_gemm_log_path",
     "gemm_configs_from_gemm_dataframe",
 ]
 
+import dataclasses
 import sys
 import os
 from pathlib import Path
@@ -38,6 +40,8 @@ from geko.config_generator.constants import (
     REQUIRED_CONFIG_FIELDS,
     VALID_BACKENDS,
     VALID_SEARCH_SPACES,
+    mx_format,
+    mx_format_from_scale_code,
 )
 from geko.config_generator.sizes import get_sizes
 from geko.constants import GEMM_TYPE_FIELDS
@@ -117,30 +121,41 @@ def _apply_env_config_overrides(config: Dict[str, Any]) -> None:
 def gemm_configs_from_gemm_dataframe(
     df: pd.DataFrame,
 ) -> List[GemmConfig]:
-    """Group df by GEMM_TYPE_FIELDS + scale columns; sizes use M,N,K or m,n,k.
+    """Group df by GEMM_TYPE_FIELDS + MX format; sizes use M,N,K or m,n,k.
 
-    MX is detected per-group from scaleA/scaleB columns (>= 3 means MX).
-    MX-only data types (F4) auto-enable MX in GemmConfig regardless.
+    Each row's MX format is decoded from its scaleA/scaleB value
+    (mx_format_from_scale_code). MX-only data types (F4) auto-enable MX in
+    GemmConfig regardless.
 
     Args:
         df: Non-empty GEMM table; empty or None yields [].
 
     Returns:
-        One GemmConfig per unique GEMM-type/MX combination.
+        One GemmConfig per unique GEMM-type/MX-format combination.
     """
     if df is None or df.empty:
         return []
     size_cols = (
         ["M", "N", "batch_count", "K"] if "M" in df.columns else ["m", "n", "batch_count", "k"]
     )
-    has_scale = "scaleA" in df.columns and "scaleB" in df.columns
     df = df.copy()
-    df["_mx"] = (df["scaleA"] >= 3) | (df["scaleB"] >= 3) if has_scale else False
+    df["_mx_block"], df["_mx_scale"] = 0, ""
+    if "scaleA" in df.columns and "scaleB" in df.columns:
+        formats = []
+        for code_a, code_b in zip(df["scaleA"].fillna(0), df["scaleB"].fillna(0)):
+            fmt = mx_format_from_scale_code(code_a)
+            if fmt != mx_format_from_scale_code(code_b):
+                raise ValueError(
+                    f"A and B must share one MX format; got scaleA={int(code_a)}, scaleB={int(code_b)}"
+                )
+            formats.append(fmt or (0, ""))
+        df["_mx_block"] = [block for block, _ in formats]
+        df["_mx_scale"] = [scale for _, scale in formats]
 
-    group_cols = list(GEMM_TYPE_FIELDS) + ["_mx"]
+    group_cols = list(GEMM_TYPE_FIELDS) + ["_mx_block", "_mx_scale"]
     gemm_configs: List[GemmConfig] = []
     for group_key, gby in df.groupby(group_cols, sort=False):
-        *type_vals, is_mx = group_key
+        *type_vals, mx_block, mx_scale = group_key
         sizes = gby[size_cols].values.tolist()
         fields = dict(zip(GEMM_TYPE_FIELDS, type_vals))
         gt = GemmType.from_hipblaslt(
@@ -151,8 +166,63 @@ def gemm_configs_from_gemm_dataframe(
             fields["c_type"],
             fields["compute_type"],
         )
-        gemm_configs.append(GemmConfig(gt, sizes, mx=bool(is_mx)))
+        gemm_configs.append(
+            GemmConfig(gt, sizes, mx_block=int(mx_block) or None, mx_scale_type=mx_scale or None)
+        )
     return gemm_configs
+
+
+def resolve_mx_defaults(gemm_configs: List[GemmConfig], arch: str) -> List[GemmConfig]:
+    """Give MX GemmConfigs without a block the arch's ``mx_block_size``, then merge equal ones.
+
+    Equal formats then compare and name the same whichever spelling (``MX:
+    True``, F4, MX_BLOCK, a log's scale value) produced them, and merging keeps
+    two of them from writing the same output files. Arches without MX are left
+    for validate_mx_arch_support to report.
+    """
+    block = HARDWARE_MAP.get(arch, {}).get("mx_block_size")
+    merged: List[GemmConfig] = []
+    for gc in gemm_configs:
+        if gc.mx and gc.mx_block is None and block is not None:
+            gc = dataclasses.replace(gc, mx_block=block)
+        key = (gc.gemm_type, gc.mx, gc.mx_block, gc.mx_scale_type)
+        for i, other in enumerate(merged):
+            if (other.gemm_type, other.mx, other.mx_block, other.mx_scale_type) == key:
+                extra = [s for s in gc.sizes if s not in other.sizes]
+                merged[i] = dataclasses.replace(other, sizes=other.sizes + extra)
+                break
+        else:
+            merged.append(gc)
+    return merged
+
+
+def _apply_config_mx(gemm_configs: List[GemmConfig], config: Dict[str, Any]) -> List[GemmConfig]:
+    """Apply the input config's MX setting to the F4 / F8 log GEMMs that carry no MX format.
+
+    A log row carries its MX format in scaleA / scaleB. Rows without one take the
+    config's MX / MX_BLOCK / MX_SCALE_TYPE; rows with one must agree with it.
+    """
+    if not config["MX"] and config["MX_BLOCK"] is None and config["MX_SCALE_TYPE"] is None:
+        return gemm_configs
+    out = []
+    for gc in gemm_configs:
+        if gc.gemm_type.data_type not in ("F4", "F8"):
+            out.append(gc)
+            continue
+        wanted = GemmConfig(
+            gc.gemm_type,
+            gc.sizes,
+            mx=bool(config["MX"]),
+            mx_block=config["MX_BLOCK"],
+            mx_scale_type=config["MX_SCALE_TYPE"],
+        )
+        if gc.mx_block is not None and mx_format(gc, config["ARCH"]) != mx_format(wanted, config["ARCH"]):
+            raise ValueError(
+                f"GEMM_LOG_PATH has {gc.name} with MX format {mx_format(gc, config['ARCH'])}, "
+                f"but the input config asks for {mx_format(wanted, config['ARCH'])}"
+            )
+        out.append(gc if gc.mx_block is not None else wanted)
+    return out
 
 
 def gemm_configs_from_gemm_log_path(log_file: str | Path) -> List[GemmConfig]:
@@ -204,7 +274,14 @@ def get_gemm_problem(config: dict) -> None:
         str(config["ComputeDataType"]),
     )
     sizes = get_sizes(config)
-    config["GemmProblems"] = [GemmConfig(gemm_type, sizes, mx=config.get("MX", False))]
+    gemm_config = GemmConfig(
+        gemm_type,
+        sizes,
+        mx=bool(config.get("MX", False)),
+        mx_block=config.get("MX_BLOCK"),
+        mx_scale_type=config.get("MX_SCALE_TYPE"),
+    )
+    config["GemmProblems"] = resolve_mx_defaults([gemm_config], config["ARCH"])
 
 
 def _load_config_from_yaml(config_path: str | Path) -> Dict[str, Any]:
@@ -391,7 +468,8 @@ def load_prepared_config_from_yaml(
             raise ValueError(
                 f"No GEMM entries found in GEMM_LOG_PATH {config['GEMM_LOG_PATH']!r}"
             )
-        config["GemmProblems"] = gemm_problems
+        gemm_problems = _apply_config_mx(gemm_problems, config)
+        config["GemmProblems"] = resolve_mx_defaults(gemm_problems, config["ARCH"])
     else:
         get_gemm_problem(config)
 

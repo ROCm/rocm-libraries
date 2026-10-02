@@ -235,6 +235,54 @@ def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_pa
         )
 
 
+@pytest.mark.parametrize("configured_auto_pop_size", [None, True, False])
+def test_ductile_backend_forwards_auto_pop_size_to_ga(monkeypatch, tmp_path, configured_auto_pop_size):
+    """DuctileBackend must forward merged_config['auto_pop_size'] to GeneticAlgorithm,
+    defaulting to True when the key is absent from the merged config."""
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            captured["auto_pop_size"] = kwargs["auto_pop_size"]
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}, {"a": 1}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+
+    merged_config = _base_ductile_merged_config()
+    if configured_auto_pop_size is None:
+        merged_config.pop("auto_pop_size", None)
+        expected = True
+    else:
+        merged_config["auto_pop_size"] = configured_auto_pop_size
+        expected = configured_auto_pop_size
+    _patch_ductile_backend_primitives(monkeypatch, merged_config)
+
+    backend = DuctileBackend()
+    with pytest.raises(RuntimeError, match="Expected results file does not exist"):
+        backend.run(
+            {},
+            _make_benchmark_config(tmp_path),
+            lambda *_args, **_kwargs: (str(tmp_path / "missing.csv"), 0),
+        )
+
+    assert captured["auto_pop_size"] is expected
+
+
 def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     _write_csv(csv_path, {"sol0": [10.0, 11.0]})

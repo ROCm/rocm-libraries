@@ -30,6 +30,11 @@ from geko.config_generator.fork_params.hw_profiles.gfx1250.post_processor import
 
 _GFX1250_ARCHS = (
     "gfx1250",
+    "gfx1250_96cu",
+    "gfx1250_192cu",
+    "gfx1250v0",
+    "gfx1250v0_96cu",
+    "gfx1250v0_192cu",
 )
 
 _GFX942_ARCHS = (

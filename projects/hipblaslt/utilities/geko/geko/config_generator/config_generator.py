@@ -8,7 +8,7 @@ import sys
 import copy
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from geko.config_generator import get_optimization_params, get_post_processor
 from geko.config_generator.cluster_sizes import do_cluster
@@ -74,6 +74,26 @@ def run(
         )
 
 
+def mi_design_mx_options(config: Dict[str, Any]) -> Tuple[Optional[Tuple[int, int]], bool]:
+    """``(mx_block_values, subtile_enabled)`` for MIDesign on the active GEMM problem.
+
+    Tensile builds gfx950 MX kernels only with UseSubtileImpl ("gfx950 MX
+    requires UseSubtileImpl"), so gfx950 MX MIs are vetted as subtile ones. Its
+    MX checks are subtile-only too, so no other arch applies them, and the MX
+    block values go to MIDesign only with subtile on.
+    """
+    problem_type = ConfigSectionGenerator(config)._problem_type
+    mx_block_values = None
+    if problem_type.get("MXBlockA") and problem_type.get("MXBlockB"):
+        mx_block_values = (problem_type["MXBlockA"], problem_type["MXBlockB"])
+
+    subtile_enabled = config.get("search_space") == "subtile"
+    if mx_block_values is not None and not subtile_enabled and config["ARCH"].startswith("gfx950"):
+        logger.warning("MX enabled, but subtile mode is not active. Enabling subtile search space.")
+        subtile_enabled = True
+    return (mx_block_values if subtile_enabled else None), subtile_enabled
+
+
 def _run_per_gemm_type(
     config: Dict[str, Any],
     hipblaslt_path: Path,
@@ -86,8 +106,8 @@ def _run_per_gemm_type(
 
     Runs MI design, fork-parameter generation, clustering / merging, and
     output writing for the GEMM described by config["GemmProblem"].
-    Each GEMM type writes its own MI_finder_log/<gemm_name>/ subdirectory
-    under output_path.
+    Each GEMM type writes its own MI_finder_log/<name>/ subdirectory
+    under output_path (GemmConfig.name).
 
     Args:
         config: Prepared config dict; config["GemmProblem"] must be set
@@ -101,23 +121,13 @@ def _run_per_gemm_type(
     """
     gp = config["GemmProblem"]
 
-    mi_finder_log_path = output_path / "MI_finder_log" / gp.gemm_type.gemm_name
+    mi_finder_log_path = output_path / "MI_finder_log" / gp.name
     mi_finder_log_path.mkdir(parents=True, exist_ok=True)
 
     size_list = gp.sizes
     logger.info(" Total number of sizes: %s", len(size_list))
 
-    csg = ConfigSectionGenerator(config)
-
-    mx_block_values = None
-    if csg._problem_type.get("MXBlockA") and csg._problem_type.get("MXBlockB"):
-        mx_block_values = (csg._problem_type["MXBlockA"], csg._problem_type["MXBlockB"])
-
-    subtile_enabled = config.get("search_space") == "subtile"
-
-    if mx_block_values is not None and not subtile_enabled:
-        logger.warning("MX enabled, but subtile mode is not active. Enabling subtile search space.")
-        subtile_enabled = True
+    mx_block_values, subtile_enabled = mi_design_mx_options(config)
 
     # --- Create MI designer, optimization params, and post-processor ---
     mi_designer = MIDesign(
@@ -152,7 +162,7 @@ def _run_per_gemm_type(
         config['MAX_NUM_KERNELS_PER_CONFIG'],
     )
 
-    GEMM_type = gp.gemm_type.gemm_name
+    GEMM_type = gp.name
 
     if write_shell_scripts and client_path is None:
         client_path = build_tensilelite_client(
@@ -224,7 +234,7 @@ def _fork_params_entry_for_size(
     if nkernels == 0:
         raise ValueError(
             f"No kernels found for GEMM type "
-            f"{config['GemmProblem'].gemm_type.gemm_name} "
+            f"{config['GemmProblem'].name} "
             f" and size {size}."
         )
     return ConfigEntry(

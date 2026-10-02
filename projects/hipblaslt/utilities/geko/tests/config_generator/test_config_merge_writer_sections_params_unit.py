@@ -12,7 +12,7 @@ from geko.config_generator import output_writer as ow
 from geko.config_generator import config_sections_generator as csg
 from geko.config_generator.fork_params.hw_profiles.gfx942 import optimization_param as g942
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
-from geko.schemas import GemmType
+from geko.schemas import GemmConfig, GemmType
 
 
 def _fp(name, values, active=True, comment="", metadata=None):
@@ -137,7 +137,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
 def _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="heuristic"):
     gt = GemmType.from_tensile("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
     return {
-        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]]),
         "ARCH": "gfx950",
         "CUs": 256,
         "XCC": 8,
@@ -203,7 +203,7 @@ def test_gfx942_params_branches(monkeypatch) -> None:
         "WGMUnit": 8,
         "StreamK": True,
         "CMS": True,
-        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "GemmProblem": GemmConfig(gt, [[4096, 256, 1, 8192]]),
     }
     p = g942.GFX942Params(cfg)
     params, groups = p.generate_for_size((4096, 256, 1, 8192))
@@ -227,7 +227,7 @@ def _section_cfg_mx(dtype="F4", mx=True, epilogues=True, arch="gfx950"):
     dest = "S" if dtype not in ("D",) else "D"
     gt = GemmType.from_tensile("T", "N", dtype, dest, "S")
     return {
-        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]], mx=mx),
         "ARCH": arch,
         "CUs": 256,
         "XCC": 8,
@@ -287,8 +287,8 @@ def test_mx_bias_type_forced_to_s():
 
 
 def test_mx_f8_problem_type_skips_use_scale_ab():
-    """MX F8 should not emit UseScaleAB."""
-    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
+    """MX F8 should not emit UseScaleAB on gfx1250 (never sets it for MX there)."""
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True, arch="gfx1250"))
     pt = gen._problem_type
     assert "UseScaleAB" not in pt
 

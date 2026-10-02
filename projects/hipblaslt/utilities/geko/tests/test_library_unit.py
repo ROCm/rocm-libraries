@@ -91,13 +91,13 @@ def test_create_bench_input_mx_block_uses_arch_mx_scale(tmp_path: Path) -> None:
     assert gemms[0]["scaleB"] == 1001
 
 
-def test_create_bench_input_mx_block_unknown_arch_defaults_scale_zero(tmp_path: Path) -> None:
+def test_create_bench_input_mx_block_unknown_arch_uses_canonical_scale(tmp_path: Path) -> None:
     lib = _mk_lib(problem_overrides={"MXBlockA": 32, "MXBlockB": 32})
     lib.data[2] = "gfx_unknown"
     bench_file, _ = lib.create_bench_input(tmp_path, verify=False)
     gemms = yaml.safe_load(Path(bench_file).read_text())
-    assert gemms[0]["scaleA"] == 0
-    assert gemms[0]["scaleB"] == 0
+    assert gemms[0]["scaleA"] == 3
+    assert gemms[0]["scaleB"] == 3
 
 
 def test_add_epilogues_updates_solution_names() -> None:

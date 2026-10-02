@@ -46,7 +46,7 @@ def _cfg(
         "StreamK": streamk,
         "CMS": cms,
         "search_space": search_space,
-        "GemmProblem": type("GP", (), {"gemm_type": gt})(),
+        "GemmProblem": type("GP", (), {"gemm_type": gt, "name": gt.gemm_name})(),
     }
 
 
@@ -195,8 +195,8 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(cg, "build_tensilelite_client", lambda *_a, **_k: tmp_path / "client")
 
     gt = GemmType.from_tensile("N", "N", "H", "H", "S")
-    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]], "mx": False})()
-    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]], "mx": False})()
+    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]], "mx": False, "name": gt.gemm_name})()
+    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]], "mx": False, "name": gt.gemm_name})()
 
     calls = []
     monkeypatch.setattr(cg, "_run_per_gemm_type", lambda conf, *_a, **_k: calls.append(conf["GemmProblem"]))
@@ -209,7 +209,7 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     # _fork_params_entry_for_size success + failure
     monkeypatch.setattr(cg, "generate_fork_params", lambda *_a, **_k: ({"A": ForkParameter(name="A", values=[1])}, 2, 3))
-    c = {"GemmProblem": type("GP", (), {"gemm_type": gt})(), "LOG_LEVEL": 20}
+    c = {"GemmProblem": type("GP", (), {"gemm_type": gt, "name": gt.gemm_name})(), "LOG_LEVEL": 20}
     e = cg._fork_params_entry_for_size((16, 16, 1, 16), object(), object(), c, None)
     assert e.nkernels == 3 and e.mis_per_size[(16, 16, 1, 16)] == 2
 

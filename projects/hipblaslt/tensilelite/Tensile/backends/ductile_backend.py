@@ -327,6 +327,7 @@ class DuctileBackend(OptimizationBackend):
             checkpoint_path=ckpt_path,
             weights=merged_config["weights"],
             weight_beta=merged_config["weight_beta"],
+            auto_pop_size=merged_config.get("auto_pop_size", True),
         )
 
         if ckpt_path.is_file():

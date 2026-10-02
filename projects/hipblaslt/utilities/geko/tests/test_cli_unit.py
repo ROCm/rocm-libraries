@@ -214,7 +214,7 @@ def test_rows_from_gemm_config_yaml_uses_yaml_arch_for_mx_scale(tmp_path: Path) 
         sort_keys=False,
     )
 
-    rows = cli._rows_from_gemm_config_yaml(cfg, arch=None)
+    rows, _config_overrides = cli._rows_from_gemm_config_yaml(cfg, arch=None)
     assert rows[0]["scaleA"] == 1001
     assert rows[0]["scaleB"] == 1001
 
@@ -393,7 +393,7 @@ def test_dispatch_search_uses_generated_workload_from_list(
     monkeypatch.setattr(
         cli,
         "_rows_from_gemm_config_yaml",
-        lambda _path, _arch: [{"M": 16, "N": 16, "K": 16}],
+        lambda _path, _arch: ([{"M": 16, "N": 16, "K": 16}], {}),
     )
 
     captured = {}

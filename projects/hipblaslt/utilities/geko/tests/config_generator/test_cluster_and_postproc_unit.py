@@ -55,12 +55,12 @@ def test_cluster_sizes_mi_and_reorder(monkeypatch) -> None:
     assert out2[(0, 0, 0, 0)] == [0]
 
 
-def _post_cfg(mt_du=None):
+def _post_cfg(mt_du=None, streamk=False):
     gt = GemmType.from_tensile("N", "N", "H", "H", "S")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
-        "StreamK": False,
+        "StreamK": streamk,
         "CMS": False,
         **({"MT_DU": mt_du} if mt_du is not None else {}),
     }
@@ -68,7 +68,9 @@ def _post_cfg(mt_du=None):
 
 def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
     monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
-    pp = base_pp.BasePostProcessor(_post_cfg(mt_du=[64, 32, 16]))
+    # StreamK=True so the origami sentinels (WorkGroupMapping included) fire;
+    # _origami_picks_wgm() gates them on StreamK being on.
+    pp = base_pp.BasePostProcessor(_post_cfg(mt_du=[64, 32, 16], streamk=True))
     fork = {
         "DepthU": ForkParameter(name="DepthU", values=[8, 16, 32]),
         "WorkGroupMapping": ForkParameter(name="WorkGroupMapping", values=[16]),
@@ -174,11 +176,11 @@ def test_base_postprocessor_depthu_removed_when_in_all_mi_groups(monkeypatch) ->
     groups = [
         {
             "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 128, 1, 1, 1, 1, 1, 1]),
-            "DepthU": 128,
+            "DepthU": ForkParameter(name="DepthU", values=[128]),
         },
         {
             "MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[32, 32, 64, 1, 1, 1, 1, 1, 1]),
-            "DepthU": 256,
+            "DepthU": ForkParameter(name="DepthU", values=[256]),
         },
     ]
 

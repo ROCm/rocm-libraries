@@ -49,6 +49,7 @@ from typing import List, Tuple, Sequence
 from threading import Lock
 
 from geko.utils import run_silent_command, parse_devices
+from geko.bench.utils import ensure_scale_columns
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -348,7 +349,7 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     if len(lib_paths) == 0:
         raise ValueError(f"No valid libraries found in '{library_dir}'")
 
-    arch = load_library(lib_paths[0]).arch
+    arch = load_library(lib_paths[0]).schedule
 
     logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
     run_silent_command(
@@ -440,7 +441,7 @@ def from_dataframe(
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 
@@ -521,7 +522,7 @@ def from_full_dataframe(
     if "solutionIdx_reference" not in df.columns:
         raise ValueError(f"Each GEMM must contain the solutionIdx_reference column")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 

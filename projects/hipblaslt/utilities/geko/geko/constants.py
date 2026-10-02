@@ -146,7 +146,29 @@ INDEX_TYPE_MAP = {
     16: "bf8_r",
     17: "f8b8",
     18: "b8f8",
+    19: "f6_r",
+    20: "bf6_r",
+    21: "f4_r",
 }
+
+# hipblaslt_scaling_format values (hipBLASLt clients/common/include/
+# hipblaslt_scaling_format.hpp) for MX block scaling, keyed by (block size,
+# Tensile scale DataType). A block-scaled problem benchmarked without its value
+# resolves to an unscaled kernel, so fp4 finds no solution at all and fp8
+# silently measures the wrong one. 0, 1 and 2 are none, Scalar and Vector.
+MX_SCALING_FORMAT = {
+    (32, "E8"): 3,    # Block_32_UE8M0
+    (16, "E8"): 4,    # Block_16_UE8M0
+    (32, "F8"): 5,    # Block_32_UE4M3
+    (16, "F8"): 6,    # Block_16_UE4M3
+    (32, "E5M3"): 7,  # Block_32_UE5M3
+    (16, "E5M3"): 8,  # Block_16_UE5M3
+}
+# Block_32_UE8M0_32_8_EXT: E8 scales on 32-element blocks, pre-swizzled into
+# 32x8 tiles. hipBLASLt maps it to the same Tensile problem as 3.
+MX_SCALING_FORMAT_PRESWIZZLED = 1001
+# MX scale DataTypes as library logic stores them (Tensile DataTypeEnum values).
+MX_SCALE_DATATYPE_ENUM = {22: "E8", 15: "F8", 23: "E5M3"}
 
 PERF_FIELDS = (
     "hipblaslt-Gflops",
@@ -165,4 +187,9 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx942_20cu",
     "gfx942_228cu",
     "gfx1250",
+    "gfx1250_96cu",
+    "gfx1250_192cu",
+    "gfx1250v0",
+    "gfx1250v0_96cu",
+    "gfx1250v0_192cu",
 )
