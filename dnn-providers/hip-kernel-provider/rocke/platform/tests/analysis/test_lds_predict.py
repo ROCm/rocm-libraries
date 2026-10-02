@@ -38,3 +38,30 @@ def test_repeated_lane_requires_inactive_access(target, opcode, address, active)
             "inactive",
         ]
         assert not result.conflict_groups
+
+
+@pytest.mark.parametrize("target", registered_targets())
+@pytest.mark.parametrize("width", [4, 8, 16])
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_profile_capacity_and_alignment_boundaries(target, width, direction):
+    capacity = {"gfx90a": 65536, "gfx942": 65536, "gfx950": 163840}[target]
+    assert resolve_profile(target).lds_capacity_bytes == capacity
+
+    def predict(address):
+        return predict_lds_conflicts(
+            target=target,
+            opcode=f"ds_{direction}_b{width * 8}",
+            wave_size=64,
+            accesses=[LdsAccess(0, 0, address, width)],
+        )
+
+    result = predict(capacity - width)
+    assert result.accesses[0].lds_byte_address == capacity - width
+    assert not result.conflict_groups
+    with pytest.raises(LdsPredictionError, match="exceeds.*LDS capacity"):
+        predict(capacity)
+    with pytest.raises(LdsPredictionError, match=f"{width}-byte aligned"):
+        predict(1 if width == 4 else 4)
+    if width > 4:
+        with pytest.raises(LdsPredictionError, match="exceeds.*LDS capacity"):
+            predict(capacity - 4)
