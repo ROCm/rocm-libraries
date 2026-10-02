@@ -12,12 +12,20 @@
 #ifdef _WIN32
 #include <Windows.h>
 #include <delayimp.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
+#ifdef _WIN32
 namespace {
 
 std::string getRocmBinDir() {
@@ -121,6 +129,42 @@ struct ComgrActionInfo {
     }
 };
 
+// LLVM's raw_fd_ostream refuses to own FD 0/1/2: the constructor clears
+// ShouldClose, and close() then asserts. Joblib workers start with stdin
+// closed, so the file comgr opens for the assemble action is FD 0 and the
+// process aborts. Point any closed standard descriptor at the null device
+// first; checked on every call because a forked worker closes stdin after
+// the parent has already run.
+void reserveClosedStandardFds() {
+#ifdef _WIN32
+    for (int fd = 0; fd <= 2; ++fd) {
+        if (_get_osfhandle(fd) != reinterpret_cast<intptr_t>(-1)) continue;
+        const int devnull = _open("NUL", _O_RDWR);
+        if (devnull < 0) return;
+        if (devnull != fd) {
+            if (_dup2(devnull, fd) != 0) {
+                _close(devnull);
+                return;
+            }
+            _close(devnull);
+        }
+    }
+#else
+    for (int fd = 0; fd <= STDERR_FILENO; ++fd) {
+        if (fcntl(fd, F_GETFD) != -1 || errno != EBADF) continue;
+        const int devnull = ::open("/dev/null", O_RDWR);
+        if (devnull < 0) return;
+        if (devnull != fd) {
+            if (::dup2(devnull, fd) == -1) {
+                ::close(devnull);
+                return;
+            }
+            ::close(devnull);
+        }
+    }
+#endif
+}
+
 }  // namespace
 
 bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
@@ -128,6 +172,7 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
 #ifdef _WIN32
     if (!isRocmPathSet()) return false;
 #endif
+    reserveClosedStandardFds();
     ComgrData data;
     if (!data.create()) return false;
 
