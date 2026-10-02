@@ -235,8 +235,11 @@ def test_shipped_wgm_kernels_classify_to_the_eleven_roles():
     kernels = sorted(root.glob("*_WGM_.s"))
     assert len(kernels) == 20
     for path in kernels:
+        text = path.read_text(errors="replace")
+        # Flattened workgroup X. These kernels do not read workgroup Y.
+        assert "grid: [TilesXY, One, Batch]" in text, path.name
         roles = []
-        for arg in _args_section(path.read_text(errors="replace")):
+        for arg in _args_section(text):
             mapped = _metadataArgToCustomArg(arg, path.stem)
             if mapped["semantic"] in WGM_ROLE_ORDER:
                 roles.append(mapped["semantic"])

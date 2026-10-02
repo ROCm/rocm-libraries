@@ -26907,7 +26907,7 @@ custom.config:
             { type: float32, semantic: Alpha } ]
     macrotile: [256, 64, 128]
     threads: [256, 1, 1]
-    grid: [TilesX, TilesY, Batch]
+    grid: [TilesXY, One, Batch]
   MatrixInstruction: [32, 32, 64, 1]
   StaggerU: 0
   EnableMatrixInstruction: True

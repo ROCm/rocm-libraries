@@ -417,6 +417,11 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         # Version >= 1 kernels receive numWorkGroups as arg and decompose
         # the flat 1-D work-group index internally.
         grid = ["TilesXYBatchGSU", "One", "One"]
+    elif kernelName.endswith("_WGM_") or kernelName.endswith("_WGM"):
+        # rocRoller workgroup mapping consumes the flattened tile index in
+        # workgroup X and does not read workgroup Y. A TilesX x TilesY launch
+        # repeats the first row of tiles and never runs the remaining ids.
+        grid = ["TilesXY", "One", "Batch"]
     else:
         # Version 0 kernels rely on hardware gridDim for tile decomposition,
         # so the grid must be multi-dimensional. Like generated kernels, they
