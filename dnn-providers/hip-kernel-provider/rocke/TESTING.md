@@ -328,6 +328,16 @@ Key semantics:
 
 ## 5. Execution tiers & gating
 
+For backend, test, and packaging changes, the pre-merge requirement is both the
+[source backend matrix and installed CI replay](platform/tests/README.md#before-merging-source-backends-and-installed-ci).
+The matrix includes default C++ selection without an importable binding,
+permissive C++ with a binding, explicit Python, strict C++, and differential
+execution. Strict C++ and differential passes alone leave fallback behavior
+untested. The installed lane must use the job's actual test selection and
+dependency environment, with imports resolved from the relocated artifact.
+Report its skips and evidence limits independently of source tests and GPU
+numerical validation.
+
 Four distinct things run here; **do not conflate them**:
 
 | Tier | What | Gated? |
@@ -337,19 +347,27 @@ Four distinct things run here; **do not conflate them**:
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
-**Developer and installed entrypoints.** [`run_all.py`](platform/tests/run_all.py) is
+**Two entrypoints with different environments and selection.** [`run_all.py`](platform/tests/run_all.py) is
 the **developer** runner (guard → gate → pytest → ctest). **CI does not run
 `run_all.py`** — it runs
-**ctest** (wired from TheRock; project selection via `get_changed_projects.py`),
-whose registered pytest entries include the platform suite and selected library
-host/GPU suites. The exact
-CTest-registered targets are authoritative in
+**ctest** against the installed artifact, after the component script installs
+the packaged wheels. Its registered pytest entries include the platform suite
+and selected library host/GPU suites. Test registration is authoritative in
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt) — read them there rather than
-trusting a copy here.
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt); the provider's external
+test-category YAML and TheRock's tier selection determine which registered
+tests actually execute. Check the selected list in the job log or with CTest's
+verbose listing. Registration alone does not establish CI coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
-*Where* a test lives and its explicit CTest selection decide whether it runs.
+The developer pytest step collects `platform/tests`. The installed platform
+pytest entry excludes the staged library tests, which have separate CTest
+entries with explicit file lists. The byte-identity corpus also reaches
+`library/`. Tests outside these selections need explicit enrollment; neither
+their presence in the source tree nor their installation makes them gated.
+Coverage gaps in [§7](#7-current-state-vs-target-the-gap-registry-wip) therefore
+need to be checked against both registration and the selected CI tier.
+
 Installed library GPU selection includes attention tests, but their Torch and
 architecture gates can still skip all numeric execution. The pinned SDPA lane
 uses an independently qualified bundle to run its enrolled cases without Torch.

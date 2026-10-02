@@ -16,6 +16,112 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
+## Before merging: source backends and installed CI
+
+Run both lanes below when changing backend selection, rejection tests, test
+dependencies, or packaging. A source-tree pytest pass does not validate the
+installed test artifact. `run_all.py` builds native code and can expose a binding
+that the CI test environment does not have.
+
+### Source backend matrix
+
+Use a fresh virtualenv outside the platform tree. Install the test requirements
+from the CI job's TheRock revision; keep Torch out of the minimal lane. Build a
+fresh native extension with `ROCKE_BUILD_PYBIND=ON` for the binding-present rows.
+Run each row in a separate process, with `PYTHONPATH` containing the platform
+Python root and, only where indicated, the matching `cpp/bindings` build directory.
+
+| Lane | `ROCKE_BACKEND` | `ROCKE_CPP_STRICT` | `rocke_engine` importable? | Rejection observed by the caller |
+|---|---|---|---|---|
+| Default installed fallback | unset | unset | No | Python exception after the C++ import fails |
+| Explicit Python | `python` | unset | Either | Python exception |
+| Permissive C++ | `cpp` | `0` | Yes | Python exception after native rejection |
+| Strict C++ | `cpp` | `1` | Yes | Native exception; fallback is an error |
+| Differential | `both` | `1` | Yes | Python runs first; its rejection prevents a native comparison |
+
+For rejection-contract changes, run these affected modules under every row,
+then the complete platform pytest suite in the default missing-binding lane:
+
+```text
+python -m pytest tests/test_rocke.py tests/core/test_gfx1250_scaled_wmma.py tests/core/test_storage.py -q -rs
+python -m pytest tests -v -rs --timeout=60
+```
+
+Verify imports before each lane: print `rocke.__file__`, and use
+`importlib.util.find_spec("rocke_engine")` to check binding absence; in the native
+lanes import `rocke_engine` and print its `__file__`. Clear inherited backend,
+fixture, and runtime overrides before configuring a lane. In particular, a
+developer's `ROCKE_CPP_STRICT=1` must not leak into the default fallback run.
+Use a unique temporary directory for each validation run (`TMPDIR` on POSIX,
+`TEMP`/`TMP` on Windows). Some tests discover native artifacts under the system
+temporary directory; an old `rocke_online` or `rocke_verify` build can otherwise
+change which tests run and which library they load.
+
+Native rejection tests must account for strict mode as well as the requested
+backend. `resolve_backend() == "cpp"` does not establish which engine produced
+the exception. Preserve the exact exception type and diagnostic for each mode;
+accepting a tuple of unrelated exceptions would hide a broken dispatch contract.
+The missing-binding regression tests deliberately block the import even when a
+native extension is available.
+
+Changes to emitted IR still require the byte-identity and golden checks, and
+kernel changes require the relevant GPU numerical tests. This matrix adds
+fallback coverage; it does not replace those checks.
+
+### Installed artifact replay
+
+Start from the failing job's **Print test reproduction command**. It pins the
+artifact run, GPU family, test script, requirements files, and tier. TheRock's
+`build_tools/github_actions/reproduce_test_failure.py` downloads and tests that
+artifact; replaying it reproduces the old result, not an unbuilt local fix.
+Validate a fix by rebuilding and packaging the changed revision with the same
+settings, then testing its relocated artifact.
+
+Run the component test script's setup as well as its CTest command. The
+hipkernelprovider script installs the artifact's `rocke` and `rocke_library`
+wheels with `--no-deps --reinstall` before running CTest. Those wheels are part
+of the tested configuration: library imports in child processes can depend on
+the installed `rocke_library` wheel even when the parent pytest process finds
+the staged library through `conftest.py`. Building only the standalone CMake
+install does not reproduce this setup. Use wheels built from the same revision
+as the artifact, never an editable install or a wheel from an older build.
+
+For example, [job 110907294612](https://github.com/ROCm/rocm-libraries/actions/runs/37019571757/job/110907294612)
+used this selection after artifact setup:
+
+```text
+ctest -L ^standard$ -LE ex_gpu --output-on-failure --parallel 1 --timeout 7200 --test-dir build/bin/hip_kernel_provider -V --tests-information 1,,1
+```
+
+Before execution, use `ctest --test-dir build/bin/hip_kernel_provider -N -V`
+with the same selection flags to check the selected names, working directory,
+commands, and environment. `ROCKE_ENGINE_test_categories_external.yaml` in the
+provider and TheRock's categorization script determine tier membership. A
+passing command that selected zero tests is not validation. In particular,
+check that `rocke_pytest` is selected when it is part of the intended coverage.
+
+That entry runs from `build/bin/hip_kernel_provider`, with `PYTHONPATH=.`:
+
+```text
+python -m pytest ./tests --ignore ./tests/library -v -rs --timeout=60
+```
+
+Use a clean runtime environment with no editable source installs, no binding
+build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
+that `rocke.__file__` is under the relocated artifact and `rocke_engine` is absent.
+Start from an unexecuted install when relocating it; omit `__pycache__` and
+pytest caches so cached code objects cannot retain paths to the original tree.
+Do not add a source directory to repair an installed import failure: install the
+required module or data through CMake and the artifact manifest. Include imported
+runner helpers even when their developer entry point is not executed by CI.
+
+Record source SHA, artifact run, Python/dependency versions, LLVM/ROCm versions,
+backend variables, selected CTest names, and pytest failures/skips. Compare the
+same environment before and after the fix. Use CI-matched LLVM tools for object
+tests; an older local compiler failure is separate evidence. Review skipped
+tests explicitly: Torch-free execution, missing native fixtures, and unavailable
+GPUs each leave different coverage gaps. Host pytest is not a full GPU job replay.
+
 ## Layout / coverage matrix
 
 This table is an **inventory** of what lives where. It does *not* imply every
