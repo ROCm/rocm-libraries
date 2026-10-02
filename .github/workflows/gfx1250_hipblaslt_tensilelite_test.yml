@@ -5,7 +5,7 @@
 # artifact inside a container.
 #
 # On-demand only: workflow_dispatch. A developer supplies the run-id of a completed
-# "TheRock Multi-Arch CI" gfx125X-dcgpu build and picks which suites to run. There is
+# "TheRock Multi-Arch CI" gfx1250-strict build and picks which suites to run. There is
 # no per-PR auto-trigger — the gfx1250 runners are scarce, so runs are manual.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
@@ -78,6 +78,21 @@ jobs:
     env:
       ROCM: ${{ github.workspace }}/rocm
       LD_LIBRARY_PATH: ${{ github.workspace }}/rocm/lib:${{ github.workspace }}/rocm/lib/llvm/lib:${{ github.workspace }}/rocm/lib/rocm_sysdeps/lib
+      # Run both suites as gfx1250-strict, against the gfx1250-strict artifact.
+      HSA_DISABLE_GFX12_STRICT: "0"
+      # awk filter for both suites' logs: drops the device banner lines and blanks
+      # client CSV columns that carry hardware data, are derived from the CU count,
+      # or are timing. Use: awk -F, -v OFS=, "$HW_SCRUB"
+      HW_SCRUB: |
+        /Query[[:space:]]+device|Device[[:space:]]+ID[[:space:]]+[0-9]|PCI[[:space:]]+Chip[[:space:]]+ID|GB[[:space:]]+memory|SCLK|MCLK|compute[[:space:]]+capability|maxGridDimX|sharedMemPerBlock|maxThreadsPerBlock|warpSize/ { next }
+        /^run,problem-progress,/ {
+          n = split("num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc clock-mem fan-rpm hardware-samples time-us gflops gbps-bandwidth enqueue-time", s, " ")
+          for (k in fe) delete fe[k]
+          for (i = 1; i <= NF; i++) for (j = 1; j <= n; j++) if ($i == s[j]) fe[NF - i] = 1
+          hdr = 1
+        }
+        hdr && /^[0-9]+,[0-9]+\/[0-9]+,/ { for (k in fe) $(NF - k) = "" }
+        { print; fflush() }
       # Activates the env-gated xfail for known-failing configs in configMarks
       # (companion tensilelite PR). Inert against artifacts that predate it.
       GFX1250_HW_XFAIL: "1"
@@ -129,7 +144,7 @@ jobs:
           set +e
           python TheRock/build_tools/install_rocm_from_artifacts.py \
             --run-id "$BUILD_RUN_ID" \
-            --artifact-group gfx125X-dcgpu \
+            --artifact-group gfx1250-strict \
             --blas --tests \
             --run-github-repo "$BUILD_REPO" \
             --output-dir "$ROCM" 2>&1 | tee fetch.log
@@ -175,14 +190,17 @@ jobs:
             echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
           fi
           echo "Using: $HIPBLASLT_TEST"
+          # Must link the fetched artifact's libhipblaslt, not another copy.
+          LIB="$(ldd "$HIPBLASLT_TEST" | awk '/libhipblaslt\.so/{print $3; exit}')"
+          case "$LIB" in
+            "$ROCM"/*) ;;
+            *) echo "::error::hipblaslt-test links '${LIB:-nothing}', not the fetched artifact's libhipblaslt"; exit 1 ;;
+          esac
           export HIPBLASLT_TEST_TIMEOUT=3600
-          export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Cleanup CI logs.
-          scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
           # Full suite in one pass.
-          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 | scrub | tee test_results/hipblaslt_test.log
+          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 | awk -F, -v OFS=, "$HW_SCRUB" | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
@@ -197,7 +215,7 @@ jobs:
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 5400s (90 min).
-          TL_TARGET=gfx1250v0
+          TL_TARGET=gfx1250-strict
           # HIP device compiles through ccache.
           # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
@@ -209,12 +227,12 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
+            -m common "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" 2>&1 \
-            | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+            | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Redact wall-clock timing from logs
         if: always()
