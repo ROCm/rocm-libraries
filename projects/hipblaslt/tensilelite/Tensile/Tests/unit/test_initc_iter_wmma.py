@@ -84,3 +84,24 @@ def test_rap_threshold_is_zero_whatever_the_prefetch_depth():
     for pgr in (1, 2, 3):
         assert _endCounter(pgr, rap=True) == 0
         assert _endCounter(pgr, suppress=True, rap=True) == 0
+
+
+@pytest.mark.parametrize(
+    "halfPLR, clusterBarrier, initCIterWmma, expected",
+    [
+        (1, True, 0, True),
+        (1, True, 1, False),
+        (0, True, 0, False),
+        (1, False, 0, False),
+    ],
+)
+def test_cluster_barrier_split_wave_loop(halfPLR, clusterBarrier, initCIterWmma, expected):
+    """Wave-split stays off while InitCIterWmma owns accumulator init."""
+    from Tensile.KernelWriter import clusterBarrierSplitWaveLoop
+
+    kernel = {
+        "HalfPLR": halfPLR,
+        "ClusterBarrier": clusterBarrier,
+        "InitCIterWmma": initCIterWmma,
+    }
+    assert clusterBarrierSplitWaveLoop(kernel) is expected

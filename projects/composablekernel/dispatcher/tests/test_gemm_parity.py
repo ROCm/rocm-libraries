@@ -271,6 +271,15 @@ class GemmBridgeParity(unittest.TestCase):
         self.assertEqual(runner.kernel_name, cfg.name)
 
         result = runner.run(A, B, problem)
+        # Every shape in _SHAPES is chosen to satisfy the kernel's tile and vector
+        # constraints, so STATUS_UNSUPPORTED here is a real regression, not a case
+        # to skip -- call it out by name rather than leaving a bare status code.
+        if result.unsupported:
+            self.fail(
+                f"{dtype}/{layout} {shape[0]} ({M}x{N}x{K}): kernel rejected the "
+                f"arguments (STATUS_UNSUPPORTED). Check the tile/vector "
+                f"constraints documented above _SHAPES."
+            )
         self.assertTrue(
             result.success,
             f"{dtype}/{layout} {shape[0]} run failed (status {result.status})",
