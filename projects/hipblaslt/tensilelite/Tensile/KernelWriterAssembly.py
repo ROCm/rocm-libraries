@@ -4921,7 +4921,7 @@ class KernelWriterAssembly(KernelWriter):
     elif ("MXS" in tc) and useFixedSrd2:
       # NoSwizzle MX: address space is scale blocks (DepthU/mxBlock), not data-K.
       # Using DepthU here overstates Srd+2 by mxBlock and skips HW OOB clamping
-      # for partial-K gathers that touch the padded scale-K window.
+      # for partial-K gathers that touch the scale-K window (compact Ceil(K/mxBlock)).
       tcab = "A" if tc == "MXSA" else "B"
       mxBlock = max(1, int(kernel["ProblemType"].get("MXBlock%s" % tcab, 1)))
       swizzleSize0 = 1

@@ -11,23 +11,21 @@ using namespace TensileLite;
 // ============================================================================
 // MX Scale Padding Tests
 //
-// Verify that setMXScaleA/B pads scale tensor dimensions so kernels that
-// process data in fixed-size blocks always have valid scale entries:
-//   - Bound dimension (K): ceil(K/mxBlock) rounded up to multiple of 8
-//     (covers K in 256-element blocks: 8 scale entries * 32 data/scale = 256)
-//   - Free dimension (M or N): rounded up to multiple of 32
-//     (covers M/N in 32-element blocks)
-//   - Batch dimension: unchanged
+// setMXScaleA/B pad mode is explicit:
+//   - Gfx950 (HostPreSwizzle): K-blocks → ×8, free → ×32
+//   - Compact (NoSwizzle / VEC32): CeilDivide(K, mxBlock), unpadded free
+//   - Gfx1250: K-blocks → multiple of 128/mxBlock (not "no pad")
 // ============================================================================
 
-// Helper: create a ContractionProblemGemm with given M, N, K and set MX scales
-static ContractionProblemGemm makeMXProblem(size_t M,
-                                            size_t N,
-                                            size_t K,
-                                            int    mxBlock,
-                                            size_t batch  = 1,
-                                            bool   transA = true,
-                                            bool   transB = false)
+static ContractionProblemGemm makeMXProblem(size_t                              M,
+                                            size_t                              N,
+                                            size_t                              K,
+                                            int                                 mxBlock,
+                                            ContractionProblemGemm::MXScaleTensorPad padMode
+                                            = ContractionProblemGemm::MXScaleTensorPad::Gfx950,
+                                            size_t                              batch  = 1,
+                                            bool                                transA = true,
+                                            bool                                transB = false)
 {
     auto problem = ContractionProblemGemm::GEMM_Strides(
         transA,
@@ -45,8 +43,8 @@ static ContractionProblemGemm makeMXProblem(size_t M,
         M, M * N,
         0.0);
 
-    problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
-    problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+    problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, padMode);
+    problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, padMode);
     return problem;
 }
 
@@ -62,7 +60,8 @@ TEST_P(MXScalePaddingTest, ScaleDimensionsPaddedCorrectly)
     auto [M, N, K, expectedScaleK, expectedM, expectedN] = GetParam();
     const int mxBlock = 32;
 
-    auto problem = makeMXProblem(M, N, K, mxBlock);
+    auto problem = makeMXProblem(M, N, K, mxBlock,
+                                 ContractionProblemGemm::MXScaleTensorPad::Gfx950);
 
     auto const& sa = problem.mxsa().sizes();
     auto const& sb = problem.mxsb().sizes();
@@ -134,7 +133,9 @@ INSTANTIATE_TEST_SUITE_P(
 // Batch dimension must not be padded; strides and total size must be consistent
 TEST(MXScalePadding, BatchAndStridesCorrect)
 {
-    auto problem = makeMXProblem(80, 50, 300, 32, /*batch=*/3);
+    auto problem = makeMXProblem(80, 50, 300, 32,
+                                 ContractionProblemGemm::MXScaleTensorPad::Gfx950,
+                                 /*batch=*/3);
 
     auto const& sa = problem.mxsa().sizes();
     auto const& sb = problem.mxsb().sizes();
@@ -156,4 +157,35 @@ TEST(MXScalePadding, BatchAndStridesCorrect)
     // totalAllocatedElements includes padding
     EXPECT_EQ(problem.mxsa().totalAllocatedElements(), sa[0] * sa[1] * sa[2]);
     EXPECT_GT(problem.mxsa().totalAllocatedElements(), (size_t)(300 / 32) * 80 * 3);
+}
+
+// NoSwizzle Compact: K=128 → 4 scale blocks (not pad-8), free dims unpadded.
+TEST(MXScalePadding, CompactNoSwizzleMatchesRocRoller)
+{
+    const int mxBlock = 32;
+    auto problem = makeMXProblem(96, 80, 128, mxBlock,
+                                 ContractionProblemGemm::MXScaleTensorPad::Compact);
+
+    auto const& sa = problem.mxsa().sizes();
+    auto const& sb = problem.mxsb().sizes();
+
+    // ceil(128/32)=4 — must not round up to 8
+    EXPECT_EQ(sa[0], 4u);
+    EXPECT_EQ(sb[0], 4u);
+    // Free dims stay exact (not pad-32)
+    EXPECT_EQ(sa[1], 96u);
+    EXPECT_EQ(sb[1], 80u);
+}
+
+// Gfx1250 dimk pad is distinct from Compact (K=32 → 4, not 1).
+TEST(MXScalePadding, Gfx1250DimKNotCompact)
+{
+    const int mxBlock = 32;
+    auto problem = makeMXProblem(64, 64, 32, mxBlock,
+                                 ContractionProblemGemm::MXScaleTensorPad::Gfx1250);
+
+    auto const& sa = problem.mxsa().sizes();
+    // ceil(32/32)=1, dimk=4 → RoundUpToMultiple(1, 4)=4
+    EXPECT_EQ(sa[0], 4u);
+    EXPECT_EQ(sa[1], 64u); // free dim unpadded under Gfx1250
 }

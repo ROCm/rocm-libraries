@@ -1630,14 +1630,12 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-// gfx950 setMXScaleA/B pad ceil(K/mxBlock) to a multiple of 8 and the free dim to
-// 32. Both NoSwizzle (m*Stride+k gather) and HostPreSwizzle (swizzle then DTL)
-// need host buffers to match that contract — generateMXInput emits compact K,
-// so restride before H2D / before applying a HostPreSwizzle layout.
-inline bool mxNeedsGfx950CanonicalScalePad(hipblaslt_scaling_format fmt,
-                                           std::string_view         archName)
+// HostPreSwizzle (EXT) needs gfx950 pad-8/32 before swizzle — matching
+// setMXScaleA/B Gfx950 descriptors. NoSwizzle / VEC32 stays compact
+// (Ceil(K/mxBlock), unpadded free); do not use this for scaleA=3.
+inline bool mxNeedsHostPreSwizzleScalePad(hipblaslt_scaling_format fmt)
 {
-    return isBlockScaling(fmt) && archName.find("gfx950") != std::string_view::npos;
+    return fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
 }
 #endif
 
@@ -2016,15 +2014,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
 
-    // Arch name for gfx950 NoSwizzle scale pad (must match setMXScaleA/B).
-    std::string mxArchName;
-    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
-    {
-        hipDeviceProp_t prop{};
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
-        mxArchName = prop.gcnArchName;
-    }
-
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < gemm_count; i++)
@@ -2174,17 +2163,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-                    if(mxNeedsGfx950CanonicalScalePad(arg.scaleA, mxArchName))
+                    if(mxNeedsHostPreSwizzleScalePad(arg.scaleA))
                     {
-                        // Match setMXScaleA: K blocks → multiple of 8, free → 32.
-                        size_t paddedK        = (kDim + 7) / 8 * 8;
-                        size_t paddedMN       = (mnDim + 31) / 32 * 32;
-                        size_scaleAVec[i]     = paddedK * paddedMN;
+                        // HostPreSwizzle: match setMXScale Gfx950 pad (K→×8, free→×32).
+                        size_t paddedK    = (kDim + 7) / 8 * 8;
+                        size_t paddedMN   = (mnDim + 31) / 32 * 32;
+                        size_scaleAVec[i] = paddedK * paddedMN;
                     }
                     else
 #endif
                     {
-                        // Account for padding in the swizzled MX layout
+                        // NoSwizzle: compact VEC32 (kDim * mnDim). Dimk headroom
+                        // kept for gfx1250 InMemorySwizzle alloc path.
                         size_t dimk      = 128 / MXBlock_A;
                         size_t padDim    = kAlongRowsA ? kDim : mnDim;
                         size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
@@ -2214,16 +2204,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
-                    if(mxNeedsGfx950CanonicalScalePad(arg.scaleB, mxArchName))
+                    if(mxNeedsHostPreSwizzleScalePad(arg.scaleB))
                     {
-                        size_t paddedK        = (kDim + 7) / 8 * 8;
-                        size_t paddedMN       = (mnDim + 31) / 32 * 32;
-                        size_scaleBVec[i]     = paddedK * paddedMN;
+                        size_t paddedK    = (kDim + 7) / 8 * 8;
+                        size_t paddedMN   = (mnDim + 31) / 32 * 32;
+                        size_scaleBVec[i] = paddedK * paddedMN;
                     }
                     else
 #endif
                     {
-                        // Account for padding in the swizzled MX layout
                         size_t dimk      = 128 / MXBlock_B;
                         size_t padDim    = kAlongRowsB ? kDim : mnDim;
                         size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
@@ -2894,11 +2883,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
         if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
-        {
             CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
-            if(mxArchName.empty())
-                mxArchName = mxProp.gcnArchName;
-        }
 #endif
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
@@ -2939,23 +2924,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
             refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            bool const padCanonicalA
-                = mxNeedsGfx950CanonicalScalePad(arg.scaleA, mxProp.gcnArchName);
-            size_t const mxBlockA    = blockSize(arg.scaleA);
-            bool const   kAlongRowsA = (transA == HIPBLAS_OP_T);
+            bool const padHostPreSwizzleA = mxNeedsHostPreSwizzleScalePad(arg.scaleA);
+            size_t const mxBlockA         = blockSize(arg.scaleA);
+            bool const   kAlongRowsA      = (transA == HIPBLAS_OP_T);
             size_t const compactKA
                 = static_cast<size_t>((K[i] + static_cast<int64_t>(mxBlockA) - 1)
                                       / static_cast<int64_t>(mxBlockA));
-            size_t const paddedKA  = (compactKA + 7) / 8 * 8;
-            size_t const freeDimA  = static_cast<size_t>(M[i]);
+            size_t const paddedKA = (compactKA + 7) / 8 * 8;
+            size_t const freeDimA = static_cast<size_t>(M[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
                 auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
                 auto* scalePtrA = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                if(padCanonicalA)
+                if(padHostPreSwizzleA)
                     std::memset(scalePtrA, 0, size_scaleAVec[i]);
-                // Emit canonical (unswizzled) scales first. gfx950 host must
-                // restride to the setMXScaleA pad before HostPreSwizzle.
+                // Emit compact canonical scales first. HostPreSwizzle restrides
+                // to Gfx950 pad before swizzle; NoSwizzle stays compact.
                 auto batchRef
                     = generateMXInput(TiA,
                                       scaleDataType(arg.scaleA),
@@ -2972,20 +2956,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
-                // K-fast (TN A): expand compact K-blocks to the gfx950 padded stride.
-                if(padCanonicalA && kAlongRowsA)
+                if(padHostPreSwizzleA && kAlongRowsA)
                     restrideMXScaleBufferKFast(
                         scalePtrA, freeDimA, compactKA, paddedKA, /*elemBytes=*/1);
                 if(scaleLayoutA != MXScaleLayout::None)
                 {
-                    size_t const scaleElems = padCanonicalA ? (freeDimA * paddedKA)
-                                                            : size_scaleAVec[i];
-                    // HostPreSwizzle / InMemorySwizzle: slow=M, fast=K-blocks (TN A).
+                    size_t const scaleElems = padHostPreSwizzleA ? (freeDimA * paddedKA)
+                                                                 : size_scaleAVec[i];
                     applyMXScaleLayoutInPlace(scalePtrA,
                                               scaleElems,
                                               scaleLayoutA,
                                               /*slowDim=*/freeDimA,
-                                              /*fastDim=*/padCanonicalA ? paddedKA : compactKA,
+                                              /*fastDim=*/padHostPreSwizzleA ? paddedKA
+                                                                             : compactKA,
                                               mxBlockA);
                 }
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
@@ -3079,10 +3062,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t             scaleBatchBytesB   = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
             std::vector<float> refBAll;
             refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            bool const padCanonicalB
-                = mxNeedsGfx950CanonicalScalePad(arg.scaleB, mxProp.gcnArchName);
-            size_t const mxBlockB    = blockSize(arg.scaleB);
-            bool const   kAlongRowsB = (transB == HIPBLAS_OP_N);
+            bool const padHostPreSwizzleB = mxNeedsHostPreSwizzleScalePad(arg.scaleB);
+            size_t const mxBlockB         = blockSize(arg.scaleB);
+            bool const   kAlongRowsB      = (transB == HIPBLAS_OP_N);
             size_t const compactKB
                 = static_cast<size_t>((K[i] + static_cast<int64_t>(mxBlockB) - 1)
                                       / static_cast<int64_t>(mxBlockB));
@@ -3092,7 +3074,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
                 auto* scalePtrB = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                if(padCanonicalB)
+                if(padHostPreSwizzleB)
                     std::memset(scalePtrB, 0, size_scaleBVec[i]);
                 auto batchRef
                     = generateMXInput(TiB,
@@ -3110,19 +3092,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
-                // K-fast (NT B): expand compact K-blocks to the gfx950 padded stride.
-                if(padCanonicalB && kAlongRowsB)
+                if(padHostPreSwizzleB && kAlongRowsB)
                     restrideMXScaleBufferKFast(
                         scalePtrB, freeDimB, compactKB, paddedKB, /*elemBytes=*/1);
                 if(scaleLayoutB != MXScaleLayout::None)
                 {
-                    size_t const scaleElems = padCanonicalB ? (freeDimB * paddedKB)
-                                                            : size_scaleBVec[i];
+                    size_t const scaleElems = padHostPreSwizzleB ? (freeDimB * paddedKB)
+                                                                 : size_scaleBVec[i];
                     applyMXScaleLayoutInPlace(scalePtrB,
                                               scaleElems,
                                               scaleLayoutB,
                                               /*slowDim=*/freeDimB,
-                                              /*fastDim=*/padCanonicalB ? paddedKB : compactKB,
+                                              /*fastDim=*/padHostPreSwizzleB ? paddedKB
+                                                                             : compactKB,
                                               mxBlockB);
                 }
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());

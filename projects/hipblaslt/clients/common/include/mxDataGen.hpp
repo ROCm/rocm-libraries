@@ -48,9 +48,10 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    float                  max_val     = 1.0f,
                                    std::string_view const scaleInitMethod = "");
 
-// generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
-// on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this
-// in-place restride before scale swizzle / H2D (see tensile DataInitialization).
+// generateMXInput emits compact scales (Ceil(K/mxBlock)). When setMXScaleA/B
+// uses Gfx950 pad (HostPreSwizzle), ceil(K/mxBlock) is rounded up to ×8 and
+// K-fast layouts need this in-place restride so strides match the descriptor.
+// NoSwizzle Compact descriptors skip restride (compactK == paddedK).
 void restrideMXScaleBufferKFast(uint8_t* buffer,
                                 size_t   compactFreeDim,
                                 size_t   compactKBlocks,

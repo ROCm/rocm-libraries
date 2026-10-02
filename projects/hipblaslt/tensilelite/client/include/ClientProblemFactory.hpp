@@ -118,7 +118,7 @@ namespace TensileLite
             int                              m_mxBlockA;
             int                              m_mxBlockB;
             int                              m_mxScaleFormat;
-            bool                             m_padMXScaleTensorFreeDim;
+            ContractionProblemGemm::MXScaleTensorPad m_mxScaleTensorPad;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

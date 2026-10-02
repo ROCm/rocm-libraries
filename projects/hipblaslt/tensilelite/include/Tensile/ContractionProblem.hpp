@@ -1199,14 +1199,31 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        // How setMXScaleA/B sizes MX scale tensor descriptors.
+        // Caution: the historical bool padScaleTensorFreeDim=false selected
+        // Gfx1250 (dimk pad), not "no padding". Use Compact explicitly for
+        // NoSwizzle / VEC32 (matches rocRoller {M, Ceil(K/mxBlock)}).
+        enum class MXScaleTensorPad : int
+        {
+            Compact = 0, // NoSwizzle: CeilDivide(K, mxBlock), unpadded free dim
+            Gfx950  = 1, // HostPreSwizzle: K-blocks → ×8, free → ×32
+            Gfx1250 = 2, // gfx1250: K-blocks → multiple of 128/mxBlock
+        };
+
+        void setMXScaleA(rocisa::DataType        mxType,
+                         int                     mxBlock,
+                         std::vector<size_t>     saStride = {},
+                         MXScaleTensorPad        padMode  = MXScaleTensorPad::Gfx950);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType        mxType,
+                         int                     mxBlock,
+                         std::vector<size_t>     sbStride = {},
+                         MXScaleTensorPad        padMode  = MXScaleTensorPad::Gfx950);
 
         rocisa::DataType mxTypeB() const
         {

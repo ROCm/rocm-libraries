@@ -2803,8 +2803,8 @@ Tests:
   gpu_arch: '942'
 
 # Broad MX datatype matrix. Pure f4xf4 in *real_precisions_mx covers both
-# NoSwizzle (scaleA:3) and HostPreSwizzle (scaleA:1001). K=128 exercises the
-# gfx950 NoSwizzle canonical scale pad (K blocks to a multiple of 8).
+# NoSwizzle (scaleA:3, compact VEC32) and HostPreSwizzle (scaleA:1001).
+# K=128 exercises NoSwizzle with K-blocks < DepthU/mxBlock (compact, not pad-8).
 - name: matmul_mx_datatypes
   category: pre_checkin
   function:

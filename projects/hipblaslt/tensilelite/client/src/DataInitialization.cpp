@@ -2021,13 +2021,13 @@ namespace TensileLite
             return isRandomLikeInitMode(dataInit) && isConstantScaleInitMode(scaleInit);
         }
 
-        // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
-        // pad ceil(K/mxBlock) up to a multiple of 8. When those differ (e.g. K=384 →
-        // 12 padded to 16) the kernel and CPU reference read every (m>0, k_block) at the
-        // wrong byte. Only the K-fast layouts (bound dim at index 0 → TN A / NT B) need
-        // this: K-slow layouts keep K-blocks as the slow axis and the unfilled padding
-        // tail is already zero from the pre-memset. Walk the free axis backward so the
-        // expansion can happen in place.
+        // generateMXInput emits compact scales (Ceil(K/mxBlock)). When
+        // setMXScaleA/B uses Gfx950 pad (HostPreSwizzle), K-blocks round up to
+        // ×8. K-fast layouts then need an in-place restride so the kernel and
+        // CPU reference share strides with the descriptor. Compact / NoSwizzle
+        // descriptors leave paddedKBlocks == compactKBlocks (restride no-op).
+        // K-slow layouts keep K as the slow axis; the pre-memset zero tail
+        // already covers any HostPreSwizzle padding.
         static void restrideMXScaleBufferKFast(uint8_t* buffer,
                                                size_t   compactFreeDim,
                                                size_t   compactKBlocks,
@@ -2211,13 +2211,11 @@ namespace TensileLite
                   hipDataType const hipScaleT = hipMxScaleTypeForDataGenerator(scaleEltType);
 
                   // cpuInput.valid always holds the canonical (non-swizzled) scale.
-                  // generateMXInput emits scales packed for the unpadded data K, but
-                  // setMXScaleA/B pad ceil(K/mxBlock) up to a multiple of 8. For K-fast
-                  // layouts (bound dim at index 0) the compact and padded K-block counts
-                  // can differ, so we must restride the canonical buffer in place so the
-                  // kernel and CPU reference read every (free, k_block) at the right byte
-                  // (develop #7683). K-slow layouts keep K as the slow axis and the
-                  // pre-memset zero tail already covers the padding.
+                  // generateMXInput emits compact K-blocks; restride only when the
+                  // descriptor actually pads (Gfx950 HostPreSwizzle). Compact /
+                  // NoSwizzle descriptors keep paddedKBlocks == compactKBlocks.
+                  // K-slow layouts keep K as the slow axis and the pre-memset
+                  // zero tail already covers any padding.
                   auto const  boundIdx = isMatrixA ? problem.boundIndices()[0].a
                                                    : problem.boundIndices()[0].b;
                   auto const  freeIdx  = isMatrixA ? problem.freeIndicesA()[0].i
