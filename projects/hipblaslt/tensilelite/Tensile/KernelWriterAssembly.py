@@ -17765,7 +17765,7 @@ class KernelWriterAssembly(KernelWriter):
       src = vgpr(srcAddrVgpr)
       ds = DSModifiers(offset=dsOffset)
       bpl = dataType.numBytes() * gwvw
-      memToken = MemTokenData([self.states.memTokenLdsBuffer0])
+      memToken = MemTokenData([self.states.memTokenEpilogue])
       if bpl <= 16:
         numRegs = max(1, bpl // 4)
         dst = vgpr(dstVgpr, numRegs) if numRegs > 1 else vgpr(dstVgpr)
@@ -18385,8 +18385,16 @@ class KernelWriterAssembly(KernelWriter):
       vectorDataTypes.scaleB.ldsOffset = subGroupOffset[0]
       storeModules.add(self.addVectorLocalStore(kernel, "ScaleB", offsetVgpr, scaleBShiftOffset, scaleBDataType, gwvw, tmpVgpr1Res, scaleBDstVgpr, subGroupOffset, 1, setToOne=True, comment="store scaleB"))
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.scaleB.turn
-    # We move s_barrier before local load. Add barrier here to avoid race condition if lds offset starts from 0
-    if kernel["LdsOffsetBias"] == 0:
+    # Protect scratch read-to-write reuse separately from the write-to-read
+    # barrier emitted by GlobalWriteBatch before its first vector LDS load.
+    if kernel.get("_SeparateEpilogueLds", False):
+      # Only the scratch is being reused here. Drain LDS reads immediately
+      # before overwriting it; do not wait for tensor loads issued by PAP.
+      module.add(SWaitCnt(dscnt=0, comment="finish previous vector epilogue LDS reads"))
+      barrier = SBarrier(comment="reuse vector epilogue LDS scratch")
+      barrier.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
+      module.add(barrier)
+    elif kernel["LdsOffsetBias"] == 0:
       module.add(SBarrier(comment="wait for all global loads."))
 
     # rearrange them and add waitcnt
@@ -18395,7 +18403,7 @@ class KernelWriterAssembly(KernelWriter):
       if isinstance(storeModule, Module):
         for item in storeModule.items():
           if isinstance(item, DSStoreInstruction):
-            item.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+            item.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
           if (not isAdded) and isinstance(item, (VCvtInstruction, DSStoreInstruction, VCndMaskB32, VLShiftLeftB32, VAndB32)):
             vlcnt = vlcnt - 1
             module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
@@ -18408,7 +18416,7 @@ class KernelWriterAssembly(KernelWriter):
             isAdded = False
       else:
         if isinstance(storeModule, DSStoreInstruction):
-          storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+          storeModule.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
         module.add(storeModule)
 
     # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only

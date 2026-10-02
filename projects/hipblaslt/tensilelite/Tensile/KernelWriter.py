@@ -460,6 +460,7 @@ class StateValues:
   # tokens occupy 0..numLDSBlk-1 and metadata uses memTokenLdsBufferMeta (4), so
   # the half-1 block starts past both to keep every token unambiguous.
   memTokenLdsSplitBase: int              = 8
+  memTokenEpilogue: int                  = 0
   oneBufferScheduling: bool              = False
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
@@ -7720,6 +7721,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.ldsReadTokenIdxB = self.states.memTokenLdsDcp["B"][0]
       self.states.ldsTensorTokenIdxA = self.states.memTokenLdsDcp["A"][0]
       self.states.ldsTensorTokenIdxB = self.states.memTokenLdsDcp["B"][0]
+    # Epilogue scratch must not alias a TDM/PAP token: otherwise scheduling
+    # its LDS stores drains unrelated prefetched tensor loads.
+    self.states.memTokenEpilogue = self.states.memTokenLdsBuffer0
+    if kernel.get("_SeparateEpilogueLds", False):
+      usedTokens = set(range(self.states.numLDSBlk)) | {self.states.memTokenLdsBufferMeta}
+      usedTokens.update(token for row in self.states.memTokenLdsSplit for token in row)
+      if self.states.dcpTokenGate:
+        usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
+      self.states.memTokenEpilogue = max(usedTokens) + 1
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0

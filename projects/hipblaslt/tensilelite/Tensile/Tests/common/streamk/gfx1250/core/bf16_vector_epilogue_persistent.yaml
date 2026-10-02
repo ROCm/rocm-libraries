@@ -1,0 +1,124 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# PAP1 must keep bias/SAV scratch outside both live compute banks.
+# PAP0 must synchronize vector reads before compute reuses their LDS.
+# Set TENSILE_PERSISTENT_FIXED_GRID=256 to pin four tiles per workgroup.
+# Exercise short/long K tails and even/odd full-tile K iteration counts.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950,
+    skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102,
+    skip-gfx1200, skip-gfx1201]
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumBenchmarks: 20
+  CEqualD: false
+  DataInitValueActivationArgs: [0.0, 0.0]
+  Architecture: gfx1250
+  NumElementsToValidate: 10000
+  BoundsCheck: 0
+  KernelTime: false
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  PrintSolutionRejectionReason: true
+  ForceGenerateKernel: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: b
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    SupportUserArgs: true
+    UseBias: 1
+    BiasDataTypeList: [s, b]
+    UseScaleAlphaVec: 1
+    Activation: true
+    ActivationType: hipblaslt_all
+    ActivationComputeDataType: s
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+    - DepthU: [128]
+    - 1LDSBuffer: [0]
+    - ActivationFuncCall: [true]
+    - ClusterDim:
+      - [1, 1]
+    - ClusterLocalRead: [0]
+    - DirectToVgprA: [false]
+    - DirectToVgprB: [false]
+    - ExpandPointerSwap: [false]
+    - GlobalSplitU: [0]
+    - GlobalSplitUAlgorithm: [MultipleBuffer]
+    - HalfPLR: [0, 2]
+    - InitCIterWmma: [1]
+    - LdsBlockSizePerPadA: [1024]
+    - LdsBlockSizePerPadB: [1024]
+    - LdsPadA: [8]
+    - LdsPadB: [8]
+    - MaxOccupancy: [40]
+    - PrefetchAcrossPersistent: [0, 1]
+    - PrefetchGlobalRead: [2]
+    - PrefetchLocalRead: [1]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [false]
+    - StoreRemapVectorWidth: [0]
+    - StoreVectorWidth: [8]
+    - TileProcessingStrategy: [DataParallel]
+    - WorkAssignment: [StaticGrid]
+    - SuppressNoLoadLoop: [false]
+    - TDMInst: [3]
+    - TDMIterateMode: [0]
+    - TDMLoadWaveSync: [false]
+    - TDMSplit: [false]
+    - TransposeLDS: [1]
+    - UseSubtileImpl: [false]
+    - VectorWidthA: [4]
+    - VectorWidthB: [4]
+    - WavefrontSize: [32]
+    - DirectToLds: [0]
+    - StaggerU: [0]
+    - WorkGroupMapping: [8]
+    BenchmarkForkParameters: null
+    JoinParameters: null
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact:
+          sizes: [8192, 8192, 1, 192]
+          stridesA: [1, 16384, 0]
+          stridesB: [1, 16384, 0]
+          stridesC: [1, 8192, 0]
+          stridesD: [1, 8192, 0]
+      - Exact:
+          sizes: [8192, 8192, 1, 8192]
+          stridesA: [1, 16384, 0]
+          stridesB: [1, 16384, 0]
+          stridesC: [1, 8192, 0]
+          stridesD: [1, 8192, 0]
+      - Exact:
+          sizes: [8192, 8192, 1, 8224]
+          stridesA: [1, 16384, 0]
+          stridesB: [1, 16384, 0]
+          stridesC: [1, 8192, 0]
+          stridesD: [1, 8192, 0]
+      - Exact:
+          sizes: [8192, 8192, 1, 8320]
+          stridesA: [1, 16384, 0]
+          stridesB: [1, 16384, 0]
+          stridesC: [1, 8192, 0]
+          stridesD: [1, 8192, 0]
+    - BiasTypeArgs: [s]
+    - ActivationArgs:
+      - - Enum: none
