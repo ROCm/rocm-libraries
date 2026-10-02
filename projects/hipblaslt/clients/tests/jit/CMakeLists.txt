@@ -69,7 +69,6 @@ add_executable(hipblaslt-jit-component-test
     "${hipblaslt_jit_source}/hipblaslt-jit-component.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-process.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp")
 target_include_directories(hipblaslt-jit-component-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
@@ -83,8 +82,7 @@ hipblaslt_jit_test(jit-component jit-cpu
 add_executable(hipblaslt-jit-debug-test
     jit_debug_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-process.cpp")
+    "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp")
 target_include_directories(hipblaslt-jit-debug-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_compile_definitions(hipblaslt-jit-debug-test PRIVATE HIPBLASLT_ENABLE_JIT)
@@ -206,8 +204,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
-        "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
-        "${hipblaslt_jit_source}/hipblaslt-jit-process.cpp")
+        "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp")
     target_include_directories(hipblaslt-jit-bundle-freshness-test PRIVATE
         "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
     target_compile_definitions(hipblaslt-jit-bundle-freshness-test PRIVATE
