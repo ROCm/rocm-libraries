@@ -28,6 +28,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -37,6 +39,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/LaunchDimGuard_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PersistentArgumentLayout_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PersistentExecutionPolicySerialization_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
@@ -66,7 +70,13 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     )
 endif()
 
+if(HIPBLASLT_ENABLE_YAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+endif()
+
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
 
 target_link_libraries(tensilelite-tests
