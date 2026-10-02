@@ -56,6 +56,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
+from ..Components.TDMRing import tdmInflightRejectReason
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -6382,6 +6383,11 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
+
+    tdmInflightReason = tdmInflightRejectReason(state)
+    if tdmInflightReason:
+      reject(state, printRejectionReason, tdmInflightReason)
+      return
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
