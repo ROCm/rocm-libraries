@@ -14,6 +14,7 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_bwd_weight.hpp"
+#include "ck/tensor_operation/gpu/device/impl/depthwise_bwd_weight_bf16_finalize.hpp"
 #include "ck/tensor_operation/gpu/device/impl/split_k_arg.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
@@ -23,9 +24,8 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
-// A CTA owns eight adjacent groups and one filter point. Admitted G>=128
-// yields at least 144 CTAs for 3x3 filters. The other 32 lanes partition
-// the reduction; with R<=min(G,512), each lane performs at most 16 products.
+// A CTA owns eight adjacent groups and one filter point; its other 32 lanes
+// partition the output reduction. Group tails are masked.
 struct DepthwiseBwdWeightBf16Params
 {
     const bhalf_t* in;
@@ -138,20 +138,23 @@ struct DeviceGroupedConvBwdWeightDepthwiseBf16 final
                ol[i] > MaxIndex)
                 return false;
         }
-        if(il[0] < 128 || il[0] != ol[0] || il[0] != wl[0] || il[1] != ol[1] || il[2] != 1 ||
-           wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
+        if(il[0] != ol[0] || il[0] != wl[0] || il[1] != ol[1] || il[2] != 1 ||
+           wl[1] != 1 || wl[2] != 1 || ol[2] != 1)
             return false;
 
-        // Checked before forming R, so invalid huge shapes cannot overflow.
-        if(ol[1] > MaxIndex / ol[3] || ol[1] * ol[3] > MaxIndex / ol[4])
+        // The signed r+=32 loop must also represent its terminal increment.
+        constexpr long_index_t MaxReduction = MaxIndex - 31;
+        if(ol[1] > MaxReduction / ol[3] ||
+           ol[1] * ol[3] > MaxReduction / ol[4] || wl[3] > MaxIndex / wl[4])
             return false;
-        const auto r = ol[1] * ol[3] * ol[4];
-        if(r > 512 || r > il[0])
+        if(!DepthwiseBf16LaunchSupported(
+               (il[0] - 1) / 8 + 1, wl[3] * wl[4], 1, 8 * 32 * sizeof(float)))
             return false;
 
         for(index_t d = 0; d < 2; ++d)
         {
-            if(a.filter_strides[d] < 1 || a.filter_strides[d] > 2 || a.filter_dilations[d] < 1 ||
+            if(a.filter_strides[d] < 1 || a.filter_strides[d] > MaxIndex ||
+               a.filter_dilations[d] < 1 ||
                a.filter_dilations[d] > MaxIndex || a.left_pads[d] < 0 ||
                a.left_pads[d] > MaxIndex || a.right_pads[d] < 0 || a.right_pads[d] > MaxIndex)
                 return false;

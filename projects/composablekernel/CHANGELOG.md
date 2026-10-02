@@ -13,8 +13,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added supported-instance selection, listing, and raw complete-invocation timing to the universal GEMM profiler.
 * Added block-diagonal group packing (`GroupsPerWmma`) to the WMMA-v3 grouped forward operation for 2D channels-last convolutions with few channels per group. Packed instances require a workspace and identify themselves with a `GroupsPerWmma` suffix in their type string; other type strings are unchanged.
 * Added a gfx1250 FP16 packed-weight grouped forward instance for four input and output channels per group.
-* Added a gfx1250 BF16 group-local depthwise backward-weight candidate for packed 2D channels-last 3x3 convolutions with at least 128 groups and reductions no longer than `min(G, 512)`.
-* Added gfx1250 BF16 depthwise backward-weight row-strip candidates for 2D channels-last 3x3 convolutions with at least 16 groups and for 11x11 stride-1 convolutions with at most seven groups.
+* Added a gfx1250 BF16 group-local depthwise backward-weight candidate for resource-safe packed 2D channels-last convolutions with runtime filter, stride, dilation, and padding.
+* Added gfx1250 BF16 depthwise backward-weight row-strip candidates with square-filter specializations and runtime convolution geometry, sharing an FP32 partial finalizer.
 
 ### Optimized
 
@@ -33,6 +33,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Removed an unused self-referential offset temporary from WMMA backward-weight kernels that prevented gfx1250 A0 module translation.
 * Fixed gfx1250 BF16 3D forward scalar-staging miscompilation by disabling early inlining for the affected registration sources.
 * Avoided repeated full support probing in scalar split-1 WRW invocations while retaining wrong-type, split, and architecture rejection.
+* Replaced empirical depthwise group, reduction, strip-count, and CTA admission limits with indexing, workspace, LDS, and device-launch bounds.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 

@@ -33,7 +33,9 @@ using BaseOp =
                                                              PassThrough,
                                                              PassThrough,
                                                              PassThrough>;
-using RowStripOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeightDepthwiseRowStripBf16;
+template <ck::index_t FilterSize = 11>
+using RowStripOp =
+    ck::tensor_operation::device::DeviceGroupedConvBwdWeightDepthwiseRowStripBf16<FilterSize>;
 
 struct Shape
 {
@@ -41,22 +43,40 @@ struct Shape
     int g;
     int h;
     int w;
+    int filter = 11;
+    int stride = 1;
+    int dilation = 1;
+    int pad = -1;
+    int right_pad = -1;
+    int stride_w = 0;
+
+    int Pad() const { return pad < 0 ? (filter - 1) * dilation / 2 : pad; }
+    int RightPad() const { return right_pad < 0 ? Pad() : right_pad; }
+    int StrideW() const { return stride_w == 0 ? stride : stride_w; }
+    int OutH() const { return (h + Pad() + RightPad() - (filter - 1) * dilation - 1) / stride + 1; }
+    int OutW() const { return (w + Pad() + RightPad() - (filter - 1) * dilation - 1) / StrideW() + 1; }
+    int FilterElements() const { return filter * filter; }
 };
 
 template <typename Index>
 struct Problem
 {
     std::array<Index, 5> in_lengths, in_strides, wei_lengths, wei_strides, out_lengths, out_strides;
-    std::array<Index, 2> filter_strides{1, 1}, filter_dilations{1, 1}, left_pads{5, 5},
-        right_pads{5, 5};
+    std::array<Index, 2> filter_strides, filter_dilations, left_pads, right_pads;
 
     explicit Problem(Shape shape)
         : in_lengths{shape.g, shape.n, 1, shape.h, shape.w},
-          in_strides{1, shape.h * shape.w * shape.g, 1, shape.w * shape.g, shape.g},
-          wei_lengths{shape.g, 1, 1, 11, 11},
-          wei_strides{121, 121, 1, 11, 1},
-          out_lengths{shape.g, shape.n, 1, shape.h, shape.w},
-          out_strides(in_strides)
+          in_strides{1, static_cast<Index>(shape.h) * shape.w * shape.g, 1,
+                     static_cast<Index>(shape.w) * shape.g, shape.g},
+          wei_lengths{shape.g, 1, 1, shape.filter, shape.filter},
+          wei_strides{shape.FilterElements(), shape.FilterElements(), 1, shape.filter, 1},
+          out_lengths{shape.g, shape.n, 1, shape.OutH(), shape.OutW()},
+          out_strides{1, static_cast<Index>(shape.OutH()) * shape.OutW() * shape.g, 1,
+                      static_cast<Index>(shape.OutW()) * shape.g, shape.g},
+          filter_strides{shape.stride, shape.StrideW()},
+          filter_dilations{shape.dilation, shape.dilation},
+          left_pads{shape.Pad(), shape.Pad()},
+          right_pads{shape.RightPad(), shape.RightPad()}
     {
     }
 
@@ -83,14 +103,14 @@ struct Problem
     }
 };
 
-std::size_t NchwOffset(Shape shape, int n, int g, int h, int w)
+std::size_t NchwOffset(int n, int g, int h, int w, int groups, int height, int width)
 {
-    return ((static_cast<std::size_t>(n) * shape.g + g) * shape.h + h) * shape.w + w;
+    return ((static_cast<std::size_t>(n) * groups + g) * height + h) * width + w;
 }
 
-std::size_t NhwgcOffset(Shape shape, int n, int g, int h, int w)
+std::size_t NhwgcOffset(int n, int g, int h, int w, int groups, int height, int width)
 {
-    return ((static_cast<std::size_t>(n) * shape.h + h) * shape.w + w) * shape.g + g;
+    return ((static_cast<std::size_t>(n) * height + h) * width + w) * groups + g;
 }
 
 struct Reference
@@ -107,35 +127,36 @@ Reference ComputeReference(Shape shape,
                            const std::vector<ck::bhalf_t>& x_nchw,
                            const std::vector<ck::bhalf_t>& dy_nchw)
 {
-    const int strips               = (shape.h + 11) / 12;
-    const std::size_t filter_count = static_cast<std::size_t>(shape.g) * 121;
+    const int strips = (shape.OutH() + 11) / 12;
+    const std::size_t filter_count = static_cast<std::size_t>(shape.g) * shape.FilterElements();
     Reference ref{std::vector<double>(filter_count),
                   std::vector<double>(static_cast<std::size_t>(shape.n) * strips * filter_count),
                   std::vector<double>(static_cast<std::size_t>(shape.n) * strips * filter_count),
                   std::vector<double>(filter_count)};
     for(int g = 0; g < shape.g; ++g)
     {
-        for(int fy = 0; fy < 11; ++fy)
+        for(int fy = 0; fy < shape.filter; ++fy)
         {
-            for(int fx = 0; fx < 11; ++fx)
+            for(int fx = 0; fx < shape.filter; ++fx)
             {
-                const std::size_t f = static_cast<std::size_t>(g) * 121 + fy * 11 + fx;
+                const std::size_t f =
+                    static_cast<std::size_t>(g) * shape.FilterElements() + fy * shape.filter + fx;
                 for(int n = 0; n < shape.n; ++n)
                 {
-                    for(int ho = 0; ho < shape.h; ++ho)
+                    for(int ho = 0; ho < shape.OutH(); ++ho)
                     {
-                        const int hi = ho + fy - 5;
+                        const int hi = ho * shape.stride + fy * shape.dilation - shape.Pad();
                         if(hi < 0 || hi >= shape.h)
                             continue;
-                        for(int wo = 0; wo < shape.w; ++wo)
+                        for(int wo = 0; wo < shape.OutW(); ++wo)
                         {
-                            const int wi = wo + fx - 5;
+                            const int wi = wo * shape.StrideW() + fx * shape.dilation - shape.Pad();
                             if(wi < 0 || wi >= shape.w)
                                 continue;
-                            const double x =
-                                ck::type_convert<float>(x_nchw[NchwOffset(shape, n, g, hi, wi)]);
-                            const double dy =
-                                ck::type_convert<float>(dy_nchw[NchwOffset(shape, n, g, ho, wo)]);
+                            const double x = ck::type_convert<float>(
+                                x_nchw[NchwOffset(n, g, hi, wi, shape.g, shape.h, shape.w)]);
+                            const double dy = ck::type_convert<float>(
+                                dy_nchw[NchwOffset(n, g, ho, wo, shape.g, shape.OutH(), shape.OutW())]);
                             const double product = x * dy;
                             const std::size_t p =
                                 (static_cast<std::size_t>(n) * strips + ho / 12) * filter_count + f;
@@ -169,18 +190,26 @@ void FillInputs(Shape shape,
             {
                 for(int w = 0; w < shape.w; ++w)
                 {
-                    const float x_sign  = (n * 7 + g * 3 + h * 5 + w) % 11 < 5 ? -1.f : 1.f;
-                    const float dy_sign = (n * 3 + g * 5 + h + w * 7) % 13 < 6 ? -1.f : 1.f;
+                    const float x_sign = (n * 7 + g * 3 + h * 5 + w) % 11 < 5 ? -1.f : 1.f;
                     const float x_value = repetition == 0
                                               ? 0.5f * (1 + (n + 2 * g + h + w) % 5)
                                               : large_x[(n + 2 * g + 3 * h + w) % large_x.size()];
+                    const auto nchw = NchwOffset(n, g, h, w, shape.g, shape.h, shape.w);
+                    const auto packed = NhwgcOffset(n, g, h, w, shape.g, shape.h, shape.w);
+                    x_nchw[nchw] = x_packed[packed] =
+                        ck::type_convert<ck::bhalf_t>(x_sign * x_value);
+                }
+            }
+            for(int h = 0; h < shape.OutH(); ++h)
+            {
+                for(int w = 0; w < shape.OutW(); ++w)
+                {
+                    const float dy_sign = (n * 3 + g * 5 + h + w * 7) % 13 < 6 ? -1.f : 1.f;
                     const float dy_value =
                         repetition == 0 ? 0.25f * (1 + (3 * n + g + 2 * h + w) % 7)
                                         : large_dy[(2 * n + g + h + 3 * w) % large_dy.size()];
-                    const auto nchw   = NchwOffset(shape, n, g, h, w);
-                    const auto packed = NhwgcOffset(shape, n, g, h, w);
-                    x_nchw[nchw]      = x_packed[packed] =
-                        ck::type_convert<ck::bhalf_t>(x_sign * x_value);
+                    const auto nchw = NchwOffset(n, g, h, w, shape.g, shape.OutH(), shape.OutW());
+                    const auto packed = NhwgcOffset(n, g, h, w, shape.g, shape.OutH(), shape.OutW());
                     dy_nchw[nchw] = dy_packed[packed] =
                         ck::type_convert<ck::bhalf_t>(dy_sign * dy_value);
                 }
@@ -192,23 +221,26 @@ void FillInputs(Shape shape,
 std::size_t WorkspaceBytes(Shape shape)
 {
     const std::size_t logical =
-        static_cast<std::size_t>(shape.n) * ((shape.h + 11) / 12) * shape.g * 121 * sizeof(float);
+        static_cast<std::size_t>(shape.n) * ((shape.OutH() + 11) / 12) * shape.g *
+        shape.FilterElements() * sizeof(float);
     return (logical + 255) / 256 * 256;
 }
 
+template <ck::index_t FilterSize = 11>
 void CheckShape(Shape shape)
 {
-    RowStripOp concrete;
+    RowStripOp<FilterSize> concrete;
     BaseOp& op = concrete; // Exercise the same virtual interface used by the factory.
     const Problem<ck::index_t> problem(shape);
-    EXPECT_EQ(op.GetTypeString().find("DeviceGroupedConvBwdWeightDepthwiseRowStripBf16<"), 0u);
 
     const std::size_t input_count = static_cast<std::size_t>(shape.n) * shape.g * shape.h * shape.w;
-    const std::size_t filter_count = static_cast<std::size_t>(shape.g) * 121;
-    std::vector<ck::bhalf_t> x_nchw(input_count), dy_nchw(input_count), x_packed(input_count),
-        dy_packed(input_count), actual(filter_count);
+    const std::size_t output_count =
+        static_cast<std::size_t>(shape.n) * shape.g * shape.OutH() * shape.OutW();
+    const std::size_t filter_count = static_cast<std::size_t>(shape.g) * shape.FilterElements();
+    std::vector<ck::bhalf_t> x_nchw(input_count), dy_nchw(output_count), x_packed(input_count),
+        dy_packed(output_count), actual(filter_count);
     ck::DeviceMem x_device(input_count * sizeof(ck::bhalf_t));
-    ck::DeviceMem dy_device(input_count * sizeof(ck::bhalf_t));
+    ck::DeviceMem dy_device(output_count * sizeof(ck::bhalf_t));
     ck::DeviceMem dw_device(filter_count * sizeof(ck::bhalf_t));
     auto arg = problem.MakeArgument(op,
                                     x_device.GetDeviceBuffer(),
@@ -220,6 +252,9 @@ void CheckShape(Shape shape)
     ASSERT_EQ(workspace_bytes, WorkspaceBytes(shape));
     ck::DeviceMem workspace(workspace_bytes);
     auto invoker = op.MakeInvokerPointer();
+    EXPECT_THROW(invoker->Run(arg.get(), StreamConfig{nullptr, false}), std::runtime_error);
+    op.SetWorkSpacePointer(arg.get(),
+                           static_cast<std::uint8_t*>(workspace.GetDeviceBuffer()) + 1);
     EXPECT_THROW(invoker->Run(arg.get(), StreamConfig{nullptr, false}), std::runtime_error);
     op.SetWorkSpacePointer(arg.get(), workspace.GetDeviceBuffer());
     std::vector<std::uint8_t> poison_workspace(workspace_bytes, 0xff);
@@ -246,7 +281,9 @@ void CheckShape(Shape shape)
                 std::max(0.03125, 0.008 * std::abs(want) + 0.0001 * reference.weight_magnitudes[i]);
             EXPECT_TRUE(std::isfinite(got)) << "weight=" << i << " repetition=" << repetition;
             EXPECT_NEAR(got, want, tolerance)
-                << "group=" << i / 121 << " fy=" << (i % 121) / 11 << " fx=" << (i % 121) % 11
+                << "group=" << i / shape.FilterElements()
+                << " fy=" << (i % shape.FilterElements()) / shape.filter
+                << " fx=" << i % shape.filter
                 << " repetition=" << repetition;
             if(reference.weight_magnitudes[i] <= 0)
                 EXPECT_EQ(got, 0) << "untouched filter weight=" << i;
@@ -258,8 +295,9 @@ void CheckShape(Shape shape)
             const double tolerance = 0.001 + 0.0001 * reference.partial_magnitudes[i];
             EXPECT_TRUE(std::isfinite(got)) << "partial=" << i << " repetition=" << repetition;
             EXPECT_NEAR(got, want, tolerance)
-                << "strip=" << i / filter_count << " group=" << (i % filter_count) / 121
-                << " filter=" << i % 121 << " repetition=" << repetition;
+                << "strip=" << i / filter_count
+                << " group=" << (i % filter_count) / shape.FilterElements()
+                << " filter=" << i % shape.FilterElements() << " repetition=" << repetition;
             if(reference.partial_magnitudes[i] <= 0)
                 EXPECT_EQ(got, 0) << "empty partial=" << i;
         }
@@ -277,9 +315,14 @@ void CheckShape(Shape shape)
             EXPECT_EQ(observed_partials[i], first_partials[i]) << "partial=" << i;
         if(repetition == 0)
         {
-            auto* typed_arg = dynamic_cast<RowStripOp::Argument*>(arg.get());
+            auto* typed_arg = dynamic_cast<typename RowStripOp<FilterSize>::Argument*>(arg.get());
             ASSERT_NE(typed_arg, nullptr);
-            ASSERT_TRUE(typed_arg->narrow_device_indices);
+            const bool original_geometry =
+                shape.filter == 11 && shape.stride == 1 && shape.StrideW() == 1 &&
+                shape.dilation == 1 && shape.Pad() == 5 && shape.RightPad() == 5;
+            EXPECT_EQ(typed_arg->narrow_device_indices, original_geometry);
+            if(!typed_arg->narrow_device_indices)
+                continue;
             typed_arg->narrow_device_indices = false;
             dw_device.ToDevice(poison_dw.data());
             workspace.ToDevice(poison_workspace.data());
@@ -302,7 +345,7 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only candidate";
 
-    RowStripOp concrete;
+    RowStripOp<> concrete;
     BaseOp& op = concrete;
     const Shape shape{2, 3, 13, 131};
     const Problem<ck::index_t> problem(shape);
@@ -322,18 +365,18 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
         op.SetWorkSpacePointer(long_dry.get(), dry_workspace.data());
     }
     auto small_dry            = long_problem.MakeArgument(op, nullptr, nullptr, nullptr, 1);
-    const auto* small_indices = dynamic_cast<const RowStripOp::Argument*>(small_dry.get());
+    const auto* small_indices = dynamic_cast<const RowStripOp<>::Argument*>(small_dry.get());
     ASSERT_NE(small_indices, nullptr);
     EXPECT_TRUE(small_indices->narrow_device_indices);
     // Query near INT_MAX without allocating a huge input; wide indexing remains legal.
     const Problem<ck::long_index_t> wide_problem(Shape{1, 3, 1, 715827881});
     auto wide_dry = wide_problem.MakeArgument(op, nullptr, nullptr, nullptr, 1);
     ASSERT_TRUE(op.IsSupportedArgument(wide_dry.get()));
-    const auto* wide_indices = dynamic_cast<const RowStripOp::Argument*>(wide_dry.get());
+    const auto* wide_indices = dynamic_cast<const RowStripOp<>::Argument*>(wide_dry.get());
     ASSERT_NE(wide_indices, nullptr);
     EXPECT_FALSE(wide_indices->narrow_device_indices);
     EXPECT_EQ(op.GetWorkSpaceSize(wide_dry.get()), WorkspaceBytes({1, 3, 1, 715827881}));
-    // The group cap is independent of batch, spatial extent and split policy.
+    // Cover small positive groups independently of batch, spatial extent and split.
     for(const int groups : {1, 2, 3, 4, 5, 6, 7})
     {
         for(const Shape covered :
@@ -398,18 +441,36 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
     wrong_filter_stride.filter_strides[0] = 2;
     EXPECT_FALSE(op.IsSupportedArgument(
         wrong_filter_stride.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
-    // Byte-span safety alone must not admit increasingly scattered lane loads
-    // and unbounded group-local scratch or producer work.
     for(const int groups : {8, 64, 4096})
     {
-        const Problem<ck::index_t> beyond_group_cap(Shape{2, groups, 13, 131});
-        EXPECT_FALSE(op.IsSupportedArgument(
-            beyond_group_cap.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()))
+        const Problem<ck::index_t> larger_groups(Shape{2, groups, 13, 131});
+        EXPECT_TRUE(op.IsSupportedArgument(
+            larger_groups.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()))
             << "G=" << groups;
     }
     auto huge           = long_problem;
     huge.out_lengths[3] = std::numeric_limits<ck::long_index_t>::max();
     EXPECT_FALSE(op.IsSupportedArgument(huge.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    // Genuine per-dimension launch and aligned scratch bounds, without allocation.
+    const Problem<ck::long_index_t> too_many_splits(Shape{16777216, 1, 1, 1});
+    EXPECT_FALSE(op.IsSupportedArgument(
+        too_many_splits.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    const Problem<ck::long_index_t> too_many_weights(Shape{1, 2218475, 1, 1});
+    EXPECT_FALSE(op.IsSupportedArgument(
+        too_many_weights.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    const Problem<ck::long_index_t> scratch_overflow(
+        Shape{std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 1, 1});
+    EXPECT_FALSE(op.IsSupportedArgument(
+        scratch_overflow.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    auto negative_pad = long_problem;
+    negative_pad.left_pads[0] = -1;
+    EXPECT_FALSE(op.IsSupportedArgument(
+        negative_pad.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    auto oversized_stride = long_problem;
+    oversized_stride.filter_strides[0] =
+        static_cast<ck::long_index_t>(std::numeric_limits<ck::index_t>::max()) + 1;
+    EXPECT_FALSE(op.IsSupportedArgument(
+        oversized_stride.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
 }
 
 TEST(TestGroupedConvndBwdWeightRowStripBf16, NchwSerialReferenceAndWorkspaceOwnership)
@@ -426,6 +487,13 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, NchwSerialReferenceAndWorkspaceOwne
     CheckShape({1, 5, 1, 1});
     CheckShape({2, 6, 25, 17});
     CheckShape({2, 7, 13, 131});
+    CheckShape({2, 8, 13, 131});
+    CheckShape({2, 64, 13, 131});
+    CheckShape({2, 4096, 13, 131});
+    CheckShape<5>({2, 17, 25, 131, 5, 2});
+    CheckShape<7>({2, 31, 13, 133, 7, 2});
+    CheckShape<3>({2, 15, 17, 130, 3, 3, 2, 1, 3, 2});
+    CheckShape({2, 9, 25, 133, 11, 2});
 }
 
 } // namespace

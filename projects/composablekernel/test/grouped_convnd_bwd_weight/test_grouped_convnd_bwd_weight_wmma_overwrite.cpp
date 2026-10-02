@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,7 @@
 
 #include "ck/ck.hpp"
 #include "ck/host_utility/device_prop.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_bf16.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_weight.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
@@ -321,8 +323,6 @@ const ck::utils::conv::ConvParam odd_channels{
 const ck::utils::conv::ConvParam odd_channels_3d{
     3, 2, 1, 5, 3, {1, 1, 1}, {2, 3, 6}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}};
 
-// G>=128 gives at least 144 filter CTAs. R<=min(G,512) limits each
-// reduction lane to at most 16 terms; the G127 and R>G controls stay excluded.
 const ck::utils::conv::ConvParam depthwise_g127_r121{
     2, 127, 1, 1, 1, {3, 3}, {11, 11}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
 const ck::utils::conv::ConvParam depthwise_g128_r121{
@@ -354,24 +354,61 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16DepthwiseShortReduction)
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only depthwise candidate";
 #ifdef CK_ENABLE_BF16
-    CheckCandidate<2, ck::bhalf_t>(depthwise_g127_r121, Candidate::Depthwise, 1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g127_r121, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r121, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r128, Candidate::Depthwise, 1, true);
-    CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r144, Candidate::Depthwise, 1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r144, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g176_r169, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g240_r196, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_asym_r256, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g450_tail_r256, Candidate::Depthwise, -1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g512_stride2_r512, Candidate::Depthwise, 0, true);
-    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r512, Candidate::Depthwise, -1, false);
-    CheckCandidate<2, ck::bhalf_t>(depthwise_g512_r640, Candidate::Depthwise, -1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r512, Candidate::Depthwise, -1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g512_r640, Candidate::Depthwise, -1, true);
+    for(const ck::utils::conv::ConvParam& generalized : {
+            ck::utils::conv::ConvParam{
+                2, 17, 2, 1, 1, {5, 5}, {25, 33}, {2, 2}, {1, 1}, {2, 2}, {2, 2}},
+            ck::utils::conv::ConvParam{
+                2, 31, 2, 1, 1, {7, 7}, {13, 17}, {2, 2}, {1, 1}, {3, 3}, {3, 3}},
+            ck::utils::conv::ConvParam{
+                2, 1, 2, 1, 1, {5, 7}, {17, 19}, {3, 2}, {2, 1}, {1, 3}, {3, 1}}})
+    {
+        CheckCandidate<2, ck::bhalf_t>(generalized, Candidate::Depthwise, 1, true);
+    }
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 2, false);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, -2, false);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g176_r169, Candidate::Depthwise, 2, false);
 #else
     GTEST_SKIP() << "BF16 instances disabled";
 #endif
+}
+
+TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16DepthwiseArithmeticBounds)
+{
+    if(!ck::is_gfx125_supported())
+        GTEST_SKIP() << "gfx1250-only depthwise candidate";
+    using Op = ck::tensor_operation::device::DeviceGroupedConvBwdWeightDepthwiseBf16;
+    Op op;
+    auto query = [&](ck::long_index_t groups, ck::long_index_t reduction,
+                     ck::long_index_t filter_h, ck::long_index_t filter_w) {
+        const std::array<ck::long_index_t, 5> lengths{groups, reduction, 1, 1, 1};
+        const std::array<ck::long_index_t, 5> strides{1, groups, 1, groups, groups};
+        const std::array<ck::long_index_t, 5> weights{groups, 1, 1, filter_h, filter_w};
+        const std::array<ck::long_index_t, 5> weight_strides{
+            filter_h * filter_w, filter_h * filter_w, 1, filter_w, 1};
+        const std::array<ck::long_index_t, 2> one{1, 1}, zero{0, 0};
+        const std::array<ck::long_index_t, 2> right_pad{filter_h - 1, filter_w - 1};
+        return op.MakeArgumentPointer(nullptr, nullptr, nullptr, lengths, strides,
+                                      weights, weight_strides, lengths, strides,
+                                      one, one, zero, right_pad,
+                                      PassThrough{}, PassThrough{}, PassThrough{}, 1);
+    };
+    constexpr ck::long_index_t MaxIndex = std::numeric_limits<ck::index_t>::max();
+    EXPECT_TRUE(op.IsSupportedArgument(query(1, MaxIndex - 31, 1, 1).get()));
+    EXPECT_FALSE(op.IsSupportedArgument(query(1, MaxIndex - 30, 1, 1).get()));
+    EXPECT_FALSE(op.IsSupportedArgument(query(1, 1, 46341, 46341).get()));
+    EXPECT_FALSE(op.IsSupportedArgument(query(134217721, 1, 1, 1).get()));
 }
 
 TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Fp16ScalarOddChannels)

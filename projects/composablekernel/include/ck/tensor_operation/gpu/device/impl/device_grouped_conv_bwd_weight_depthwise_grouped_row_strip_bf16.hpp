@@ -15,6 +15,7 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_bwd_weight.hpp"
+#include "ck/tensor_operation/gpu/device/impl/depthwise_bwd_weight_bf16_finalize.hpp"
 #include "ck/tensor_operation/gpu/device/impl/split_k_arg.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
@@ -25,7 +26,7 @@ namespace tensor_operation {
 namespace device {
 
 // P[s, g, f], s = n * ceil(Ho / 8) * ceil(Wo / 80)
-//                 + ystrip * ceil(Wo / 80) + xstrip, f = fy * 3 + fx.
+//                 + ystrip * ceil(Wo / 80) + xstrip, f = fy * FilterSize + fx.
 struct DepthwiseGroupedRowStripBf16Params
 {
     const bhalf_t* in;
@@ -40,29 +41,30 @@ struct DepthwiseGroupedRowStripBf16Params
     long_index_t strips_per_image;
     long_index_t width_strips;
     long_index_t partial_splits;
+    long_index_t stride_h, stride_w;
+    long_index_t dilation_h, dilation_w;
+    long_index_t left_pad_h, left_pad_w;
 };
 
+template <index_t FilterSize>
 struct DepthwiseGroupedRowStripBf16Argument : BaseArgument,
                                               ArgumentSplitK,
                                               DepthwiseGroupedRowStripBf16Params
 {
     bool valid             = false;
-    index_t filter_stride  = 0;
     size_t workspace_bytes = 0;
 };
 
 // Each CTA owns one eight-row by at-most-80-column output strip and sixteen
 // adjacent groups. The 16 reduction lanes visit five 16-column waves;
-// every valid output contributes once to each of its nine filter weights.
-template <index_t ConvStride>
+// every valid output contributes once to each filter weight.
+template <index_t FilterSize>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16(
     DepthwiseGroupedRowStripBf16Params a)
 {
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
-    static_assert(ConvStride == 1 || ConvStride == 2);
     constexpr index_t GroupLanes     = 16;
     constexpr index_t ReductionLanes = 16;
-    constexpr index_t FilterSize     = 3;
     constexpr index_t FilterElements = FilterSize * FilterSize;
     const index_t tid                = threadIdx.x;
     const index_t group_lane         = tid % GroupLanes;
@@ -95,14 +97,14 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
 #pragma unroll
                 for(index_t fy = 0; fy < FilterSize; ++fy)
                 {
-                    const long_index_t hi = ConvStride * ho + fy - 1;
+                    const long_index_t hi = a.stride_h * ho + fy * a.dilation_h - a.left_pad_h;
                     if(hi >= 0 && hi < a.in_h)
                     {
                         const long_index_t in_row = ((n * a.in_h + hi) * a.in_w) * a.groups + group;
 #pragma unroll
                         for(index_t fx = 0; fx < FilterSize; ++fx)
                         {
-                            const long_index_t wi = ConvStride * wo + fx - 1;
+                            const long_index_t wi = a.stride_w * wo + fx * a.dilation_w - a.left_pad_w;
                             if(wi >= 0 && wi < a.in_w)
                                 accum[fy * FilterSize + fx] +=
                                     type_convert<float>(a.in[in_row + wi * a.groups]) * dy;
@@ -157,54 +159,8 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
 #endif
 }
 
-// Adjacent weight lanes load adjacent taps/groups; each split lane accumulates
-// disjoint strips before wave-local and inter-wave FP32 reduction.
-__global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_finalize_bf16(
-    DepthwiseGroupedRowStripBf16Params a)
-{
-#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
-    constexpr index_t WeightLanes = 16;
-    constexpr index_t SplitLanes  = 16;
-    const index_t tid             = threadIdx.x;
-    const index_t weight_lane     = tid % WeightLanes;
-    const index_t split_lane      = tid / WeightLanes;
-    const long_index_t weight = static_cast<long_index_t>(blockIdx.x) * WeightLanes + weight_lane;
-    const long_index_t weight_count = a.groups * 9;
-    float sum                       = 0;
-    if(weight < weight_count)
-    {
-        for(long_index_t s = split_lane; s < a.partial_splits; s += SplitLanes)
-            sum += a.partial[s * weight_count + weight];
-    }
 
-    // Wave-local pair reduction retains all sixteen independent weights.
-    constexpr index_t Waves = 8;
-    const float other       = __builtin_bit_cast(
-        float, __builtin_amdgcn_ds_bpermute(((tid % 32 ^ 16) << 2), __builtin_bit_cast(int, sum)));
-    if(split_lane % 2 == 0)
-        sum += other;
-    __shared__ float reduction[Waves][WeightLanes];
-    if(split_lane % 2 == 0)
-        reduction[split_lane / 2][weight_lane] = sum;
-    __syncthreads();
-    if(split_lane == 0 && weight < weight_count)
-    {
-        float wave_sums[Waves];
-#pragma unroll
-        for(index_t w = 0; w < Waves; ++w)
-            wave_sums[w] = reduction[w][weight_lane];
-#pragma unroll
-        for(index_t step = Waves / 2; step > 0; step /= 2)
-#pragma unroll
-            for(index_t w = 0; w < step; ++w)
-                wave_sums[w] += wave_sums[w + step];
-        a.wei[weight] = type_convert<bhalf_t>(wave_sums[0]);
-    }
-#else
-    ignore = a;
-#endif
-}
-
+template <index_t FilterSize = 3>
 struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
     : DeviceGroupedConvBwdWeight<2,
                                  tensor_layout::convolution::NHWGC,
@@ -217,7 +173,10 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                                  element_wise::PassThrough,
                                  element_wise::PassThrough>
 {
-    using Argument = DepthwiseGroupedRowStripBf16Argument;
+    static_assert(FilterSize > 0 && FilterSize <= 11,
+                  "The producer filter reduction must fit in 64 KiB LDS");
+    static constexpr long_index_t FilterElements = FilterSize * FilterSize;
+    using Argument = DepthwiseGroupedRowStripBf16Argument<FilterSize>;
 
     static bool
     CheckedMultiply(long_index_t x, long_index_t y, long_index_t limit, long_index_t& result)
@@ -254,27 +213,21 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                ol[d] > MaxIndex)
                 return false;
         }
-        // Exact packed NHWGC/NHWGK, GKYXC with singleton C and K. A full
-        // 16-group CTA is the minimum useful tile; the checked CTA and scratch
-        // limits below, rather than a workload-specific group cap, bound larger G.
+        // Exact packed depthwise layouts; incomplete group tiles are masked.
         const long_index_t g = il[0];
-        if(g < 16 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 ||
-           wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
+        if(ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 ||
+           wl[2] != 1 || ol[2] != 1 || wl[3] != FilterSize || wl[4] != FilterSize)
             return false;
-        if((fs[0] != 1 && fs[0] != 2) || fs[0] != fs[1] || fd[0] != 1 || fd[1] != 1 || lp[0] != 1 ||
-           lp[1] != 1 || rp[0] < 0 || rp[0] > 1 || rp[1] < 0 || rp[1] > 1)
-            return false;
-        // MIOpen canonicalizes redundant right padding to zero on even extents.
-        // Admit either descriptor only when it describes the supplied output extent.
-        if(il[3] + 1 + rp[0] < 3 || il[4] + 1 + rp[1] < 3 ||
-           (il[3] + rp[0] - 2) / fs[0] + 1 != ol[3] || (il[4] + rp[1] - 2) / fs[1] + 1 != ol[4])
-            return false;
-
-        long_index_t image_rows, r;
-        // R is the logical output work, distinct from the number of P planes.
-        if(!CheckedMultiply(ol[1], ol[3], MaxIndex, image_rows) ||
-           !CheckedMultiply(image_rows, ol[4], MaxIndex, r) || r < 513 || r > 201600)
-            return false;
+        for(index_t d = 0; d < 2; ++d)
+        {
+            if(fs[d] < 1 || fs[d] > MaxIndex || fd[d] < 1 || fd[d] > MaxIndex ||
+               lp[d] < 0 || lp[d] > MaxIndex || rp[d] < 0 || rp[d] > MaxIndex)
+                return false;
+            const long_index_t effective = (FilterSize - 1) * static_cast<long_index_t>(fd[d]) + 1;
+            const long_index_t padded = static_cast<long_index_t>(il[d + 3]) + lp[d] + rp[d];
+            if(effective > padded || (padded - effective) / fs[d] + 1 != ol[d + 3])
+                return false;
+        }
 
         long_index_t in_plane, out_plane, in_image, out_image, in_count, out_count;
         if(!CheckedMultiply(il[4], g, MaxBf16Elements, in_plane) ||
@@ -286,24 +239,24 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
             return false;
         if(is[0] != 1 || is[1] != in_image || is[2] != 1 || is[3] != in_plane || is[4] != g ||
            os[0] != 1 || os[1] != out_image || os[2] != 1 || os[3] != out_plane || os[4] != g ||
-           ws[0] != 9 || ws[1] != 9 || ws[2] != 1 || ws[3] != 3 || ws[4] != 1)
+           ws[0] != FilterElements || ws[1] != FilterElements || ws[2] != 1 ||
+           ws[3] != FilterSize || ws[4] != 1)
             return false;
 
         const long_index_t height_strips = (ol[3] - 1) / 8 + 1;
         const long_index_t width_strips  = (ol[4] - 1) / 80 + 1;
-        long_index_t strips, splits, ctas, weights, partials;
+        long_index_t strips, splits, weights, partials;
         if(!CheckedMultiply(height_strips, width_strips, MaxIndex, strips) ||
-           !CheckedMultiply(il[1], strips, 336, splits) ||
-           !CheckedMultiply(splits, (g - 1) / 16 + 1, 10752, ctas) ||
-           !CheckedMultiply(g, 9, MaxBf16Elements, weights) ||
+           !CheckedMultiply(il[1], strips, MaxIndex, splits) ||
+           !CheckedMultiply(g, FilterElements, MaxBf16Elements, weights) ||
            !CheckedMultiply(splits, weights, MaxFloatElements, partials))
             return false;
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
         if(logical_bytes > static_cast<size_t>(MaxBytes - 255))
             return false;
-        // Empirical occupancy gate for newly admitted groups, not an arithmetic
-        // safety limit. Preserve the original G=192..512 low-CTA domain.
-        if((g < 192 || g > 512) && ctas < 512)
+        if(!DepthwiseBf16LaunchSupported(splits, (g - 1) / 16 + 1, 1,
+                                       FilterElements * 8 * 16 * sizeof(float)) ||
+           !DepthwiseBf16LaunchSupported((weights - 1) / 16 + 1, 1, 1, 8 * 16 * sizeof(float)))
             return false;
         a.groups           = g;
         a.in_h             = il[3];
@@ -313,6 +266,12 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
         a.strips_per_image = strips;
         a.width_strips     = width_strips;
         a.partial_splits   = splits;
+        a.stride_h         = fs[0];
+        a.stride_w         = fs[1];
+        a.dilation_h       = fd[0];
+        a.dilation_w       = fd[1];
+        a.left_pad_h       = lp[0];
+        a.left_pad_w       = lp[1];
         a.workspace_bytes  = (logical_bytes + 255) & ~size_t{255};
         return true;
     }
@@ -339,9 +298,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
         a->out      = static_cast<const bhalf_t*>(out);
         a->partial  = nullptr;
         a->k_batch_ = (split == -1 || split == 0) ? 1 : split;
-        // The checked resource envelope bounds new row and width strips.
-        a->valid         = Validate(il, is, wl, ws, ol, os, fs, fd, lp, rp, split, *a);
-        a->filter_stride = a->valid ? static_cast<index_t>(fs[0]) : 0;
+        a->valid = Validate(il, is, wl, ws, ol, os, fs, fd, lp, rp, split, *a);
         return a;
     }
 
@@ -401,29 +358,22 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
             params.partial = static_cast<float*>(a->p_workspace_);
             const dim3 stage1_grid(static_cast<uint32_t>(a->partial_splits),
                                    static_cast<uint32_t>((a->groups - 1) / 16 + 1));
-            const auto stage1_ms =
-                a->filter_stride == 1
-                    ? launch_and_time_kernel(
-                          stream,
-                          kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16<1>,
-                          stage1_grid,
-                          dim3(256),
-                          0,
-                          params)
-                    : launch_and_time_kernel(
-                          stream,
-                          kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16<2>,
-                          stage1_grid,
-                          dim3(256),
-                          0,
-                          params);
-            const auto stage2_ms = launch_and_time_kernel(
+            const auto stage1_ms = launch_and_time_kernel(
                 stream,
-                kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_finalize_bf16,
-                dim3(static_cast<uint32_t>((a->groups * 9 - 1) / 16 + 1)),
+                kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16<FilterSize>,
+                stage1_grid,
                 dim3(256),
                 0,
                 params);
+            const DepthwiseBwdWeightBf16FinalizeParams<long_index_t> finalize{
+                params.wei, params.partial, params.groups * FilterElements, params.partial_splits};
+            const auto stage2_ms = launch_and_time_kernel(
+                stream,
+                kernel_grouped_conv2d_bwd_weight_depthwise_strip_finalize_bf16<long_index_t>,
+                dim3(static_cast<uint32_t>((a->groups * FilterElements - 1) / 16 + 1)),
+                dim3(256),
+                0,
+                finalize);
             return stage1_ms + stage2_ms;
         }
     };
@@ -457,7 +407,8 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
 
     std::string GetTypeString() const override
     {
-        return "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>";
+        return "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, " +
+               std::to_string(FilterElements) + ", Split1>";
     }
 };
 

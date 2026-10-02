@@ -40,7 +40,7 @@ void add_device_grouped_conv2d_bwd_weight_depthwise_row_strip_nhwgc_gkyxc_nhwgk_
                                                            PassThrough,
                                                            PassThrough>>>& instances)
 {
-    instances.emplace_back(std::make_unique<DeviceGroupedConvBwdWeightDepthwiseRowStripBf16>());
+    instances.emplace_back(std::make_unique<DeviceGroupedConvBwdWeightDepthwiseRowStripBf16<>>());
 }
 
 void add_device_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_nhwgc_gkyxc_nhwgk_bf16_instances(
@@ -56,7 +56,7 @@ void add_device_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_nhwgc_gkyx
                                                            PassThrough>>>& instances)
 {
     instances.emplace_back(
-        std::make_unique<DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16>());
+        std::make_unique<DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<>>());
 }
 #endif
 
