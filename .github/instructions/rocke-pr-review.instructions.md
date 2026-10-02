@@ -44,23 +44,22 @@ Each rule says what to flag and what not to flag. Name the rule in your comment.
 - A refactor must keep failure modes: if the old code raised on missing or invalid input,
   the new code must too.
 
-## Rule 5 — Python attention selector changes need their C++ twin
+## Rule 5 — Python and C++ implementations must agree
 
 - Attention selection exists in two engines and both are live: Python
   (`library/kernels/common/attention_unified.py`, the `_enable_*` and `_select_*`
   functions) and C++ (`platform/cpp/instances/common/attention_unified_selectors.cpp`,
   where each function is marked `/* Python: <name>(problem). */`).
-- Flag a change to one of these Python functions when the matching C++ function is not
-  changed the same way in the same PR (same conditions, same thresholds, same order).
+- For changes in either engine, flag disagreement with its counterpart in selectors,
+  lowering, atoms or instances.
 - Do not flag families with no C++ twin, such as GDN and KDA under
   `library/dispatch/gdn/`: Python-only changes there are expected.
 
 ## Rule 6 — Anything that changes the built kernel must reach its identity
 
 - The compiled-binary key is derived from the spec (`KernelId.compile_key` hashes the spec
-  fields). Flag a value that changes the emitted IR but is not a spec field: a module
-  global, a builder default, a closure variable or an argument passed around the spec.
-  Two different kernels would then share one cache entry.
+  fields). Flag two reachable configurations that emit different IR under the same
+  compilation key. Identify the value that differs but is absent from the key.
 - Where `kernel_name()` encodes codegen knobs, flag a new IR-changing spec field that is
   not reflected there.
 - For a cohort override (a predicate that switches a spec flag on for some problems),
@@ -83,8 +82,8 @@ Each rule says what to flag and what not to flag. Name the rule in your comment.
 - Flag a change placed in a branch, set, table or helper shared by several archs
   (gfx942, gfx950, gfx1250) or kernel families when the PR describes only one of them.
 - In the comment, list the other members the change reaches and ask what it does to each
-  (routing, segment counts, cache key, spec class). A member nobody named is one nobody
-  checked.
+  (routing, segment counts, cache key, spec class). Ask for validation evidence for
+  members the PR does not discuss.
 - Also flag comments or docstrings on the shared structure that the change makes wrong.
 
 ## Rule 9 — A fixed bug is a class, not one site
@@ -96,17 +95,19 @@ Each rule says what to flag and what not to flag. Name the rule in your comment.
 ## Rule 10 — Shapes the PR does not target must emit identical IR
 
 - Flag new IR-emitting code in a builder or lowering path that runs for every shape
-  instead of behind the spec flag or predicate the PR adds. Covered shapes must emit
+  instead of behind the spec flag or predicate the PR adds. Untargeted shapes must emit
   byte-identical IR.
-- Flag changes to golden or reference IR files (`tests/golden/`, `*_ir_sha256.json`)
-  when the PR description does not say which shapes moved and why. A re-blessed golden
-  is not evidence of correctness.
+- Add goldens for new cases; update existing golden or reference IR entries
+  (`tests/golden/`, `*_ir_sha256.json`) only for intentional emission changes.
+  Flag updates that do not explain which shapes changed and why.
+- Goldens check baseline stability; Python/C++ parity checks agreement; GPU tests
+  against an independent reference check numerical correctness for tested cases.
 
 ## Rule 11 — No silent fallback
 
 - Flag a path that, when the fast kernel is unsupported or fails, quietly falls back to a
   slower kernel, a different dtype (for example fp8 to fp16) or a different algorithm
   without raising, warning or recording the fallback.
-- Prefer, in order: repair the request, reject it loudly, fall back with a visible
-  warning. A silent slow path and a cryptic failure are both defects.
+- Prefer, in order: have the caller repair the request, reject it loudly, fall back
+  with a visible warning. A silent slow path and a cryptic failure are both defects.
 - Do not flag fallbacks that are documented, tested and reported to the caller.
