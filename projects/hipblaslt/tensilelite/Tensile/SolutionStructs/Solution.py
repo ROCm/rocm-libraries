@@ -56,7 +56,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
-from ..Components.TDMRing import tdmInflightRejectReason
+from ..Components.TDMRing import tdmDeepRing, tdmInflightRejectReason, tdmRingRejectReason
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3501,6 +3501,10 @@ class Solution(collections.abc.Mapping):
       hasCMS,_ = hasCustomSchedule(state)
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
         reject(state, printRejectionReason, "UseCustomMainLoopSchedule=1 but CMS is not supported")
+      # depthUIteration checked the TDM ring with auto still unresolved and let it through:
+      # the ring emits its own main loop, so a deep ring resolves auto off.
+      if state["UseCustomMainLoopSchedule"] == -1 and tdmDeepRing(state):
+        hasCMS = False
       state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
       # reject CMS + TailloopInNll
       if state["TailloopInNll"] and state["UseCustomMainLoopSchedule"] == 1:
@@ -5810,6 +5814,11 @@ class Solution(collections.abc.Mapping):
           thresholdMFMA //= 2
         if numMFMA < thresholdMFMA:
           state["ScheduleGROverBarrier"] = 0
+    # Ahead of the PGR>=3 checks: a TDM state at level >= 3 that is not a supported ring is
+    # rejected there, so clearing ScheduleGROverBarrier on it here changes no kernel.
+    if tdmDeepRing(state):
+      # The TDM ring issues each fill right after the fence that protects its slot.
+      state["ScheduleGROverBarrier"] = 0
 
     # number of minimum GR inc inst per MFMA
     # default 1
@@ -6301,6 +6310,10 @@ class Solution(collections.abc.Mapping):
     state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
     state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
     _oneLdsBufAtEval = state["1LDSBuffer"]   # may still be -1 (auto) here; resolved to 0/1 below
+    if state["LDSSegmentInterleave"] == -1 and tdmDeepRing(state):
+      # Auto is off on the TDM LDS ring, as UseCustomMainLoopSchedule is; an explicit 1 is
+      # still rejected.
+      state["LDSSegmentInterleave"] = 0
     _segRes = segIntEval(state)
     _segApplicable = _segRes["applicable"]                   # resolved to LDSSegmentInterleave 0/1 below
     state["LDSSegInterleaveOffsets"] = _segRes["offsets"]    # consumed by emit sites when applied
@@ -6922,7 +6935,11 @@ class Solution(collections.abc.Mapping):
     #   reject(state, printRejectionReason, "ScheduleIterAlg 2 only work with EPS1_SGR1, LoopIter=1")
 
     # reject for PGR>=3
-    if state["PrefetchGlobalRead"] >= 3:
+    tdmRingReason = tdmRingRejectReason(state)
+    if tdmRingReason:
+      reject(state, printRejectionReason, tdmRingReason)
+      return
+    if state["PrefetchGlobalRead"] >= 3 and not tdmDeepRing(state):
       # DTLA + DTLB only
       if not(state["DirectToLdsA"] and state["DirectToLdsB"]):
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only DirectToLdsA and DirectToLdsB")

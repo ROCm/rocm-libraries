@@ -102,8 +102,9 @@ class _Writer:
             self.scheduleIterAlg = 0
             self.kernelName = "unit_test_kernel"
             self.overflowedResources = 0
-            # No fixture builds the three-buffer TDM path; the real method returns {}.
+            # No fixture builds the three-buffer TDM path or the TDM ring; the real method returns {}.
             self.kernel = {}
+            self.tdmDeepRing = False
 
     class _DebugConfig:
         printSolutionRejectionReason = False

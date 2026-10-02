@@ -236,6 +236,10 @@ globalParameters["KeepBuildTmp"] = False  # If true, do not remove artifacts in 
 
 # debug for assembly
 #globalParameters["SplitGSU"] = False  # Split GSU kernel into GSU1 and GSUM
+# Main-loop fence of the TDM LDS ring (PrefetchGlobalRead 3-4 on TDM): "auto" or "fused" is
+# one barrier that publishes the next tile and protects the refilled slot; "twoBarrier"
+# (experimental) protects, fills, then publishes. Not part of the kernel name.
+globalParameters["TDMRingFenceOverride"] = "auto"
 
 # Tensor printing controls:
 globalParameters["PrintTensorA"] = 0  # Print TensorA after initialization

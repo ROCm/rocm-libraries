@@ -535,8 +535,12 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["TDMPlusLdsBuf"]
     localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
+    if writer.states.tdmDeepRing and writer.states.tdmRingFence == "twoBarrier":
+        # The two-barrier ring fills between its protect and publish barriers.
+        tdmLoadIter = localWriteEndIter
 
-    if kernel["PrefetchGlobalRead"] == 2:
+    # The TDM ring (PGR 3-4) issues its fills like PGR2: after the fence of the slot they refill.
+    if kernel["PrefetchGlobalRead"] == 2 or writer.states.tdmDeepRing:
         # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads
         # are emitted at iter 0, they clobber vgprG2L* before the later local-write
         # iteration stores the previous prefetch to LDS. Place non-TDM reads in the

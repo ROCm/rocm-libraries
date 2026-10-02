@@ -113,6 +113,9 @@ def _call_nll_body(kernel):
     self.states.numReadsIterCoalescedMXSA = 1
     self.states.numReadsIterCoalescedMXSB = 1
     self.states.numReadsIterCoalescedMetadata = 1
+    # A MagicMock attribute is truthy; this is not a TDM ring kernel.
+    self.states.tdmDeepRing = False
+    self.states.tdmRingFence = "fused"
 
     # codes fields read after makeSchedule (unrollLoopHeader) and in the loop
     self.codes.unrollLoopHeader = Module("unrollLoopHeader")

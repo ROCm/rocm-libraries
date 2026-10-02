@@ -53,7 +53,7 @@ def _make_writer(loop_iters=8, num_iters_plr=1):
         gl2Prefetch=Module("gl2Prefetch"),
     )
     return SimpleNamespace(
-        states=SimpleNamespace(numItersPLR=num_iters_plr),
+        states=SimpleNamespace(numItersPLR=num_iters_plr, tdmDeepRing=False, tdmRingFence="fused"),
         codes=codes,
     )
 

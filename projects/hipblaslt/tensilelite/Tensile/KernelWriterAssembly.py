@@ -80,6 +80,7 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGat
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
+from .Components.TDMRing import tdmRingPrologueWait
 from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
@@ -18089,6 +18090,18 @@ class KernelWriterAssembly(KernelWriter):
           # add more comment for early exit
           comment += " (for early exit)"
         imod.add(self._wait(kernel, tensorParametersA, tensorParametersB, numWait, -1, -1, comment))
+      elif idxPgr == 1 and self.states.tdmDeepRing:
+        # Every early exit lands here with fewer stages in flight than the waits after it
+        # assume: skipPGR{PGR}_{PGR} waits for the oldest of PGR stages, and openLoop sends
+        # 2..PGR-1 tiles to NoGlobalLoadLoop_{PGR-2}.
+        imod.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1,
+                            "TDM ring: wait for all prefetch (for early exit)"))
+      elif self.states.tdmDeepRing:
+        # All PGR stages are in flight, or an early exit drained them: the barrier after
+        # this publishes tile 0, the oldest.
+        imod.add(self._wait(kernel, tensorParametersA, tensorParametersB,
+                            tdmRingPrologueWait(kernel), -1, -1,
+                            "TDM ring: wait for the oldest of %u stages" % PGR))
     return imod
 
   ########################################
@@ -19229,6 +19242,10 @@ class KernelWriterAssembly(KernelWriter):
        (kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and (not kernel["ProblemType"]["Sparse"] or kernel["DirectToLdsMetadata"]) and kernel["PrefetchGlobalRead"] >= 2):
       # DTVA and DTVB, or ((DTLA + DTLB) + PGR>=2) case, wait code for prefetch is unnecessary
       # (because wait is for local write code in PGR>=2 case)
+      return module
+    if self.states.tdmDeepRing:
+      # The TDM ring keeps stage 0 in flight while it issues the others and waits for it at
+      # skipPGR{PGR}_{PGR} (closePrefetchGlobalRead2orMore).
       return module
     count = 0
     if kernel["DirectToVgprA"]:
@@ -21555,9 +21572,12 @@ class KernelWriterAssembly(KernelWriter):
     #   recalcLocalReadAddressesAB() performs this switch by recomputing the local-read
     #   pointer to buffer 0; (e.g. ds_load_b128 covering 2 MI-K to ds_load_b64 per MI_K).
     #   (needResetLROffsets or isPersistent(kernel)) in KernelWriter, keeping write/read consistent.
+    #   The TDM ring's write slot after the drain depends on K, while the tail reads
+    #   restart at buffer 0, so the ring always resets.
     needLdsReset = (isPersistent(kernel) or
                     self.states.numReadsIterCoalescedA > 1 or
-                    self.states.numReadsIterCoalescedB > 1)
+                    self.states.numReadsIterCoalescedB > 1 or
+                    self.states.tdmDeepRing)
     if not kernel["1LDSBuffer"] and needLdsReset:
       mod.addComment("TDM tail: reset LDS write addr to buffer 0 (matches recalculated local-read ptr)")
       mod.add(self.tdmResetTailLdsBuffer(kernel, comp.getLdsAddrSgprName(descSgprName(0))))

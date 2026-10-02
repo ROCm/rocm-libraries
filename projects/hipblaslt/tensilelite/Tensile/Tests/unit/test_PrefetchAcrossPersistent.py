@@ -90,6 +90,7 @@ class _ClassicPapWriter:
             memTokenLdsBuffer1=1,
             numLDSBlk=2,
             staggerUCode=False,
+            tdmDeepRing=False,
             unrollIdx=0,
             use64bShadowLimit=use64b_shadow,
             use64bShadowLimitMX=use64b_shadow_mx,
@@ -177,6 +178,7 @@ class _SetupNewTilePapTdmWriter:
             memTokenLdsBuffer1=1,
             numLDSBlk=2,
             staggerUCode=False,
+            tdmDeepRing=False,
             unrollIdx=0,
             # Capability/kernel state consumed by ClusterLoadTDM.find()'s
             # PartialMatch (asmCaps HasTDM + kernel TDMInst==3), mirroring the

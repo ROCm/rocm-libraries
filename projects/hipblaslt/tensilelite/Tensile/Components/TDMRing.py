@@ -16,6 +16,8 @@ from .DecouplePGR import dcpLdsSide, decouplePGRBlocks, pgrLevelsForTensors
 from .TDMFuse import tdmGrouping, tdmMemberIsLive, tdmWavePartition, tdmWaveSeparated
 
 TDM_INFLIGHT_PER_WAVE_LIMIT = 11
+TDM_RING_STAGES = (3, 4)
+TDM_RING_FENCE_SHAPES = ("auto", "fused", "twoBarrier")
 
 
 def tdmDeepRing(ks):
@@ -27,9 +29,8 @@ def tdmDeepRing(ks):
 
 
 def _tdmIssueCopies(ks, tc):
-    """One TDM per tensor; TDMSplit halves a data tensor into two."""
-    pt = ks.get("ProblemType") or {}
-    if ks.get("TDMSplit") and "MXS" not in tc and not pt.get("Sparse"):
+    """One TDM per tensor; TDMSplit halves a data tensor, sparse or not, into two."""
+    if ks.get("TDMSplit") and "MXS" not in tc and tc != "Metadata":
         return (tc, tc)
     return (tc,)
 
@@ -126,3 +127,138 @@ def tdmInflightRejectReason(ks):
             "per-wave limit of %u (LDS blocks A=%u, B=%u; PrefetchGlobalRead=%u; NumWaves=%u)"
             % (bound, TDM_INFLIGHT_PER_WAVE_LIMIT, blocks["A"], blocks["B"],
                ks["PrefetchGlobalRead"], ks["NumWaves"]))
+
+
+def tdmRingIssuesPerStage(ks):
+    """TDMs every wave issues per ring stage, or None when wave roles issue different counts.
+
+    The ring's tensorcnt immediates are wave-uniform and count exactly this many per stage:
+    a count above what a wave issues would leave that wave's oldest stage unretired. The
+    ring takes MX on both sides or neither, where the per-wave count is exact.
+    """
+    counts = {len(issues) for issues in tdmWaveIssueMembers(ks)}
+    return counts.pop() if len(counts) == 1 else None
+
+
+def tdmRingFenceShape(override):
+    """Main-loop fence of a deep ring for the TDMRingFenceOverride global parameter.
+
+    "auto" and "fused" give the merged fence: one barrier publishes the next tile and
+    protects the slot refilled right after it. "twoBarrier" protects, fills, then publishes.
+    """
+    if override not in TDM_RING_FENCE_SHAPES:
+        raise ValueError("TDMRingFenceOverride must be one of %s, got %r"
+                         % (", ".join(TDM_RING_FENCE_SHAPES), override))
+    return "twoBarrier" if override == "twoBarrier" else "fused"
+
+
+def tdmRingPrologueWait(ks):
+    """tensorcnt each wave waits for before the prologue barrier publishes tile 0.
+
+    The prologue issues all S stages first, so only tile 0 must land. An early exit, with fewer
+    than S tiles, drains at skipPGR{S}_1 before it reaches this wait.
+    """
+    return (ks["PrefetchGlobalRead"] - 1) * tdmRingIssuesPerStage(ks)
+
+
+def tdmRingPublishWait(ks, fenceShape):
+    """tensorcnt each wave waits for before the main-loop publish barrier of body i.
+
+    Tiles i+1 .. i+S-1 are in flight at the merged fence, which fills tile i+S after its
+    barrier; the two-barrier variant has issued tile i+S as well. Only tile i+1 must land.
+    """
+    stages = ks["PrefetchGlobalRead"]
+    inFlight = stages - 1 if fenceShape == "fused" else stages
+    return (inFlight - 1) * tdmRingIssuesPerStage(ks)
+
+
+def tdmRingNoLoadWait(ks, remainPgr):
+    """tensorcnt before the publish barrier of the NGLL that has remainPgr stages in flight."""
+    return (remainPgr - 1) * tdmRingIssuesPerStage(ks)
+
+
+def _tdmRingItersPLR(ks):
+    """Sub-iterations the local-read prefetch runs ahead, as KernelWriter derives numItersPLR."""
+    loopIters = ks.get("LoopIters", 0)
+    inputPerThread = ks.get("MIInputPerThread", 0)
+    readWidth = ks.get("LocalReadVectorWidthA", 0)
+    if ks.get("EnableMatrixInstruction") and inputPerThread and readWidth >= inputPerThread:
+        loopIters //= max(readWidth // inputPerThread, 1)
+    return ks.get("PrefetchLocalRead", 0) % loopIters if loopIters else 0
+
+
+_TDM_RING_UNSUPPORTED_FLAGS = (
+    "StreamK", "PrefetchAcrossPersistent", "ReuseAcrossPersistent", "HalfPLR",
+    "SuppressNoLoadLoop", "UseSubtileImpl", "TDMSplit", "PrefetchGL2",
+    "UnrollLoopSwapGlobalReadOrder", "UseCustomMainLoopSchedule", "ForceUnrollSubIter",
+    "UsePLRPack", "ExpertSchedulingMode", "TDMPlusLdsBuf",
+)
+# Auto values Solution has not resolved yet when it checks the ring (in depthUIteration);
+# it resolves each of them off on a deep ring afterwards.
+_TDM_RING_AUTO_OFF = {"UseCustomMainLoopSchedule": -1}
+_TDM_RING_DIRECT_KEYS = (
+    "DirectToLdsA", "DirectToLdsB", "DirectToVgprA", "DirectToVgprB",
+    "DirectToLdsMXSA", "DirectToLdsMXSB", "DirectToVgprMXSA", "DirectToVgprMXSB",
+)
+
+
+def _tdmRingFlagOn(ks, key):
+    """True when `key` is on in `ks`; the auto value of a flag the ring resolves off is off."""
+    value = ks.get(key, 0)
+    if key in _TDM_RING_AUTO_OFF and value == _TDM_RING_AUTO_OFF[key]:
+        return False
+    return value not in (0, False)
+
+
+def tdmRingRejectReason(ks):
+    """Why the deep TDM ring does not support `ks` yet, or None.
+
+    Supported: the equal-depth ring at PrefetchGlobalRead 3-4 under ScheduleIterAlg 0, whose
+    fences and waits the writer emits itself, with TDM A and B on two or more waves,
+    TDMFuse 0 and MX on both sides or neither. None when `ks` is not a deep ring.
+    """
+    if not tdmDeepRing(ks):
+        return None
+    _, pgrA, pgrB = pgrLevelsForTensors(ks)
+    pt = ks.get("ProblemType") or {}
+    stages = ks["PrefetchGlobalRead"]
+
+    def unsupported():
+        if pgrA != pgrB:
+            yield "PrefetchGlobalReadA=%u with PrefetchGlobalReadB=%u" % (pgrA, pgrB)
+        if stages not in TDM_RING_STAGES:
+            yield "PrefetchGlobalRead=%u (the ring has 3 or 4 slots)" % stages
+        if any(ks.get(key) for key in _TDM_RING_DIRECT_KEYS):
+            yield "DirectToLds or DirectToVgpr"
+        if not tdmWaveSeparated(ks):
+            yield "NumWaves=%u (the ring needs wave-separated TDM)" % ks.get("NumWaves", 1)
+        if ks.get("_ScheduleIterAlg") != 0 or ks.get("_StinkyTofuOptLevel", 0) != 0:
+            yield ("ScheduleIterAlg=%s (only 0, where the writer emits the ring waits)"
+                   % ks.get("ScheduleIterAlg"))
+        if ks.get("PrefetchLocalRead", 0) < 1 or _tdmRingItersPLR(ks) == 0:
+            yield ("PrefetchLocalRead=%u with LoopIters=%u (the next tile is read after the "
+                   "fence, so the local-read prefetch must run ahead within the tile)"
+                   % (ks.get("PrefetchLocalRead", 0), ks.get("LoopIters", 0)))
+        if ks.get("1LDSBuffer") == 1:
+            yield "1LDSBuffer=1"
+        flags = [key for key in _TDM_RING_UNSUPPORTED_FLAGS if _tdmRingFlagOn(ks, key)]
+        if flags:
+            yield ", ".join(flags)
+        if any(dim != 1 for dim in (ks.get("ClusterDim") or [1, 1])):
+            yield "ClusterDim != [1, 1]"
+        if pt.get("Sparse"):
+            yield "Sparse"
+        # Solution resolves the auto -1 off on a ring before this check; only 1 is on.
+        if ks.get("LDSSegmentInterleave") == 1:
+            yield "LDSSegmentInterleave=1"
+        if ks.get("TDMFuse", 0) != 0:
+            yield "TDMFuse=%u (only 0)" % ks.get("TDMFuse", 0)
+        if bool(pt.get("MXBlockA")) != bool(pt.get("MXBlockB")):
+            yield "MX on one side only"
+        if tdmRingIssuesPerStage(ks) is None:
+            yield "wave roles issuing different TDM counts per stage"
+
+    what = next(unsupported(), None)
+    if what is None:
+        return None
+    return "TDM LDS ring (PrefetchGlobalRead=%u): %s is not supported yet" % (stages, what)
