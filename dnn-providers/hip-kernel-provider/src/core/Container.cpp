@@ -144,8 +144,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      }
                      catch(const std::exception& error)
                      {
-                         // The loader validates each set, but its probe and this construction
-                         // are different objects, so that's convention, not a guarantee.
+                         // The loader validates each set, but a later Container rebuilds its
+                         // state manager from the set, and the engine wrapping either can
+                         // still throw, so that's convention, not a guarantee.
                          // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name

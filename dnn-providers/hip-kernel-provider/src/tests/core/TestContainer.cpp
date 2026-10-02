@@ -173,6 +173,35 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
     }
 }
 
+TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngine)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    const auto expectEveryIngestorEngine = [&sets](Container& container, const char* which) {
+        const auto engineIds = container.getEngineManager().getAllEngineIds();
+        for(const auto& set : sets)
+        {
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+                << which << " Container has no engine for descriptor set '" << set.engine.name
+                << "'";
+        }
+    };
+
+    // Only the process's first Container takes the state managers discovery built, so
+    // these two are on the rebuild path whatever ran before.
+    {
+        const Container earlier;
+    }
+    Container afterDestroyed;
+    expectEveryIngestorEngine(afterDestroyed, "the after-destroyed");
+    Container whileAlive;
+    expectEveryIngestorEngine(whileAlive, "the while-alive");
+}
+
 TEST(TestContainer, GetEngineNameReturnsTheDeclaredNameForEveryIngestorEngine)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;

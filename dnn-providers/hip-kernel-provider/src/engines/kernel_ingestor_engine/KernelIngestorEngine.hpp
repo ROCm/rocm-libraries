@@ -48,7 +48,9 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
 /// discoverDescriptorSets(), or null once taken. One-shot: the first engine constructed for
 /// that set takes it, and any later one -- a Container created after an earlier one was
 /// destroyed -- builds its own from the set, so no state manager is shared between two
-/// engines.
+/// engines. A state manager no engine takes stays alive until the provider unloads, beside
+/// the retained set it was built from: a process that enumerates engines but never
+/// constructs a Container keeps one extra state manager per set.
 std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
     takeDiscoveredStateManager(size_t index);
 
