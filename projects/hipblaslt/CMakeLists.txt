@@ -69,6 +69,10 @@ option(HIPBLASLT_ENABLE_JIT "Build direct TensileLite and generic JIT GEMM suppo
 if(HIPBLASLT_ENABLE_JIT AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_JIT requires the host library")
 endif()
+option(HIPBLASLT_JIT_ENABLE_HIPKITTENS "Build the JIT HipKittens backend (developer builds)." OFF)
+if(HIPBLASLT_JIT_ENABLE_HIPKITTENS AND NOT HIPBLASLT_ENABLE_JIT)
+    message(FATAL_ERROR "HIPBLASLT_JIT_ENABLE_HIPKITTENS requires HIPBLASLT_ENABLE_JIT")
+endif()
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
 

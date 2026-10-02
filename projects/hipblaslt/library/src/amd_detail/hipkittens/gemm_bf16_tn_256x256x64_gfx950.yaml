@@ -1,0 +1,55 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# One HipKittens GEMM variant of the JIT HipKittens backend. make_entries.py
+# turns Solution into the one-solution library entry that the backend copies
+# for each request; the backend compiles Template with HipFlags.
+Template: gemm_bf16_tn_256x256x64_gfx950.hip
+Architecture: gfx950
+HipFlags: [-std=c++20, -DKITTENS_CDNA4, -w]
+# What the built kernel uses; hipblaslt-jit-hipkittens-test checks it.
+Resources:
+  KernargBytes: 36
+  LdsBytes: 160000
+  Vgprs: 242
+  VgprSpills: 0
+Solution:
+  ProblemType:
+    OperationType: GEMM
+    DataType: b
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: True
+    TransposeB: False
+    UseBeta: False
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+  CustomKernel:
+    name: HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1
+    args: [ { type: address, semantic: AddressA },
+            { type: address, semantic: AddressB },
+            { type: address, semantic: AddressD },
+            { type: uint32, semantic: SizeFree0 },
+            { type: uint32, semantic: SizeFree1 },
+            { type: uint32, semantic: SizeSum } ]
+    macrotile: [256, 256, 64]
+    threads: [512, 1, 1]
+    grid: [TilesXY, One, One]
+    workspaceType: None
+  InternalSupportParams:
+    KernArgsVersion: 0
+  MatrixInstruction: [16, 16, 32, 1]
+  EnableMatrixInstruction: True
+  MIWaveTile: [8, 4]
+  WavefrontSize: 64
+  GlobalSplitU: 1
+  StaggerU: 0
+  # Odd numbers of 64-wide K tiles give wrong results, and the kernel has no
+  # tail handling for M or N.
+  AssertFree0ElementMultiple: 256
+  AssertFree1ElementMultiple: 256
+  AssertSummationElementMultiple: 128
+  BatchSizeEqual: 1

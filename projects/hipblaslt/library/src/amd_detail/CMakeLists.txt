@@ -45,6 +45,9 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-report.cpp")
+    if(HIPBLASLT_JIT_ENABLE_HIPKITTENS)
+        include(hipblaslt_hipkittens)
+    endif()
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)
@@ -184,6 +187,21 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
             hip::device Threads::Threads)
         target_compile_features(hipblaslt-jit-library-test PRIVATE cxx_std_17)
         set_target_properties(hipblaslt-jit-library-test PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+    endif()
+
+    # "host" needs no gfx950 device; "gpu" and "library" run the kernels on one.
+    if(HIPBLASLT_JIT_HIPKITTENS)
+        add_executable(hipblaslt-jit-hipkittens-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/hipkittens_backend_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp")
+        target_include_directories(hipblaslt-jit-hipkittens-test PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
+        target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE
+            roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+        target_compile_features(hipblaslt-jit-hipkittens-test PRIVATE cxx_std_17)
+        set_target_properties(hipblaslt-jit-hipkittens-test PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
     endif()
 endif()
