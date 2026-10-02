@@ -15,7 +15,7 @@ GlobalParameters:
   CEqualD: false
   DataInitValueActivationArgs: [0.0, 0.0]
   Architecture: gfx1250
-  NumElementsToValidate: 10000
+  NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: false
   CpuThreads: 32
@@ -60,22 +60,41 @@ BenchmarkProblems:
     - DirectToVgprB: [false]
     - ExpandPointerSwap: [false]
     - GlobalSplitU: [0]
-    - GlobalSplitUAlgorithm: [MultipleBuffer]
-    - HalfPLR: [0, 2]
     - InitCIterWmma: [1]
     - LdsBlockSizePerPadA: [1024]
     - LdsBlockSizePerPadB: [1024]
     - LdsPadA: [8]
     - LdsPadB: [8]
     - MaxOccupancy: [40]
-    - PrefetchAcrossPersistent: [0, 1]
     - PrefetchGlobalRead: [2]
     - PrefetchLocalRead: [1]
     - ScheduleIterAlg: [4]
     - SourceSwap: [false]
     - StoreRemapVectorWidth: [0]
     - StoreVectorWidth: [8]
-    - TileProcessingStrategy: [DataParallel]
+    # HalfPLR + PAP is supported only by DataParallel.
+    - Groups:
+      - - TileProcessingStrategy: DataParallel
+          PrefetchAcrossPersistent: 0
+          HalfPLR: 0
+        - TileProcessingStrategy: DataParallel
+          PrefetchAcrossPersistent: 0
+          HalfPLR: 2
+        - TileProcessingStrategy: DataParallel
+          PrefetchAcrossPersistent: 1
+          HalfPLR: 0
+        - TileProcessingStrategy: DataParallel
+          PrefetchAcrossPersistent: 1
+          HalfPLR: 2
+        - TileProcessingStrategy: StreamK
+          PrefetchAcrossPersistent: 0
+          HalfPLR: 0
+        - TileProcessingStrategy: StreamK
+          PrefetchAcrossPersistent: 0
+          HalfPLR: 2
+        - TileProcessingStrategy: StreamK
+          PrefetchAcrossPersistent: 1
+          HalfPLR: 0
     - WorkAssignment: [StaticGrid]
     - SuppressNoLoadLoop: [false]
     - TDMInst: [3]
