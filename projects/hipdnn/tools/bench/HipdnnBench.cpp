@@ -586,9 +586,14 @@ nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
 ///
 /// Results keep their zero fill so a kernel that writes nothing is detectable. Types this
 /// build cannot encode exactly also keep zeros rather than risk filling NaNs.
+///
+/// @p fills keeps each input's image (a function of seed, uid and size) across one problem's
+/// candidates, uploaded afresh into each candidate's buffers, so a kernel that scribbles on an
+/// input cannot pass its damage on.
 hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan,
                                        const std::unordered_map<int64_t, void*>& variantPack,
-                                       uint64_t seed)
+                                       uint64_t seed,
+                                       std::map<int64_t, std::vector<uint8_t>>& fills)
 {
     for(const auto& tensor : plan.tensors)
     {
@@ -597,8 +602,19 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
         {
             continue; // A result, or something not in the pack at all.
         }
-        const auto image = hipdnn_bench::detail::inputFillImage(
-            tensor.dataType, static_cast<size_t>(tensor.bytes), seed, tensor.uid);
+        const auto bytes = static_cast<size_t>(tensor.bytes);
+        auto cached = fills.find(tensor.uid);
+        // Empty is the declined-type answer and is reused as such; a size that moved between
+        // candidates is not the same image, so it is generated again rather than reused.
+        if(cached == fills.end() || (!cached->second.empty() && cached->second.size() != bytes))
+        {
+            cached = fills
+                         .insert_or_assign(tensor.uid,
+                                           hipdnn_bench::detail::inputFillImage(
+                                               tensor.dataType, bytes, seed, tensor.uid))
+                         .first;
+        }
+        const auto& image = cached->second;
         if(image.empty())
         {
             continue;
@@ -628,7 +644,8 @@ hipdnn_frontend::Error
                            int64_t engineId,
                            const std::vector<KnobSetting>& settings,
                            std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
-                           std::map<int64_t, std::vector<uint8_t>>& images)
+                           std::map<int64_t, std::vector<uint8_t>>& images,
+                           std::map<int64_t, std::vector<uint8_t>>& fills)
 {
     BenchGraph graph;
     HIPDNN_CHECK_ERROR(
@@ -642,7 +659,7 @@ hipdnn_frontend::Error
     std::unordered_map<int64_t, void*> variantPack;
     HIPDNN_CHECK_ERROR(allocateVariantPack(plan, buffers, variantPack));
     HIPDNN_CHECK_ERROR(
-        fillGraphInputs(plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
+        fillGraphInputs(plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes), fills));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.addDevice(workspaceSize) : nullptr;
@@ -1134,6 +1151,7 @@ int runBench(const std::vector<std::string>& args)
     // to the cross-check, which keeps one image per distinct answer, not per candidate.
     std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
     hipdnn_bench::CatalogCrossCheck crossCheck(tensors);
+    std::map<int64_t, std::vector<uint8_t>> fills; // One input image per uid, every candidate.
     for(const auto& result : results)
     {
         hipdnn_bench::CandidateOutput captured;
@@ -1149,7 +1167,8 @@ int runBench(const std::vector<std::string>& args)
                                                     options.engineId,
                                                     result.knobSettings,
                                                     tensors,
-                                                    captured.images);
+                                                    captured.images,
+                                                    fills);
             captured.executed = ran.is_good();
             if(!ran.is_good())
             {
