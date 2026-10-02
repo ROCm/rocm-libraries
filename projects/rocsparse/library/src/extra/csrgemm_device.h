@@ -70,7 +70,7 @@ namespace rocsparse
     }
 
     // Compute number of intermediate products of each row
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool GRID_STRIDE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_intermediate_products(J m,
                                        const I* __restrict__ csr_row_ptr_A,
@@ -88,12 +88,10 @@ namespace rocsparse
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
 
-        // (Sub)wavefront id within the block
-        int wid = hipThreadIdx_x / WFSIZE;
-
         // Each (sub)wavefront processes a row, grid-strided so a grid clamped by
-        // get_grid_size_x still covers every row
-        for(int64_t row = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; row < m;
+        // get_grid_size_x still covers every row. The first row fits in 32 bits because
+        // the dispatch caps grid.x * BLOCKSIZE below 2^32.
+        for(int64_t row = (hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x) / WFSIZE; row < m;
             row += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
             // Initialize intermediate product counter of current row
@@ -131,6 +129,11 @@ namespace rocsparse
 
                 // Write number of intermediate products of the current row
                 int_prod[row] = nprod;
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }
@@ -456,6 +459,7 @@ namespace rocsparse
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
+              bool     GRID_STRIDE,
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
@@ -492,8 +496,9 @@ namespace rocsparse
         J* table = &stable[wid * HASHSIZE];
 
         // Grid-stride over the (sub)wavefront rows so a grid clamped by get_grid_size_x
-        // covers all rows
-        for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; idx < m;
+        // covers all rows. The first row fits in 32 bits because the dispatch caps
+        // grid.x * BLOCKSIZE below 2^32.
+        for(int64_t idx = (hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x) / WFSIZE; idx < m;
             idx += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
             // Initialize hash table
@@ -560,6 +565,11 @@ namespace rocsparse
             {
                 row_nnz[row] = nnz;
             }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
@@ -568,6 +578,7 @@ namespace rocsparse
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
+              bool     GRID_STRIDE,
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
@@ -687,8 +698,15 @@ namespace rocsparse
                 row_nnz[row] = nnz;
             }
 
-            // Wait for all threads before reusing the shared hash table for the next row
-            __syncthreads();
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above
+                __syncthreads();
+            }
+            else
+            {
+                break;
+            }
         }
     }
 
@@ -696,7 +714,12 @@ namespace rocsparse
     // Splitting row into several chunks such that we can use shared memory to store whether
     // a column index is populated or not.
     // Each row has at least 8193 intermediate products to compute.
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t CHUNKSIZE, typename I, typename J>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WFSIZE,
+              uint32_t CHUNKSIZE,
+              bool     GRID_STRIDE,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_nnz_block_per_row_multipass(J size,
                                              J n,
@@ -905,8 +928,10 @@ namespace rocsparse
                 row_nnz[row] = nnz;
             }
 
-            // Barrier before the next grid-stride row reuses the shared row nnz state
-            __syncthreads();
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
