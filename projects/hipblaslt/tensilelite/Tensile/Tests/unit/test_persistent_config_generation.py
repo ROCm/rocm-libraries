@@ -36,6 +36,23 @@ def _derive(tmp_path, name, config):
     return solutions_from_config(path, arch="gfx942")
 
 
+@pytest.mark.parametrize("xcc", [3, 8])
+def test_hybrid_kernel_selects_mapping_grid_before_extracting_mode(tmp_path, xcc):
+    config = _config({"TileProcessingStrategy": ["StreamK"], "WorkAssignment": ["Hybrid"],
+                      "PersistentXCCMapping": [xcc]})
+    path = tmp_path / "hybrid_mapping.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    results = emit_kernels_from_config(path, arch="gfx942")
+    assert results
+    for name, source, error in results:
+        assert error == 0, name
+        selection = source.index("Hybrid launch grid for the active mode")
+        assert selection < source.index("SK5: shift mode bit (bit 30) down")
+        select_line = source[:selection].splitlines()[-1]
+        assert "s_cselect_b32" in select_line
+        assert "s[sgprSKGrid], s[sgprskGrid]" in select_line
+
+
 @pytest.mark.parametrize("strategy,assignment,mode,force,fragment", (
     ("None", "StaticGrid", 0, 0, "TPSN"),
     ("DataParallel", "StaticGrid", 3, 1, "TPSDP"),

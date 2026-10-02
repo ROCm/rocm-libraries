@@ -896,6 +896,11 @@ validParameters = { # we need to make sure this matches develop
     # Persistent tile processing and work assignment are independent selectors.
     # None disables persistence and ignores assignment. DataParallel supports StaticGrid;
     # StreamK supports StaticGrid, DynamicWorkQueue and Hybrid.
+    # Shared host grid controls retain their numeric behavior. New environment
+    # spellings win when both old and new names are explicitly set:
+    # TENSILE_PERSISTENT_FIXED_GRID, TENSILE_PERSISTENT_DYNAMIC_GRID,
+    # TENSILE_PERSISTENT_MAX_CUS, TENSILE_PERSISTENT_GRID_MULTIPLIER,
+    # TENSILE_PERSISTENT_DYNAMIC_WGM (legacy TENSILE_STREAMK_* aliases).
     # Grid-policy selection is independent of device work-queue assignment.
     "TileProcessingStrategy": ["None", "DataParallel", "StreamK"],
     "WorkAssignment": ["StaticGrid", "DynamicWorkQueue", "Hybrid"],
@@ -1182,6 +1187,9 @@ validParameters = { # we need to make sure this matches develop
     # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
+    # Also supported for Sparse (2:4 structured sparsity): the sparse-tracked operand's
+    # LDS footprint holds the compressed (K/2) data, which the split boundary accounts for;
+    # the metadata tensor itself is never split.
     "TDMSplit": [False, True],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any
