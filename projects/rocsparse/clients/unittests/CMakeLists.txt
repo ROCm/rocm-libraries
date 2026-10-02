@@ -148,6 +148,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_readfirstlane.cpp
   # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid.cpp
+  # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid_dispatch.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
