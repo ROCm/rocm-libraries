@@ -36,6 +36,8 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_*, rocke_mmaop_* */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type               */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, ...  */
+#include "rocke/instance_gemm_internal.h" /* rocke_gemm_tdm_*, dtype_bytes */
+#include "rocke/tdm.h" /* rocke_tdm_encode_padding                         */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
@@ -196,6 +198,8 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.dtl_cache_a = 0; /* CACHE_ALL    */
     s.trait.dtl_cache_b = 2; /* CACHE_STREAM */
     s.trait.dtl_prefetch = false;
+    s.trait.tdm = false;
+    s.trait.tdm_depth = 1; /* default 1 (unpipelined; meaningful only with tdm) */
     s.trait.active_tile_skip = false;
     s.trait.lds_k_pad = 0;
     s.trait.lds_swizzle = false;
@@ -423,20 +427,30 @@ static const rocke_type_t*
                                          t->warp_tile_k);
 }
 
-/* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */
+/* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools.
+ *
+ * The row stride carries lds_k_pad wherever the emitter applies it: always on
+ * the VGPR-staged path, and on direct-to-LDS only for gfx1250's per-lane async
+ * instruction. The gfx9 buffer_load_lds family stays unpadded. */
 static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
                                 const rocke_archtarget_t* target,
+                                const char* arch,
                                 int* out_ab_single,
                                 bool* out_db,
                                 bool* out_two_buf)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
+    int lds_pad;
+    int lds_k;
     int ab_single;
     long lds_cap;
     bool db_fits_2wg;
     bool db;
 
-    ab_single = ((t->tile_m * t->tile_k) + (t->tile_n * t->tile_k)) * 2;
+    lds_pad = (spec->trait.direct_to_lds && strcmp(arch, "gfx1250") != 0) ? 0
+                                                                           : spec->trait.lds_k_pad;
+    lds_k = t->tile_k + lds_pad;
+    ab_single = ((t->tile_m * lds_k) + (t->tile_n * lds_k)) * 2;
     lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
     db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
     db = (strcmp(spec->trait.pipeline, "compv4") == 0)
@@ -453,8 +467,22 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
     if(out_two_buf != NULL)
     {
-        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                       || rocke_gemm_tdm_pipelined(&spec->trait);
     }
+}
+
+/* _ab_lds_buffers(spec, arch): how many A/B LDS buffers the emitter allocates.
+ * Shared with rocke_build_universal_gemm's ring-size choice so the gate charges
+ * exactly what the emitter spends. */
+static int ck_gemm_ab_lds_buffers(bool two_buf, const rocke_gemm_universal_spec_t* spec)
+{
+    int ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    if(ring)
+    {
+        return ring;
+    }
+    return two_buf ? 2 : 1;
 }
 
 /* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). MFMA-only
@@ -586,6 +614,15 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "spec wave_size %d != %s wave_size %d", spec->wave_size, arch, target->wave_size);
     }
 
+    /* TDM emits tensor_load_to_lds / s_wait_tensorcnt, which exist only on
+     * targets with the mover. Gated ahead of the per-family checks so an MFMA
+     * target cannot admit the knob and hand the lowerer an opcode it has no
+     * instruction for. */
+    if(spec->trait.tdm && !target->memory.has_tdm)
+    {
+        CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
+    }
+
     /* WMMA coverage is narrower than CDNA's MFMA matrix. */
     if(strcmp(family, "wmma") == 0)
     {
@@ -658,6 +695,54 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
              * is per-lane addressed, so a padded LDS row stride costs nothing.
              * (lds_swizzle is rejected for the whole family above.) */
         }
+        if(spec->trait.tdm)
+        {
+            int elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
+            int row_bytes = t->tile_k * elem_bytes;
+            if(spec->trait.direct_to_lds)
+            {
+                CK_GEMM_REJECT("tdm and direct_to_lds are alternative load paths");
+            }
+            /* pad_m/pad_n/pad_k are not consulted: OOB is handled by clipping
+             * the descriptor's tensor extents. pad_interval is a 3-bit log2 of
+             * a dword count, so one tile row must be a power-of-two dword count
+             * in [2, 256]. */
+            if(spec->trait.lds_k_pad)
+            {
+                char why[256];
+                int pad_interval = 0;
+                int pad_amount = 0;
+                why[0] = '\0';
+                if(rocke_tdm_encode_padding(row_bytes,
+                                            (int64_t)spec->trait.lds_k_pad * elem_bytes,
+                                            &pad_interval,
+                                            &pad_amount,
+                                            why,
+                                            sizeof(why))
+                   != ROCKE_OK)
+                {
+                    CK_GEMM_REJECT("tdm cannot encode lds_k_pad: %s", why);
+                }
+            }
+            else if((row_bytes % 4) != 0 || row_bytes < 8)
+            {
+                CK_GEMM_REJECT("tdm needs a dword-multiple tile row (got %dB)", row_bytes);
+            }
+            /* Depth counts LDS buffers: 1 is unpipelined, 2 ping-pongs, and 3+
+             * take the modular ring. Each stage costs another A/B region, which
+             * the LDS budget below charges, so a ring too deep for the tile is
+             * rejected there rather than here. */
+            if(spec->trait.tdm_depth < 1 || spec->trait.tdm_depth > ROCKE_GEMM_TDM_MAX_DEPTH)
+            {
+                CK_GEMM_REJECT("tdm_depth must be in 1..%d (got %d)",
+                               ROCKE_GEMM_TDM_MAX_DEPTH,
+                               spec->trait.tdm_depth);
+            }
+        }
+    }
+    if(spec->trait.tdm_depth != 1 && !spec->trait.tdm)
+    {
+        CK_GEMM_REJECT("tdm_depth is only meaningful with tdm=True");
     }
 
     /* Geometry divisibility. */
@@ -694,8 +779,8 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * persistent is additive too: the grid-stride tile loop encloses both the
      * K-loop and the epilogue, and the packer treats every allocation used
      * inside one scf.for as live for the whole loop, so A/B and C interfere. */
-    ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
-    ab_bytes = ab_single * (ab_dbl ? 2 : 1);
+    ck_gemm_ab_lds_plan(spec, target, arch, &ab_single, NULL, &ab_dbl);
+    ab_bytes = ab_single * ck_gemm_ab_lds_buffers(ab_dbl, spec);
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
     if(c_bytes != 0 && !(spec->trait.cshuffle_no_alias || spec->trait.persistent))
     {

@@ -38,6 +38,50 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/tdm.h" /* rocke_tdm_build_descriptor_2d */
+
+/* _ELEM_BYTES / _dtype_bytes. */
+int rocke_gemm_dtype_bytes(const char* dtype)
+{
+    static const struct
+    {
+        const char* name;
+        int bytes;
+    } k_elem_bytes[] = {{"f16", 2},
+                        {"fp16", 2},
+                        {"bf16", 2},
+                        {"fp8", 1},
+                        {"bf8", 1},
+                        {"f32", 4},
+                        {"fp32", 4}};
+    if(dtype == NULL)
+    {
+        return 0;
+    }
+    for(size_t i = 0; i < sizeof(k_elem_bytes) / sizeof(k_elem_bytes[0]); ++i)
+    {
+        if(strcmp(dtype, k_elem_bytes[i].name) == 0)
+        {
+            return k_elem_bytes[i].bytes;
+        }
+    }
+    return 0;
+}
+
+/* _tdm_pipelined: depth 1 is the unpipelined issue/wait/compute form; depth 2+
+ * overlaps the next tile's transfer with the current tile's WMMAs. */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait)
+{
+    return trait->tdm && trait->tdm_depth >= 2;
+}
+
+/* _tdm_ring_depth: only depth >= 3 needs a runtime ring index, because only
+ * there is the write slot neither the slot being read nor the single other half
+ * of a ping-pong. */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait)
+{
+    return (trait->tdm && trait->tdm_depth >= 3) ? trait->tdm_depth : 0;
+}
 
 /* The driver populates the param + environment fields then calls this; declared
  * here (not in the shared header, to keep that surface frozen) and referenced by
@@ -383,6 +427,42 @@ rocke_value_t*
         rocke_b_shl(b, rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod), ctx->c_swl));
 }
 
+/* _issue: one TDM descriptor moving a [rows, block_k] tile of `ptr` whose
+ * first row is `row_off` into LDS at `lds_base`. */
+static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* row_off,
+                                 int rows,
+                                 rocke_value_t* lds_base,
+                                 rocke_value_t* batch_off,
+                                 rocke_value_t* k_off,
+                                 rocke_value_t* k_remaining)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* origin
+        = rocke_b_add(b, batch_off, rocke_b_add(b, rocke_b_mul(b, row_off, ctx->K), k_off));
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+    memset(&args, 0, sizeof(args));
+    args.global_addr = rocke_b_global_addr_of(b, ptr, origin);
+    args.lds_addr = lds_base;
+    args.elem_bytes = ctx->tdm_elem_bytes;
+    args.tensor_dim0 = k_remaining;
+    args.tensor_dim1 = rocke_b_const_i32(b, rows);
+    args.tile_dim0 = ctx->block_k;
+    args.tile_dim1 = rows;
+    args.dim0_stride_value = ctx->K;
+    args.dim1_stride = 1;
+    args.pad_enable = ctx->tdm_pad_enable;
+    args.pad_interval = ctx->tdm_pad_interval;
+    args.pad_amount = ctx->tdm_pad_amount;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    {
+        return;
+    }
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+}
+
 /* ===================================================================== *
  *  emit_load_phase -- one K-tile's coalesced global->LDS copy.
  *
@@ -403,6 +483,101 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     const rocke_type_t* I64 = rocke_i64();
     (void)A_dst; /* Python emit_load_phase's A_dst/B_dst args are unused in body. */
     (void)B_dst;
+
+    /* ----------------------- TDM path ----------------------- *
+     * One descriptor per operand. The tile origin rides in the global address;
+     * the tensor extents are what remains of the tensor from that origin,
+     * clamped at zero so the mover clips a partial tile instead of running off
+     * the end. */
+    if(spec->trait.tdm)
+    {
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* a_lds;
+        rocke_value_t* b_lds;
+        rocke_value_t* k_remaining;
+        if(parity_v != NULL)
+        {
+            a_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_a_lds_base,
+                rocke_b_zext(
+                    b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_a_buf_bytes)), I64));
+            b_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_b_lds_base,
+                rocke_b_zext(
+                    b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_b_buf_bytes)), I64));
+        }
+        else if(parity_imm)
+        {
+            a_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_a_lds_base,
+                rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_a_buf_bytes), I64));
+            b_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_b_lds_base,
+                rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_b_buf_bytes), I64));
+        }
+        else
+        {
+            a_lds = ctx->tdm_a_lds_base;
+            b_lds = ctx->tdm_b_lds_base;
+        }
+
+        k_remaining = rocke_b_smax(b, rocke_b_sub(b, ctx->K, k_off), zero);
+
+        /* tensor_load_to_lds is a wave-level instruction that moves the whole
+         * tile, so letting every wave issue it copies the tile once per wave.
+         * One wave owns each operand; the rest reach the LDS contents through
+         * the barrier in the drain. */
+        if(ctx->tdm_waves > 1)
+        {
+            rocke_if_t a_gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, zero));
+            rocke_b_region_enter(b, a_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+            rocke_if_t b_gate
+                = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, rocke_b_const_i32(b, 1)));
+            rocke_b_region_enter(b, b_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+        }
+        else
+        {
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+        }
+        return;
+    }
 
     /* ----------------------- DirectToLDS path ----------------------- */
     if(spec->trait.direct_to_lds)

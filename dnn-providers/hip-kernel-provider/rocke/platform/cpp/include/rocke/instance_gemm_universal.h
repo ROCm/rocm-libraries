@@ -54,6 +54,11 @@ extern "C" {
 #define ROCKE_GEMM_DTL_DWORDS_PER_LANE 4
 #define ROCKE_GEMM_DTL_ELEMS_PER_LANE (ROCKE_GEMM_DTL_DWORDS_PER_LANE * 2)
 
+/* The deepest TDM ring the K-loop will emit (Python _TDM_MAX_DEPTH). Not a
+ * hardware bound -- s_wait_tensorcnt takes a u16 count -- but every stage costs
+ * a whole extra A/B LDS region. */
+#define ROCKE_GEMM_TDM_MAX_DEPTH 4
+
 /* ------------------------------------------------------------------ TileSpec *
  *
  * Mirror of Python TileSpec. The three computed @property values
@@ -108,6 +113,15 @@ typedef struct rocke_gemm_trait_spec
     int dtl_cache_a; /* default 0 (CACHE_ALL)    */
     int dtl_cache_b; /* default 2 (CACHE_STREAM) */
     bool dtl_prefetch;
+    /* TDM (Tensor Data Mover): the third global->LDS mechanism, beside the
+     * VGPR-staged path and direct_to_lds. One wave-uniform descriptor per
+     * operand per K-tile; completion rides TENSORcnt. gfx1250 only, and
+     * mutually exclusive with direct_to_lds. */
+    bool tdm;
+    /* Size of the TDM LDS ring, counted in buffers: 1 is unpipelined, 2
+     * ping-pongs, 3..ROCKE_GEMM_TDM_MAX_DEPTH keep depth-2 further fills in
+     * flight across the per-tile wait. Only meaningful when tdm is set. */
+    int tdm_depth; /* default 1 */
     bool active_tile_skip;
     int lds_k_pad; /* default 0 */
     bool lds_swizzle;

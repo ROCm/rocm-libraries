@@ -271,6 +271,8 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "dtl_cache_a",
                               "dtl_cache_b",
                               "dtl_prefetch",
+                              "tdm",
+                              "tdm_depth",
                               "active_tile_skip",
                               "lds_k_pad",
                               "lds_swizzle"};
@@ -309,6 +311,8 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         spec->trait.dtl_cache_a = dict_int(tr, "dtl_cache_a", spec->trait.dtl_cache_a);
         spec->trait.dtl_cache_b = dict_int(tr, "dtl_cache_b", spec->trait.dtl_cache_b);
         spec->trait.dtl_prefetch = dict_bool(tr, "dtl_prefetch", spec->trait.dtl_prefetch);
+        spec->trait.tdm = dict_bool(tr, "tdm", spec->trait.tdm);
+        spec->trait.tdm_depth = dict_int(tr, "tdm_depth", spec->trait.tdm_depth);
         spec->trait.active_tile_skip
             = dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
         spec->trait.lds_k_pad = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
@@ -427,6 +431,8 @@ SpecHolder build_spec(const py::dict& root)
                               "dtl_cache_a",
                               "dtl_cache_b",
                               "dtl_prefetch",
+                              "tdm",
+                              "tdm_depth",
                               "active_tile_skip",
                               "lds_k_pad",
                               "lds_swizzle"};
@@ -466,6 +472,8 @@ SpecHolder build_spec(const py::dict& root)
         h.spec.trait.dtl_cache_a = dict_int(tr, "dtl_cache_a", h.spec.trait.dtl_cache_a);
         h.spec.trait.dtl_cache_b = dict_int(tr, "dtl_cache_b", h.spec.trait.dtl_cache_b);
         h.spec.trait.dtl_prefetch = dict_bool(tr, "dtl_prefetch", h.spec.trait.dtl_prefetch);
+        h.spec.trait.tdm = dict_bool(tr, "tdm", h.spec.trait.tdm);
+        h.spec.trait.tdm_depth = dict_int(tr, "tdm_depth", h.spec.trait.tdm_depth);
         h.spec.trait.active_tile_skip
             = dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
         h.spec.trait.lds_k_pad = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);

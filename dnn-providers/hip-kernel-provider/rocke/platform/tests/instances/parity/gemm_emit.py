@@ -355,14 +355,75 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=256,
             batched=False,
         )
+    if idx in _TDM_CONFIGS:
+        # gfx1250 TDM load path, one config per K-loop shape: depth 1 is the
+        # single-buffer loop, depth 2 the ping-pong, depth 3/4 the modular
+        # ring. Multi-wave configs gate each operand's descriptor to one wave;
+        # the single-wave config issues both unconditionally and waits on two
+        # descriptors per tile.
+        name, depth, epilogue, pad, single_wave = _TDM_CONFIGS[idx]
+        tile = (
+            TileSpec(
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=1,
+                warp_n=1,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            )
+            if single_wave
+            else TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            )
+        )
+        return (
+            UniversalGemmSpec(
+                name=name,
+                tile=tile,
+                trait=TraitSpec(
+                    pipeline="mem",
+                    epilogue=epilogue,
+                    tdm=True,
+                    tdm_depth=depth,
+                    lds_k_pad=pad,
+                ),
+                data=DataSpec(
+                    dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+                ),
+                wave_size=32,
+                block_size=32 if single_wave else 128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
+
+
+# idx -> (name, tdm_depth, epilogue, lds_k_pad, single_wave)
+_TDM_CONFIGS = {
+    14: ("test_tdm_d1", 1, "default", 8, False),
+    15: ("test_tdm_d2_cshuffle", 2, "cshuffle", 8, False),
+    16: ("test_tdm_d3_ring", 3, "default", 8, False),
+    17: ("test_tdm_d4_ring_1wave", 4, "default", 0, True),
+}
 
 
 def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..13>\n",
+        usage="usage: gemm_emit.py <config_index 0..17>\n",
     )
 
 

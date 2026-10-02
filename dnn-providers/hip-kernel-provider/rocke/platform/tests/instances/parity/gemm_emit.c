@@ -306,6 +306,55 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 14: /* gfx1250 TDM depth 1: single-buffer loop, per-wave operand gate */
+    case 15: /* gfx1250 TDM depth 2: ping-pong, cshuffle epilogue */
+    case 16: /* gfx1250 TDM depth 3: modular ring */
+    case 17: /* gfx1250 TDM depth 4: modular ring, single wave, unpadded */
+    {
+        static const char* const names[] = {
+            "test_tdm_d1", "test_tdm_d2_cshuffle", "test_tdm_d3_ring", "test_tdm_d4_ring_1wave"};
+        static const int depths[] = {1, 2, 3, 4};
+        const int i = idx - 14;
+        const bool single_wave = (idx == 17);
+        spec->name = names[i];
+        if(single_wave)
+        {
+            spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 64,
+                                                  .tile_n = 64,
+                                                  .tile_k = 64,
+                                                  .warp_m = 1,
+                                                  .warp_n = 1,
+                                                  .warp_k = 1,
+                                                  .warp_tile_m = 16,
+                                                  .warp_tile_n = 16,
+                                                  .warp_tile_k = 32};
+        }
+        else
+        {
+            spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
+                                                  .tile_n = 128,
+                                                  .tile_k = 32,
+                                                  .warp_m = 2,
+                                                  .warp_n = 2,
+                                                  .warp_k = 1,
+                                                  .warp_tile_m = 16,
+                                                  .warp_tile_n = 16,
+                                                  .warp_tile_k = 32};
+        }
+        spec->trait.pipeline = "mem";
+        spec->trait.epilogue = (idx == 15) ? "cshuffle" : "default";
+        spec->trait.tdm = true;
+        spec->trait.tdm_depth = depths[i];
+        spec->trait.lds_k_pad = single_wave ? 0 : 8;
+        spec->data.dtype_a = "bf16";
+        spec->data.dtype_b = "bf16";
+        spec->data.dtype_c = "bf16";
+        spec->data.dtype_acc = "fp32";
+        spec->wave_size = 32;
+        spec->block_size = single_wave ? 32 : 128;
+        spec->batched = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -313,14 +362,15 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942 and 11 gfx1250; the rest use the gfx950 baseline. */
+/* Config 9 exercises gfx942 and 11, 14..17 gfx1250; the rest use the gfx950
+ * baseline. */
 static const char* arch_for(int idx)
 {
     if(idx == 9)
     {
         return "gfx942";
     }
-    if(idx == 11)
+    if(idx == 11 || (idx >= 14 && idx <= 17))
     {
         return "gfx1250";
     }
@@ -331,7 +381,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..13>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..17>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
