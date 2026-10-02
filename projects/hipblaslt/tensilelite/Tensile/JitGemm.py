@@ -21,7 +21,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import SingleSolution as SS
+from . import JitDebug, SingleSolution as SS
 
 
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
@@ -364,7 +364,7 @@ def _candidateDescriptorRejection(candidate, request):
     return None
 
 
-def _select(request, configPath, derive, ranking=None):
+def _select(request, configPath, derive, ranking=None, _debug=JitDebug.NULL):
     """Return the first acceptable candidate as (configPath, solution, metadata).
 
     A ``ranking`` from _Ranking continues after the candidate it last accepted,
@@ -379,45 +379,63 @@ def _select(request, configPath, derive, ranking=None):
     rejections = ranking.rejections
     excluded = set(request.get("exclude_kernel_names", []))
     candidates = request["candidates"]
+
+    def tried(candidate, outcome, reason=None, span=None):
+        _debug.candidate(index=ranking.position - 1, of=len(candidates), id=candidate["id"],
+                         outcome=outcome, reason=reason, ns=(span or {}).get("ns"))
+
     while ranking.position < len(candidates):
         candidate = candidates[ranking.position]
         ranking.position += 1
-        reason = (_modeledTransportRejection(request, candidate)
-                  or _candidateDescriptorRejection(candidate, request))
+        reason, category = _modeledTransportRejection(request, candidate), "modeled_transport"
+        if not reason:
+            reason, category = _candidateDescriptorRejection(candidate, request), "descriptor"
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
+            tried(candidate, "rejected", category)
             continue
         config = _configuration(request, candidate)
         diagnostics = io.StringIO()
         try:
-            with contextlib.redirect_stdout(diagnostics), contextlib.redirect_stderr(diagnostics):
-                solution = derive(config, f"{request['model']} candidate {candidate['id']}")
+            with _debug.span("derive", stage=False, rejects=(SS.SingleSolutionRejected,),
+                             candidate=candidate["id"]) as span:
+                with contextlib.redirect_stdout(diagnostics), \
+                        contextlib.redirect_stderr(diagnostics):
+                    solution = derive(config, f"{request['model']} candidate {candidate['id']}")
         except SS.SingleSolutionRejected as error:
             captured = diagnostics.getvalue()
             reasons = [line for line in captured.splitlines() if line.startswith("reject:")]
             rejections.append({"candidate_id": candidate["id"],
                                "reason": "\n".join(reasons)[:4096] or str(error),
                                "diagnostics": captured[:4096] + captured[-4096:]})
+            tried(candidate, "rejected", "tensile", span)
             continue
         # Any other exception is a request/toolchain/implementation failure. It
         # propagates without trying another candidate or emitting a kernel.
         problem = request["problem"]
-        reason = (_modeledRejection(solution, request, candidate)
-                  or _descriptorRejection(solution, request) or problemSizeRejection(
-            solution, [problem[key] for key in ("m", "n", "batch", "k")],
-            {tensor.upper(): problem[f"strides_{tensor}"] for tensor in "abcd"},
-            {tensor.upper(): problem.get(f"sizes_{tensor}") for tensor in "abcd"}))
+        reason, category = _modeledRejection(solution, request, candidate), "modeled"
+        if not reason:
+            reason, category = _descriptorRejection(solution, request), "descriptor"
+        if not reason:
+            reason, category = problemSizeRejection(
+                solution, [problem[key] for key in ("m", "n", "batch", "k")],
+                {tensor.upper(): problem[f"strides_{tensor}"] for tensor in "abcd"},
+                {tensor.upper(): problem.get(f"sizes_{tensor}") for tensor in "abcd"}
+            ), "problem_size"
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
+            tried(candidate, "rejected", category, span)
             continue
         kernel = solution.get("KernelNameMin")
         if kernel in excluded:
             rejections.append({"candidate_id": candidate["id"],
                                "reason": f"Excluded kernel {kernel}"})
+            tried(candidate, "rejected", "excluded", span)
             continue
         if kernel in ranking.kernels:
             rejections.append({"candidate_id": candidate["id"],
                                "reason": f"Same kernel as candidate {ranking.kernels[kernel]}"})
+            tried(candidate, "rejected", "duplicate", span)
             continue
         with configPath.open("x", encoding="utf-8") as stream:
             stream.write("# Copyright Advanced Micro Devices, Inc., or its affiliates.\n"
@@ -464,6 +482,7 @@ def _select(request, configPath, derive, ranking=None):
             metadata["modeled"] = copy.deepcopy(candidate["modeled"])
         ranking.kernels[kernel] = candidate["id"]
         ranking.accepted += 1
+        tried(candidate, "selected", span=span)
         return configPath, solution, metadata
     if ranking.accepted:
         return None
@@ -481,7 +500,8 @@ class _Ranking:
         self.rejections = []
 
 
-def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, **options):
+def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, _debug=JitDebug.NULL,
+                            **options):
     """Build the best ``requested_solutions`` candidates as ``outputPath/bundle-<rank>``.
 
     ``outputPath/bundle`` links to ``bundle-0``, whose recipe and prediction are
@@ -489,7 +509,10 @@ def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, **options)
     Fewer bundles than requested means the remaining candidates were rejected.
     """
     requestPath = Path(requestPath).resolve(strict=True)
-    request = _readRequest(requestPath)
+    with _debug.span("request_read"):
+        request = _readRequest(requestPath)
+    _debug.request(requested=request.get("requested_solutions", 1),
+                   candidates=len(request["candidates"]))
     _require(request["architecture"] == architecture, "Prediction and build architectures differ")
     outputPath = Path(outputPath).absolute()
     configPath = Path(str(outputPath) + ".yaml")
@@ -500,16 +523,18 @@ def generateAndBuildJitGemm(requestPath, outputPath, *, architecture, **options)
 
     def select(derive):
         path = configPath if not ranking.accepted else Path(f"{outputPath}.{ranking.accepted}.yaml")
-        return _select(request, path, derive, ranking)
+        return _select(request, path, derive, ranking, _debug)
 
     selection = (_configuration(request, request["candidates"][0]), select)
     result = SS._generateAndBuild(requestPath, outputPath, architecture=architecture,
                                   _selection=selection,
-                                  _count=request.get("requested_solutions", 1), **options)
-    manifest = json.loads(result.manifestPath.read_text(encoding="utf-8"))
-    with predictionPath.open("x", encoding="utf-8") as stream:
-        json.dump(manifest["jit_prediction"], stream, indent=2, allow_nan=False)
-        stream.write("\n")
+                                  _count=request.get("requested_solutions", 1), _debug=_debug,
+                                  **options)
+    with _debug.span("prediction_write"):
+        manifest = json.loads(result.manifestPath.read_text(encoding="utf-8"))
+        with predictionPath.open("x", encoding="utf-8") as stream:
+            json.dump(manifest["jit_prediction"], stream, indent=2, allow_nan=False)
+            stream.write("\n")
     return result
 
 
@@ -524,11 +549,22 @@ def main(argv=None):
     parser.add_argument("--library-format", dest="libraryFormat", choices=("msgpack", "yaml"), default="msgpack")
     parser.add_argument("--keep-build-tmp", dest="keepBuildTmp", action="store_true")
     parser.add_argument("--source-only", dest="sourceOnly", action="store_true")
+    JitDebug.addArguments(parser)
+    args = vars(parser.parse_args(argv))
+    debug = JitDebug.fromArguments(parser, args, module="Tensile.JitGemm", mode="prediction")
+    status, errorType = "failed", None
     try:
-        result = generateAndBuildJitGemm(**vars(parser.parse_args(argv)))
+        result = generateAndBuildJitGemm(**args, _debug=debug)
+        status = "ok"
     except (SS.SingleSolutionError, OSError, ValueError) as error:
+        errorType = type(error).__name__
         print(f"JIT GEMM build failed: {error}", file=sys.stderr)
         return 1
+    except BaseException as error:
+        errorType = type(error).__name__
+        raise
+    finally:
+        debug.finish(status, errorType)
     print(result.manifestPath)
     return 0
 

@@ -131,7 +131,7 @@ def test_target_preserves_features_and_resolves_stepping():
 
 @pytest.fixture
 def stub_build(monkeypatch):
-    def build(configPath, staging, *args):
+    def build(configPath, staging, *args, **kwargs):
         library = staging / "library" / "gfx942"
         library.mkdir(parents=True)
         (library / "single.co").write_bytes(b"code object")
@@ -173,7 +173,7 @@ def test_result_is_published_atomically_and_paths_survive_move(tmp_path, stub_bu
 
 
 def test_source_bundle_result_has_sources_and_no_loader(tmp_path, monkeypatch):
-    def build(configPath, staging, *args):
+    def build(configPath, staging, *args, **kwargs):
         (staging / "sources").mkdir()
         (staging / "sources" / "single.s").write_text(".amdhsa_kernel single\n")
         (staging / "library").mkdir()
@@ -205,7 +205,7 @@ def test_source_bundle_result_has_sources_and_no_loader(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("error", [RuntimeError("assembler failed"), SystemExit(-1)])
 def test_failed_request_never_publishes_and_does_not_exit_caller(tmp_path, monkeypatch, error):
-    def fail(config, staging, *args):
+    def fail(config, staging, *args, **kwargs):
         (staging / "partial.co").write_bytes(b"partial")
         raise error
 
@@ -222,9 +222,46 @@ def test_cli_translates_typed_errors_to_status(monkeypatch, capsys):
     def fail(*args, **kwargs):
         raise SS.SingleSolutionConfigError("two requested configurations")
 
-    monkeypatch.setattr(SS, "generateAndBuildSingleSolution", fail)
+    monkeypatch.setattr(SS, "_generateAndBuild", fail)
     assert SS.main([str(CONFIG), "unused", "--architecture", "gfx942"]) == 1
     assert "two requested configurations" in capsys.readouterr().err
+
+
+def test_cli_debug_records_an_explicit_build_without_changing_it(tmp_path, stub_build, capsys):
+    directory = tmp_path / "jit-debug"
+    manifests = []
+    for name, extra in (("plain", []), ("debug", ["--debug", "all", "--debug-dir", str(directory)])):
+        output = tmp_path / name
+        assert SS.main([str(CONFIG), str(output), "--architecture", "gfx942", *extra]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == f"{output / 'bundle' / 'manifest.json'}\n" and captured.err == ""
+        manifests.append((output / "bundle" / "manifest.json").read_bytes())
+    assert manifests[0] == manifests[1]
+    lines = [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+    assert [(line["kind"], line.get("stage"), line.get("phase")) for line in lines] == [
+        ("request", None, None), ("stage", "manifest_write", "start"),
+        ("stage", "manifest_write", "end"), ("stage", "publish", "start"),
+        ("stage", "publish", "end"), ("done", None, None)]
+    assert lines[0] | {"module": "Tensile.SingleSolution", "mode": "explicit", "requested": 1} == lines[0]
+    assert lines[-1]["status"] == "ok" and lines[-1]["bundles_published"] == 1
+    timing = json.loads((directory / "timing.json").read_text())
+    assert timing["mode"] == "explicit" and timing["status"] == "ok"
+    assert [span["rank"] for span in timing["spans"]] == [0, None]
+
+
+def test_cli_debug_records_a_failed_build(tmp_path, monkeypatch, capsys):
+    def fail(config, staging, *args, **kwargs):
+        raise RuntimeError("assembler failed")
+
+    monkeypatch.setattr(SS, "_build", fail)
+    directory = tmp_path / "jit-debug"
+    assert SS.main([str(CONFIG), str(tmp_path / "failed"), "--architecture", "gfx942",
+                    "--debug", "timing", "--debug-dir", str(directory)]) == 1
+    assert capsys.readouterr().err == "Single-solution build failed: assembler failed\n"
+    assert [path.name for path in directory.iterdir()] == ["timing.json"]
+    timing = json.loads((directory / "timing.json").read_text())
+    assert timing["status"] == "failed" and timing["error_type"] == "SingleSolutionBuildError"
+    assert timing["bundles_published"] == 0
 
 
 def test_tool_version_probe_treats_path_as_literal_argv(tmp_path, monkeypatch):

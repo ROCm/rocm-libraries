@@ -27,7 +27,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__
+from . import JitDebug, __version__
 
 
 class SingleSolutionError(RuntimeError):
@@ -294,27 +294,29 @@ def _build(
     keepBuildTmp,
     sourceOnly=False,
     _selection=None,
+    _debug=JitDebug.NULL,
 ):
-    from . import LibraryIO
-    from .Common import getVerbosity, setVerbosity, state
-    from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-    from .Common.GlobalParameters import (
-        assignGlobalParameters,
-        globalParameters,
-        restoreDefaultGlobalParameters,
-    )
-    from .Common.Types import makeDebugConfig
-    from .Common.ValidParameters import validParameters
-    from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
-    from .KernelWriterAssembly import KernelWriterAssembly
-    from .SolutionLibrary import MasterSolutionLibrary
-    from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
-    from .TensileCreateLibrary.Run import writeSolutionsAndKernels
-    from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
-    from .Toolchain.Component import Assembler
-    from .Toolchain.Source import makeSourceToolchain
-    from .Toolchain.Validators import ToolchainDefaults, validateToolchain
-    from .resources import copy_static_headers
+    with _debug.span("imports"):
+        from . import LibraryIO
+        from .Common import getVerbosity, setVerbosity, state
+        from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+        from .Common.GlobalParameters import (
+            assignGlobalParameters,
+            globalParameters,
+            restoreDefaultGlobalParameters,
+        )
+        from .Common.Types import makeDebugConfig
+        from .Common.ValidParameters import validParameters
+        from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
+        from .KernelWriterAssembly import KernelWriterAssembly
+        from .SolutionLibrary import MasterSolutionLibrary
+        from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+        from .TensileCreateLibrary.Run import writeSolutionsAndKernels
+        from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
+        from .Toolchain.Component import Assembler
+        from .Toolchain.Source import makeSourceToolchain
+        from .Toolchain.Validators import ToolchainDefaults, validateToolchain
+        from .resources import copy_static_headers
 
     config = LibraryIO.read(str(configPath)) if _selection is None else _selection[0]
     _, _, globalsConfig = _singleConfig(config, configPath)
@@ -330,76 +332,83 @@ def _build(
     savedIsa = copy.deepcopy(validParameters["ISA"])
     savedVerbosity = getVerbosity()
     try:
-        restoreDefaultGlobalParameters()
-        setVerbosity(globalsConfig.get("PrintLevel", 1))
-        if sourceOnly:
-            # The compiler still probes assembler capabilities; nothing is built.
-            compiler, _ = validateToolchain(cxxCompiler, ToolchainDefaults.HIP_CONFIG)
-            bundler = None
-            toolchain = AssemblyToolchain(Assembler(compiler, codeObjectVersion), None, None)
-        else:
-            compiler, bundler, _ = validateToolchain(
-                cxxCompiler, offloadBundler, ToolchainDefaults.HIP_CONFIG
+        with _debug.span("setup"):
+            restoreDefaultGlobalParameters()
+            setVerbosity(globalsConfig.get("PrintLevel", 1))
+            if sourceOnly:
+                # The compiler still probes assembler capabilities; nothing is built.
+                compiler, _ = validateToolchain(cxxCompiler, ToolchainDefaults.HIP_CONFIG)
+                bundler = None
+                toolchain = AssemblyToolchain(Assembler(compiler, codeObjectVersion), None, None)
+            else:
+                compiler, bundler, _ = validateToolchain(
+                    cxxCompiler, offloadBundler, ToolchainDefaults.HIP_CONFIG
+                )
+                toolchain = makeAssemblyToolchain(compiler, bundler, codeObjectVersion)
+            global _compilerIdentity
+            identity = (str(Path(compiler).resolve()), tuple(toolchain.assembler.version))
+            if _compilerIdentity is not None and _compilerIdentity != identity:
+                raise SingleSolutionConfigError(
+                    "Use a fresh Python process when changing the compiler")
+            _compilerIdentity = identity
+            isaInfoMap = makeIsaInfoMap([isa], compiler)
+            applyArchCapOverrides(isaInfoMap, [architecture])
+            globalsConfig.update(
+                {
+                    "RuntimeLanguage": "HIP",
+                    "CpuThreads": 1,
+                    "PythonProfile": False,
+                    "CodeObjectVersion": codeObjectVersion,
+                    "LibraryFormat": libraryFormat,
+                    "GenerateSourcesAndExit": False,
+                    "HardwareMonitor": False,
+                    "PinClocks": False,
+                    "KeepBuildTmp": keepBuildTmp,
+                }
             )
-            toolchain = makeAssemblyToolchain(compiler, bundler, codeObjectVersion)
-        global _compilerIdentity
-        identity = (str(Path(compiler).resolve()), tuple(toolchain.assembler.version))
-        if _compilerIdentity is not None and _compilerIdentity != identity:
-            raise SingleSolutionConfigError("Use a fresh Python process when changing the compiler")
-        _compilerIdentity = identity
-        isaInfoMap = makeIsaInfoMap([isa], compiler)
-        applyArchCapOverrides(isaInfoMap, [architecture])
-        globalsConfig.update(
-            {
-                "RuntimeLanguage": "HIP",
-                "CpuThreads": 1,
-                "PythonProfile": False,
-                "CodeObjectVersion": codeObjectVersion,
-                "LibraryFormat": libraryFormat,
-                "GenerateSourcesAndExit": False,
-                "HardwareMonitor": False,
-                "PinClocks": False,
-                "KeepBuildTmp": keepBuildTmp,
-            }
-        )
-        assignGlobalParameters(globalsConfig, isaInfoMap)
-        globalParameters["StinkyTofuArchName"] = (
-            "gfx1250v0" if architecture.split(":")[0] == "gfx1250v0" else ""
-        )
-        debug = makeDebugConfig(globalsConfig)
+            assignGlobalParameters(globalsConfig, isaInfoMap)
+            globalParameters["StinkyTofuArchName"] = (
+                "gfx1250v0" if architecture.split(":")[0] == "gfx1250v0" else ""
+            )
+            debug = makeDebugConfig(globalsConfig)
         prediction = None
-        if _selection is None:
-            solution = _deriveSingleSolution(
-                config, configPath, architecture, toolchain, debug, isaInfoMap)
-        else:
-            def derive(candidateConfig, label):
-                derived = _deriveSingleSolution(
-                    candidateConfig, label, architecture, toolchain, debug, isaInfoMap,
-                    strictErrors=True)
-                # Must match the name the published library gives the kernel
-                # (MasterSolutionLibrary.applyNaming names the kernel view).
-                derived["KernelNameMin"] = getKernelNameMin(derived.getKernels()[0], debug.splitGSU)
-                return derived
-            choice = _selection[1](derive)
+        with _debug.span("select", rejects=(SingleSolutionRejected,)):
+            if _selection is None:
+                solution = _deriveSingleSolution(
+                    config, configPath, architecture, toolchain, debug, isaInfoMap)
+            else:
+                def derive(candidateConfig, label):
+                    derived = _deriveSingleSolution(
+                        candidateConfig, label, architecture, toolchain, debug, isaInfoMap,
+                        strictErrors=True)
+                    # Must match the name the published library gives the kernel
+                    # (MasterSolutionLibrary.applyNaming names the kernel view).
+                    derived["KernelNameMin"] = getKernelNameMin(
+                        derived.getKernels()[0], debug.splitGSU)
+                    return derived
+                choice = _selection[1](derive)
+        if _selection is not None:
             if choice is None:
                 return None
             configPath, solution, prediction = choice
-        helpers = initHelperKernelObjects(solution, KernelHelperEnum.All, str(compiler), isaInfoMap)
-        # Match the normal build's helper-family deduplication. One writer may
-        # emit several exported kernels, while activation writers emit support.
-        helpers = list({helper.getKernelName(): helper for helper in helpers}.values())
-        helperDescriptions = _helperDescriptions(helpers)
-        sourceToolchain = None
-        supportFiles = []
-        sources = staging / "sources"
-        if helpers and sourceOnly:
-            supportFiles = copy_static_headers(sources) + ["Kernels.cpp", "Kernels.h"]
-        elif helpers:
-            supportFiles = copy_static_headers(staging) + ["Kernels.cpp", "Kernels.h"]
-            sourceToolchain = makeSourceToolchain(compiler, bundler)
-            sourceToolchain.compiler.default_args.append(
-                f"-mcode-object-version={codeObjectVersion}"
-            )
+        with _debug.span("helpers"):
+            helpers = initHelperKernelObjects(
+                solution, KernelHelperEnum.All, str(compiler), isaInfoMap)
+            # Match the normal build's helper-family deduplication. One writer may
+            # emit several exported kernels, while activation writers emit support.
+            helpers = list({helper.getKernelName(): helper for helper in helpers}.values())
+            helperDescriptions = _helperDescriptions(helpers)
+            sourceToolchain = None
+            supportFiles = []
+            sources = staging / "sources"
+            if helpers and sourceOnly:
+                supportFiles = copy_static_headers(sources) + ["Kernels.cpp", "Kernels.h"]
+            elif helpers:
+                supportFiles = copy_static_headers(staging) + ["Kernels.cpp", "Kernels.h"]
+                sourceToolchain = makeSourceToolchain(compiler, bundler)
+                sourceToolchain.compiler.default_args.append(
+                    f"-mcode-object-version={codeObjectVersion}"
+                )
         solution["SolutionIndex"] = 0
         solution["SolutionNameMin"] = getSolutionNameMin(solution, debug.splitGSU)
         solution["KernelNameMin"] = getKernelNameMin(solution, debug.splitGSU)
@@ -407,35 +416,37 @@ def _build(
         kernels = solution.getKernels()
         if len(kernels) != 1:
             raise SingleSolutionConfigError("The solution must contain exactly one main kernel")
-        outputs, _ = writeSolutionsAndKernels(
-            staging,
-            toolchain,
-            sourceToolchain,
-            solutions,
-            kernels,
-            helpers,
-            KernelWriterAssembly(toolchain.assembler, debug),
-            debug.splitGSU,
-            [compilerTarget],
-            errorTolerant=False,
-            compress=False,
-            removeTemporaries=not keepBuildTmp,
-            strict=True,
-            assemblyTarget=compilerTarget,
-            sourcesOnly=sourceOnly,
-        )
+        with _debug.span("kernel_source"):
+            outputs, _ = writeSolutionsAndKernels(
+                staging,
+                toolchain,
+                sourceToolchain,
+                solutions,
+                kernels,
+                helpers,
+                KernelWriterAssembly(toolchain.assembler, debug),
+                debug.splitGSU,
+                [compilerTarget],
+                errorTolerant=False,
+                compress=False,
+                removeTemporaries=not keepBuildTmp,
+                strict=True,
+                assemblyTarget=compilerTarget,
+                sourcesOnly=sourceOnly,
+            )
         if sourceOnly:
             if len(solutions) != 1 or len(outputs) != 1:
                 raise SingleSolutionBuildError(
                     "Generation did not produce exactly one solution and main kernel source"
                 )
-            sources.mkdir(exist_ok=True)
-            mainOutput = sources / Path(outputs[0]).name
-            shutil.copyfile(outputs[0], mainOutput)
-            for name in ("Kernels.cpp", "Kernels.h") if helpers else ():
-                (staging / name).replace(sources / name)
-            if not keepBuildTmp:
-                shutil.rmtree(staging / "build_tmp")
+            with _debug.span("copy_sources"):
+                sources.mkdir(exist_ok=True)
+                mainOutput = sources / Path(outputs[0]).name
+                shutil.copyfile(outputs[0], mainOutput)
+                for name in ("Kernels.cpp", "Kernels.h") if helpers else ():
+                    (staging / name).replace(sources / name)
+                if not keepBuildTmp:
+                    shutil.rmtree(staging / "build_tmp")
             outputs = [mainOutput, *(sources / name for name in supportFiles)]
             libraryBase = staging / "library" / "TensileLibrary"
         else:
@@ -446,17 +457,18 @@ def _build(
                 )
             mainOutput = mainOutputs[0]
             libraryBase = mainOutput.parent / "TensileLibrary"
-        library = MasterSolutionLibrary.BenchmarkingLibrary(
-            solutions,
-            toolchain.assembler,
-            debug.splitGSU,
-            debug.printSolutionRejectionReason,
-            debug.printIndexAssignmentInfo,
-            isaInfoMap,
-        )
-        library.applyNaming(debug.splitGSU)
-        selected = next(iter(library.solutions.values()))
-        LibraryIO.write(str(libraryBase), state(library), libraryFormat)
+        with _debug.span("library_write"):
+            library = MasterSolutionLibrary.BenchmarkingLibrary(
+                solutions,
+                toolchain.assembler,
+                debug.splitGSU,
+                debug.printSolutionRejectionReason,
+                debug.printIndexAssignmentInfo,
+                isaInfoMap,
+            )
+            library.applyNaming(debug.splitGSU)
+            selected = next(iter(library.solutions.values()))
+            LibraryIO.write(str(libraryBase), state(library), libraryFormat)
         logical = libraryBase.with_suffix(".dat" if libraryFormat == "msgpack" else ".yaml")
         physical = Path(str(logical) + ".zlib") if libraryFormat == "msgpack" else logical
         supportPaths = [] if sourceOnly else [staging / name for name in supportFiles]
@@ -489,6 +501,9 @@ def _build(
                 "helpers": helperDescriptions,
                 "support_files": supportFiles,
             }
+        with _debug.span("provenance"):
+            configSha256 = hashlib.sha256(configPath.read_bytes()).hexdigest()
+            sourceRevision = _sourceRevision()
         manifest |= {
             "solution": {
                 "index": selected.index,
@@ -507,9 +522,9 @@ def _build(
                 "support_generators": sum(h["kind"] != "kernel_family" for h in helperDescriptions),
             },
             "provenance": {
-                "config_sha256": hashlib.sha256(configPath.read_bytes()).hexdigest(),
+                "config_sha256": configSha256,
                 "generator_version": __version__,
-                "source_revision": _sourceRevision(),
+                "source_revision": sourceRevision,
                 "compiler_path": str(compiler),
                 "compiler_version": ".".join(map(str, toolchain.assembler.version)),
                 "code_object_version": codeObjectVersion,
@@ -559,6 +574,7 @@ def _generateAndBuild(
     sourceOnly: bool = False,
     _selection=None,
     _count=None,
+    _debug=JitDebug.NULL,
 ) -> SingleSolutionBuildResult:
     """Build one YAML-requested solution and publish ``outputPath/bundle`` atomically.
 
@@ -582,7 +598,8 @@ def _generateAndBuild(
         outputPath.mkdir(parents=True, exist_ok=False)
         names = ["bundle"] if _count is None else [f"bundle-{rank}" for rank in range(_count)]
         staged = []
-        for name in names:
+        for rank, name in enumerate(names):
+            _debug.bundle(rank)
             staging = outputPath / (".staging" if _count is None else f".staging-{name}")
             staging.mkdir()
             manifest = _build(
@@ -596,21 +613,26 @@ def _generateAndBuild(
                 keepBuildTmp,
                 sourceOnly,
                 *(() if _selection is None else (_selection,)),
+                _debug=_debug,
             )
             if manifest is None:
                 staging.rmdir()
                 break
-            (staging / "manifest.json").write_text(
-                json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-            )
+            with _debug.span("manifest_write"):
+                (staging / "manifest.json").write_text(
+                    json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+                )
             staged.append((staging, name, manifest))
+        _debug.bundle(None)
         if not staged:
             raise SingleSolutionBuildError("No solution was selected")
-        for staging, name, _ in staged:
-            staging.rename(outputPath / name)
         bundle = outputPath / "bundle"
-        if _count is not None:
-            bundle.symlink_to(names[0], target_is_directory=True)
+        with _debug.span("publish"):
+            for staging, name, _ in staged:
+                staging.rename(outputPath / name)
+            if _count is not None:
+                bundle.symlink_to(names[0], target_is_directory=True)
+        _debug.published(len(staged))
         manifest = staged[0][2]
         mainCodeObject = manifest["main_kernel"].get("code_object")
         return SingleSolutionBuildResult(
@@ -654,12 +676,24 @@ def main(argv=None):
     )
     parser.add_argument("--keep-build-tmp", dest="keepBuildTmp", action="store_true")
     parser.add_argument("--source-only", dest="sourceOnly", action="store_true")
-    args = parser.parse_args(argv)
+    JitDebug.addArguments(parser)
+    args = vars(parser.parse_args(argv))
+    debug = JitDebug.fromArguments(
+        parser, args, module="Tensile.SingleSolution", mode="explicit")
+    status, errorType = "failed", None
     try:
-        result = generateAndBuildSingleSolution(**vars(args))
+        debug.request(requested=1)
+        result = _generateAndBuild(**args, _debug=debug)
+        status = "ok"
     except SingleSolutionError as error:
+        errorType = type(error).__name__
         print(f"Single-solution build failed: {error}", file=sys.stderr)
         return 1
+    except BaseException as error:
+        errorType = type(error).__name__
+        raise
+    finally:
+        debug.finish(status, errorType)
     print(result.manifestPath)
     return 0
 

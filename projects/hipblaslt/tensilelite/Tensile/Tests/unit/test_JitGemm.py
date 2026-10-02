@@ -358,7 +358,7 @@ def ranked_build(monkeypatch, names=None):
 
     ``names`` maps a candidate id to its kernel name, default ``kernel-<id>``.
     """
-    def build(configPath, staging, *args):
+    def build(configPath, staging, *args, **kwargs):
         def derive(config, label):
             derived = solution()
             identifier = label.rsplit(' ', 1)[1]
@@ -1053,3 +1053,124 @@ def test_mx_equivalent_datatype_families_reuse_recipe_cross_compiles(
             "candidate_id": 7,
             "reason": "Candidate MXScaleFormat=NoSwizzle conflicts with descriptor MXScaleFormat=InMemorySwizzle",
         }]
+
+
+def debug_events(directory):
+    return [json.loads(line) for line in (directory / "events.jsonl").read_text().splitlines()]
+
+
+def files(root, skip=()):
+    return {path.relative_to(root).as_posix(): path.read_bytes()
+            for path in sorted(root.rglob("*")) if path.is_file() and path.name not in skip}
+
+
+def test_debug_records_candidates_without_changing_the_result(
+    prediction_request, tmp_path, monkeypatch, capsys
+):
+    ranked_build(monkeypatch, {7: "kernel-a", 2: "kernel-b", 5: "kernel-a", 4: "kernel-c"})
+    for identifier in (5, 4):
+        candidate = copy.deepcopy(prediction_request["candidates"][1])
+        candidate["id"] = identifier
+        prediction_request["candidates"].append(candidate)
+    prediction_request.update(requested_solutions=3, exclude_kernel_names=["kernel-b"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    directory = tmp_path / "jit-debug"
+    results = {}
+    for name, extra in (("plain", []), ("debug", ["--debug", "all", "--debug-dir", str(directory)])):
+        output = tmp_path / name / "ranked"
+        output.parent.mkdir()
+        assert JG.main([str(source), str(output), "--architecture", "gfx950", "--source-only",
+                        *extra]) == 0
+        captured = capsys.readouterr()
+        assert captured.out == f"{output / 'bundle' / 'manifest.json'}\n" and captured.err == ""
+        results[name] = files(output.parent)
+    assert results["plain"] == results["debug"]
+    assert sorted(path.name for path in directory.iterdir()) == ["events.jsonl", "timing.json"]
+    lines = debug_events(directory)
+    assert [(line["rank"], line["id"], line["outcome"], line.get("reason"))
+            for line in lines if line["kind"] == "candidate"] == [
+        (0, 7, "selected", None), (1, 2, "rejected", "excluded"),
+        (1, 5, "rejected", "duplicate"), (1, 4, "selected", None)]
+    assert [line["kind"] for line in lines if line["kind"] != "stage"][0] == "request"
+    assert lines[-1] | {"kind": "done", "module": "Tensile.JitGemm", "mode": "prediction",
+                        "status": "ok", "bundles_published": 2, "requested": 3,
+                        "candidates": 4} == lines[-1]
+    timing = json.loads((directory / "timing.json").read_text())
+    assert timing["status"] == "ok" and timing["bundles_published"] == 2
+    assert {"request_read", "manifest_write", "publish", "prediction_write"} <= set(timing["totals"])
+    assert [candidate["id"] for candidate in timing["candidates"]] == [7, 2, 5, 4]
+
+
+def test_debug_reports_a_failed_request(prediction_request, tmp_path, monkeypatch, capsys):
+    ranked_build(monkeypatch)
+    prediction_request["exclude_kernel_names"] = ["kernel-7", "kernel-2"]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    directory = tmp_path / "jit-debug"
+    assert JG.main([str(source), str(tmp_path / "out"), "--architecture", "gfx950",
+                    "--debug", "all", "--debug-dir", str(directory)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("JIT GEMM build failed: No JIT candidate")
+    lines = debug_events(directory)
+    assert [(line["id"], line["reason"]) for line in lines if line["kind"] == "candidate"] == [
+        (7, "excluded"), (2, "excluded")]
+    assert lines[-1] | {"kind": "done", "status": "failed", "bundles_published": 0,
+                        "error_type": "SingleSolutionConfigError"} == lines[-1]
+    timing = json.loads((directory / "timing.json").read_text())
+    assert timing["status"] == "failed" and timing["error_type"] == "SingleSolutionConfigError"
+
+
+def test_debug_flags_leave_real_outputs_identical(modeled_request, tmp_path):
+    modeled_request["requested_solutions"] = 2
+    directory = tmp_path / "jit-debug"
+    results = {}
+    for name, extra in (("plain", ()), ("debug", ("--debug", "all", "--debug-dir", str(directory)))):
+        (tmp_path / name).mkdir()
+        compile_request(modeled_request, tmp_path / name, "--source-only", *extra)
+        log = (tmp_path / name / "compiler.log").read_text()
+        results[name] = (files(tmp_path / name, skip=("compiler.log",)),
+                         log.replace(str(tmp_path / name), "OUTPUT"))
+    assert results["plain"] == results["debug"]
+    lines = debug_events(directory)
+    stages = {line["stage"] for line in lines if line["kind"] == "stage"}
+    assert stages == {"request_read", "imports", "setup", "select", "helpers", "kernel_source",
+                      "copy_sources", "library_write", "provenance", "manifest_write", "publish",
+                      "prediction_write"}
+    assert all(line["status"] == "ok" for line in lines if line.get("phase") == "end")
+    timing = json.loads((directory / "timing.json").read_text())
+    assert timing["status"] == "ok" and timing["bundles_published"] == 2
+    top = sum(span["ns"] for span in timing["spans"] if span["parent"] is None)
+    assert 0 < top <= timing["total_ns"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL")
+def test_killed_generator_leaves_only_complete_event_lines(prediction_request, tmp_path):
+    import signal
+    import time
+
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    directory = tmp_path / "jit-debug"
+    events = directory / "events.jsonl"
+    process = subprocess.Popen(
+        [sys.executable, "-m", "Tensile.JitGemm", str(source), str(tmp_path / "out"),
+         "--architecture", "gfx950", "--source-only", "--debug", "progress",
+         "--debug-dir", str(directory)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp_path)
+    try:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and process.poll() is None and (
+                not events.exists() or '"kind":"stage"' not in events.read_text()):
+            time.sleep(0.005)
+        process.send_signal(signal.SIGKILL)
+        process.wait(timeout=60)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert process.returncode == -signal.SIGKILL
+    *complete, partial = events.read_text().split("\n")
+    assert complete and all(json.loads(line)["v"] == 1 for line in complete)
+    assert partial == "" or not partial.endswith("}")
+    assert not (directory / "timing.json").exists()
