@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SweepManifestCache.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -676,26 +677,6 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
     }
 }
 
-inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
-                                           const std::string& caseId)
-{
-    if(!sweepJson.contains("cases") || !sweepJson.at("cases").is_array())
-    {
-        return nullptr;
-    }
-
-    for(const auto& caseJson : sweepJson.at("cases"))
-    {
-        if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string()
-           && caseJson.at("id").get<std::string>() == caseId)
-        {
-            return &caseJson;
-        }
-    }
-
-    return nullptr;
-}
-
 inline std::optional<std::filesystem::path>
     resolveSweepGoldenDirectory(const std::filesystem::path& sweepPath,
                                 const nlohmann::json& caseJson)
@@ -716,70 +697,6 @@ inline std::optional<std::filesystem::path>
 }
 
 } // namespace detail
-
-// The parsed graph.template.json and sweep.json of one template sweep, with its
-// cases indexed by id, for loading that sweep's cases one after another.
-//
-// Every case of a sweep shares both files, and one sweep.json can carry hundreds
-// of cases. Parsing them again for each case made a load pass cost cases x
-// manifest size: about 5.9 GB of JSON for the 10,732 checked-in sweep cases,
-// before --gtest_filter could narrow anything. discoverBundles() emits a sweep's
-// cases back to back, so holding only the most recently used sweep parses each
-// manifest once and keeps at most one in memory.
-class SweepManifestCache
-{
-public:
-    struct Manifest
-    {
-        std::optional<nlohmann::json> templateJson;
-        std::optional<nlohmann::json> sweepJson;
-
-        // First case per id, the same one detail::findSweepCase() would return.
-        // Points into sweepJson.
-        std::unordered_map<std::string, const nlohmann::json*> casesById;
-
-        const nlohmann::json* findCase(const std::string& caseId) const
-        {
-            const auto it = casesById.find(caseId);
-            return it != casesById.end() ? it->second : nullptr;
-        }
-    };
-
-    // The manifest for `discovered`, which must be a template-sweep case. Valid
-    // until the next call.
-    const Manifest& get(const DiscoveredBundle& discovered)
-    {
-        if(_manifest.has_value() && _sweepPath == discovered.jsonPath
-           && _templatePath == discovered.sweep->templatePath)
-        {
-            return *_manifest;
-        }
-
-        _sweepPath = discovered.jsonPath;
-        _templatePath = discovered.sweep->templatePath;
-        auto& manifest = _manifest.emplace();
-        manifest.templateJson = detail::parseJsonFile(_templatePath);
-        manifest.sweepJson = detail::parseJsonFile(_sweepPath);
-
-        if(manifest.sweepJson.has_value() && manifest.sweepJson->contains("cases")
-           && manifest.sweepJson->at("cases").is_array())
-        {
-            for(const auto& caseJson : manifest.sweepJson->at("cases"))
-            {
-                if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string())
-                {
-                    manifest.casesById.emplace(caseJson.at("id").get<std::string>(), &caseJson);
-                }
-            }
-        }
-        return manifest;
-    }
-
-private:
-    std::filesystem::path _sweepPath;
-    std::filesystem::path _templatePath;
-    std::optional<Manifest> _manifest;
-};
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
 //
@@ -878,14 +795,14 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto& manifest = sweeps.get(discovered);
-    const auto& templateJson = manifest.templateJson;
-    if(!templateJson.has_value() || !manifest.sweepJson.has_value())
+    const auto& sweep = sweeps.get(discovered);
+    const auto& templateJson = sweep.templateJson;
+    if(!templateJson.has_value() || !sweep.manifest.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = manifest.findCase(discovered.sweep->caseId);
+    const auto* caseJson = sweep.manifest->findCase(discovered.sweep->caseId);
     if(caseJson == nullptr)
     {
         return LoadError::INVALID_SWEEP_CASE;
