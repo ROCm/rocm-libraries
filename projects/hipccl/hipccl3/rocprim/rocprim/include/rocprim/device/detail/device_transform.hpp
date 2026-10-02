@@ -41,8 +41,8 @@ namespace detail
 
 struct always_true_predicate
 {
-    template<class T>
-    constexpr bool ROCPRIM_DEVICE ROCPRIM_INLINE operator()(T const&) const
+    template<class... Ts>
+    constexpr bool ROCPRIM_DEVICE ROCPRIM_INLINE operator()(Ts&&...) const
     {
         return true;
     }
@@ -51,15 +51,21 @@ struct always_true_predicate
 template<class Function, class... Ts>
 struct unpack_nary_op
 {
-    ROCPRIM_HOST_DEVICE inline unpack_nary_op() = default;
-
-    ROCPRIM_HOST_DEVICE inline unpack_nary_op(Function op) : op_(op) {}
-
-    ROCPRIM_HOST_DEVICE inline ~unpack_nary_op() = default;
+    ROCPRIM_HOST_DEVICE
+    inline unpack_nary_op()
+        = default;
 
     ROCPRIM_HOST_DEVICE
-    inline decltype(auto)
-        operator()(const ::rocprim::tuple<Ts...>& t) const
+    inline unpack_nary_op(Function op)
+        : op_(op)
+    {}
+
+    ROCPRIM_HOST_DEVICE
+    inline ~unpack_nary_op()
+        = default;
+
+    ROCPRIM_HOST_DEVICE
+    inline decltype(auto) operator()(const ::rocprim::tuple<Ts...>& t) const
     {
         return apply_impl(t, std::index_sequence_for<Ts...>{});
     }
@@ -71,7 +77,7 @@ private:
     template<std::size_t... Is>
     ROCPRIM_HOST_DEVICE
     inline decltype(auto) apply_impl(const ::rocprim::tuple<Ts...>& t,
-                                  std::index_sequence<Is...>) const
+                                     std::index_sequence<Is...>) const
     {
         return op_(::rocprim::get<Is>(t)...);
     }
