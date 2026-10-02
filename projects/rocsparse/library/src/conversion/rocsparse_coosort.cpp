@@ -474,9 +474,10 @@ namespace rocsparse
             = rocsparse::align_size<char>(rocsparse::max(buffer_size_by_row, buffer_size_by_col));
 
         // rocPRIM does not support in-place sorting, so we need additional buffer
-        // for all temporary arrays: an array of nnz indices, the workspace of the segments,
+        // for all temporary arrays: two arrays of nnz indices, the workspace of the segments,
         // which holds the number of segments followed by up to nnz unique indices, and the
         // segment offsets.
+        *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * nnz);
         *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * nnz);
         *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * (nnz + 1));
         *buffer_size_in_bytes += rocsparse::align_size<char>(idx_size * (rocsparse::max(m, n) + 1));
@@ -485,8 +486,8 @@ namespace rocsparse
     }
 
     // Sorts the entries by row (dir == rocsparse_direction_row) or by column
-    // (dir == rocsparse_direction_column). If perm is not null, it must hold the identity
-    // permutation, and it is overwritten with the sorting permutation.
+    // (dir == rocsparse_direction_column). If perm is not null, the sorting permutation is
+    // applied to it, so it holds the sorting permutation if it starts as the identity.
     static rocsparse_status coosort_compute(rocsparse_handle    handle,
                                             rocsparse_direction dir,
                                             int64_t             m,
@@ -539,14 +540,22 @@ namespace rocsparse
         void* work3 = ptr;
         ptr += rocsparse::align_size<char>(idx_size * (rocsparse::max(m, n) + 1));
 
+        void* work4 = ptr;
+        ptr += rocsparse::align_size<char>(idx_size * nnz);
+
         void* tmp_rocprim = ptr;
 
         int64_t nsegm = 0;
 
         if(perm != nullptr)
         {
-            // perm starts as the identity, so sorting it along with the major indices gives the
-            // original position of each entry, which is used to reorder the minor indices.
+            // Create the identity permutation to keep track of the reordering, so that perm
+            // does not need to hold the identity.
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::gcreate_identity_permutation(handle, nnz, idx_type, work4));
+
+            // Sorting the identity along with the major indices gives the original position
+            // of each entry, which is used to reorder the minor indices and perm.
             void* mapping = nullptr;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_sort_major(handle,
                                                                     idx_type,
@@ -554,19 +563,21 @@ namespace rocsparse
                                                                     major_endbit,
                                                                     major,
                                                                     work2,
-                                                                    perm,
+                                                                    work4,
                                                                     work1,
                                                                     tmp_rocprim,
                                                                     &mapping));
-            void* alt_map = (mapping == perm) ? work1 : perm;
+            void* alt_map = (mapping == work4) ? work1 : work4;
 
             // Obtain segments for segmented sort by the minor indices
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_segments(
                 handle, idx_type, nnz, major, work2, work3, tmp_rocprim, &nsegm));
 
-            // Reorder the minor indices
+            // Reorder the minor indices and perm
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::coosort_permute(handle, idx_type, nnz, minor, mapping, work2));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::coosort_permute(handle, idx_type, nnz, perm, mapping, alt_map));
 
             // Sort the minor indices within each segment
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_sort_minor(handle,
@@ -577,8 +588,8 @@ namespace rocsparse
                                                                     work3,
                                                                     work2,
                                                                     minor,
-                                                                    mapping,
                                                                     alt_map,
+                                                                    mapping,
                                                                     minor,
                                                                     perm,
                                                                     tmp_rocprim));
