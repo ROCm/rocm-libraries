@@ -256,6 +256,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 # Setup testing dependencies
 include(Dependencies)
@@ -328,6 +329,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
 
+    # The shipped descriptors, and the default of the overridable
+    # HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT cache entry descriptor-packaging declares.
+    set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
+
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
     # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
@@ -375,6 +381,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950AttentionDense_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
     set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
@@ -383,6 +390,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
@@ -391,6 +399,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
             "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
         )
@@ -423,10 +432,13 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # rocKE's installed Python CTest entries invoke a bare `python`, which the
-    # runtime image does not provide, so they cannot run from an installed tree.
-    # The installed C++ entries and the rocke Python frontend are unaffected.
-    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
+    # TheRock's test setup activates a virtual environment and installs the
+    # staged rocKE wheels before invoking CTest, so the focused installed Python
+    # checks can resolve both `python` and the rocKE packages. Defer the full
+    # platform pytest suite until the pinned TheRock supplies rocKE's NumPy and
+    # ml_dtypes component requirements.
+    set(ROCKE_INSTALL_PYTHON_TESTS ON)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST OFF)
 
     add_subdirectory(rocke)
 else()
@@ -545,10 +557,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # tree, so a directory missing at install time means the build did not run to
     # completion, and saying so beats shipping a package with no descriptors in it.
     #
-    # hkp_packaging_product exists exactly when the production packer will write -- the
-    # production source root is set and is a real directory. Re-testing the source root
-    # here would emit the rule for configurations the packer skips, turning a supported
-    # build into an install-time failure.
+    # hkp_packaging_product exists exactly when the production packer will write;
+    # re-testing the source root here would emit the rule for configurations the packer
+    # skips, turning a supported build into an install-time failure.
     # Each pack marks its output root complete with a stamp file inside it, so that
     # emptying the tree invalidates the stamp too. The stamp belongs to the build and not
     # to the package, and every pack writes the same name, so one pattern drops all of

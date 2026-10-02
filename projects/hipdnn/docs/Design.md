@@ -52,6 +52,25 @@ hipDNN uses a layered error handling approach designed to be robust across C/C++
 2.  **Backend (C API)**: All public API functions return `hipdnnStatus_t` codes. The backend catches any internal C++ exceptions, converts them to the appropriate status code, and stores the exception message. Users can retrieve descriptive error messages using `hipdnnGetLastErrorString`.
 3.  **Frontend (C++ API)**: The C++ frontend checks `hipdnnStatus_t` codes from the backend. On failure, it retrieves the detailed error message via `hipdnnGetLastErrorString` and returns an `Error` object containing the error code and description. The frontend utilizes **value-based error handling** rather than throwing exceptions.
 
+### Timing and Watchdog Recovery
+
+Timing must compare measurements made with the same method. A successful execution
+does not necessarily produce a valid timing sample.
+
+- **Timeout scope**: A stall watchdog timeout invalidates only that measurement.
+  It does not disable stalling for other gates or later comparisons.
+- **Comparison policy**: Each frontend autotune call and ingestor `BenchmarkPlan`
+  selection starts by attempting device-only timing. A timeout or a valid unstalled
+  sample ends that pass immediately. The caller discards its scores and measures
+  every candidate again without stalling. The unstalled pass cannot request another
+  restart. Execution errors and malformed timings remain failures, not timeout signals.
+- **Resource scope**: Each comparison reuses its timing resources across samples
+  and the fallback pass. Frontend autotune owns one backend profiling context;
+  ingestor selection owns its events and gate until selection completes.
+
+A timeout can reflect a slow host or missing release, not a permanent engine
+fault. Each independent comparison therefore starts fresh.
+
 ### SDKs
 
 hipDNN provides three header-only SDK libraries that serve as the foundation for communication between different components.

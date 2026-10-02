@@ -25,6 +25,19 @@ def _bf16_to_float32(np, values):
     return bits.view(np.float32)
 
 
+def _gemm_is_bf16(manifest: dict) -> bool:
+    """Whether the GEMM operands are bf16, per the ``A`` ptr type.
+
+    Legacy manifests use ``gemm_fp16`` for both dtypes, so their element
+    type is carried by ``args_signature`` (``ptr<bf16, global>`` vs
+    ``ptr<f16, global>``, emitted by ``helpers.manifest.gemm_args_signature``).
+    Both are 2 bytes wide, so only the interpretation differs.
+    """
+    sig = manifest.get("args_signature", [])
+    ptr_type = next((a.get("type", "") for a in sig if a.get("name") == "A"), "")
+    return "bf16" in ptr_type
+
+
 def run_gemm_manifest_problem(
     manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
 ) -> tuple:
@@ -34,7 +47,13 @@ def run_gemm_manifest_problem(
         M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
     else:
         M, N, K = shape
-    dtype = str(manifest.get("dtype") or manifest.get("kind", "").removeprefix("gemm_"))
+    dtype = (
+        "bf16"
+        if _gemm_is_bf16(manifest)
+        else str(
+            manifest.get("dtype") or manifest.get("kind", "").removeprefix("gemm_")
+        )
+    )
     if dtype not in ("fp16", "bf16"):
         raise ValueError(f"unsupported GEMM manifest dtype {dtype!r}")
     rng = np.random.default_rng(0xC0FFEE)
@@ -84,14 +103,14 @@ def run_gemm_manifest_problem(
             A_f32 = _bf16_to_float32(np, A)
             B_f32 = _bf16_to_float32(np, B)
             C_f32 = _bf16_to_float32(np, C)
-            ref_f32 = _bf16_to_float32(
-                np, _float32_to_bf16(np, A_f32 @ B_f32.T)
-            )
+            ref_f32 = _bf16_to_float32(np, _float32_to_bf16(np, A_f32 @ B_f32.T))
         else:
             C_f32 = C.astype(np.float32)
             ref_f32 = (
-                A.astype(np.float32) @ B.astype(np.float32).T
-            ).astype(np.float16).astype(np.float32)
+                (A.astype(np.float32) @ B.astype(np.float32).T)
+                .astype(np.float16)
+                .astype(np.float32)
+            )
         tol = 1e-2
         err = np.abs(C_f32 - ref_f32)
         bad = err > tol + tol * np.abs(ref_f32)

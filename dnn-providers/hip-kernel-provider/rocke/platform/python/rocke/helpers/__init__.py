@@ -239,7 +239,7 @@ from .io import (
     store_vec,
     vector_row_copy,
 )
-from .layouts import LdsLayout, TransposeLdsReader
+from .layouts import ConvKOuterFragmentReader, LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncPingPongLoader,
     AsyncTileLoader,
@@ -318,6 +318,7 @@ from .preshuffle import (
     host_preshuffle_layout,
 )
 from .quant import (
+    LogicalQDType,
     QDType,
     QUANT_MAX_ABS,
     dequantize_scalar_to_f32,
@@ -469,6 +470,7 @@ __all__ = [
     "super_tile_swizzle_dynamic",
     # Loads
     "LdsLayout",
+    "ConvKOuterFragmentReader",
     "TransposeLdsReader",
     "AsyncPingPongLoader",
     "AsyncTileLoader",
@@ -621,6 +623,7 @@ __all__ = [
     "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",
     # Quantisation (f32 <-> {i8, fp8e4m3, bf8e5m2})
+    "LogicalQDType",
     "QDType",
     "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",

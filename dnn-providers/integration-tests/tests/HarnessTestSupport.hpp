@@ -12,7 +12,8 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
-#include "ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -39,11 +40,11 @@ inline void ensureTestConfigInitialized()
 /// A policy for a deviceless run: host pointers, so the mocked engine can write
 /// straight into the variant pack and no ITensor ever hipMallocs.
 inline HarnessPolicy hostPolicy(VerificationMode mode = VerificationMode::AUTO,
-                                bool enforceSupportClaims = false)
+                                ClaimMode claims = ClaimMode::WARN)
 {
     HarnessPolicy policy;
     policy.mode = mode;
-    policy.enforceSupportClaims = enforceSupportClaims;
+    policy.claims = claims;
     policy.placement = TensorPlacement::HOST;
     policy.arch = "gfx942";
     policy.platform = "linux";

@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -49,7 +49,8 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 256
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -86,7 +87,8 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 256
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -149,7 +151,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -190,7 +193,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -236,7 +240,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -282,7 +287,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -347,7 +353,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -394,7 +401,7 @@ BenchmarkProblems:
   #       - DepthU: [128]                 # 1*MI_K = 128
   #       - ScheduleIterAlg: [3]
   #       - DirectToLds: [1]
-  #       - StreamK: [3]
+  #       - TileProcessingStrategy: [StreamK]
   #       - StaggerU: [0]
   #       - UseSubtileImpl: [1]
   #     BenchmarkJoinParameters:
@@ -440,7 +447,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
@@ -486,7 +494,8 @@ BenchmarkProblems:
         - DepthU: [128]                 # 1*MI_K = 128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
