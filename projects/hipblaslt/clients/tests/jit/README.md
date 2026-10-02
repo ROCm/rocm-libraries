@@ -23,7 +23,7 @@ root:
 
 ```bash
 cmake -S projects/hipblaslt -B "$project_build" \
-  -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_BUILD_TESTING=ON \
+  -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON -DHIPBLASLT_BUILD_TESTING=ON \
   -DHIPBLASLT_ENABLE_CLIENT=ON
 cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
@@ -34,6 +34,12 @@ cmake --build "$project_build" --parallel 8 --target \
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
+
+`HIPBLASLT_JIT_TESTING=ON` links the mock backend that
+`hipblaslt-jit-mock-backend-test` replays bundles through. The tests that need
+no generator are also CTest tests:
+`ctest --test-dir "$project_build/clients/tests/jit" -L jit-cpu` runs the ones
+that need no GPU, and `-L jit-gpu` runs the rest.
 
 Choose a fresh output directory. When other work shares the host, set
 `HIP_VISIBLE_DEVICES` to keep the tests on one GPU. The driver checks that the shared library and

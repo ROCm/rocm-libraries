@@ -174,7 +174,7 @@ jobs:
             -DPython_EXECUTABLE="$VENV_DIR/bin/python" \
             -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
             -DGPU_TARGETS="$JIT_ARCHITECTURE" \
-            -DHIPBLASLT_ENABLE_JIT=ON \
+            -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON \
             -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
             -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON \
             -DHIPBLASLT_ENABLE_BLIS=OFF -DHIPBLASLT_ENABLE_SAMPLES=OFF \
@@ -198,6 +198,40 @@ jobs:
           python .github/scripts/test_hipblaslt_jit.py \
             --build "$JIT_BUILD_DIR" --architecture "$JIT_ARCHITECTURE" \
             --output jit-test-logs/results 2>&1 | tee jit-test-logs/test.log
+      - name: Build and test without the TensileLite backend
+        timeout-minutes: 90
+        env:
+          JIT_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          jobs="${KUBE_CPU_REQUEST:-8}"
+          jobs="${jobs%.*}"
+          (( jobs > 16 )) && jobs=16
+          (( jobs < 1 )) && jobs=1
+          # "none" links the no-backend provider, "test" the mock-backed test backend.
+          for config in none test; do
+            testing=OFF
+            [[ "$config" == test ]] && testing=ON
+            build="$GITHUB_WORKSPACE/build/jit-$config"
+            cmake -S projects/hipblaslt -B "$build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER="$ROCM_PATH/bin/amdclang" \
+              -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+              -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_PREFIX_PATH="$JIT_DEPS_DIR;$ROCM_PATH" \
+              -DPython_EXECUTABLE="$VENV_DIR/bin/python" \
+              -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
+              -DGPU_TARGETS="$JIT_ARCHITECTURE" \
+              -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TENSILELITE=OFF \
+              -DHIPBLASLT_JIT_TESTING="$testing" \
+              -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
+              -DHIPBLASLT_ENABLE_CLIENT=OFF -DHIPBLASLT_BUILD_TESTING=ON \
+              -DHIPBLASLT_ENABLE_ROCROLLER=OFF -DHIPBLASLT_ENABLE_MARKER=OFF \
+              -DHIPBLASLT_ENABLE_EXTOPS=OFF -DHIPBLASLT_ENABLE_MATRIX_TRANSFORM=OFF \
+              -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
+              2>&1 | tee "jit-test-logs/configure-$config.log"
+            cmake --build "$build" --parallel "$jobs" 2>&1 | tee "jit-test-logs/build-$config.log"
+            ctest --test-dir "$build/clients/tests/jit" --output-on-failure \
+              2>&1 | tee "jit-test-logs/ctest-$config.log"
+          done
       - name: Upload logs and generated bundles
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
