@@ -5,7 +5,11 @@
 
 #include <hip/hip_runtime.h>
 
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -33,7 +37,14 @@ namespace hipblaslt_cotenant
         const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
         va_end(args);
         if(n > 0)
-            (void)!::write(STDERR_FILENO, buf, std::min<size_t>(n, sizeof(buf) - 1));
+        {
+            const auto len = static_cast<unsigned>(std::min<size_t>(n, sizeof(buf) - 1));
+#ifdef _WIN32
+            (void)_write(2, buf, len);
+#else
+            (void)!::write(2, buf, len);
+#endif
+        }
     }
 
     template <bool Stoppable>
