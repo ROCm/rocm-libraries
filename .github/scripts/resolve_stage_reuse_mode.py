@@ -16,7 +16,7 @@ branch = (
 requested = os.environ["REQUESTED_MODE"]
 baseline = os.environ["BASELINE_RUN_ID"]
 
-if branch.startswith("release/"):
+if branch.startswith("users/"):
     mode, reason = "off", "release branch"
 elif requested == "reuse-stage" and not baseline:
     mode, reason = "off", "no baseline run ID"
