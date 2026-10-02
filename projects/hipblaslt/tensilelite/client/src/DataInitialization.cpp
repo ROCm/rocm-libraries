@@ -2871,8 +2871,8 @@ namespace TensileLite
                     ::Tensor::Manipulation::Shape paddedShape{
                         DGen::roundUp(tiledSize, MiM_N),
                         DGen::roundUp(effUnrolled, effMiK * effPackK)};
-                    auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+                    auto swizzleKey = std::make_tuple(
+                        toBitWidth(desc.dataType()), unrolledSize, tiledSize, i, MiK, PackK);
 
                     // Convert byte-granularity flat size back to native element count
                     // for the GPU copy (e.g. FP4: 2 elements per byte)
