@@ -1114,6 +1114,249 @@ TEST_F(InsertClusterBarrierPassTest, Rule3Mode2StaysIdempotent) {
         << "re-running mode 2 must be a no-op:" << blockListing(*bb);
 }
 
+// The live-SCC loop: a def above the protect group and its reader below it, so
+// SCC is live where mode 0 waits. The handshake's signal block opens with
+// `s_cmp_eq_u32 s[sgprWaveIdx], 0`, so even a signal with no lead to climb for
+// has to leave that range, and it settles right above the def.
+//
+//     label_TestLoop:
+//     v_wmma
+//     s_cmp_eq_u32 s80, 0         <- def
+//     s_wait_tensorcnt 0          <- where mode 0 waits
+//     s_barrier_signal -1         <- trigger
+//     s_barrier_wait -1
+//     s_cselect_b32 s81, s82, 0   <- reader
+//     tensor_load_to_lds
+TEST_F(InsertClusterBarrierPassTest, Rule3LeadZeroSignalsAboveALiveSccRange) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* wmma = createWMMA(24, 0, 8);
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0);
+
+    EXPECT_EQ(lastSccWriterBefore(indexOf(reader)), def)
+        << "the reader keeps the value its def computed:" << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(wmma), indexOf(def)), nullptr)
+        << "the signal settles right above the def:" << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(drain);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait stays where mode 0 puts it:" << blockListing(*bb);
+}
+
+// Mode 1 signals where mode 0 waits, which the same range rules out, so the block
+// keeps mode 0 -- whose signal, with no lead, still has to climb out of it.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode1LeadZeroFallbackSignalsAboveALiveSccRange) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* wmma = createWMMA(24, 0, 8);
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/0, /*rule3Mode=*/1);
+
+    EXPECT_EQ(lastSccWriterBefore(indexOf(reader)), def)
+        << "the reader keeps the value its def computed:" << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(wmma), indexOf(def)), nullptr)
+        << "the signal settles right above the def:" << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(drain);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait stays where mode 0 puts it:" << blockListing(*bb);
+}
+
+// A lead > 0 already had to clear that range, and the no-lead fix leaves it
+// alone: the climb still runs to the loop head.
+TEST_F(InsertClusterBarrierPassTest, Rule3PositiveLeadOverALiveSccRangeIsUnchanged) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* wmma = createWMMA(24, 0, 8);
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(lastSccWriterBefore(indexOf(reader)), def)
+        << "the reader keeps the value its def computed:" << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(wmma)), nullptr)
+        << "the signal climbs to the loop head:" << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(drain);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait stays where mode 0 puts it:" << blockListing(*bb);
+}
+
+// A negative lead is unset, as the module option's -1 is. With no module to read
+// main-loop statistics from it resolves to the static default, so the signal
+// climbs as far as a lead of 100 takes it, not to where a lead of 0 stops.
+TEST_F(InsertClusterBarrierPassTest, Rule3NegativeLeadIsUnsetNotZero) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* wmma = createWMMA(24, 0, 8);
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* drain = createWaitTensorCnt(0);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* reader = createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/-1);
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_EQ(lastSccWriterBefore(indexOf(reader)), def)
+        << "the reader keeps the value its def computed:" << blockListing(*bb);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(wmma)), nullptr)
+        << "an unset lead climbs like the default one:" << blockListing(*bb);
+    StinkyInstruction* clusterWait = realInstBefore(drain);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << "the wait stays where mode 0 puts it:" << blockListing(*bb);
+}
+
+// A lead > 0 that comes back to the wait's own spot has bought none, so it is
+// placed as a lead of 0 would be. Here the wait opens its segment: the climb
+// stops at the loop head before it buys any lead, and SCC is live across that
+// label, from a def in the preheader to a reader below the wait. No spot above
+// the wait is left in the segment, so a lead of 100 aborts just as a lead of 0
+// does, rather than plant the handshake's SCC-writing compare at the wait.
+//
+//     s_cmp_eq_u32 s80, 0         <- def
+//     label_TestLoop:
+//     s_barrier_signal -1         <- trigger, where mode 0 waits
+//     s_barrier_wait -1
+//     tensor_load_to_lds
+//     s_cselect_b32 s81, s82, 0   <- reader
+TEST_F(InsertClusterBarrierPassTest, Rule3PositiveLeadAbortsWhenItsSegmentOpensAtALiveWait) {
+    appendGsu1Preheader();
+    createSCmpWritingScc(/*srcSgpr=*/80);
+    openLoop();
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    const BasicBlock::iterator segBegin = segBeginAfter(loopHead);
+    ASSERT_EQ(segBegin.getNodePtr(), static_cast<IRBase*>(trigger))
+        << "the wait must open its segment:" << blockListing(*bb);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_NE(cycleMap.find(trigger), cycleMap.end())
+        << "a lead > 0 needs an estimate at the wait:" << blockListing(*bb);
+
+    auto place = [&](int leadCycles) {
+        (void)cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+            trigger, segBegin, trigger, cycleMap, leadCycles, /*maxLeadCycles=*/900,
+            /*priorWaitAnchors=*/{}, /*maxHops=*/0, loopHead);
+    };
+    EXPECT_DEATH(place(/*leadCycles=*/100), "SCC live at the wait");
+    EXPECT_DEATH(place(/*leadCycles=*/0), "SCC live at the wait");
+}
+
+// The same answer where there is one to give. The climb's hard stop, an earlier
+// handshake's trigger whose s_barrier_wait -1 never comes, hands back the wait's
+// own spot before a lead of 500 is bought, and SCC is live there. A lead of 0
+// settles right above the def, the nearest spot above the wait that SCC leaves
+// free, and so does the lead of 500 that bought nothing.
+//
+//     label_TestLoop:
+//     s_barrier_signal -1         <- the earlier trigger, the climb's hard stop
+//     s_cmp_eq_u32 s80, 0         <- def
+//     s_barrier_signal -1         <- trigger, where mode 0 waits
+//     s_barrier_wait -1
+//     tensor_load_to_lds
+//     s_cselect_b32 s81, s82, 0   <- reader
+TEST_F(InsertClusterBarrierPassTest, Rule3PositiveLeadStoppedAtItsWaitSignalsAboveALiveSccRange) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* earlier = createBarrierSignal(kWorkgroupBarrierId);
+    StinkyInstruction* def = createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_NE(cycleMap.find(trigger), cycleMap.end())
+        << "a lead > 0 needs an estimate at the wait:" << blockListing(*bb);
+
+    auto place = [&](int leadCycles) {
+        return cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+            trigger, segBeginAfter(loopHead), trigger, cycleMap, leadCycles,
+            /*maxLeadCycles=*/900, /*priorWaitAnchors=*/{earlier}, /*maxHops=*/0, loopHead);
+    };
+    const auto withoutLead = place(/*leadCycles=*/0);
+    EXPECT_EQ(withoutLead.anchor, static_cast<IRBase*>(def))
+        << "lead 0 settles right above the def:" << blockListing(*bb);
+    const auto withLead = place(/*leadCycles=*/500);
+    EXPECT_EQ(withLead.anchor, static_cast<IRBase*>(def))
+        << "a lead that bought nothing settles where lead 0 does:" << blockListing(*bb);
+    EXPECT_EQ(withLead.hops, 0) << blockListing(*bb);
+}
+
+// And where there is none: the earlier handshake's pair ends right above this
+// wait, so the hard stop hands back the wait's own spot with nothing between to
+// settle on. Co-locating would put the compare inside the range, so both leads
+// abort, as a range that reaches the wait does elsewhere.
+//
+//     label_TestLoop:
+//     s_barrier_signal -1         <- the earlier trigger, the climb's hard stop
+//     s_barrier_wait -1
+//     s_barrier_signal -1         <- trigger, where mode 0 waits
+//     s_barrier_wait -1
+//     tensor_load_to_lds
+//     s_cselect_b32 s81, s82, 0   <- reader
+TEST_F(InsertClusterBarrierPassTest, Rule3HardStopAtALiveWaitAbortsWithOrWithoutLead) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* earlier = createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    closeLoop();
+
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_NE(cycleMap.find(trigger), cycleMap.end())
+        << "a lead > 0 needs an estimate at the wait:" << blockListing(*bb);
+
+    auto place = [&](int leadCycles) {
+        (void)cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
+            trigger, segBeginAfter(loopHead), trigger, cycleMap, leadCycles,
+            /*maxLeadCycles=*/900, /*priorWaitAnchors=*/{earlier}, /*maxHops=*/0, loopHead);
+    };
+    EXPECT_DEATH(place(/*leadCycles=*/0), "SCC live at the wait");
+    EXPECT_DEATH(place(/*leadCycles=*/500), "SCC live at the wait");
+}
+
 // The producer drain follows StreamK multicast at PGR >= 2 unless producerDrain
 // says otherwise, and lands after the whole run of adjacent loads.
 TEST_F(InsertClusterBarrierPassTest, ProducerDrainFollowsStreamKMulticastByDefault) {

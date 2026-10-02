@@ -418,6 +418,7 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertClusterBarrierPass",
      [](const std::vector<std::string>& args) -> std::unique_ptr<Pass> {
          const std::optional<int> pgr = passArgInt(args, "pgr", 1);
+         // lead < 0 is unset, as ModuleOptions' -1 is; the pass resolves it.
          const std::optional<int> lead = passArgInt(args, "lead", 100);
          const std::optional<int> rule3Mode = passArgInt(args, "rule3Mode", 0);
          const std::optional<int> producerDrain = passArgInt(args, "producerDrain", -1);

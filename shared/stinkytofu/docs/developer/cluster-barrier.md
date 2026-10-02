@@ -85,7 +85,7 @@ Multiple loads sharing the same workgroup signal receive one handshake.
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
 2. The **signal anchor** (Rule 3(a)) is found by walking backward from the wait
    anchor until it stands `ClusterBarrierRule3SignalLeadCycles` estimated cycles
-   ahead of it (default 100; 0 co-locates signal and wait), somewhere the
+   ahead of it (default 100; for 0 and negative values see below), somewhere the
    handshake may legally go. The lead is a target, not a cap: a spot inside a
    live SCC range is not one the walk may take, so it keeps climbing, and
    `kRule3SignalMaxLeadCycles` is what bounds the answer. Past that ceiling it
@@ -96,7 +96,18 @@ Multiple loads sharing the same workgroup signal receive one handshake.
    `kRule3CrossLoop` false every label and branch stops it too, which confines it
    to the wait's own segment.
 
-When cycle estimates are unavailable, the signal co-locates with the wait.
+With no lead to buy -- a lead of 0, or no cycle estimate at the wait -- the signal
+co-locates with the wait, but only where SCC is dead there. Where SCC is live at
+the wait, the walk runs as if the lead were already met at the wait and settles
+on the nearest spot above it that SCC leaves free (see [SCC](#scc)). A walk with
+a lead that comes back to the wait's own spot -- a boundary or a hard stop ends
+it before it buys any -- has bought none, and is placed the same way.
+
+A negative lead is unset, like the module option's -1. Gfx1250Backend resolves
+that through SchedulingKnobHeuristics before building the pass; the pass resolves
+one it is handed directly, such as stinkytofu-opt's `lead=-1`, the same way. A
+pass sees no module and so no main-loop statistics, which leaves the static
+default, 100.
 
 Cross-segment hoisting and loop-carried compensation are gated by the compile-time
 switch `cluster_barrier::kRule3CrossLoop` in
@@ -236,7 +247,7 @@ A block takes mode 1 or 2 for all of its triggers or for none. When a trigger's
 `s_barrier_wait -1` does not come before its load, or SCC is live where the signal
 block would go (mode 1: above the drains; mode 2: anywhere from that wait down to
 the load), the whole block keeps mode 0 and the pass emits a `Rule3ModeFallback`
-remark. The decision is per block because the signal climb stops at the other
+remark that names the cause. The decision is per block because the signal climb stops at the other
 handshakes' waits by their triggers, which is where those waits are only when the
 whole block is placed by mode 0.
 

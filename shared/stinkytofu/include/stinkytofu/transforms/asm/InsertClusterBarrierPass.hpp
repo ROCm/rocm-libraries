@@ -59,7 +59,10 @@ class Pass;
 /// \p streamKMulticast and \p pgrValue only enable the Rule 3 producer-side
 /// tensor drain for StreamK cluster multicast at PrefetchGlobalRead >= 2.
 /// \p rule3SignalLeadCycles controls how far ahead of its wait the Rule 3
-/// signal is targeted; 0 co-locates them.
+/// signal is targeted; 0 co-locates them where SCC is dead at the wait, and
+/// otherwise puts the signal at the nearest SCC-dead spot above it. A negative
+/// value is unset, as the module option's -1 is, and takes what
+/// SchedulingKnobHeuristics gives a module without main-loop statistics.
 /// \p rule3Mode places the Rule 3 handshake around its trigger, the protect
 /// workgroup barrier: 0 = signal ahead by the lead, wait above the trigger;
 /// 1 = signal where mode 0 waits, wait right after the trigger's

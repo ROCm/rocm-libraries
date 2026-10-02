@@ -40,6 +40,7 @@
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
+#include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -717,9 +718,14 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
     int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
     StinkyInstruction* loopHead) {
-    if (leadCycles <= 0) return {defaultAnchor, 0};
     auto refIt = cycleMap.find(referenceAnchor);
-    if (refIt == cycleMap.end()) return {defaultAnchor, 0};
+    // No lead to buy -- none asked for, or no estimate at the wait to measure one
+    // from -- leaves the signal at the wait's own spot, and the handshake's
+    // SCC-writing compare may only take that spot where SCC is dead. Where it is
+    // live, the scan below runs with the lead already met at the wait, so it
+    // settles on the nearest spot above the wait that SCC leaves free.
+    const bool noLead = leadCycles <= 0 || refIt == cycleMap.end();
+    if (noLead && !isSccLiveIn(referenceAnchor)) return {defaultAnchor, 0};
     BasicBlock* parent = referenceAnchor->getParent();
     if (parent == nullptr) return {defaultAnchor, 0};
     const auto bbBegin = parent->begin();
@@ -729,7 +735,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // in a segment that is textually below the wait and so carries larger
     // absolute cycles.
     int64_t accum = 0;
-    int64_t prevCycle = static_cast<int64_t>(refIt->second);
+    int64_t prevCycle = noLead ? 0 : static_cast<int64_t>(refIt->second);
     int hops = 0;
     bool crossedLoopHead = false;
     auto curSegBegin = segBegin;
@@ -751,8 +757,8 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // through clearScc, which asks isSccLiveIn again. A boundary stop is judged
     // on placement alone, and on purpose: see curSegBeginSccLive.
     bool sccLive = isSccLiveIn(referenceAnchor);
-    bool targetMet = false;
-    StinkyInstruction* leadPoint = nullptr;
+    bool targetMet = noLead;
+    StinkyInstruction* leadPoint = noLead ? referenceAnchor : nullptr;
     IRBase* outOfSegmentNomination = nullptr;
 
     // SCC queries about the anchor scan forward towards the wait, so the wait
@@ -781,12 +787,21 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // lead point to the first spot below the range, which is nearer the wait than
     // the lead asked for. A boundary-forced anchor is a lower bound -- the scan
     // may not go above it -- so when it lands inside a live range the only legal
-    // correction is to drop below the range. Failing that the whole segment from
-    // the def down to the wait is live and there is no safe spot at all; the
-    // caller's default (co-locating with the wait) is then no worse than anything
-    // else this pass could pick.
+    // correction is to drop below the range, which leaves the wait's own spot as
+    // the last one to try.
+    //
+    // That spot takes the compare like any other, so it is only an answer where
+    // SCC is dead there. A climb that comes back to it bought no lead, and with
+    // SCC live there it is placed as no lead would place it -- at the nearest spot
+    // above the wait that SCC leaves free -- which is what null asks report() for.
+    // With no lead to begin with, that is the search already running, and it has
+    // found nothing.
     auto clearScc = [&](IRBase* anchor) -> IRBase* {
-        if (anchor == defaultAnchor) return anchor;
+        if (anchor == defaultAnchor) {
+            if (!isSccLiveIn(referenceAnchor)) return anchor;
+            if (!noLead) return nullptr;
+            STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live at the wait");
+        }
         auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
         if (anchorInst == nullptr || !isSccLiveIn(anchorInst)) return anchor;
         return resolveSccDeadBelow(anchorInst, sccLimit(anchorInst));
@@ -835,8 +850,14 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // that climbed over an edge and then dropped back below it crossed nothing in
     // the end and must not be billed for it -- neither when it gave up at the
     // caller's default, which is the wait's own spot, nor when it settled
-    // anywhere else the wait can reach without a branch.
+    // anywhere else the wait can reach without a branch. Where clearScc hands the
+    // placement to the search with no lead (null), the answer and its hops are
+    // that search's.
     auto report = [&](IRBase* anchor) -> Rule3SignalAnchor {
+        if (anchor == nullptr)
+            return findRule3SignalAnchorByCycleLead(referenceAnchor, segBegin, defaultAnchor,
+                                                    cycleMap, /*leadCycles=*/0, maxLeadCycles,
+                                                    priorWaitAnchors, maxHops, loopHead);
         return rule3ReportAnchor(anchor, defaultAnchor, hops, crossedLoopHead,
                                  outOfSegmentNomination, segBegin, referenceAnchor);
     };
@@ -937,7 +958,8 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         }
         if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
 
-        auto cycleIt = cycleMap.find(inst);
+        // No lead, nothing to count, and so no ceiling to turn back at.
+        auto cycleIt = noLead ? cycleMap.end() : cycleMap.find(inst);
         if (cycleIt != cycleMap.end()) {
             const int64_t cyc = static_cast<int64_t>(cycleIt->second);
             if (cyc <= prevCycle) accum += prevCycle - cyc;
@@ -1317,6 +1339,18 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
     return true;
 }
 
+/// The lead a negative, i.e. unset, rule3SignalLeadCycles resolves to: what
+/// SchedulingKnobHeuristics gives a knob the user left alone. Its policy reads
+/// the main-loop statistics of a module, which a pass never sees, so they go in
+/// empty and the answer is the one a module without them gets.
+int unsetRule3SignalLeadCycles(const std::array<int, 3>& arch) {
+    SchedulingFeatures features;
+    features.arch = arch;
+    return resolveSchedulingKnobs(features, SchedulingKnobOverrides{},
+                                  HeuristicSchedulingKnobPolicy{})
+        .clusterBarrierRule3SignalLeadCycles;
+}
+
 class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
@@ -1325,7 +1359,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                                  int rule3Mode, int producerDrain)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
-          rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
+          rule3SignalLeadCycles_(rule3SignalLeadCycles),
           rule3Mode_((rule3Mode == 1 || rule3Mode == 2) ? rule3Mode : 0),
           producerDrain_(producerDrain) {}
 
@@ -1341,9 +1375,11 @@ class InsertClusterBarrierPassImpl : public Pass {
         const auto& arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
+        int rule3SignalLeadCycles = rule3SignalLeadCycles_;
+        if (rule3SignalLeadCycles < 0) rule3SignalLeadCycles = unsetRule3SignalLeadCycles(arch);
         static const std::unordered_map<const StinkyInstruction*, uint32_t> kEmptyCycleMap;
         const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap =
-            (rule3SignalLeadCycles_ > 0)
+            (rule3SignalLeadCycles > 0)
                 ? AM.getResult<EstimateAsmCyclesPerInstructionAnalysis>(func)
                 : kEmptyCycleMap;
 
@@ -1468,19 +1504,26 @@ class InsertClusterBarrierPassImpl : public Pass {
             // the other handshakes' waits by their triggers, which is where those
             // waits are only when the whole block is placed by mode 0.
             bool afterProtect = rule3Mode_ != 0 && !triggers.empty();
+            // Named in the remark, so that fallback counts can be told apart by cause.
+            const char* fallbackReason = "";
             for (TriggerSite& site : triggers) {
                 if (!afterProtect) break;
                 StinkyInstruction* below = anchorAfterProtectWait(site.trigger, site.tensorLoad);
                 if (below == nullptr) {
                     afterProtect = false;
+                    fallbackReason = "a trigger has no s_barrier_wait -1 before its load";
                 } else if (rule3Mode_ == 1) {
                     // The signal block writes SCC where mode 0 would have waited.
                     afterProtect = !isSccLiveIn(site.waitAnchorInst);
+                    if (!afterProtect)
+                        fallbackReason = "SCC is live at mode 0's wait, where mode 1 signals";
                     site.afterProtectSignal = site.waitAnchor;
                     site.afterProtectWait = below;
                 } else {
                     StinkyInstruction* spot = findSccDeadAnchorThrough(below, site.tensorLoad);
                     afterProtect = spot != nullptr;
+                    if (!afterProtect)
+                        fallbackReason = "SCC is live from s_barrier_wait -1 through the load";
                     site.afterProtectSignal = spot;
                     site.afterProtectWait = spot;
                 }
@@ -1490,8 +1533,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                            {OptimizationRemark::Kind::Analysis, getName(), "Rule3ModeFallback",
                             "@" + func.getName() + ": Rule 3 mode " + std::to_string(rule3Mode_) +
                                 " kept mode 0 for " + std::to_string(triggers.size()) +
-                                " handshake(s): a trigger has no s_barrier_wait -1 before its "
-                                "load, or SCC is live where its signal would go"});
+                                " handshake(s): " + fallbackReason});
             }
 
             std::unordered_set<StinkyInstruction*> priorWaitAnchors;
@@ -1528,7 +1570,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // distance.
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
                     site.waitAnchorInst, tSegBegin, /*defaultAnchor=*/site.waitAnchor, cycleMap,
-                    rule3SignalLeadCycles_, kRule3SignalMaxLeadCycles, priorWaitAnchors,
+                    rule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors,
                     maxSegmentHops, head);
                 // Read the exit label and climb the preheader now: once the handshakes
                 // go in, the body is full of this pass's own skip branches and
