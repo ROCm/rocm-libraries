@@ -239,7 +239,7 @@ KnobSetting disableBenchmarkingKnob()
 
 KnobSetting kernelFamilyKnob(int64_t family)
 {
-    return KnobSetting(KERNEL_FAMILY_KNOB, family);
+    return {KERNEL_FAMILY_KNOB, family};
 }
 
 std::string candidateCount(size_t candidates)

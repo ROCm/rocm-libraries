@@ -47,7 +47,7 @@ struct TensorSpec
     bool constant = false;
     bool omitDims = false;
     bool omitStrides = false;
-    std::optional<int64_t> raggedOffset{};
+    std::optional<int64_t> raggedOffset = std::nullopt;
     int64_t alignment = 16;
 };
 
@@ -129,6 +129,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec = {})
         &spec.dilation,
         spec.mode);
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.reserve(spec.nodeCount);
     for(unsigned int i = 0; i < spec.nodeCount; ++i)
     {
         nodes.push_back(
@@ -710,7 +711,7 @@ TEST(TestGfx950ConvFwdKernelMatcher, DefaultEpilogueRequiresScalarOutputStores)
             }
             spec.tensors[1].dims[0] = k;
             spec.tensors[2].dims[1] = k;
-            spec.tensors[2].strides = {14 * 14 * k, 1, 14 * k, k};
+            spec.tensors[2].strides = {k * 14 * 14, 1, k * 14, k};
             const GraphFixture fixture(buildGraph(spec), gfx950Properties());
             for(const auto tileK : {64, 128})
             {
