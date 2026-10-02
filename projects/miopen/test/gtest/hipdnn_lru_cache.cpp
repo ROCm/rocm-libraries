@@ -12,6 +12,8 @@ namespace {
 
 using Cache = miopen::wrapper::LruCache<int, int>;
 
+} // namespace
+
 TEST(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
 {
     Cache cache(3);
@@ -60,5 +62,3 @@ TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
     EXPECT_NE(cache.Find(1), nullptr);
     EXPECT_NE(cache.Find(3), nullptr);
 }
-
-} // namespace
