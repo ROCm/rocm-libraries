@@ -4,7 +4,8 @@
 # that hardware does not insert itself. It must:
 #   * split unsafe SMEM and FLAT groups with s_wait_xcnt 0;
 #   * drain VMEM before the first atomic, but not between atomics;
-#   * drain before forever s_sleep and non-adjacent s_set_vgpr_msb;
+#   * drain before forever s_sleep, and before s_set_vgpr_msb while XCNT may
+#     still be live (a partial s_wait_loadcnt is not an XCNT drain);
 #   * carry a group through a fall-through block-label boundary.
 
 # CHECK-LABEL: @smem_source_clobber
@@ -176,17 +177,63 @@ st.func @buffer_source_reuse() {
   v0 = "st.buffer_load_b32"(v1)
 }
 
-# A VGPR-MSB setter adjacent to its VMEM user needs no explicit drain.
+# s_set_vgpr_msb in a non-leading issue dword can co-issue and skip the
+# XCNT==0 check. A following VMEM user is the co-issue case, so the pass
+# still drains first.
 # CHECK-LABEL: @adjacent_vgpr_msb_vmem
 # CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
 # CHECK-NEXT: s_set_vgpr_msb"(1)
 # CHECK-NEXT: buffer_load_b32
-# CHECK-NOT: s_wait_xcnt
 st.func @adjacent_vgpr_msb_vmem() {
 ^entry:
   v9 = "st.buffer_load_b32"(v0)
   "st.s_set_vgpr_msb"(1)
   v10 = "st.buffer_load_b32"(v1)
+}
+
+# s_wait_loadcnt 1 leaves that load in flight and does not drain any other
+# counter's XCNT. The VGPR-map change still needs s_wait_xcnt 0.
+# CHECK-LABEL: @partial_loadcnt_then_vgpr_msb
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_loadcnt"(1)
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NEXT: ds_store_b16
+st.func @partial_loadcnt_then_vgpr_msb() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_wait_loadcnt"(1)
+  "st.s_set_vgpr_msb"(1)
+  "st.ds_store_b16"(v2, v3)
+}
+
+# A zero loadcnt wait retires loads only. A prior store's translation can
+# still be outstanding, so s_set_vgpr_msb still needs s_wait_xcnt 0.
+# CHECK-LABEL: @loadcnt_does_not_drain_store_xcnt
+# CHECK: buffer_store_b32
+# CHECK-NEXT: s_wait_loadcnt"(0)
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+st.func @loadcnt_does_not_drain_store_xcnt() {
+^entry:
+  "st.buffer_store_b32"(v0, v1)
+  "st.s_wait_loadcnt"(0)
+  "st.s_set_vgpr_msb"(1)
+}
+
+# s_wait_xcnt 0 already retired every translation.
+# CHECK-LABEL: @xcnt_drain_then_vgpr_msb
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NOT: s_wait_xcnt
+st.func @xcnt_drain_then_vgpr_msb() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_wait_xcnt"(0)
+  "st.s_set_vgpr_msb"(1)
+  v11 = "st.v_add_f32"(v2, v3)
 }
 
 # Single-group hardware drains at both SMEM -> VMEM and VMEM -> SMEM switches.
