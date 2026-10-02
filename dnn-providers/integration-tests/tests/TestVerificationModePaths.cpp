@@ -510,6 +510,8 @@ TEST_F(TestVerificationModePathsFixture, AutoNoOracleFailsUnderFailOnNoOracle)
     // Still on the unverifiable report: the FAIL is the gate, the report the trail.
     EXPECT_EQ(unverifiable.size(), 1U);
     const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: no oracle can verify"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: no oracle can verify"));
     EXPECT_THAT(messages, ::testing::HasSubstr("golden (absent)"));
     EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (not applicable)"));
     EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (not applicable)"));
@@ -655,6 +657,14 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableRunsNoReferenceA
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+    // Golden data was there, just not asked for: the message must not claim that
+    // nothing could verify the bundle.
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("the requested oracle cannot verify"));
+    EXPECT_THAT(
+        messages,
+        ::testing::HasSubstr("golden data is present but not used under --verification-mode=gpu"));
+    EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("no oracle can verify")));
 }
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableFailsUnderFailOnNoOracle)
@@ -673,8 +683,13 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableFailsUnderFailOn
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
-    EXPECT_THAT(testing_support::allMessages(results),
-                ::testing::HasSubstr("GPU reference (not applicable)"));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (not applicable)"));
+    // The FAIL reads like the SKIP it replaces, so one log grep finds both.
+    EXPECT_THAT(messages, ::testing::HasSubstr("Unverifiable: the requested oracle"));
+    EXPECT_THAT(
+        messages,
+        ::testing::HasSubstr("golden data is present but not used under --verification-mode=gpu"));
 }
 
 TEST_F(TestVerificationModePathsFixture, CpuModeLateCapabilityMissFailsUnderFailOnNoOracle)

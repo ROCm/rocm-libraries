@@ -313,6 +313,10 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
+    // The one wording of "unverifiable", shared by the SKIP above and the FAIL that
+    // --fail-on-no-oracle turns it into, so a log grep finds both.
+    std::string unverifiableMessage(const std::string& reason) const;
+
     // The single definition of "this graph's claims are this run's business": an engine
     // was named to check against, this is not an authoring run, and a sidecar exists.
     // Deliberately free of the claim mode -- what a broken claim costs is
@@ -394,6 +398,9 @@ private:
     {
         bool golden = false;
         bool autoMode = false;
+        /// The --verification-mode an explicit chain was asked for ("gpu"/"cpu");
+        /// empty in auto mode.
+        std::string explicitMode;
         std::vector<ReferenceExecutorType> candidates;
         std::size_t next = 0; ///< first candidate not yet probed
         std::optional<ResolvedReference> ready;

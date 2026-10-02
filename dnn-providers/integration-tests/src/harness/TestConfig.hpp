@@ -151,7 +151,8 @@ struct TestConfigOptions
     std::optional<std::string> engineName;
     bool failOnUnsupported = false;
     // Opt-in while CI's Unverifiable counts are collected; the default flips in a
-    // follow-up. Off, a bundle no oracle can verify SKIPs as it always has.
+    // follow-up. Off, a bundle every oracle declined SKIPs as it always has; one
+    // where a reference errored fails regardless.
     bool failOnNoOracle = false;
     bool skipGraphValidation = false;
     std::optional<std::filesystem::path> configPath;

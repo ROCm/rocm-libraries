@@ -355,9 +355,11 @@ IntegrationBundleVerificationHarness::OracleChain
         chain.candidates = {ReferenceExecutorType::GPU, ReferenceExecutorType::CPU};
         break;
     case VerificationMode::GPU:
+        chain.explicitMode = "gpu";
         chain.candidates = {ReferenceExecutorType::GPU};
         break;
     case VerificationMode::CPU:
+        chain.explicitMode = "cpu";
         chain.candidates = {ReferenceExecutorType::CPU};
         break;
     case VerificationMode::GOLDEN:
@@ -530,6 +532,17 @@ VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleC
     {
         tried += (tried.empty() ? "" : ", ") + entry;
     }
+    // An explicit mode never consults golden data. Say so when it is there, so the
+    // message does not send anyone looking for data that is sitting in the bundle.
+    if(!chain.autoMode && _bundle->hasGoldenOutputs)
+    {
+        tried += "; golden data is present but not used under --verification-mode="
+                 + chain.explicitMode;
+    }
+
+    // Auto mode exhausted every oracle; an explicit mode only the one it demanded.
+    const std::string verdict = chain.autoMode ? "no oracle can verify this bundle"
+                                               : "the requested oracle cannot verify this bundle";
 
     // A reference that errored is a bug in the oracle, not a gap in coverage, and is
     // already in the reference-error report. It fails regardless of the opt-in below.
@@ -537,12 +550,12 @@ VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleC
     {
         return VerificationOutcome::failed(reached,
                                            FailureOrigin::ORACLE,
-                                           "a reference executor errored and no oracle could "
-                                           "verify this bundle; tried: "
-                                               + tried + " (" + _bundlePath.string() + ")");
+                                           "a reference executor errored and " + verdict
+                                               + "; tried: " + tried + " (" + _bundlePath.string()
+                                               + ")");
     }
 
-    const std::string reason = "no oracle can verify this bundle; tried: " + tried;
+    const std::string reason = verdict + "; tried: " + tried;
     if(!_deps.policy.failOnNoOracle)
     {
         return unverifiable(reason, reached);
@@ -550,7 +563,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleC
 
     _deps.reporter->recordUnverifiable(_bundlePath.string(), reason);
     return VerificationOutcome::failed(
-        reached, FailureOrigin::HARNESS, reason + " (" + _bundlePath.string() + ")");
+        reached, FailureOrigin::HARNESS, unverifiableMessage(reason));
 }
 
 // ---- inputs ----------------------------------------------------------------
@@ -800,8 +813,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::unverifiable(const std
                                                                        VerificationDepth reached)
 {
     _deps.reporter->recordUnverifiable(_bundlePath.string(), reason);
-    return VerificationOutcome::skipped(
-        reached, "Unverifiable: " + reason + " (" + _bundlePath.string() + ")");
+    return VerificationOutcome::skipped(reached, unverifiableMessage(reason));
+}
+
+std::string
+    IntegrationBundleVerificationHarness::unverifiableMessage(const std::string& reason) const
+{
+    return "Unverifiable: " + reason + " (" + _bundlePath.string() + ")";
 }
 
 void IntegrationBundleVerificationHarness::recordRefError(const std::string& reason)
