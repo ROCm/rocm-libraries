@@ -30,7 +30,9 @@ enum class UnverifiableSeverity
 // Process-wide collector of bundles that ended a run without a verdict. Mirrors
 // SupportMatrixCollector: a thread-safe singleton populated during test execution
 // and printed once after RUN_ALL_TESTS(). Records do not affect the GTest exit
-// code — an unverifiable bundle SKIPs; this report is the visible trail.
+// code — the test carries its own verdict: an unverifiable bundle SKIPs (FAILs
+// under --fail-on-no-oracle), and one left unverified after a reference error
+// FAILs; this report is the trail.
 class UnverifiableBundleReport
 {
 public:

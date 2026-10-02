@@ -52,6 +52,7 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     // the header main.cpp prints comes from that same call, and the two disagreeing
     // would label the run with a mode it did not use.
     EXPECT_EQ(policy.claims, claimMode());
+    EXPECT_EQ(policy.failOnNoOracle, TestConfig::get().failOnNoOracle());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());

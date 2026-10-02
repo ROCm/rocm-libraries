@@ -58,6 +58,11 @@ TEST(TestConfigUninitialized, FailOnUnsupportedThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().failOnUnsupported(), std::runtime_error);
 }
 
+TEST(TestConfigUninitialized, FailOnNoOracleThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().failOnNoOracle(), std::runtime_error);
+}
+
 TEST(TestConfigUninitialized, SkipGraphValidationThrowsWhenUninitialized)
 {
     EXPECT_THROW(TestConfig::get().skipGraphValidation(), std::runtime_error);
@@ -214,6 +219,12 @@ TEST_F(TestConfigInitialized, HasEngineNameReturnsTrue)
 TEST_F(TestConfigInitialized, FailOnUnsupportedReturnsTrue)
 {
     EXPECT_TRUE(TestConfig::get().failOnUnsupported());
+}
+
+// Off unless asked for: the no-oracle FAIL is opt-in until the default flips.
+TEST_F(TestConfigInitialized, FailOnNoOracleDefaultsToFalse)
+{
+    EXPECT_FALSE(TestConfig::get().failOnNoOracle());
 }
 
 TEST_F(TestConfigInitialized, SkipGraphValidationReturnsFalse)

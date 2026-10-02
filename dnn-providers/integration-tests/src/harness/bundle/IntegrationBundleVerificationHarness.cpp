@@ -9,6 +9,8 @@
 #include <ostream>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <utility>
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -306,8 +308,23 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
     // seconds per skip, and left those inputs cached on the bundle for the rest of
     // the run.
+    //
+    // Which oracle will judge the engine is settled here too, before the engine runs:
+    // golden data and isApplicable() are both knowable now, and an engine run nothing
+    // can check is GPU time spent on a verdict that was already decided. Golden mode
+    // has its own, stricter, demand for its one oracle -- see runGoldenMode().
+    OracleChain oracles;
     if(session.engines.accepted)
     {
+        if(_deps.policy.mode != VerificationMode::GOLDEN)
+        {
+            oracles = resolveOracles(_deps.policy.mode);
+            if(oracles.exhausted())
+            {
+                return noOracle(oracles, VerificationDepth::NOT_REACHED);
+            }
+        }
+
         if(auto unavailable = prepareInputs())
         {
             return *unavailable;
@@ -319,15 +336,74 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     case VerificationMode::GOLDEN:
         return runGoldenMode(session);
     case VerificationMode::GPU:
-        return runExplicitRefMode(session, ReferenceExecutorType::GPU);
     case VerificationMode::CPU:
-        return runExplicitRefMode(session, ReferenceExecutorType::CPU);
     case VerificationMode::AUTO:
-        return runAutoMode(session);
+        return runReferenceMode(session, oracles);
     default:
         return VerificationOutcome::failed(
             VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, "Unknown verification mode");
     }
+}
+
+IntegrationBundleVerificationHarness::OracleChain
+    IntegrationBundleVerificationHarness::resolveOracles(VerificationMode mode)
+{
+    OracleChain chain;
+    switch(mode)
+    {
+    case VerificationMode::AUTO:
+        chain.autoMode = true;
+        chain.golden = _bundle->hasGoldenOutputs;
+        if(chain.golden)
+        {
+            return chain;
+        }
+        chain.tried.emplace_back("golden (absent)");
+        chain.candidates = {ReferenceExecutorType::GPU, ReferenceExecutorType::CPU};
+        break;
+    case VerificationMode::GPU:
+        chain.candidates = {ReferenceExecutorType::GPU};
+        break;
+    case VerificationMode::CPU:
+        chain.candidates = {ReferenceExecutorType::CPU};
+        break;
+    case VerificationMode::GOLDEN:
+    default:
+        throw std::logic_error("resolveOracles: no reference chain for this verification mode");
+    }
+
+    chain.ready = nextApplicableReference(chain);
+    return chain;
+}
+
+std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
+    IntegrationBundleVerificationHarness::nextApplicableReference(OracleChain& chain)
+{
+    while(chain.next < chain.candidates.size())
+    {
+        const ReferenceExecutorType type = chain.candidates[chain.next++];
+        const std::string label = refLabel(type);
+        try
+        {
+            IReferenceGraphExecutor& executor = _deps.referenceExecutors->get(type);
+            if(executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+            {
+                return ResolvedReference{type, &executor};
+            }
+            chain.tried.push_back(label + " (not applicable)");
+        }
+        catch(const ReferenceCapabilityError& e)
+        {
+            chain.tried.push_back(label + " (not applicable: " + e.what() + ")");
+        }
+        catch(const std::exception& e)
+        {
+            recordRefError(label + " errored checking applicability: " + e.what());
+            chain.refErrored = true;
+            chain.tried.push_back(label + " (errored checking applicability: " + e.what() + ")");
+        }
+    }
+    return std::nullopt;
 }
 
 VerificationOutcome
@@ -387,97 +463,94 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     return compareAgainstGolden(engine.outputs);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::runExplicitRefMode(GraphSession& session,
-                                                             ReferenceExecutorType type)
+VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session,
+                                                                           OracleChain& oracles)
 {
     auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
         return engineDidNotRun(engine);
     }
-
-    OutputTensors refOutputs;
-    const RefRunResult result = runReferenceCapturingOutputs(type, refOutputs);
-    switch(result.status)
-    {
-    case RefStatus::CAPABILITY_MISS:
-        return unverifiable(refLabel(type) + " cannot run this op: " + result.message,
-                            VerificationDepth::EXECUTED);
-    case RefStatus::RUNTIME_ERROR:
-        recordRefError(refLabel(type) + " errored: " + result.message);
-        return VerificationOutcome::failed(VerificationDepth::EXECUTED,
-                                           FailureOrigin::ORACLE,
-                                           refLabel(type) + " errored (verification-mode="
-                                               + refLabel(type) + "): " + result.message);
-    case RefStatus::RAN:
-        return compareOutputs(engine.outputs, refOutputs, result.site, verifierFor(type));
-    default:
-        return VerificationOutcome::failed(
-            VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
-    }
+    return runOracleChain(engine.outputs, oracles);
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSession& session)
+VerificationOutcome
+    IntegrationBundleVerificationHarness::runOracleChain(OutputTensors& engineOutputs,
+                                                         OracleChain& chain)
 {
-    auto engine = runEngine(session);
-    if(engine.status != EngineStatus::RAN)
+    if(chain.golden)
     {
-        return engineDidNotRun(engine);
+        return compareAgainstGolden(engineOutputs);
     }
 
-    if(_bundle->hasGoldenOutputs)
-    {
-        return compareAgainstGolden(engine.outputs);
-    }
-
-    // GPU ref (non-final): capability miss or runtime error -> fall through.
-    bool gpuRefErrored = false;
+    // isApplicable() said yes before the engine ran, but execute() can still find a
+    // capability gap the up-front check could not see, or crash. Either way the next
+    // candidate gets its turn; only once the chain is spent does the bundle go
+    // without a verdict.
+    for(auto ref = std::exchange(chain.ready, std::nullopt); ref.has_value();
+        ref = nextApplicableReference(chain))
     {
         OutputTensors refOutputs;
-        const RefRunResult gpu
-            = runReferenceCapturingOutputs(ReferenceExecutorType::GPU, refOutputs);
-        if(gpu.status == RefStatus::RAN)
+        const RefRunResult result = runReferenceCapturingOutputs(*ref, refOutputs);
+        const std::string label = refLabel(ref->type);
+        switch(result.status)
         {
-            return compareOutputs(engine.outputs, refOutputs, gpu.site, Verifier::GPU_REFERENCE);
-        }
-        if(gpu.status == RefStatus::RUNTIME_ERROR)
-        {
-            gpuRefErrored = true;
-            recordRefError("GPU reference errored (auto mode, falling through to CPU): "
-                           + gpu.message);
-        }
-    }
-
-    // CPU ref (final): capability miss -> unverifiable; runtime error -> FAIL.
-    {
-        OutputTensors refOutputs;
-        const RefRunResult cpu
-            = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, refOutputs);
-        switch(cpu.status)
-        {
-        case RefStatus::CAPABILITY_MISS:
-            return unverifiable(
-                gpuRefErrored ? "no usable reference (golden absent; GPU ref errored, CPU ref "
-                                "cannot run this op; see reference-error report): "
-                                    + cpu.message
-                              : "no reference available (golden absent; GPU and CPU ref "
-                                "cannot run this op): "
-                                    + cpu.message,
-                VerificationDepth::EXECUTED);
-        case RefStatus::RUNTIME_ERROR:
-            recordRefError("CPU reference errored (auto mode, last resort): " + cpu.message);
-            return VerificationOutcome::failed(VerificationDepth::EXECUTED,
-                                               FailureOrigin::ORACLE,
-                                               "CPU reference errored (auto mode, last resort): "
-                                                   + cpu.message);
         case RefStatus::RAN:
-            return compareOutputs(engine.outputs, refOutputs, cpu.site, Verifier::CPU_REFERENCE);
+            return compareOutputs(engineOutputs, refOutputs, result.site, verifierFor(ref->type));
+        case RefStatus::CAPABILITY_MISS:
+            chain.tried.push_back(label + " (cannot run this op: " + result.message + ")");
+            break;
+        case RefStatus::RUNTIME_ERROR:
+        {
+            const bool fallsThrough = chain.next < chain.candidates.size();
+            const std::string context
+                = !chain.autoMode ? "verification-mode explicit"
+                  : fallsThrough
+                      ? "auto mode, falling through to " + refLabel(chain.candidates[chain.next])
+                      : "auto mode, last resort";
+            recordRefError(label + " errored (" + context + "): " + result.message);
+            chain.refErrored = true;
+            chain.tried.push_back(label + " (errored: " + result.message + ")");
+            break;
+        }
         default:
             return VerificationOutcome::failed(
                 VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
         }
     }
+
+    return noOracle(chain, VerificationDepth::EXECUTED);
+}
+
+VerificationOutcome IntegrationBundleVerificationHarness::noOracle(const OracleChain& chain,
+                                                                   VerificationDepth reached)
+{
+    std::string tried;
+    for(const auto& entry : chain.tried)
+    {
+        tried += (tried.empty() ? "" : ", ") + entry;
+    }
+
+    // A reference that errored is a bug in the oracle, not a gap in coverage, and is
+    // already in the reference-error report. It fails regardless of the opt-in below.
+    if(chain.refErrored)
+    {
+        return VerificationOutcome::failed(reached,
+                                           FailureOrigin::ORACLE,
+                                           "a reference executor errored and no oracle could "
+                                           "verify this bundle; tried: "
+                                               + tried + " (" + _bundlePath.string() + ")");
+    }
+
+    const std::string reason = "no oracle can verify this bundle; tried: " + tried;
+    if(!_deps.policy.failOnNoOracle)
+    {
+        return unverifiable(reason, reached);
+    }
+
+    _deps.reporter->recordUnverifiable(_bundlePath.string(), reason);
+    return VerificationOutcome::failed(
+        reached, FailureOrigin::HARNESS, reason + " (" + _bundlePath.string() + ")");
 }
 
 // ---- inputs ----------------------------------------------------------------
@@ -625,7 +698,7 @@ IntegrationBundleVerificationHarness::EngineRunResult
 }
 
 IntegrationBundleVerificationHarness::RefRunResult
-    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(ReferenceExecutorType type,
+    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(const ResolvedReference& ref,
                                                                        OutputTensors& refOutputs)
 {
     refOutputs = allocateSentinelOutputs();
@@ -635,17 +708,13 @@ IntegrationBundleVerificationHarness::RefRunResult
     // not an error, and the executor is the one that knows which it needs.
     bool useDevice = false;
 
+    // isApplicable() already said yes in nextApplicableReference(); execute() can
+    // still throw a ReferenceCapabilityError for what that check could not see.
     try
     {
-        IReferenceGraphExecutor& executor = _deps.referenceExecutors->get(type);
+        IReferenceGraphExecutor& executor = *ref.executor;
         useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
         auto variantPack = buildVariantPack(refOutputs, useDevice);
-
-        if(!executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
-        {
-            return {RefStatus::CAPABILITY_MISS,
-                    refLabel(type) + " is not applicable for this graph"};
-        }
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)

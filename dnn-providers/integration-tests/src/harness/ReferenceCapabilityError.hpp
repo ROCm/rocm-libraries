@@ -17,10 +17,12 @@ namespace hipdnn_integration_tests
 //   B  disagreement     — ref ran, output != engine-> mismatch at compare time
 //   C  runtime error    — ref CAN run it but threw -> any other std::exception
 //
-// In `auto` mode a case-A miss falls through to the next reference; in explicit
-// gpu/cpu mode it SKIPs. A case-C error is loud (auto: fall through + loud
-// report; explicit / end-of-auto: FAIL). Throwing the right type at the source
-// is what lets the harness tell A from C.
+// A case-A miss falls through to the next reference; when none is left the bundle
+// has no oracle and SKIPs (FAILs under --fail-on-no-oracle). Most misses are
+// caught by isApplicable() before the engine runs; this exception covers the ones
+// only execute() can see. A case-C error is loud (fall through + loud report, and
+// FAIL if nothing after it verifies the bundle). Throwing the right type at the
+// source is what lets the harness tell A from C.
 //
 // Deriving from std::runtime_error keeps existing `catch(const std::exception&)`
 // / `catch(const std::runtime_error&)` call sites working unchanged.
