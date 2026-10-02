@@ -282,10 +282,13 @@ Async constraints:
 - consumers must wait on VMEM before reading;
 - swizzles belong in consumer read arithmetic, not in the destination pointer.
 
-The gfx1250 universal GEMM path currently uses synchronous WMMA staging. It
-accepts the `mem` or `wmma_v1` pipeline with either the `default` or the
-`cshuffle` epilogue, and does not support `compv4`, `direct_to_lds`, or
-`dtl_prefetch`.
+The gfx1250 universal GEMM path accepts the `mem` or `wmma_v1` pipeline
+with either the `default` or the `cshuffle` epilogue. Global-to-LDS staging
+can use VGPRs, `direct_to_lds` with optional `dtl_prefetch`, or TDM.
+Direct-to-LDS uses async 16-byte copies for aligned, complete chunks and
+masked scalar loads for partial chunks or unaligned row pitches. Invalid
+M/N rows and K elements are staged as zero. TDM descriptors carry the
+remaining M/N/K extents. `compv4` remains unsupported on this target.
 
 The `cshuffle` epilogue matters more on WMMA than on MFMA. A wave32 16x16 atom
 hands each lane eight accumulator values that sit in eight *different* rows of
@@ -296,9 +299,8 @@ vector store instead. On a bandwidth-bound output tile that is the difference
 between a scattered 16-bit store stream and a coalesced one.
 
 gfx1250 has a separate `global_load_async_to_lds_*` instruction family with a
-dedicated async counter. That path is currently used only for optional V
-prefetching in gfx1250 tiled 3D attention; it is not wired into universal GEMM
-or convolution. The gfx942/gfx950 `AsyncTileLoader` uses different instructions
+dedicated async counter. Universal GEMM and optional V prefetching in
+gfx1250 tiled 3D attention use this path; convolution does not. The gfx942/gfx950 `AsyncTileLoader` uses different instructions
 and cannot be reused on gfx1250.
 
 For row-wise small ops, use `helpers/sweep.py::sweep_row_chunks` and the `helpers/io.py` dispatchers (`load_vec_as_f32`, `pack_f32_to`) instead of building tile loaders.

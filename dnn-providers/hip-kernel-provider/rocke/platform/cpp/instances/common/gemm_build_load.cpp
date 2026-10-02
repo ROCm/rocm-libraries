@@ -47,13 +47,8 @@ int rocke_gemm_dtype_bytes(const char* dtype)
     {
         const char* name;
         int bytes;
-    } k_elem_bytes[] = {{"f16", 2},
-                        {"fp16", 2},
-                        {"bf16", 2},
-                        {"fp8", 1},
-                        {"bf8", 1},
-                        {"f32", 4},
-                        {"fp32", 4}};
+    } k_elem_bytes[]
+        = {{"f16", 2}, {"fp16", 2}, {"bf16", 2}, {"fp8", 1}, {"bf8", 1}, {"f32", 4}, {"fp32", 4}};
     if(dtype == NULL)
     {
         return 0;
@@ -255,11 +250,9 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
      * gfx9 buffer_load_lds family is wave-contiguous and stays unpadded.
      * _lds_k = block_k + pad */
     {
-        const int dtl_lane_addressed =
-            (ctx->arch != NULL && strcmp(ctx->arch, "gfx1250") == 0);
-        ctx->lds_pad = (spec->trait.direct_to_lds && !dtl_lane_addressed)
-                           ? 0
-                           : spec->trait.lds_k_pad;
+        const int dtl_lane_addressed = (ctx->arch != NULL && strcmp(ctx->arch, "gfx1250") == 0);
+        ctx->lds_pad
+            = (spec->trait.direct_to_lds && !dtl_lane_addressed) ? 0 : spec->trait.lds_k_pad;
     }
     ctx->lds_k = ctx->block_k + ctx->lds_pad;
     {
@@ -433,10 +426,12 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
                                  rocke_value_t* ptr,
                                  rocke_value_t* row_off,
                                  int rows,
+                                 rocke_value_t* extent,
                                  rocke_value_t* lds_base,
                                  rocke_value_t* batch_off,
                                  rocke_value_t* k_off,
-                                 rocke_value_t* k_remaining)
+                                 rocke_value_t* k_remaining,
+                                 rocke_value_t* zero)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* origin
@@ -448,7 +443,7 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     args.lds_addr = lds_base;
     args.elem_bytes = ctx->tdm_elem_bytes;
     args.tensor_dim0 = k_remaining;
-    args.tensor_dim1 = rocke_b_const_i32(b, rows);
+    args.tensor_dim1 = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
     args.tile_dim0 = ctx->block_k;
     args.tile_dim1 = rows;
     args.dim0_stride_value = ctx->K;
@@ -463,36 +458,46 @@ static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
     rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
 }
 
-/* gfx1250 direct-to-LDS copy of one chunk. Under pad_k a chunk past K would
- * read the next row's head (or past the buffer on the last row), so its LDS
- * slot is zeroed instead. A chunk is all-in or all-out only when K is a
- * multiple of dtl_halves, which the 16 B async copy needs anyway. */
+/* Mirror _gfx1250_async_load: retain async b128 for full, aligned chunks;
+ * scalar masked loads handle row tails, K tails and unaligned row pitches. */
 static void rocke_gemm_gfx1250_async_load(rocke_gemm_build_ctx_t* ctx,
                                           rocke_value_t* src,
                                           rocke_value_t* off_elems,
                                           rocke_value_t* smem,
                                           rocke_value_t* lds_row,
                                           rocke_value_t* col,
+                                          rocke_value_t* global_row,
+                                          rocke_value_t* extent,
                                           rocke_value_t* k_off,
                                           int cpol)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* lds_indices[2] = {lds_row, col};
-    if(!ctx->spec->trait.pad_k)
-    {
-        rocke_b_global_load_async_to_lds(
-            b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
-        return;
-    }
-    rocke_value_t* valid = rocke_b_cmp_lt(b, rocke_b_add(b, k_off, col), ctx->K);
+    rocke_value_t* row_valid = rocke_b_cmp_lt(b, global_row, extent);
+    rocke_value_t* k_col = rocke_b_add(b, k_off, col);
+    rocke_value_t* full
+        = rocke_b_cmp_le(b, rocke_b_add(b, k_col, rocke_b_const_i32(b, ctx->dtl_halves)), ctx->K);
+    rocke_value_t* remainder = rocke_b_mod(b, off_elems, rocke_b_const_i32(b, ctx->dtl_halves));
+    rocke_value_t* aligned = rocke_b_cmp_eq(b, remainder, rocke_b_const_i32(b, 0));
+    rocke_value_t* valid = rocke_b_land(b, row_valid, rocke_b_land(b, full, aligned));
     rocke_if_else_t ife = rocke_b_scf_if_else(b, valid);
     rocke_b_region_enter(b, ife.then_region);
     rocke_b_global_load_async_to_lds(
         b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
     rocke_b_region_leave(b);
     rocke_b_region_enter(b, ife.else_region);
-    rocke_value_t* zero = rocke_b_zero_vec(b, ctx->storage_dtype, ctx->dtl_halves);
-    rocke_b_smem_store_vN(b, smem, lds_indices, 2, zero, ctx->dtl_halves);
+    rocke_value_t* zero
+        = rocke_b_vec_extract(b, rocke_b_zero_vec(b, ctx->storage_dtype, ctx->dtl_halves), 0);
+    for(int i = 0; i < ctx->dtl_halves; ++i)
+    {
+        rocke_value_t* ci = rocke_b_const_i32(b, i);
+        rocke_value_t* mask
+            = rocke_b_land(b, row_valid, rocke_b_cmp_lt(b, rocke_b_add(b, k_col, ci), ctx->K));
+        rocke_value_t* value = rocke_b_masked_global_load(
+            b, src, rocke_b_add(b, off_elems, ci), mask, zero, ctx->storage_dtype, 2);
+        rocke_value_t* indices[2] = {lds_row, rocke_b_add(b, col, ci)};
+        rocke_b_smem_store_vN(b, smem, indices, 2, value, 1);
+    }
     rocke_b_region_leave(b);
 }
 
@@ -572,10 +577,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->A,
                                  ctx->block_m_off,
                                  ctx->block_m,
+                                 ctx->M,
                                  a_lds,
                                  ctx->batch_off_a,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_b_region_leave(b);
             rocke_if_t b_gate
                 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, rocke_b_const_i32(b, 1)));
@@ -584,10 +591,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->Bp,
                                  ctx->block_n_off,
                                  ctx->block_n,
+                                 ctx->N,
                                  b_lds,
                                  ctx->batch_off_b,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_b_region_leave(b);
         }
         else
@@ -596,18 +605,22 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                  ctx->A,
                                  ctx->block_m_off,
                                  ctx->block_m,
+                                 ctx->M,
                                  a_lds,
                                  ctx->batch_off_a,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
             rocke_gemm_tdm_issue(ctx,
                                  ctx->Bp,
                                  ctx->block_n_off,
                                  ctx->block_n,
+                                 ctx->N,
                                  b_lds,
                                  ctx->batch_off_b,
                                  k_off,
-                                 k_remaining);
+                                 k_remaining,
+                                 zero);
         }
         return;
     }
@@ -701,6 +714,8 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                               ctx->A_smem,
                                               lds_row,
                                               col,
+                                              rocke_b_add(b, ctx->block_m_off, row),
+                                              ctx->M,
                                               k_off,
                                               spec->trait.dtl_cache_a);
             }
@@ -755,6 +770,8 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                               ctx->B_smem,
                                               lds_row,
                                               col,
+                                              rocke_b_add(b, ctx->block_n_off, row),
+                                              ctx->N,
                                               k_off,
                                               spec->trait.dtl_cache_b);
             }

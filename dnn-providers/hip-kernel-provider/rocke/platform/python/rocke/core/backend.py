@@ -448,6 +448,7 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pad_n=tr.pad_n,
         pad_k=tr.pad_k,
         persistent=tr.persistent,
+        persistent_ctas=tr.persistent_ctas,
         chiplet_swizzle=tr.chiplet_swizzle,
         chiplet_wgm=tr.chiplet_wgm,
         chiplet_num_xcds=tr.chiplet_num_xcds,
