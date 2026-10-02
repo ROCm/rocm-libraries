@@ -8,14 +8,17 @@ The pass is created via:
 ```cpp
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    int rule3Mode = 0, int producerDrain = -1);
+    int rule3Mode = 0, int producerDrain = -1, int loopPeriod = 1, int driftCanaryCycles = 0,
+    int skewCanaryCycles = 0);
 ```
 
 Gfx1250Backend fills these from the module options `StreamKMulticast`,
 `PrefetchGlobalRead`, `ClusterBarrierRule3SignalLeadCycles` (resolved through
-SchedulingKnobHeuristics), `ClusterBarrierRule3Mode` and `ClusterProducerDrain`.
-stinkytofu-opt takes them as `--InsertClusterBarrierPass=streamKMulticast,pgr=2,lead=200,rule3Mode=2,producerDrain=0`.
-See [Placement modes](#placement-modes) and [Producer drain](#producer-drain).
+SchedulingKnobHeuristics), `ClusterBarrierRule3Mode`, `ClusterProducerDrain`,
+`ClusterBarrierLoopPeriod`, `ClusterDriftCanaryCycles` and `ClusterSkewCanaryCycles`.
+stinkytofu-opt takes them as `--InsertClusterBarrierPass=streamKMulticast,pgr=2,lead=200,rule3Mode=2,producerDrain=0,loopPeriod=3,driftCanary=256,skewCanary=512`.
+See [Placement modes](#placement-modes), [Producer drain](#producer-drain),
+[Loop period](#loop-period) and [Cluster canaries](#cluster-canaries).
 
 ## Overview
 
@@ -263,6 +266,52 @@ cooperative load retires before the back edge. `ClusterProducerDrain` overrides 
 condition: -1 keeps it, 0 never drains, 1 drains after every Rule 3 group.
 TensileLite no longer passes the `StreamKMulticast` module option (#12817,
 e69ccbe3), so on TensileLite kernels -1 (auto) never drains and 1 forces the drain.
+
+### Loop period
+
+`ClusterBarrierLoopPeriod` (k) numbers each loop's triggers in program order from
+the loop head and keeps the handshake of the ones whose number is a multiple of k:
+1 (default) keeps every trigger, 0 keeps none, so the loop body runs without cluster
+barriers and Rules 1, 2 and 4 are all that is left. The same triggers are kept on
+every trip, which spaces the kept handshakes evenly only when k divides the
+triggers per trip (one per loop copy: 3 with HalfPLR, 2 with ExpandPointerSwap
+alone, 1 otherwise). A loop where it does not keeps every handshake, and the pass
+emits a `LoopPeriodFallback` remark for it.
+
+No branch is involved: every kept handshake is a whole pair in its own segment,
+placed exactly where period 1 places it, and every workgroup of a cluster runs the
+same trips, so the phases stay balanced. A dropped trigger keeps its producer
+drain, and still counts as Rule 3's when Rule 4 checks for a conflict. The
+numbering includes triggers a previous run already handled, so a re-run drops the
+same ones again. With no handshake to mark it handled, a dropped trigger is collected
+again on a re-run, which finds the producer drain already planted behind its group
+(by its comment, before the next tensor load) and plants no second one.
+
+### Cluster canaries
+
+`ClusterDriftCanaryCycles` and `ClusterSkewCanaryCycles` are diagnostics, off at 0.
+Each plants, at every Rule 3 site, a sleep of about that many cycles behind
+`s_bitcmp1_b32` / `s_cbranch_scc0` on bit 0 of `sgprWorkGroup0`, then the same on
+bit 0 of `sgprWorkGroup1`. Neighbouring workgroups of a cluster differ in one of
+those bits, so in every multicast group some workgroups sleep that much longer
+than others. `s_sleep` counts units of 64 clocks.
+
+| Canary | Where | What it shows |
+|---|---|---|
+| drift | right after the Rule 3 signal; where the loop period dropped the handshake, where its wait would have gone | with period 0 the delay piles up trip after trip; with handshakes it lands between a workgroup's signal and its last reads of the slot |
+| skew | right above the Rule 3 wait | a fixed spread in when the workgroups issue the refill load, reset by every handshake |
+
+The canaries move nothing else. They need the `.set` of both workgroup-id symbols
+(else the pass emits `ClusterCanaryNoWorkGroupId` and plants none), and a spot
+where SCC is dead (else that site is skipped and counted in a `ClusterCanarySkipped`
+remark). A re-run does not plant them twice.
+
+They stay out of a Rule 3 site that comes after the latch of a loop nested in its
+own loop: the site past the main loop where a PAP kernel prefetches the next tile.
+By then the persistent loop may have moved `sgprWorkGroup0` and `sgprWorkGroup1` on
+to that tile, so the canary there would sort the cluster by another tile's ids. The
+site keeps its handshake; its canaries are counted in a `ClusterCanarySkipped` remark
+of their own ("past an inner loop").
 
 ---
 

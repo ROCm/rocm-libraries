@@ -52,6 +52,10 @@ constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
 constexpr const char* kDrainBypassLabelSuffix = "_skipCBWait";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
+constexpr const char* kWorkGroup0Symbol = "sgprWorkGroup0";
+constexpr const char* kWorkGroup1Symbol = "sgprWorkGroup1";
+constexpr const char* kDriftCanaryLabelPrefix = "label_clusterDriftCanary_";
+constexpr const char* kSkewCanaryLabelPrefix = "label_clusterSkewCanary_";
 constexpr size_t kHashLen = 16;
 constexpr const char* kGSU1LabelName = "label_GSU_1";
 constexpr const char* kOpenLoopLabelName = "label_openLoopL";
@@ -71,6 +75,10 @@ constexpr int kRule3SignalMaxLeadCycles = 900;
 /// in flight and so costs one compensating pair around the loop; more hops
 /// would need per-edge accounting for no extra overlap.
 constexpr int kMaxSegmentHops = 1;
+
+/// `s_sleep` counts in units of 64 clocks, at most 127 of them per instruction.
+constexpr int kSleepUnitCycles = 64;
+constexpr int kMaxSleepUnits = 127;
 
 std::string makeRandomHash() {
     static thread_local std::mt19937_64 engine{std::random_device{}()};
@@ -376,6 +384,11 @@ void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRB
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
+/// The comment every producer drain carries, which is also how a re-run tells
+/// one apart from any other `s_wait_tensorcnt 0`.
+constexpr const char* kProducerDrainComment =
+    "retire cooperative tensor_load_to_lds before back-edge (PGR>=2 coherence)";
+
 /// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
 /// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
 /// cooperative load is async and produced by a PEER wave, so the consumer's own
@@ -391,9 +404,78 @@ void insertProducerTensorDrainBefore(IRBase* anchor, AsmIRBuilder& irBuilder, Gf
     SWaitTensorCntData d;
     d.tlcnt = 0;
     w->addModifier<SWaitTensorCntData>(d);
-    w->addModifier<CommentData>(
-        CommentData{"retire cooperative tensor_load_to_lds before back-edge "
-                    "(PGR>=2 coherence)"});
+    w->addModifier<CommentData>(CommentData{kProducerDrainComment});
+}
+
+/// Whether a drain insertProducerTensorDrainBefore planted already stands between
+/// \p from, the end of a tensor-load group, and the next tensor load, which leaves
+/// that group as the only one it can belong to.
+bool producerTensorDrainFollows(BasicBlock::iterator from, BasicBlock::iterator end) {
+    for (auto it = from; it != end; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isTensorLoad(*inst)) return false;
+        if (inst->getUnifiedOpcode() != GFX::s_wait_tensorcnt) continue;
+        const auto* comment = inst->getModifier<CommentData>();
+        if (comment != nullptr && comment->comment == kProducerDrainComment) return true;
+    }
+    return false;
+}
+
+/// Diagnostic sleep in front of \p anchor: about \p cycles once for each of bit 0
+/// of `sgprWorkGroup0` and bit 0 of `sgprWorkGroup1` that is set. Workgroups next
+/// to each other in a cluster differ in one of those bits, so every multicast
+/// group holds workgroups that sleep \p cycles longer than others. Clobbers SCC.
+void insertClusterCanaryBefore(IRBase* anchor, int cycles, const char* labelPrefix,
+                               AsmIRBuilder& irBuilder, GfxArchID archId) {
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_bitcmp1_b32, archId);
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+    const HwInstDesc* sleepDesc = getMCIDByUOp(GFX::s_sleep, archId);
+    assert(cmpDesc && brDesc && sleepDesc &&
+           "Cluster canary opcodes are not supported on this architecture");
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+
+    const int units = (cycles + kSleepUnitCycles - 1) / kSleepUnitCycles;
+    for (const char* symbol : {kWorkGroup0Symbol, kWorkGroup1Symbol}) {
+        const std::string labelName = labelPrefix + makeRandomHash();
+
+        StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
+        cmpInst->addDestReg(StinkyRegister::getSCCRegister());
+        cmpInst->addSrcReg(makeSymbolicSgpr(symbol));
+        cmpInst->addSrcReg(StinkyRegister(0));
+        cmpInst->addModifier<CommentData>(CommentData{"cluster canary: workgroup id parity"});
+
+        StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
+        brInst->addSrcReg(StinkyRegister(labelName));
+        brInst->addModifier<LabelData>(LabelData{labelName});
+
+        for (int left = units; left > 0; left -= kMaxSleepUnits) {
+            StinkyInstruction* sleepInst = irBuilder.create(sleepDesc, anchor);
+            sleepInst->addSrcReg(StinkyRegister(std::min(left, kMaxSleepUnits)));
+            sleepInst->addModifier<CommentData>(CommentData{"cluster canary sleep"});
+        }
+
+        StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
+        lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
+    }
+}
+
+/// Is the instruction right in front of \p anchor a label named with
+/// \p labelPrefix, i.e. the end of a block this pass planted there?
+bool followsLabelWithPrefix(IRBase* anchor, const char* labelPrefix) {
+    auto* at = (anchor != nullptr) ? dyn_cast<StinkyInstruction>(anchor) : nullptr;
+    if (at == nullptr || at->getParent() == nullptr) return false;
+    auto it = BasicBlock::iterator(at);
+    while (it != at->getParent()->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr) continue;
+        if (!isLabel(*prev)) return false;
+        const auto* data = prev->getModifier<LabelData>();
+        return data != nullptr && data->label.rfind(labelPrefix, 0) == 0;
+    }
+    return false;
 }
 
 bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
@@ -567,6 +649,25 @@ StinkyInstruction* findEnclosingLoopHead(StinkyInstruction* inst) {
         }
     }
     return nullptr;
+}
+
+/// Has a loop nested in the one \p loopHead opens already closed above \p inst?
+/// That is a branch back to a label lying between the two.
+bool followsInnerLoopLatch(StinkyInstruction* loopHead, StinkyInstruction* inst) {
+    BasicBlock* parent = inst->getParent();
+    if (parent == nullptr || loopHead == nullptr || loopHead->getParent() != parent) return false;
+    std::unordered_set<std::string> innerLabels;
+    for (auto it = std::next(BasicBlock::iterator(loopHead)); it != BasicBlock::iterator(inst);
+         ++it) {
+        auto* cand = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (cand == nullptr) continue;
+        if (isLabel(*cand)) {
+            if (const auto* data = cand->getModifier<LabelData>()) innerLabels.insert(data->label);
+            continue;
+        }
+        if (isBranch(*cand) && innerLabels.count(getBranchTarget(*cand)) != 0) return true;
+    }
+    return false;
 }
 
 /// Whether \p inst is the compare that opens a loop's skip shortcut, i.e.
@@ -1356,12 +1457,16 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 int rule3Mode, int producerDrain)
+                                 int rule3Mode, int producerDrain, int loopPeriod,
+                                 int driftCanaryCycles, int skewCanaryCycles)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(rule3SignalLeadCycles),
           rule3Mode_((rule3Mode == 1 || rule3Mode == 2) ? rule3Mode : 0),
-          producerDrain_(producerDrain) {}
+          producerDrain_(producerDrain),
+          loopPeriod_((loopPeriod >= 0) ? loopPeriod : 1),
+          driftCanaryCycles_(std::max(0, driftCanaryCycles)),
+          skewCanaryCycles_(std::max(0, skewCanaryCycles)) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1374,6 +1479,28 @@ class InsertClusterBarrierPassImpl : public Pass {
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         const auto& arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+
+        // The canaries name the workgroup ids by symbol, which only a `.set`
+        // turns into the right register.
+        bool canaries = driftCanaryCycles_ > 0 || skewCanaryCycles_ > 0;
+        if (canaries) {
+            std::unordered_map<std::string, int64_t> symbols;
+            collectAsmSetSymbolValues(func, symbols);
+            if (symbols.count(kWorkGroup0Symbol) == 0 || symbols.count(kWorkGroup1Symbol) == 0) {
+                canaries = false;
+                emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, getName(),
+                                     "ClusterCanaryNoWorkGroupId",
+                                     "@" + func.getName() +
+                                         ": cluster canaries skipped: no .set for "
+                                         "sgprWorkGroup0 and sgprWorkGroup1"});
+            }
+        }
+        size_t canariesSkipped = 0;
+        // Past an inner loop's latch, a persistent loop may already have moved the
+        // workgroup ids on to its next tile (PAP prefetches there), so a canary
+        // would sort the cluster by another tile's ids.
+        std::unordered_set<StinkyInstruction*> triggersPastInnerLoop;
+        size_t canariesPastInnerLoop = 0;
 
         int rule3SignalLeadCycles = rule3SignalLeadCycles_;
         if (rule3SignalLeadCycles < 0) rule3SignalLeadCycles = unsetRule3SignalLeadCycles(arch);
@@ -1435,9 +1562,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* tensorLoad = nullptr;
                 IRBase* afterProtectSignal = nullptr;
                 IRBase* afterProtectWait = nullptr;
+                // The enclosing loop and the trigger's place among that loop's
+                // triggers, in program order.
+                StinkyInstruction* loopHead = nullptr;
+                size_t loopOrdinal = 0;
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
+            // Triggers per loop, counting the ones a previous run already handled,
+            // so a re-run numbers them the same way.
+            std::unordered_map<StinkyInstruction*, size_t> loopTriggerCounts;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
             // insertProducerTensorDrainBefore.
@@ -1458,12 +1592,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                         findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
                     if (trigger == nullptr) continue;
                     if (!seenTriggers.insert(trigger).second) continue;
-                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
 
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop
                     // there is no next trip to hand a token to and no exit to compensate
                     // at, and the run-up's own load is Rule 2's business.
-                    if (findEnclosingLoopHead(trigger) == nullptr) continue;
+                    StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                    if (head == nullptr) continue;
+                    const size_t ordinal = loopTriggerCounts[head]++;
+                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+                    if (canaries && followsInnerLoopLatch(head, trigger))
+                        triggersPastInnerLoop.insert(trigger);
                     // Modes 1 and 2 leave no cluster wait right above the trigger, so
                     // what marks one already handled is a cluster barrier between it
                     // and its load.
@@ -1474,7 +1612,9 @@ class InsertClusterBarrierPassImpl : public Pass {
                     IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
                     auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
                     triggers.push_back({trigger, segBegin, waitAnchor,
-                                        (hoistedInst != nullptr) ? hoistedInst : trigger, inst});
+                                        (hoistedInst != nullptr) ? hoistedInst : trigger, inst,
+                                        /*afterProtectSignal=*/nullptr,
+                                        /*afterProtectWait=*/nullptr, head, ordinal});
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1493,10 +1633,50 @@ class InsertClusterBarrierPassImpl : public Pass {
                             }
                             break;
                         }
-                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
-                                                                            : nullptr);
+                        IRBase* drainAnchor = (postIt != bb.end()) ? postIt.getNodePtr() : nullptr;
+                        // A trigger the loop period dropped has no handshake to mark it
+                        // handled, so a re-run collects it again; its drain is already there.
+                        if (!producerTensorDrainFollows(postIt, bb.end()))
+                            producerDrainAnchors.push_back(drainAnchor);
                     }
                 }
+            }
+
+            // ClusterBarrierLoopPeriod keeps the handshake of every loopPeriod_-th
+            // trigger of a loop. The pass runs before the CFG is built, so all of a
+            // loop's triggers are in this block. Keeping the same ones every trip
+            // spaces them evenly only when the period divides the triggers per trip,
+            // so a loop where it does not keeps them all. A dropped trigger keeps
+            // its producer drain.
+            std::vector<TriggerSite> unpaired;
+            if (loopPeriod_ != 1 && !triggers.empty()) {
+                const size_t period = static_cast<size_t>(loopPeriod_);
+                std::vector<TriggerSite> kept;
+                std::vector<StinkyInstruction*> unevenLoops;
+                for (const TriggerSite& site : triggers) {
+                    const size_t perTrip = loopTriggerCounts[site.loopHead];
+                    bool keep = false;
+                    if (period != 0 && perTrip % period != 0) {
+                        keep = true;
+                        if (std::find(unevenLoops.begin(), unevenLoops.end(), site.loopHead) ==
+                            unevenLoops.end())
+                            unevenLoops.push_back(site.loopHead);
+                    } else {
+                        keep = period != 0 && site.loopOrdinal % period == 0;
+                    }
+                    (keep ? kept : unpaired).push_back(site);
+                }
+                for (StinkyInstruction* head : unevenLoops) {
+                    const auto* label = head->getModifier<LabelData>();
+                    emitRemark(passCtx,
+                               {OptimizationRemark::Kind::Analysis, getName(), "LoopPeriodFallback",
+                                "@" + func.getName() + ": loop period " +
+                                    std::to_string(loopPeriod_) + " kept every handshake of " +
+                                    ((label != nullptr) ? label->label : std::string("a loop")) +
+                                    ": its " + std::to_string(loopTriggerCounts[head]) +
+                                    " trigger(s) per trip are not a multiple of the period"});
+                }
+                triggers = std::move(kept);
             }
 
             // Modes 1 and 2 move the handshake below the protect barrier. A block
@@ -1538,6 +1718,10 @@ class InsertClusterBarrierPassImpl : public Pass {
 
             std::unordered_set<StinkyInstruction*> priorWaitAnchors;
             for (const TriggerSite& site : triggers) {
+                priorWaitAnchors.insert(site.trigger);
+            }
+            // A kept handshake climbs no further than it does with every trigger kept.
+            for (const TriggerSite& site : unpaired) {
                 priorWaitAnchors.insert(site.trigger);
             }
 
@@ -1636,17 +1820,59 @@ class InsertClusterBarrierPassImpl : public Pass {
                         break;
                     }
                 }
+                // A trigger the loop period left without a handshake is still Rule 3's.
+                for (const TriggerSite& site : unpaired) {
+                    if (tailPairedSignal != nullptr && site.trigger == tailPairedSignal)
+                        conflictsWithRule3 = true;
+                }
                 if (conflictsWithRule3 || isFollowedByClusterBarrierHandshakeOrSignal(tailWait)) {
                     tailWait = nullptr;
                 }
             }
 
-            if (pending.empty() && tailTL == nullptr && tailWait == nullptr) continue;
+            const bool driftAtUnpaired = canaries && driftCanaryCycles_ > 0 && !unpaired.empty();
+            if (pending.empty() && producerDrainAnchors.empty() && !driftAtUnpaired &&
+                tailTL == nullptr && tailWait == nullptr)
+                continue;
 
             AsmIRBuilder irBuilder(bb, archId);
+            auto plantCanary = [&](StinkyInstruction* trigger, IRBase* anchor, int cycles,
+                                   const char* labelPrefix) {
+                if (triggersPastInnerLoop.count(trigger) != 0) {
+                    ++canariesPastInnerLoop;
+                    return;
+                }
+                auto* at = (anchor != nullptr) ? dyn_cast<StinkyInstruction>(anchor) : nullptr;
+                if (at == nullptr || isSccLiveIn(at)) {
+                    ++canariesSkipped;
+                    return;
+                }
+                insertClusterCanaryBefore(anchor, cycles, labelPrefix, irBuilder, archId);
+            };
             for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
-                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
-                (void)trigger;
+                if (canaries) {
+                    // Drift sleeps between the signal and the reads of the slot still
+                    // to come; skew sleeps after them, right above the wait.
+                    insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
+                    if (driftCanaryCycles_ > 0)
+                        plantCanary(trigger, signalAnchor, driftCanaryCycles_,
+                                    kDriftCanaryLabelPrefix);
+                    if (skewCanaryCycles_ > 0)
+                        plantCanary(trigger, waitAnchor, skewCanaryCycles_, kSkewCanaryLabelPrefix);
+                    insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
+                                                   archId);
+                } else {
+                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                }
+            }
+            if (driftAtUnpaired) {
+                // Where the period dropped the handshake, drift sleeps where its wait
+                // would have gone. A re-run finds the canary it planted there.
+                for (const TriggerSite& site : unpaired) {
+                    if (followsLabelWithPrefix(site.waitAnchor, kDriftCanaryLabelPrefix)) continue;
+                    plantCanary(site.trigger, site.waitAnchor, driftCanaryCycles_,
+                                kDriftCanaryLabelPrefix);
+                }
             }
             // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
             for (const LoopCompensation& comp : hoistedLoops) {
@@ -1668,6 +1894,20 @@ class InsertClusterBarrierPassImpl : public Pass {
                 insertClusterBarrierWaitBefore(hoistAboveLeadingWaitCnts(tailTL),
                                                "cluster barrier wait", irBuilder, archId);
             }
+        }
+
+        if (canariesSkipped != 0) {
+            emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, getName(),
+                                 "ClusterCanarySkipped",
+                                 "@" + func.getName() + ": " + std::to_string(canariesSkipped) +
+                                     " cluster canary site(s) skipped: SCC is live there"});
+        }
+        if (canariesPastInnerLoop != 0) {
+            emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, getName(),
+                                 "ClusterCanarySkipped",
+                                 "@" + func.getName() + ": " +
+                                     std::to_string(canariesPastInnerLoop) +
+                                     " cluster canary site(s) skipped: past an inner loop"});
         }
 
         // The gates above carry placeholder indices (see makeSymbolicSgpr).
@@ -1699,6 +1939,9 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int rule3SignalLeadCycles_ = 100;
     const int rule3Mode_ = 0;
     const int producerDrain_ = -1;
+    const int loopPeriod_ = 1;
+    const int driftCanaryCycles_ = 0;
+    const int skewCanaryCycles_ = 0;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -1707,9 +1950,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
                                                      int rule3SignalLeadCycles, int rule3Mode,
-                                                     int producerDrain) {
+                                                     int producerDrain, int loopPeriod,
+                                                     int driftCanaryCycles, int skewCanaryCycles) {
     return std::make_unique<InsertClusterBarrierPassImpl>(
-        streamKMulticast, pgrValue, rule3SignalLeadCycles, rule3Mode, producerDrain);
+        streamKMulticast, pgrValue, rule3SignalLeadCycles, rule3Mode, producerDrain, loopPeriod,
+        driftCanaryCycles, skewCanaryCycles);
 }
 
 namespace cluster_barrier {

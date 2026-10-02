@@ -17,7 +17,7 @@ from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
 from rocisa.instruction import SLShiftLeftB32, SMulI32, SBitcmp1B32, SCBranchSCC1, SBranch, \
-    SMovB32, SAndB32, SOrB32
+    SMovB32, SAndB32, SOrB32, SAddU32
 
 
 class ClusterLoadTDM(ClusterLoad):
@@ -128,6 +128,9 @@ class ClusterLoadTDM(ClusterLoad):
         if not kernel["Multicast"]:
             return mod
         mod.addComment0("Calculate multicast mask")
+        if globalParameters.get("TDMMulticastSelfOnly", 0):
+            return self._computeSelfOnlyMasks(kernel, mod, sgprWgX=sgprWgX, sgprWgY=sgprWgY,
+                                              sgprNWgX=sgprNWgX)
 
         # sTmp+0 / sTmp+4 double as scratch for the reduced-bit masks of a padded
         # boundary cluster: maskCol = (1<<(validY*cx))-1 (AND with maskA), maskRow =
@@ -203,6 +206,35 @@ class ClusterLoadTDM(ClusterLoad):
             mod.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
                             comment="Shift factor: wg_y * nwg_x"))
             setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
+        return mod
+
+    def _computeSelfOnlyMasks(self, kernel: Mapping, mod: Module, *, sgprWgX: int,
+                              sgprWgY: int, sgprNWgX: int) -> Module:
+        """TDMMulticastSelfOnly: set every mask computeMasks would set to this WG's bit.
+
+        That bit, ``1 << (wg_x + wg_y * nwg_x)``, is in each of the full masks, so
+        the loads stay the ones each WG needs while none is shared with a peer. The
+        boundary-cluster reduction has nothing to drop from it and is skipped.
+        """
+        masks = []
+        if kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"] in (1, 2):
+            masks.append("MulticastMaskMetadata")
+        if self.usesCombinedMask(kernel):
+            masks.append("MulticastMask")
+        else:
+            masks += ["MulticastMaskA", "MulticastMaskB"]
+        first = masks[0]
+        mod.add(SMulI32(dst=sgpr(first), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),
+                        comment="wg_y * nwg_x"))
+        mod.add(SAddU32(dst=sgpr(first), src0=sgpr(first), src1=sgpr(sgprWgX),
+                        comment="WG rank in the cluster"))
+        mod.add(SLShiftLeftB32(dst=sgpr(first), shiftHex=sgpr(first), src=hex(1),
+                               comment="TDM multicast self only"))
+        if globalParameters.get("TDMMulticastEarlyTimeout", 0):
+            mod.add(SOrB32(dst=sgpr(first), src0=sgpr(first), src1=hex(1 << 21),
+                           comment="TDM multicast early timeout (group1 dword0 bit 21)"))
+        for mask in masks[1:]:
+            mod.add(SMovB32(dst=sgpr(mask), src=sgpr(first), comment="TDM multicast self only"))
         return mod
 
     # -- descriptor attach ---------------------------------------------------

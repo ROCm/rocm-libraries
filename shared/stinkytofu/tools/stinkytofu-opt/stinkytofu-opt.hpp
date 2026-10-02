@@ -414,7 +414,8 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createPrefetchBridgeSubstitutionPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     // InsertClusterBarrierPass accepts: streamKMulticast, pgr=<n>,
-    // lead=<cycles>, rule3Mode=<0|1|2>, producerDrain=<-1|0|1>
+    // lead=<cycles>, rule3Mode=<0|1|2>, producerDrain=<-1|0|1>,
+    // loopPeriod=<k>, driftCanary=<cycles>, skewCanary=<cycles>
     {"InsertClusterBarrierPass",
      [](const std::vector<std::string>& args) -> std::unique_ptr<Pass> {
          const std::optional<int> pgr = passArgInt(args, "pgr", 1);
@@ -422,9 +423,15 @@ const std::vector<PassInfo> availablePasses = {
          const std::optional<int> lead = passArgInt(args, "lead", 100);
          const std::optional<int> rule3Mode = passArgInt(args, "rule3Mode", 0);
          const std::optional<int> producerDrain = passArgInt(args, "producerDrain", -1);
-         if (!pgr || !lead || !rule3Mode || !producerDrain) return nullptr;
+         const std::optional<int> loopPeriod = passArgInt(args, "loopPeriod", 1);
+         const std::optional<int> driftCanary = passArgInt(args, "driftCanary", 0);
+         const std::optional<int> skewCanary = passArgInt(args, "skewCanary", 0);
+         if (!pgr || !lead || !rule3Mode || !producerDrain || !loopPeriod || !driftCanary ||
+             !skewCanary)
+             return nullptr;
          return createInsertClusterBarrierPass(hasPassArg(args, "streamKMulticast"), *pgr, *lead,
-                                               *rule3Mode, *producerDrain);
+                                               *rule3Mode, *producerDrain, *loopPeriod,
+                                               *driftCanary, *skewCanary);
      }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},

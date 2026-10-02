@@ -70,8 +70,18 @@ class Pass;
 /// and 2 stay above the refill tensor load. Any other value reads as 0.
 /// \p producerDrain overrides when that drain is planted: -1 = the StreamK
 /// condition above, 0 = never, 1 = after every Rule 3 tensor-load group.
+/// \p loopPeriod keeps the Rule 3 handshake of every \p loopPeriod-th trigger of
+/// a loop, counted in program order from the loop head: 1 = every trigger, 0 =
+/// none. A loop whose triggers per trip are not a multiple of \p loopPeriod
+/// keeps all of them. Negative values read as 1.
+/// \p driftCanaryCycles and \p skewCanaryCycles are diagnostics that make
+/// workgroups of a cluster sleep different times, by the parity of their
+/// workgroup ids: drift right after each Rule 3 signal (where the period
+/// dropped the handshake, where its wait would have gone), skew right above
+/// each Rule 3 wait. 0 plants nothing.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    int rule3Mode = 0, int producerDrain = -1);
+    int rule3Mode = 0, int producerDrain = -1, int loopPeriod = 1, int driftCanaryCycles = 0,
+    int skewCanaryCycles = 0);
 
 }  // namespace stinkytofu

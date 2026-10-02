@@ -358,6 +358,83 @@ class TestEarlyTimeout:
         assert str(mod).strip() == ""
 
 
+# --- TDMMulticastSelfOnly --------------------------------------------------
+
+@pytest.fixture
+def _self_only(monkeypatch):
+    from Tensile.Common.GlobalParameters import globalParameters
+    monkeypatch.setitem(globalParameters, "TDMMulticastSelfOnly", 1)
+
+
+def _selfBit(mask):
+    return [f"s_mul_i32 s[sgpr{mask}], s62, s63",
+            f"s_add_u32 s[sgpr{mask}], s[sgpr{mask}], s61",
+            f"s_lshl_b32 s[sgpr{mask}], 0x1, s[sgpr{mask}]"]
+
+
+class TestSelfOnly:
+    def test_off_by_default(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2)),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert _selfBit("MulticastMask")[2] not in src
+        assert "s_lshl_b32 s[sgprMulticastMask], 0x5, s61" in src
+
+    @pytest.mark.usefixtures("_self_only")
+    def test_combined_mask_is_the_wg_bit(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2)),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        lines = _selfBit("MulticastMask")
+        assert all(line in src for line in lines)
+        assert src.index(lines[0]) < src.index(lines[1]) < src.index(lines[2])
+        # Both parities get the same mask, so the wave-parity split is gone.
+        assert "s_bitcmp1_b32" not in src
+        assert "0x5, s61" not in src and "0x3, s62" not in src
+
+    @pytest.mark.usefixtures("_self_only")
+    def test_split_masks_copy_the_wg_bit(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2), useSubtile=True),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert all(line in src for line in _selfBit("MulticastMaskA"))
+        assert "s_mov_b32 s[sgprMulticastMaskB], s[sgprMulticastMaskA]" in src
+
+    @pytest.mark.usefixtures("_self_only")
+    def test_metadata_mask_copies_the_wg_bit(self):
+        mod = _c().computeMasks(
+            _StubWriter(), _kernel(clusterDim=(2, 2), sparse=1, tdmMeta=True),
+            sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert all(line in src for line in _selfBit("MulticastMaskMetadata"))
+        assert "s_mov_b32 s[sgprMulticastMask], s[sgprMulticastMaskMetadata]" in src
+
+    @pytest.mark.usefixtures("_self_only", "_early_timeout")
+    def test_early_timeout_is_set_before_the_copies(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(clusterDim=(2, 2), useSubtile=True),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        orLine = _earlyTimeoutOr("MulticastMaskA")
+        assert src.count(orLine) == 1
+        assert src.index(orLine) < src.index(
+            "s_mov_b32 s[sgprMulticastMaskB], s[sgprMulticastMaskA]")
+
+    @pytest.mark.usefixtures("_self_only")
+    def test_skips_the_boundary_reduction(self):
+        class _NoReduction(_StubWriter):
+            def computeMulticastMaskReduction(self, *args, **kwargs):
+                raise AssertionError("a self-only mask has no peers to reduce")
+
+        _c().computeMasks(_NoReduction(), _kernel(clusterDim=(2, 2)),
+                          sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+
+    @pytest.mark.usefixtures("_self_only")
+    def test_noop_when_multicast_off(self):
+        mod = _c().computeMasks(_StubWriter(), _kernel(multicast=False),
+                                sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        assert str(mod).strip() == ""
+
+
 # --- applyToDescriptor emitted asm -----------------------------------------
 
 class TestApplyToDescriptor:

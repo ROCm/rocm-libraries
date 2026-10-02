@@ -423,14 +423,31 @@ globalParameters["DisableSTWaitCnt"] = True
 #     tensor-load group; -1 = auto, 0 = never, 1 = always. Auto drains only for
 #     StreamK multicast with PGR >= 2, and TensileLite no longer passes
 #     StreamKMulticast (#12817, e69ccbe3), so -1 never drains; 1 forces the drain.
+#   StinkyTofuClusterBarrierLoopPeriod: keep the in-loop handshake of every k-th
+#     trigger of a loop; 1 = every trigger, 0 = none. A loop whose triggers per
+#     trip (one per loop copy) are not a multiple of k keeps all of them.
+#   StinkyTofuClusterDriftCanaryCycles / StinkyTofuClusterSkewCanaryCycles:
+#     diagnostics, 0 = off. Workgroups of a cluster sleep about this many cycles
+#     more than their neighbours, by the parity of WorkGroup0 and WorkGroup1:
+#     drift right after each in-loop cluster signal (with LoopPeriod 0, once per
+#     loop copy, so the skew piles up), skew right above each in-loop cluster
+#     wait. A PAP kernel's next-tile site past the main loop gets neither.
 globalParameters["StinkyTofuClusterBarrierRule3SignalLeadCycles"] = -1
 globalParameters["StinkyTofuClusterBarrierRule3Mode"] = 0
 globalParameters["StinkyTofuClusterProducerDrain"] = -1
+globalParameters["StinkyTofuClusterBarrierLoopPeriod"] = 1
+globalParameters["StinkyTofuClusterDriftCanaryCycles"] = 0
+globalParameters["StinkyTofuClusterSkewCanaryCycles"] = 0
 
 # 1 sets the TDM multicast early-timeout bit (descriptor group1 dword0 bit 21) in
 # every multicast mask; 0 leaves it clear. Experiment only, like the
 # cluster-barrier knobs above.
 globalParameters["TDMMulticastEarlyTimeout"] = 0
+
+# 1 cuts every multicast mask down to the workgroup's own bit, so no TDM load is
+# shared while the cluster barriers stay as they are: the control that prices the
+# barriers alone. 0 leaves the masks alone. Experiment only.
+globalParameters["TDMMulticastSelfOnly"] = 0
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency

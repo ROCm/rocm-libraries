@@ -7170,6 +7170,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                    globalParameters.get("StinkyTofuClusterBarrierRule3Mode", 0)),
                                "ClusterProducerDrain": int(
                                    globalParameters.get("StinkyTofuClusterProducerDrain", -1)),
+                               "ClusterBarrierLoopPeriod": int(
+                                   globalParameters.get("StinkyTofuClusterBarrierLoopPeriod", 1)),
+                               "ClusterDriftCanaryCycles": int(
+                                   globalParameters.get("StinkyTofuClusterDriftCanaryCycles", 0)),
+                               "ClusterSkewCanaryCycles": int(
+                                   globalParameters.get("StinkyTofuClusterSkewCanaryCycles", 0)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.

@@ -34,7 +34,9 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
@@ -540,11 +542,13 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
     void runPass(int rule3SignalLeadCycles = 100, int rule3Mode = 0, int producerDrain = -1,
-                 bool streamKMulticast = false, int pgrValue = 1) {
+                 bool streamKMulticast = false, int pgrValue = 1, int loopPeriod = 1,
+                 int driftCanaryCycles = 0, int skewCanaryCycles = 0) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(streamKMulticast, pgrValue,
-                                                   rule3SignalLeadCycles, rule3Mode, producerDrain);
+                                                   rule3SignalLeadCycles, rule3Mode, producerDrain,
+                                                   loopPeriod, driftCanaryCycles, skewCanaryCycles);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -580,6 +584,138 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         after = createWMMA(32, 8, 16);
         closeLoop();
         return lastLoad;
+    }
+
+    // A loop with one trigger per copy, the shape a trip of HalfPLR's three copies
+    // or ExpandPointerSwap's two has. Returns the triggers in program order.
+    std::vector<StinkyInstruction*> buildCopiesLoop(int copies) {
+        appendGsu1Preheader();
+        openLoop();
+        std::vector<StinkyInstruction*> triggers;
+        for (int copy = 0; copy < copies; ++copy) {
+            createWMMA(24, 0, 8);
+            triggers.push_back(appendHandshake(/*loadS0=*/8 * copy, /*loadS1=*/8 * copy + 4));
+            createWMMA(32, 8, 16);
+        }
+        closeLoop();
+        return triggers;
+    }
+
+    // The `.set` lines a kernel carries for its workgroup ids, which the cluster
+    // canaries read by name.
+    void appendWorkGroupIdSets() {
+        const std::pair<const char*, const char*> sets[] = {{"sgprWorkGroup0", "2"},
+                                                            {"sgprWorkGroup1", "3"}};
+        for (const auto& [symbol, value] : sets) {
+            AsmDirective* d = IRBase::createIR<AsmDirective>();
+            d->kind = AsmDirectiveKind::SET;
+            d->name = ".set";
+            d->symbol = symbol;
+            d->value = value;
+            bb->appendIR(d);
+        }
+    }
+
+    // A one-copy loop for the canaries, with the workgroup-id `.set` lines. Returns
+    // the trigger; \p load, when given, is set to its refill load.
+    StinkyInstruction* buildCanaryLoop(StinkyInstruction** load = nullptr) {
+        appendWorkGroupIdSets();
+        appendGsu1Preheader();
+        openLoop();
+        createWMMA(24, 0, 8);
+        createWMMA(32, 8, 16);
+        StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+        createBarrierWait(kWorkgroupBarrierId);
+        StinkyInstruction* refill = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0,
+                                                            /*src1Reg=*/4);
+        if (load != nullptr) *load = refill;
+        createWMMA(40, 16, 8);
+        closeLoop();
+        return trigger;
+    }
+
+    // A persistent kernel's tile loop around the main loop, with one more Rule 3
+    // site past the main loop's latch, where PAP prefetches the next tile. Returns
+    // the main loop's trigger and the one past it, in that order.
+    std::pair<StinkyInstruction*, StinkyInstruction*> buildTileLoopAroundCanaryLoop() {
+        appendWorkGroupIdSets();
+        appendGsu1Preheader();
+        createLabel("label_TestTileLoop");
+        createWMMA(24, 0, 8);
+        openLoop();
+        createWMMA(24, 0, 8);
+        createWMMA(32, 8, 16);
+        StinkyInstruction* inMain = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+        createWMMA(40, 16, 8);
+        closeLoop();
+        createWMMA(32, 8, 16);
+        StinkyInstruction* pastMain = appendHandshake(/*loadS0=*/8, /*loadS1=*/12);
+        createWMMA(40, 16, 8);
+        createGuardedBranch(GFX::s_cbranch_scc1, /*sgpr=*/93, "label_TestTileLoopEnd");
+        createGuardedBranch(GFX::s_cbranch_scc0, /*sgpr=*/94, "label_TestTileLoop");
+        createLabel("label_TestTileLoopEnd");
+        createWMMA(8, 0, 8);
+        return {inMain, pastMain};
+    }
+
+    // Cluster signals and waits strictly between the test loop's head and its exit
+    // label.
+    std::pair<int, int> loopClusterCounts() {
+        StinkyInstruction* head = findLabelNamed("label_TestLoop");
+        StinkyInstruction* end = findLabelNamed("label_TestLoopEnd");
+        if (head == nullptr || end == nullptr) return {-1, -1};
+        const size_t from = indexOf(head);
+        const size_t to = indexOf(end);
+        int signals = 0;
+        int waits = 0;
+        size_t idx = 0;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const size_t here = idx++;
+            if (here <= from || here >= to) continue;
+            const int kind = clusterBarrierKind(*cast<StinkyInstruction>(&ir));
+            if (kind == 1) ++signals;
+            if (kind == -1) ++waits;
+        }
+        return {signals, waits};
+    }
+
+    // The units of every `s_sleep` in the block, in program order.
+    std::vector<int> sleepUnits() const {
+        std::vector<int> units;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (inst->getUnifiedOpcode() != GFX::s_sleep) continue;
+            const auto& srcs = inst->getSrcRegs();
+            units.push_back(srcs.empty() ? -1 : static_cast<int>(srcs[0].getLiteralInt()));
+        }
+        return units;
+    }
+
+    static bool isCanaryCmp(const StinkyInstruction& inst, const char* symbol) {
+        if (inst.getUnifiedOpcode() != GFX::s_bitcmp1_b32) return false;
+        const auto& srcs = inst.getSrcRegs();
+        return !srcs.empty() && srcs[0].getSymbolicName() == symbol;
+    }
+
+    // The instruction \p step places after (negative: before) \p inst, counting
+    // neither labels nor pseudo instructions; null past either end.
+    StinkyInstruction* neighbourOf(const StinkyInstruction* inst, int step) const {
+        std::vector<StinkyInstruction*> insts;
+        for (IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            auto* candidate = cast<StinkyInstruction>(&ir);
+            if (isLabel(*candidate) || isPseudoInst(candidate)) continue;
+            insts.push_back(candidate);
+        }
+        for (size_t i = 0; i < insts.size(); ++i) {
+            if (insts[i] != inst) continue;
+            const long j = static_cast<long>(i) + step;
+            if (j < 0 || j >= static_cast<long>(insts.size())) return nullptr;
+            return insts[static_cast<size_t>(j)];
+        }
+        return nullptr;
     }
 
     void expectNoClusterPhaseOverlap(int expectedSignals) {
@@ -1392,6 +1528,311 @@ TEST_F(InsertClusterBarrierPassTest, ProducerDrainOneDrainsWithoutStreamKMultica
     ASSERT_NE(drain, nullptr) << blockListing(*bb);
     EXPECT_EQ(drain->getUnifiedOpcode(), GFX::s_wait_tensorcnt) << blockListing(*bb);
     EXPECT_EQ(firstRealInstAfter(drain), after) << blockListing(*bb);
+}
+
+// Period 1, the default, keeps a handshake per trigger and plants no canary.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodOneKeepsEveryHandshake) {
+    const std::vector<StinkyInstruction*> triggers = buildCopiesLoop(/*copies=*/3);
+
+    runPass();
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{3, 3})) << blockListing(*bb);
+    for (StinkyInstruction* trigger : triggers)
+        EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+    EXPECT_TRUE(sleepUnits().empty()) << blockListing(*bb);
+}
+
+// With three triggers a trip, period 3 keeps the first one's handshake: one per
+// trip, each still a whole pair.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodThreeKeepsOneHandshakePerTrip) {
+    const std::vector<StinkyInstruction*> triggers = buildCopiesLoop(/*copies=*/3);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/3);
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{1, 1})) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(triggers[0])) << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(triggers[1])) << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(triggers[2])) << blockListing(*bb);
+}
+
+// Period 0 empties the loop body; Rule 1's signal and Rule 2's wait stay.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodZeroLeavesTheLoopWithoutHandshakes) {
+    buildCopiesLoop(/*copies=*/3);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/0);
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{0, 0})) << blockListing(*bb);
+    EXPECT_EQ(clusterBarrierCounts(), (std::pair<int, int>{1, 1})) << blockListing(*bb);
+}
+
+// Two does not divide three triggers a trip, so the kept handshakes would not be
+// evenly spaced: the loop keeps all of them.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodThatDoesNotDivideTheTripKeepsEveryHandshake) {
+    buildCopiesLoop(/*copies=*/3);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/2);
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{3, 3})) << blockListing(*bb);
+}
+
+// The producer drain belongs to the load group, not to the handshake.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodZeroKeepsTheProducerDrains) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* firstLoad = createTensorLoadInBlock(bb, arch, /*src0Reg=*/0,
+                                                           /*src1Reg=*/4);
+    StinkyInstruction* afterFirst = createWMMA(32, 8, 16);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    StinkyInstruction* secondLoad = createTensorLoadInBlock(bb, arch, /*src0Reg=*/48,
+                                                            /*src1Reg=*/52);
+    StinkyInstruction* afterSecond = createWMMA(40, 16, 8);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/0);
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{0, 0})) << blockListing(*bb);
+    for (const auto& [load, after] : {std::pair{firstLoad, afterFirst},
+                                      std::pair{secondLoad, afterSecond}}) {
+        StinkyInstruction* drain = firstRealInstAfter(load);
+        ASSERT_NE(drain, nullptr) << blockListing(*bb);
+        EXPECT_EQ(drain->getUnifiedOpcode(), GFX::s_wait_tensorcnt) << blockListing(*bb);
+        EXPECT_EQ(firstRealInstAfter(drain), after) << blockListing(*bb);
+    }
+}
+
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodStaysIdempotent) {
+    const std::vector<StinkyInstruction*> triggers = buildCopiesLoop(/*copies=*/2);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/2);
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{1, 1})) << blockListing(*bb);
+    const auto afterFirst = clusterBarrierCounts();
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/2);
+
+    EXPECT_EQ(clusterBarrierCounts(), afterFirst)
+        << "re-running a loop period must be a no-op:" << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(triggers[1])) << blockListing(*bb);
+}
+
+// A trigger the loop period drops has no handshake to mark it handled, so a
+// re-run collects it again; the drain behind its load group is already there
+// and must not be planted a second time.
+TEST_F(InsertClusterBarrierPassTest, LoopPeriodRerunPlantsEachProducerDrainOnce) {
+    buildCopiesLoop(/*copies=*/3);
+    auto tensorCntWaits = [&]() {
+        int count = 0;
+        for (IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            if (cast<StinkyInstruction>(&ir)->getUnifiedOpcode() == GFX::s_wait_tensorcnt) ++count;
+        }
+        return count;
+    };
+
+    for (int run = 1; run <= 2; ++run) {
+        runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/1,
+                /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/3);
+        EXPECT_EQ(tensorCntWaits(), 3)
+            << "one drain per load group after run " << run << ":" << blockListing(*bb);
+    }
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{1, 1})) << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, ClusterCanariesAreOffByDefault) {
+    StinkyInstruction* trigger = buildCanaryLoop();
+
+    runPass();
+
+    EXPECT_TRUE(sleepUnits().empty()) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+}
+
+// Skew sleeps after the workgroup's last reads of the slot, right above the wait,
+// once for each workgroup-id bit that is set. The wait stays right above the
+// trigger, which is how a re-run knows the handshake is there.
+TEST_F(InsertClusterBarrierPassTest, SkewCanarySleepsRightAboveTheWait) {
+    StinkyInstruction* trigger = buildCanaryLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/0, /*skewCanaryCycles=*/256);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{4, 4})) << blockListing(*bb);
+    ASSERT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+    StinkyInstruction* clusterWait = neighbourOf(trigger, -1);
+    StinkyInstruction* lastSleep = neighbourOf(clusterWait, -1);
+    ASSERT_NE(lastSleep, nullptr) << blockListing(*bb);
+    EXPECT_EQ(lastSleep->getUnifiedOpcode(), GFX::s_sleep) << blockListing(*bb);
+    StinkyInstruction* cmp1 = neighbourOf(lastSleep, -2);
+    ASSERT_NE(cmp1, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isCanaryCmp(*cmp1, "sgprWorkGroup1")) << blockListing(*bb);
+    StinkyInstruction* cmp0 = neighbourOf(cmp1, -3);
+    ASSERT_NE(cmp0, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isCanaryCmp(*cmp0, "sgprWorkGroup0")) << blockListing(*bb);
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    EXPECT_NE(findClusterSignalBetween(indexOf(loopHead), indexOf(cmp0)), nullptr)
+        << "the signal stays above the canary:" << blockListing(*bb);
+}
+
+// Drift sleeps right after the signal, ahead of the reads of the slot still to
+// come.
+TEST_F(InsertClusterBarrierPassTest, DriftCanarySleepsRightAfterTheSignal) {
+    StinkyInstruction* trigger = buildCanaryLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/128);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{2, 2})) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+    StinkyInstruction* loopHead = findLabelNamed("label_TestLoop");
+    ASSERT_NE(loopHead, nullptr);
+    StinkyInstruction* signal = findClusterSignalBetween(indexOf(loopHead), indexOf(trigger));
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* cmp0 = neighbourOf(signal, 1);
+    ASSERT_NE(cmp0, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isCanaryCmp(*cmp0, "sgprWorkGroup0")) << blockListing(*bb);
+}
+
+// Mode 2 puts the signal and the wait side by side; drift and then skew go
+// between them.
+TEST_F(InsertClusterBarrierPassTest, Rule3Mode2CanariesSitBetweenTheSignalAndTheWait) {
+    StinkyInstruction* load = nullptr;
+    buildCanaryLoop(&load);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/2, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/128, /*skewCanaryCycles=*/256);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{2, 2, 4, 4})) << blockListing(*bb);
+    StinkyInstruction* clusterWait = neighbourOf(load, -1);
+    ASSERT_NE(clusterWait, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isClusterBarrierWithLiteral(*clusterWait, /*wantSignal=*/false))
+        << blockListing(*bb);
+    StinkyInstruction* lastSleep = neighbourOf(clusterWait, -1);
+    ASSERT_NE(lastSleep, nullptr) << blockListing(*bb);
+    EXPECT_EQ(lastSleep->getUnifiedOpcode(), GFX::s_sleep) << blockListing(*bb);
+    StinkyInstruction* signal = findLastClusterSignalBefore(indexOf(lastSleep));
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    StinkyInstruction* firstCmp = neighbourOf(signal, 1);
+    ASSERT_NE(firstCmp, nullptr) << blockListing(*bb);
+    EXPECT_TRUE(isCanaryCmp(*firstCmp, "sgprWorkGroup0")) << blockListing(*bb);
+}
+
+TEST_F(InsertClusterBarrierPassTest, ClusterCanariesNeedTheWorkGroupIdSymbols) {
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/256, /*skewCanaryCycles=*/256);
+
+    EXPECT_TRUE(sleepUnits().empty()) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+}
+
+// V11's shape: no handshake in the loop, so drift sleeps on every copy where the
+// wait would have gone, and the gap between workgroups grows trip after trip.
+TEST_F(InsertClusterBarrierPassTest, DriftCanaryWithLoopPeriodZeroSleepsOnEveryCopy) {
+    appendWorkGroupIdSets();
+    const std::vector<StinkyInstruction*> triggers = buildCopiesLoop(/*copies=*/3);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/0,
+            /*driftCanaryCycles=*/256);
+
+    EXPECT_EQ(loopClusterCounts(), (std::pair<int, int>{0, 0})) << blockListing(*bb);
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{4, 4, 4, 4, 4, 4})) << blockListing(*bb);
+    for (StinkyInstruction* trigger : triggers) {
+        StinkyInstruction* sleep = neighbourOf(trigger, -1);
+        ASSERT_NE(sleep, nullptr) << blockListing(*bb);
+        EXPECT_EQ(sleep->getUnifiedOpcode(), GFX::s_sleep) << blockListing(*bb);
+    }
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/0,
+            /*driftCanaryCycles=*/256);
+    EXPECT_EQ(sleepUnits().size(), 6u) << "a re-run plants no second canary:" << blockListing(*bb);
+}
+
+// A compare above the trigger feeds a reader below the refill load, so SCC is
+// live where skew would go and that site is skipped. Drift follows the signal
+// block, which climbs out of the range, and still goes in.
+TEST_F(InsertClusterBarrierPassTest, SkewCanarySkipsASiteWhereSccIsLive) {
+    appendWorkGroupIdSets();
+    appendGsu1Preheader();
+    openLoop();
+    createWMMA(24, 0, 8);
+    createSCmpWritingScc(/*srcSgpr=*/80);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+    createSCselectReadingScc(/*destSgpr=*/81, /*srcSgpr=*/82);
+    closeLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/256, /*skewCanaryCycles=*/512);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{4, 4})) << "only drift's sleeps go in:"
+                                                       << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+}
+
+// s_sleep takes at most 127 units, so a longer canary is split.
+TEST_F(InsertClusterBarrierPassTest, CanaryLongerThanOneSleepIsSplit) {
+    buildCanaryLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/0, /*skewCanaryCycles=*/127 * 64 + 1);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{127, 1, 127, 1})) << blockListing(*bb);
+}
+
+// The canaries stay in the main loop. The site past its latch keeps its
+// handshake and gets neither canary.
+TEST_F(InsertClusterBarrierPassTest, ClusterCanariesSkipASitePastAnInnerLoop) {
+    const auto [inMain, pastMain] = buildTileLoopAroundCanaryLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/1,
+            /*driftCanaryCycles=*/128, /*skewCanaryCycles=*/256);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{2, 2, 4, 4})) << "only the main loop sleeps:"
+                                                             << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(inMain)) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(pastMain)) << blockListing(*bb);
+}
+
+// Where the loop period drops every handshake, drift still goes only where the
+// main loop's wait would have been.
+TEST_F(InsertClusterBarrierPassTest, DriftCanaryWithLoopPeriodZeroSkipsASitePastAnInnerLoop) {
+    const auto [inMain, pastMain] = buildTileLoopAroundCanaryLoop();
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*rule3Mode=*/0, /*producerDrain=*/-1,
+            /*streamKMulticast=*/false, /*pgrValue=*/1, /*loopPeriod=*/0,
+            /*driftCanaryCycles=*/256);
+
+    EXPECT_EQ(sleepUnits(), (std::vector<int>{4, 4})) << blockListing(*bb);
+    StinkyInstruction* sleep = neighbourOf(inMain, -1);
+    ASSERT_NE(sleep, nullptr) << blockListing(*bb);
+    EXPECT_EQ(sleep->getUnifiedOpcode(), GFX::s_sleep) << blockListing(*bb);
+    StinkyInstruction* abovePast = neighbourOf(pastMain, -1);
+    ASSERT_NE(abovePast, nullptr) << blockListing(*bb);
+    EXPECT_NE(abovePast->getUnifiedOpcode(), GFX::s_sleep) << blockListing(*bb);
 }
 
 // A call ends the climb whatever the hop budget says. It is the one boundary
