@@ -2,7 +2,7 @@
 # name: test_gfx950_hss_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_SH_HHS_BH_Bias_UserArgs_MT64x64x3kvquuDe7ty8D5fP1vJ0Ep2KH9ypGMfsZ8TME-xOtzLQ=',
+      'basename': 'Cijk_Ailk_Bljk_SH_HHS_BH_Bias_UserArgs_MT64x64x3OZKGGBp3yCLk74y9f_9yzfx1t6nuTo6WIeN1AZRvYr8=',
       'err': 0,
     }),
   ])
