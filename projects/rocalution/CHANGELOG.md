@@ -5,6 +5,11 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Resolved issues
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the accelerator limiting the iterations of the second triangular solve to the number of iterations performed by the first one.
+
+## (Unreleased) rocALUTION 4.1.1
+
+### Resolved issues
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
 ## (Unreleased) rocALUTION 4.1.1
