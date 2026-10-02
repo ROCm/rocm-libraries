@@ -8,6 +8,9 @@ endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
+if(NOT EXPECTED_ROCM_CLANG_TIDY_VERSION)
+    set(EXPECTED_ROCM_CLANG_TIDY_VERSION "23")
+endif()
 if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
 endif()
@@ -21,6 +24,7 @@ option(ALLOW_TOOL_VERSION_MISMATCH
 if(ALLOW_TOOL_VERSION_MISMATCH)
     set(ALLOW_CLANG_FORMAT_VERSION_MISMATCH ON)
     set(ALLOW_CLANG_TIDY_VERSION_MISMATCH ON)
+    set(ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH ON)
     set(ALLOW_LLVM_VERSION_MISMATCH ON)
 endif()
 
@@ -215,6 +219,55 @@ function(findAndCheckClangTidy)
     if(RUN_CLANG_TIDY_EXE)
         set(RUN_CLANG_TIDY_EXE ${RUN_CLANG_TIDY_EXE} PARENT_SCOPE)
     endif()
+endfunction()
+
+# Finds and checks the clang-tidy that ships with ROCm.
+function(findAndCheckRocmClangTidy)
+    set(_rocm_llvm_bin_dirs "")
+    if(DEFINED ROCM_PATH)
+        list(APPEND _rocm_llvm_bin_dirs "${ROCM_PATH}/llvm/bin" "${ROCM_PATH}/lib/llvm/bin")
+    endif()
+    list(APPEND _rocm_llvm_bin_dirs /opt/rocm/llvm/bin /opt/rocm/lib/llvm/bin)
+
+    find_program(
+        ROCM_CLANG_TIDY_EXE
+        NAMES clang-tidy-${EXPECTED_ROCM_CLANG_TIDY_VERSION} clang-tidy
+        PATHS ${_rocm_llvm_bin_dirs} NO_DEFAULT_PATH
+        DOC "clang-tidy from the ROCm LLVM toolchain, used for embedded HIP kernels"
+    )
+
+    if(NOT ROCM_CLANG_TIDY_EXE)
+        string(REPLACE ";" "\n  " _formatted_dirs "${_rocm_llvm_bin_dirs}")
+        message(STATUS "ROCm clang-tidy not found in:\n  ${_formatted_dirs}")
+        set(ROCM_CLANG_TIDY_EXE "" PARENT_SCOPE)
+        set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "" PARENT_SCOPE)
+        return()
+    endif()
+
+    checktoolversion(
+        ${ROCM_CLANG_TIDY_EXE} "clang-tidy" ${EXPECTED_ROCM_CLANG_TIDY_VERSION}
+        "version ([0-9]+)\\." "Found ROCm clang-tidy version {VERSION} at {PATH}"
+    )
+    set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "${clang-tidy_MAJOR_VERSION}"
+        CACHE INTERNAL "Detected major version of ROCM_CLANG_TIDY_EXE"
+    )
+
+    if(NOT clang-tidy_VERSION_MATCHED AND NOT ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH)
+        message(WARNING
+            "ROCm clang-tidy disabled due to version mismatch (expected "
+            "${EXPECTED_ROCM_CLANG_TIDY_VERSION}). Set EXPECTED_ROCM_CLANG_TIDY_VERSION to "
+            "the version you have, after reviewing the check deltas in ClangTidy.cmake, or "
+            "set ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH=ON to use it as-is."
+        )
+        unset(ROCM_CLANG_TIDY_EXE CACHE)
+        unset(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION CACHE)
+        set(ROCM_CLANG_TIDY_EXE "" PARENT_SCOPE)
+        set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(ROCM_CLANG_TIDY_EXE ${ROCM_CLANG_TIDY_EXE} PARENT_SCOPE)
+    set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION ${ROCM_CLANG_TIDY_EXE_MAJOR_VERSION} PARENT_SCOPE)
 endfunction()
 
 # Finds and checks LLVM tools

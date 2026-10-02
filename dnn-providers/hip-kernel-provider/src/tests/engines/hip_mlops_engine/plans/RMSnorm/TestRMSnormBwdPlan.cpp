@@ -312,9 +312,9 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
                 .Times(1);
 
             auto mockProgram = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdData"))
+            EXPECT_CALL(*mockProgram, getKernel("rmsNormBwdData"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel1))));
-            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdScaleBias"))
+            EXPECT_CALL(*mockProgram, getKernel("rmsNormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel2))));
 
             return mockProgram;
@@ -356,9 +356,9 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
                 .Times(1);
 
             auto mockProgram = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdData"))
+            EXPECT_CALL(*mockProgram, getKernel("rmsNormBwdData"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel1))));
-            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdScaleBias"))
+            EXPECT_CALL(*mockProgram, getKernel("rmsNormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel2))));
 
             return mockProgram;

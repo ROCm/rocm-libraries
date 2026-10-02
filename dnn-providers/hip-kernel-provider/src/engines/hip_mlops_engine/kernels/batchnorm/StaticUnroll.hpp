@@ -6,77 +6,78 @@
 #ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
 #endif
+#include <type_traits>
 
 namespace hip_kernel_provider::batchnorm
 {
 
 template <typename IndexType>
-struct static_unroll_impl
+struct StaticUnrollImpl
 {
-    struct swallow
+    struct Swallow
     {
         template <typename... Ts>
-        __forceinline__ __host__ __device__ constexpr swallow(Ts&&...)
+        __forceinline__ __host__ __device__ constexpr Swallow(Ts&&... /*unused*/)
         {
         }
     };
 
     template <IndexType... Is>
-    struct sequence
+    struct Sequence
     {
     };
 
     template <typename Seq, typename... Seqs>
-    struct sequence_merge
+    struct SequenceMerge
     {
-        using type = typename sequence_merge<Seq, typename sequence_merge<Seqs...>::type>::type;
+        using type = typename SequenceMerge<Seq, typename SequenceMerge<Seqs...>::type>::type;
     };
 
     template <IndexType... Xs, IndexType... Ys>
-    struct sequence_merge<sequence<Xs...>, sequence<Ys...>>
+    struct SequenceMerge<Sequence<Xs...>, Sequence<Ys...>>
     {
-        using type = sequence<Xs..., Ys...>;
+        using type = Sequence<Xs..., Ys...>;
     };
 
     template <typename Seq>
-    struct sequence_merge<Seq>
+    struct SequenceMerge<Seq>
     {
         using type = Seq;
     };
 
     template <IndexType NSize, typename F>
-    struct sequence_gen
+    struct SequenceGen
     {
         template <IndexType IBegin, IndexType NRemain, typename G>
-        struct sequence_gen_impl
+        struct SequenceGenImpl
         {
-            static constexpr IndexType NRemainLeft = NRemain / 2;
-            static constexpr IndexType NRemainRight = NRemain - NRemainLeft;
-            static constexpr IndexType IMiddle = IBegin + NRemainLeft;
+            static constexpr IndexType N_REMAIN_LEFT = NRemain / 2;
+            static constexpr IndexType N_REMAIN_RIGHT = NRemain - N_REMAIN_LEFT;
+            static constexpr IndexType I_MIDDLE = IBegin + N_REMAIN_LEFT;
 
-            using type = typename sequence_merge<
-                typename sequence_gen_impl<IBegin, NRemainLeft, G>::type,
-                typename sequence_gen_impl<IMiddle, NRemainRight, G>::type>::type;
+            using type = typename SequenceMerge<
+                typename SequenceGenImpl<IBegin, N_REMAIN_LEFT, G>::type,
+                typename SequenceGenImpl<I_MIDDLE, N_REMAIN_RIGHT, G>::type>::type;
         };
 
         template <IndexType I, typename G>
-        struct sequence_gen_impl<I, 1, G>
+        struct SequenceGenImpl<I, 1, G>
         {
-            using type = sequence<G{}(I)>;
+            using type = Sequence<G{}(I)>;
         };
 
         template <IndexType I, typename G>
-        struct sequence_gen_impl<I, 0, G>
+        struct SequenceGenImpl<I, 0, G>
         {
-            using type = sequence<>;
+            using type = Sequence<>;
         };
 
-        using type = typename sequence_gen_impl<0, NSize, F>::type;
+        using type = typename SequenceGenImpl<0, NSize, F>::type;
     };
 
     // arithmetic sequence
     template <IndexType IBegin, IndexType IEnd, IndexType Increment>
-    struct arithmetic_sequence_gen
+    struct ArithmeticSequenceGen
     {
         struct F
         {
@@ -86,30 +87,30 @@ struct static_unroll_impl
             }
         };
 
-        using type0 = typename sequence_gen<(IEnd - IBegin) / Increment, F>::type;
-        using type1 = sequence<>;
+        using type0 = typename SequenceGen<(IEnd - IBegin) / Increment, F>::type;
+        using type1 = Sequence<>;
 
-        static constexpr bool kHasContent
+        static constexpr bool K_HAS_CONTENT
             = (Increment > 0 && IBegin < IEnd) || (Increment < 0 && IBegin > IEnd);
 
-        using type = typename std::conditional<kHasContent, type0, type1>::type;
+        using type = typename std::conditional_t<K_HAS_CONTENT, type0, type1>;
     };
 
     template <class>
-    struct static_for_impl;
+    struct StaticForImpl;
 
     template <IndexType... Is>
-    struct static_for_impl<sequence<Is...>>
+    struct StaticForImpl<Sequence<Is...>>
     {
         template <class F>
         __forceinline__ __host__ __device__ constexpr void operator()(F f) const
         {
-            swallow{(f(Is), 0)...};
+            Swallow{(f(Is), 0)...};
         }
     };
 
     template <IndexType NBegin, IndexType NEnd, IndexType Increment>
-    struct static_for
+    struct StaticFor
     {
         static_assert(Increment != 0 && (NEnd - NBegin) % Increment == 0,
                       "Wrong! should satisfy (NEnd - NBegin) % Increment == 0");
@@ -120,55 +121,56 @@ struct static_unroll_impl
         template <class F>
         __forceinline__ __host__ __device__ constexpr void operator()(F f) const
         {
-            static_for_impl<typename arithmetic_sequence_gen<NBegin, NEnd, Increment>::type>{}(f);
+            StaticForImpl<typename ArithmeticSequenceGen<NBegin, NEnd, Increment>::type>{}(f);
         }
     };
 };
 
 template <typename ItemType, ItemType Start, ItemType End, ItemType Stride>
-struct static_nounroll
+struct StaticNounroll
 {
-    template <typename Func>
-    __forceinline__ __host__ __device__ constexpr static_nounroll(Func&& f)
+    template <typename Func> // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
+    __forceinline__ __host__ __device__ constexpr StaticNounroll(Func&& f)
     {
         ItemType i = Start;
-        while(i < static_cast<ItemType>(End))
+        while(i < End)
         {
             f(i);
-            i += static_cast<ItemType>(Stride);
+            i += Stride;
         }
     }
 };
 
 template <typename ItemType, ItemType Start, ItemType End, ItemType Stride>
-struct static_unroll_full
+struct StaticUnrollFull
 {
-    static constexpr ItemType actual_end
+    static constexpr ItemType ACTUAL_END
         = (End - Start) % Stride == 0 ? End : ((End - Start) / Stride + 1) * Stride;
     template <typename F>
-    __forceinline__ __host__ __device__ constexpr static_unroll_full(F f)
+    __forceinline__ __host__ __device__ constexpr StaticUnrollFull(F f)
     {
-        typename static_unroll_impl<ItemType>::template static_for<Start, actual_end, Stride>{}(f);
+        typename StaticUnrollImpl<ItemType>::template StaticFor<Start, ACTUAL_END, Stride>{}(f);
     }
 };
 
 template <typename ItemType, ItemType Start, ItemType End, ItemType Stride, ItemType Hint>
-struct static_unroll_count
+struct StaticUnrollCount
 {
     static_assert(Hint > 0, "Hint must be a positive integer.");
-    static constexpr ItemType unroll_end = Start + (Stride * Hint);
+    static constexpr ItemType UNROLL_END = Start + (Stride * Hint);
 
     template <typename F>
-    __forceinline__ __host__ __device__ constexpr static_unroll_count(F f)
+    __forceinline__ __host__ __device__ constexpr StaticUnrollCount(F f)
     {
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         if constexpr(Hint == 1 || (End - Start) <= Hint)
         {
-            static_nounroll<ItemType, Start, End, Stride>{f};
+            StaticNounroll<ItemType, Start, End, Stride>{f};
         }
         else
         {
-            static_unroll_full<ItemType, Start, unroll_end, Stride>{f};
-            static_nounroll<ItemType, unroll_end, End, Stride>{f};
+            StaticUnrollFull<ItemType, Start, UNROLL_END, Stride>{f};
+            StaticNounroll<ItemType, UNROLL_END, End, Stride>{f};
         }
     }
 };
