@@ -1,0 +1,1016 @@
+#!/usr/bin/env python3
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""RFC 0019.13 §11.2 regret evaluation.
+
+Each test pins a property whose breakage yields a plausible number, not an error.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("numpy")
+pytest.importorskip("pandas")
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from uhd_gen.evaluate import (  # noqa: E402
+    ObjectiveDirectionError,
+    Split,
+    evaluate_corpus,
+    regret_of,
+    resolve_grouping,
+    split_problems,
+)
+
+DEVICE_A = "a1b2c3d4"
+DEVICE_B = "ffffbbbb"
+
+
+def make_corpus(rows: list[dict]) -> pd.DataFrame:
+    """A §8.3-shaped corpus from terse row dicts, with the envelope filled in."""
+    filled = []
+    for row in rows:
+        record = {
+            "benchmark": row["benchmark"],
+            "device": row.get("device", DEVICE_A),
+            "kernel": row["kernel"],
+            "pack": row.get("pack", "p"),
+            "dispatch": row.get("dispatch", "d"),
+            "minTimeMs": row.get("minTimeMs", ""),
+            "avgTimeMs": row.get("avgTimeMs", ""),
+            "stddevMs": row.get("stddevMs", ""),
+            "iters": row.get("iters", 100),
+            "is_valid": row.get("is_valid", "True"),
+            "tflops": row.get("tflops", ""),
+            "q.M": row.get("q.M", 128),
+        }
+        if "regime" in row:
+            record["regime"] = row["regime"]
+        filled.append(record)
+    return pd.DataFrame(filled)
+
+
+def oracle_scorer(target: str, objective: str):
+    """A perfect model: its score IS the measured value, so its pick is the oracle."""
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        return pd.to_numeric(frame[target]).to_numpy(dtype=float)
+
+    return score
+
+
+def worst_scorer(target: str, objective: str):
+    """The exact inverse: ranks the worst measured candidate first."""
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        return -pd.to_numeric(frame[target]).to_numpy(dtype=float)
+
+    return score
+
+
+def evaluate_all(df: pd.DataFrame, scorer, **kwargs):
+    """Score every problem (no split), so expected values do not depend on a hash."""
+    kwargs.setdefault("eval_fraction", 1.0)
+    return evaluate_corpus(df, scorer, **kwargs)
+
+
+# ---------------------------------------------------------------------------------
+# The two ends of the scale
+# ---------------------------------------------------------------------------------
+
+
+def test_oracle_picking_model_has_exactly_zero_regret():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+            {"benchmark": "g2", "kernel": "k1", "minTimeMs": 5.0},
+            {"benchmark": "g2", "kernel": "k2", "minTimeMs": 4.0},
+        ]
+    )
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    metrics = result.report["metrics"]
+
+    assert metrics["problems_scored"] == 2
+    assert metrics["top1_regret"] == {"mean": 0.0, "p50": 0.0, "p95": 0.0, "max": 0.0}
+    assert metrics["regret_tail"]["fraction"] == 0.0
+    assert metrics["topk_recall"]["strict"]["1"] == 1.0
+
+
+def test_worst_picking_model_scores_the_hand_computed_regret():
+    # g1: oracle 1.0, worst 2.0  -> 2.0/1.0 - 1 = 1.00
+    # g2: oracle 4.0, worst 5.0  -> 5.0/4.0 - 1 = 0.25
+    # mean = 0.625, p50 = 0.625 (two points, linear interpolation), max = 1.00
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+            {"benchmark": "g2", "kernel": "k1", "minTimeMs": 5.0},
+            {"benchmark": "g2", "kernel": "k2", "minTimeMs": 4.0},
+        ]
+    )
+    result = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    regret = result.report["metrics"]["top1_regret"]
+
+    assert regret["mean"] == pytest.approx(0.625)
+    assert regret["p50"] == pytest.approx(0.625)
+    assert regret["max"] == pytest.approx(1.0)
+    # Both problems exceed 5%, so the tail is everything.
+    assert result.report["metrics"]["regret_tail"]["fraction"] == 1.0
+    # Strict recall@1 misses; k=3 >= |V(p)| is a trivial hit and reported as such.
+    assert result.report["metrics"]["topk_recall"]["strict"]["1"] == 0.0
+    assert result.report["metrics"]["topk_recall"]["trivial"]["3"] == 1.0
+
+
+def test_regret_is_non_negative_under_both_objectives():
+    """The same corpus read as throughput and as latency, worst pick both times."""
+    minimise = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 4.0},
+        ]
+    )
+    maximise = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "tflops": 100.0},
+            {"benchmark": "g1", "kernel": "k2", "tflops": 25.0},
+        ]
+    )
+
+    low = evaluate_all(
+        minimise, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    high = evaluate_all(
+        maximise, worst_scorer("tflops", "max"), target="tflops", objective="max"
+    )
+
+    # min: 4/1 - 1 = 3.0.  max: 1 - 25/100 = 0.75. Different scales, same sign.
+    assert low.report["metrics"]["top1_regret"]["mean"] == pytest.approx(3.0)
+    assert high.report["metrics"]["top1_regret"]["mean"] == pytest.approx(0.75)
+    assert low.report["metrics"]["top1_regret"]["mean"] >= 0.0
+    assert high.report["metrics"]["top1_regret"]["mean"] >= 0.0
+
+
+def test_backwards_objective_fails_loudly_instead_of_printing():
+    """A negative regret means the objective direction is inverted."""
+    with pytest.raises(ObjectiveDirectionError, match="backwards"):
+        # A pick below the `min` oracle is impossible; it would print -0.75 as regret.
+        regret_of(picked=1.0, oracle=4.0, objective="min")
+    with pytest.raises(ObjectiveDirectionError, match="backwards"):
+        regret_of(picked=4.0, oracle=1.0, objective="max")
+
+
+def test_ranking_direction_follows_the_objective():
+    """One scorer, two directions, opposite ends of the same candidate set."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "slow", "minTimeMs": 10.0},
+            {"benchmark": "g1", "kernel": "fast", "minTimeMs": 1.0},
+        ]
+    )
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        return pd.to_numeric(frame["minTimeMs"]).to_numpy(dtype=float)
+
+    lower_is_better = evaluate_all(df, score, target="minTimeMs", objective="min")
+    higher_is_better = evaluate_all(df, score, target="minTimeMs", objective="max")
+
+    assert lower_is_better.problems[0].picked_value == pytest.approx(1.0)
+    assert higher_is_better.problems[0].picked_value == pytest.approx(10.0)
+    assert lower_is_better.problems[0].regret == pytest.approx(0.0)
+    assert higher_is_better.problems[0].regret == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------------
+# Rows that must never become the oracle
+# ---------------------------------------------------------------------------------
+
+
+def test_invalid_rows_are_never_the_oracle():
+    """An is_valid=False row has no timing; blank-as-zero would win every argmin."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "ok_fast", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "ok_slow", "minTimeMs": 3.0},
+            # What `export-benchmarks` writes for a failed compile: timings empty.
+            {
+                "benchmark": "g1",
+                "kernel": "failed",
+                "minTimeMs": "",
+                "is_valid": "False",
+            },
+        ]
+    )
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    problem = result.problems[0]
+
+    assert problem.oracle_value == pytest.approx(2.0)
+    assert problem.candidates == 2, "the failed candidate must not be in V(p)"
+    assert result.report["exclusions"]["invalid_rows"] == 1
+    assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(0.0)
+
+
+def test_an_invalid_row_carrying_a_stale_timing_is_still_excluded():
+    """is_valid is authoritative, not the presence of a number in the timing column."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "real", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "also_real", "minTimeMs": 3.0},
+            {
+                "benchmark": "g1",
+                "kernel": "bogus",
+                "minTimeMs": 0.01,
+                "is_valid": "False",
+            },
+        ]
+    )
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    assert result.problems[0].oracle_value == pytest.approx(2.0)
+    assert result.report["exclusions"]["invalid_rows"] == 1
+
+
+def test_a_numerically_wrong_row_is_never_the_oracle():
+    """RFC 0019 §13.2: wrong-answer timings are dropped; unchecked ones stay."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "checked", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "unchecked", "minTimeMs": 3.0},
+            {"benchmark": "g1", "kernel": "wrong_but_fast", "minTimeMs": 0.5},
+        ]
+    )
+    # As CSV text, the way a direct corpus carries it.
+    df["numerically_valid"] = ["True", "", "False"]
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    assert result.problems[0].oracle_value == pytest.approx(2.0)
+    assert result.problems[0].candidates == 2
+    assert result.report["exclusions"]["numerically_invalid_rows"] == 1
+
+
+def test_single_candidate_problems_are_excluded_and_counted():
+    """With nothing to choose between, a correct pick is not evidence of anything."""
+    df = make_corpus(
+        [
+            {"benchmark": "alone", "kernel": "k1", "minTimeMs": 7.0},
+            {"benchmark": "pair", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "pair", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    result = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    # If the lone problem were scored as regret 0 it would halve the reported mean.
+    assert result.report["metrics"]["problems_scored"] == 1
+    assert result.report["exclusions"]["problems_single_candidate"] == 1
+    assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------------
+# Problem identity
+# ---------------------------------------------------------------------------------
+
+
+def test_two_devices_are_two_problems():
+    """The same graph on a fast and a slow card has two oracles, not one."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "device": DEVICE_A, "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "device": DEVICE_A, "kernel": "k2", "minTimeMs": 1.1},
+            {"benchmark": "g1", "device": DEVICE_B, "kernel": "k1", "minTimeMs": 10.0},
+            {"benchmark": "g1", "device": DEVICE_B, "kernel": "k2", "minTimeMs": 11.0},
+        ]
+    )
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    assert result.report["grouping"]["columns"] == ["benchmark", "device"]
+    assert result.report["grouping"]["degraded"] is False
+    assert result.report["metrics"]["problems_scored"] == 2
+    # Conflated, the slow card's perfect pick would be charged 10.0/1.0 - 1 = 9.0.
+    assert result.report["metrics"]["top1_regret"]["max"] == pytest.approx(0.0)
+    assert not any("GROUPING" in warning for warning in result.warnings)
+
+
+def test_missing_device_column_degrades_loudly():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    ).drop(columns=["device"])
+
+    grouping = resolve_grouping(df)
+    assert grouping.degraded is True
+    assert grouping.columns == ("benchmark",)
+
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    assert result.report["grouping"]["degraded"] is True
+    assert result.report["warnings"], "a degraded grouping must never be silent"
+    warning = result.report["warnings"][0]
+    assert "DEGRADED PROBLEM GROUPING" in warning
+    assert "two devices" in warning
+    assert result.report["warnings"] == result.warnings
+
+
+def test_empty_device_column_degrades_loudly_too():
+    """An unknown device is exported as an empty string, not NaN."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "device": "", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "device": "", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    df["device"] = df["device"].astype(str)
+
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    assert result.report["grouping"]["columns"] == ["benchmark"]
+    assert "DEGRADED PROBLEM GROUPING" in result.report["warnings"][0]
+    assert "empty on all" in result.report["warnings"][0]
+
+
+def test_partially_identified_device_column_warns_without_merging():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "device": DEVICE_A, "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "device": DEVICE_A, "kernel": "k2", "minTimeMs": 2.0},
+            {"benchmark": "g1", "device": "", "kernel": "k1", "minTimeMs": 9.0},
+            {"benchmark": "g1", "device": "", "kernel": "k2", "minTimeMs": 8.0},
+        ]
+    )
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    assert result.report["grouping"]["degraded"] is False
+    assert result.report["metrics"]["problems_scored"] == 2
+    assert "PARTIAL DEVICE IDENTITY" in result.report["warnings"][0]
+
+
+# ---------------------------------------------------------------------------------
+# The split
+# ---------------------------------------------------------------------------------
+
+
+def test_split_is_reproducible_and_seed_dependent():
+    keys = [("g%02d" % i,) for i in range(40)]
+    first = split_problems(keys, 0.25, seed=7)
+    again = split_problems(list(reversed(keys)), 0.25, seed=7)
+    other = split_problems(keys, 0.25, seed=8)
+
+    assert (
+        first.eval_problems == again.eval_problems
+    ), "row order must not move the slice"
+    assert len(first.eval_problems) == 10
+    assert set(first.eval_problems) & set(first.train_problems) == set()
+    assert first.eval_problems != other.eval_problems
+
+
+def test_split_never_returns_an_empty_slice():
+    single = split_problems([("only",)], 0.2, seed=0)
+    assert single.eval_problems == (("only",),)
+
+
+def test_split_moves_whole_problems_not_rows():
+    """Every candidate of an evaluated problem must be on the evaluation side."""
+    rows = []
+    for problem in range(12):
+        for candidate, time_ms in enumerate([1.0, 4.0, 4.0, 4.0]):
+            rows.append(
+                {
+                    "benchmark": f"g{problem:02d}",
+                    "kernel": f"k{candidate}",
+                    "minTimeMs": time_ms,
+                }
+            )
+    df = make_corpus(rows)
+
+    # Never picks the 1.0 row, so every scored problem has regret 4/1 - 1 = 3.0.
+    def last_first(frame: pd.DataFrame) -> np.ndarray:
+        return -np.arange(len(frame), dtype=float)
+
+    result = evaluate_corpus(
+        df,
+        last_first,
+        target="minTimeMs",
+        objective="min",
+        eval_fraction=0.25,
+        seed=3,
+    )
+
+    assert result.report["split"]["unit"] == "problem"
+    assert result.report["split"]["eval_problems"] == 3
+    assert result.report["metrics"]["problems_scored"] == 3
+    for problem in result.problems:
+        assert problem.candidates == 4
+        assert problem.oracle_value == pytest.approx(1.0)
+        assert problem.regret == pytest.approx(3.0)
+    assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(3.0)
+
+    # Recorded, so the figure is reproducible from the report alone.
+    assert result.report["split"]["seed"] == 3
+    assert len(result.report["split"]["eval_problem_keys"]) == 3
+
+
+def test_a_row_wise_split_would_report_a_materially_better_number():
+    """Dropping each oracle row, as a row-wise split does, turns regret 3.0 into 0.0."""
+    rows = []
+    for problem in range(12):
+        for candidate, time_ms in enumerate([1.0, 4.0, 4.0, 4.0]):
+            rows.append(
+                {
+                    "benchmark": f"g{problem:02d}",
+                    "kernel": f"k{candidate}",
+                    "minTimeMs": time_ms,
+                }
+            )
+    df = make_corpus(rows)
+
+    def last_first(frame: pd.DataFrame) -> np.ndarray:
+        return -np.arange(len(frame), dtype=float)
+
+    group_aware = evaluate_corpus(
+        df, last_first, target="minTimeMs", objective="min", eval_fraction=0.25, seed=3
+    )
+    leaked = evaluate_corpus(
+        df[df["kernel"] != "k0"],
+        last_first,
+        target="minTimeMs",
+        objective="min",
+        eval_fraction=0.25,
+        seed=3,
+    )
+
+    assert group_aware.report["metrics"]["top1_regret"]["mean"] == pytest.approx(3.0)
+    assert leaked.report["metrics"]["top1_regret"]["mean"] == pytest.approx(0.0)
+
+
+def test_full_corpus_evaluation_says_it_held_nothing_out():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    result = evaluate_corpus(
+        df,
+        oracle_scorer("minTimeMs", "min"),
+        target="minTimeMs",
+        objective="min",
+        eval_fraction=1.0,
+    )
+    assert result.report["split"]["method"] == "full_corpus"
+    assert any("NO HELD-OUT SLICE" in warning for warning in result.report["warnings"])
+
+
+# ---------------------------------------------------------------------------------
+# Recall, ties and regimes
+# ---------------------------------------------------------------------------------
+
+
+def test_top_k_recall_counts_the_oracles_rank():
+    """Six candidates, the oracle ranked fourth: a miss at 1 and 3, a hit at 5."""
+    times = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": f"k{i}", "minTimeMs": t}
+            for i, t in enumerate(times)
+        ]
+    )
+
+    # Ranks k3, k4, k5 ahead of the oracle k0 by giving them lower scores under `min`.
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        rank = {"k3": 0.0, "k4": 1.0, "k5": 2.0, "k0": 3.0, "k1": 4.0, "k2": 5.0}
+        return np.array([rank[name] for name in frame["kernel"]], dtype=float)
+
+    recall = evaluate_all(df, score, target="minTimeMs", objective="min").report[
+        "metrics"
+    ]["topk_recall"]
+
+    assert recall["strict"]["1"] == 0.0
+    assert recall["strict"]["3"] == 0.0
+    assert recall["strict"]["5"] == 1.0
+
+
+def test_tie_aware_recall_forgives_an_indistinguishable_second_choice():
+    """§11.2: two kernels within noise; either choice costs nothing."""
+    df = make_corpus(
+        [
+            # 0.2% apart: inside the 1% tolerance and the +-2 standard-error band.
+            {"benchmark": "g1", "kernel": "a", "minTimeMs": 1.000, "stddevMs": 0.05},
+            {"benchmark": "g1", "kernel": "b", "minTimeMs": 1.002, "stddevMs": 0.05},
+            {"benchmark": "g1", "kernel": "c", "minTimeMs": 3.000, "stddevMs": 0.05},
+        ]
+    )
+
+    def prefers_b(frame: pd.DataFrame) -> np.ndarray:
+        rank = {"b": 0.0, "a": 1.0, "c": 2.0}
+        return np.array([rank[name] for name in frame["kernel"]], dtype=float)
+
+    report = evaluate_all(df, prefers_b, target="minTimeMs", objective="min").report
+    recall = report["metrics"]["topk_recall"]
+
+    # Strict misses; tie-aware hits, and regret agrees: 1.002/1.000 - 1 = 0.002.
+    assert recall["strict"]["1"] == 0.0
+    assert recall["tie_aware"]["1"] == 1.0
+    assert report["metrics"]["top1_regret"]["mean"] == pytest.approx(0.002)
+    assert report["metrics"]["regret_tail"]["fraction"] == 0.0
+    assert report["ties"]["noise_band_applied"] is True
+
+
+def test_a_real_miss_is_not_forgiven_by_the_tie_rule():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "a", "minTimeMs": 1.0, "stddevMs": 0.001},
+            {"benchmark": "g1", "kernel": "b", "minTimeMs": 1.5, "stddevMs": 0.001},
+        ]
+    )
+
+    def prefers_b(frame: pd.DataFrame) -> np.ndarray:
+        return np.array([1.0 if name == "a" else 0.0 for name in frame["kernel"]])
+
+    recall = evaluate_all(df, prefers_b, target="minTimeMs", objective="min").report[
+        "metrics"
+    ]["topk_recall"]
+    assert recall["strict"]["1"] == 0.0
+    assert recall["tie_aware"]["1"] == 0.0
+
+
+def test_noise_band_is_not_applied_to_a_target_in_other_units():
+    """stddevMs is milliseconds; a TFLOPS target must not be widened by it."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "a", "tflops": 100.0, "stddevMs": 50.0},
+            {"benchmark": "g1", "kernel": "b", "tflops": 99.0, "stddevMs": 50.0},
+        ]
+    )
+    report = evaluate_all(
+        df, oracle_scorer("tflops", "max"), target="tflops", objective="max"
+    ).report
+    assert report["ties"]["noise_band_applied"] is False
+    assert "not a millisecond timing column" in report["ties"]["policy"]
+
+
+def test_a_corpus_without_stddev_names_the_missing_column_not_the_units():
+    """§8.3 makes stddevMs required; without it the band is inert, not inapplicable."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    ).drop(columns=["stddevMs"])
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    ties = result.report["ties"]
+
+    assert ties["noise_band_applied"] is False
+    assert "no `stddevMs` column" in ties["policy"]
+    assert "not a millisecond timing column" not in ties["policy"]
+    assert any(
+        "NO MEASUREMENT NOISE" in warning for warning in result.report["warnings"]
+    )
+
+
+# ---------------------------------------------------------------------------------
+# §11.4 references
+# ---------------------------------------------------------------------------------
+
+
+def test_the_report_carries_the_references_11_4_reads_the_model_against():
+    df = make_corpus(
+        [
+            # Corpus order is the shipped priority order: static takes the slow one.
+            {"benchmark": "g1", "kernel": "shipped_first", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "actually_best", "minTimeMs": 1.0},
+        ]
+    )
+    references = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["metrics"]["references"]
+
+    assert references["oracle"]["top1_regret"]["mean"] == 0.0
+    # What the ordering the model replaces costs: 2.0/1.0 - 1.
+    assert references["static_order"]["top1_regret"]["mean"] == pytest.approx(1.0)
+    assert references["static_order"]["topk_recall"]["strict"]["1"] == 0.0
+    assert references["static_order"]["topk_recall"]["strict"]["3"] == 1.0
+    # Uniform choice: one of the two candidates costs 1.0, the other nothing.
+    assert references["random"]["top1_regret"]["mean"] == pytest.approx(0.5)
+    assert references["random"]["topk_recall"]["strict"]["1"] == pytest.approx(0.5)
+
+
+def test_a_model_that_loses_to_static_order_says_so():
+    """§11.4 MUST 2: the one case where shipping is almost certainly wrong."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "shipped_first", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "slower", "minTimeMs": 2.0},
+        ]
+    )
+    result = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    # Static order already picks the oracle; the model picks the other one.
+    assert (
+        result.report["metrics"]["references"]["static_order"]["top1_regret"]["mean"]
+        == 0.0
+    )
+    assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(1.0)
+    assert any(
+        "DOES NOT BEAT STATIC ORDER" in warning for warning in result.report["warnings"]
+    )
+
+
+def test_a_regime_that_regresses_against_static_order_is_named():
+    """§11.4 MUST 3: aggregate improvement can hide a regression in one regime."""
+    df = make_corpus(
+        [
+            # decode: the model beats the shipped order by a wide margin.
+            {
+                "benchmark": "d1",
+                "kernel": "first",
+                "minTimeMs": 5.0,
+                "regime": "decode",
+            },
+            {
+                "benchmark": "d1",
+                "kernel": "second",
+                "minTimeMs": 1.0,
+                "regime": "decode",
+            },
+            # prefill: the shipped order is already right and the model is not.
+            {
+                "benchmark": "p1",
+                "kernel": "first",
+                "minTimeMs": 1.0,
+                "regime": "prefill",
+            },
+            {
+                "benchmark": "p1",
+                "kernel": "second",
+                "minTimeMs": 1.5,
+                "regime": "prefill",
+            },
+        ]
+    )
+
+    def prefers_second(frame: pd.DataFrame) -> np.ndarray:
+        return np.array([0.0 if name == "second" else 1.0 for name in frame["kernel"]])
+
+    result = evaluate_all(df, prefers_second, target="minTimeMs", objective="min")
+    metrics = result.report["metrics"]
+
+    # Aggregate: model (0 + 0.5)/2 beats static (4.0 + 0)/2; only per-regime catches it.
+    assert metrics["top1_regret"]["mean"] == pytest.approx(0.25)
+    assert metrics["references"]["static_order"]["top1_regret"][
+        "mean"
+    ] == pytest.approx(2.0)
+    assert not any("DOES NOT BEAT STATIC ORDER" in w for w in result.report["warnings"])
+    warning = next(w for w in result.report["warnings"] if "REGIME REGRESSION" in w)
+    assert "prefill" in warning
+    assert "decode" not in warning
+
+
+def test_the_regression_check_11_4_cannot_run_is_declared_rather_than_skipped():
+    """§11.4 MUST 4 needs a previous UHD; there is no loader, so the gap is stated."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    gaps = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["not_implemented"]
+
+    assert any("§11.4 MUST 4" in gap for gap in gaps)
+    assert any("scoring time" in gap for gap in gaps)
+
+
+def test_per_regime_regret_when_the_corpus_carries_a_regime():
+    df = make_corpus(
+        [
+            {"benchmark": "d1", "kernel": "k1", "minTimeMs": 1.0, "regime": "decode"},
+            {"benchmark": "d1", "kernel": "k2", "minTimeMs": 3.0, "regime": "decode"},
+            {"benchmark": "p1", "kernel": "k1", "minTimeMs": 1.0, "regime": "prefill"},
+            {"benchmark": "p1", "kernel": "k2", "minTimeMs": 1.1, "regime": "prefill"},
+        ]
+    )
+    per_regime = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["metrics"]["per_regime"]
+
+    # decode: 3/1 - 1 = 2.0.  prefill: 1.1/1 - 1 = 0.1.
+    assert per_regime["decode"]["mean_regret"] == pytest.approx(2.0)
+    assert per_regime["prefill"]["mean_regret"] == pytest.approx(0.1)
+
+
+def test_absent_regime_is_stated_not_omitted():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    metrics = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["metrics"]
+
+    assert "per_regime" in metrics, "the key must be present even when it is null"
+    assert metrics["per_regime"] is None
+    assert metrics["per_regime_status"].startswith("UNAVAILABLE")
+    assert "regime" in metrics["per_regime_status"]
+
+
+# ---------------------------------------------------------------------------------
+# Report shape
+# ---------------------------------------------------------------------------------
+
+
+def test_report_records_everything_needed_to_reproduce_it():
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+            {"benchmark": "g2", "kernel": "k1", "minTimeMs": 3.0},
+            {"benchmark": "g2", "kernel": "k2", "minTimeMs": 4.0},
+        ]
+    )
+    report = evaluate_corpus(
+        df,
+        oracle_scorer("minTimeMs", "min"),
+        target="minTimeMs",
+        objective="min",
+        eval_fraction=0.5,
+        seed=11,
+    ).report
+
+    assert report["schema"] == "uhd_gen.eval_report/1"
+    assert report["target"] == "minTimeMs"
+    assert report["objective"] == "min"
+    assert report["split"]["seed"] == 11
+    assert report["split"]["eval_fraction"] == 0.5
+    assert report["not_implemented"], "the §11.2 gaps must be stated, not implied"
+    # Serialisable as written: the report is the artifact §10.4 names.
+    json.dumps(report)
+
+
+def test_regret_tail_threshold_is_the_five_percent_of_the_spec():
+    df = make_corpus(
+        [
+            # 4% over the oracle: under the tail threshold.
+            {"benchmark": "near", "kernel": "k1", "minTimeMs": 1.00},
+            {"benchmark": "near", "kernel": "k2", "minTimeMs": 1.04},
+            # 20% over: in the tail.
+            {"benchmark": "far", "kernel": "k1", "minTimeMs": 1.00},
+            {"benchmark": "far", "kernel": "k2", "minTimeMs": 1.20},
+        ]
+    )
+    tail = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["metrics"]["regret_tail"]
+
+    assert tail["threshold"] == 0.05
+    assert tail["problems"] == 1
+    assert tail["fraction"] == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------------
+# §11.2 calibration: the absolute value, which ranking metrics cannot see
+# ---------------------------------------------------------------------------------
+
+
+def _calibration_corpus() -> pd.DataFrame:
+    return make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "tflops": 100.0},
+            {"benchmark": "g1", "kernel": "k2", "tflops": 200.0},
+            {"benchmark": "g2", "kernel": "k1", "tflops": 400.0},
+            {"benchmark": "g2", "kernel": "k2", "tflops": 800.0},
+        ]
+    )
+
+
+def _scaled_scorer(factor: float):
+    """Ranks exactly like the oracle, reads `factor` times too high."""
+    return lambda frame: (frame["tflops"] * factor).to_numpy(dtype=float)
+
+
+def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale():
+    # Regret 0 and recall@1 1.0, yet 50% high on every prediction, which decides
+    # cross-engine arbitration (RFC 0019 §11.3). Only calibration sees it.
+    result = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"metric": "tflops", "calibrated": True},
+    )
+    metrics = result.report["metrics"]
+
+    assert metrics["top1_regret"]["mean"] == pytest.approx(0.0)
+    calibration = metrics["calibration"]
+    assert calibration["status"] == "computed"
+    assert calibration["all_candidates"]["signed_relative_bias"] == pytest.approx(0.5)
+    assert calibration["all_candidates"]["relative_absolute_error"] == pytest.approx(
+        0.5
+    )
+    # The picked candidate is the oracle here, so its absolute error is the oracle's.
+    assert calibration["selected_candidate"]["signed_bias"] == pytest.approx(
+        (200.0 * 0.5 + 800.0 * 0.5) / 2
+    )
+
+
+def test_the_bias_warning_names_the_direction():
+    # Over-predicting engines win arbitrations they should lose; under-predicting ones
+    # lose work they would do best. No other metric shows the sign.
+    over = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"metric": "tflops", "calibrated": True},
+    ).report["warnings"]
+    under = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(0.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"metric": "tflops", "calibrated": True},
+    ).report["warnings"]
+
+    assert any("OVER-predicts by 50.0%" in warning for warning in over)
+    assert not any("UNDER-predicts" in warning for warning in over)
+    assert any("UNDER-predicts by 50.0%" in warning for warning in under)
+
+
+def test_a_time_score_that_reads_low_is_favoured_not_avoided():
+    # Under `time` lower wins, so the arbitration consequence of a bias flips with the
+    # metric: an engine whose predicted time reads LOW wins work it would do slower.
+    corpus = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
+            {"benchmark": "g2", "kernel": "k1", "avgTimeMs": 4.0},
+            {"benchmark": "g2", "kernel": "k2", "avgTimeMs": 8.0},
+        ]
+    )
+    report = evaluate_all(
+        corpus,
+        lambda frame: pd.to_numeric(frame["avgTimeMs"]).to_numpy(dtype=float) * 0.5,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"metric": "time", "calibrated": True},
+    ).report
+
+    assert (report["metric"], report["metrics"]["top1_regret"]["mean"]) == (
+        "time",
+        pytest.approx(0.0),
+    )
+    assert "warning" not in report["metrics"]["calibration"]
+    assert any(
+        "UNDER-predicts by 50.0%" in warning and "will favour" in warning
+        for warning in report["warnings"]
+    )
+
+
+def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
+    result = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.02),
+        target="tflops",
+        objective="max",
+        score_declaration={"metric": "tflops", "calibrated": True},
+    ).report
+
+    assert result["metrics"]["calibration"]["all_candidates"][
+        "signed_relative_bias"
+    ] == pytest.approx(0.02)
+    assert not any(
+        "CALIBRATED SCORE IS BIASED" in warning for warning in result["warnings"]
+    )
+
+
+def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
+    # An uncalibrated score is only an ordering key; comparing it to a measurement
+    # is meaningless.
+    report = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"calibrated": False},
+    ).report
+
+    assert report["metrics"]["calibration"]["status"] == "not applicable"
+    assert "all_candidates" not in report["metrics"]["calibration"]
+    assert not any(
+        "CALIBRATED SCORE IS BIASED" in warning for warning in report["warnings"]
+    )
+    assert not any(
+        "calibration metrics" in entry for entry in report["not_implemented"]
+    ), "§11.2 calibration is implemented; it must not still be listed as a gap"
+
+
+def _negative_time_problem():
+    """Measured [1, 2]; predicted times -0.2 (faster) and 1.0 (slower)."""
+    corpus = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
+        ]
+    )
+    predictions = {"k1": -0.2, "k2": 1.0}
+    return corpus, lambda frame: np.array(
+        [predictions[kernel] for kernel in frame["kernel"]]
+    )
+
+
+def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
+    """The runtime ranks a non-positive physical score last: it runs the 2.0 kernel."""
+    corpus, scorer = _negative_time_problem()
+    report = evaluate_all(
+        corpus,
+        scorer,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"metric": "time", "calibrated": True, "transform": "log1p"},
+    ).report
+
+    assert report["metrics"]["top1_regret"]["max"] == pytest.approx(1.0)
+    calibration = report["metrics"]["calibration"]
+    assert calibration["excluded_runtime_discarded_predictions"] == 1
+    # Only the admitted 1.0-against-2.0 pair is calibrated: a 50% under-prediction.
+    assert calibration["all_candidates"]["signed_relative_bias"] == pytest.approx(-0.5)
+
+
+def test_a_metric_less_identity_score_may_be_signed():
+    """A non-physical ordering key ranks a negative score normally: -0.2 is the pick."""
+    corpus, scorer = _negative_time_problem()
+    report = evaluate_all(
+        corpus,
+        scorer,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"transform": "identity"},
+    ).report
+
+    assert report["metrics"]["top1_regret"]["max"] == pytest.approx(0.0)
+
+
+def _trained(keys=None, trained_on="training.json"):
+    from types import SimpleNamespace
+
+    manifest = {"input_file": trained_on}
+    if keys is not None:
+        manifest["training_problem_keys"] = keys
+    return SimpleNamespace(manifest=manifest, trained_on=trained_on)
+
+
+def test_a_renamed_copy_of_the_training_corpus_is_not_held_out():
+    """Only problem identity, not the file name, decides held-out status."""
+    from uhd_gen.evaluate import _holdout_integrity
+
+    evaluated = [["identical-problem", "board"]]
+    assert _holdout_integrity(_trained(), evaluated)["status"] == "unknown"
+    assert (
+        _holdout_integrity(_trained([["identical-problem", "board"]]), evaluated)[
+            "status"
+        ]
+        == "COMPROMISED"
+    )
+    assert (
+        _holdout_integrity(_trained([["other-problem", "board"]]), evaluated)["status"]
+        == "held_out"
+    )
+
+
+def test_keys_without_device_identity_compare_on_the_graph_alone():
+    """Without device identity, a shared graph proves nothing; disjoint graphs do."""
+    from uhd_gen.evaluate import _holdout_integrity
+
+    trained = _trained([["g1", "board"]])
+    assert _holdout_integrity(trained, [["g1"]])["status"] == "unknown"
+    assert _holdout_integrity(trained, [["g2"]])["status"] == "held_out"

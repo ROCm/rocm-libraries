@@ -1,0 +1,1406 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+/// @file GraphBuilders.hpp
+/// @brief Builds a graph from an explicit problem description.
+///
+/// No defaults: every parameter must reach the emitted graph (enforced by test), unlike the
+/// test SDK's fixture builders.
+namespace hipdnn_corpus_gen::builders
+{
+
+namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+
+/// Serialized graph bytes.
+using GraphBytes = std::vector<uint8_t>;
+
+/// One tensor of a problem. Strides are explicit because layout is part of the problem.
+struct TensorSpec
+{
+    int64_t uid = 0;
+    std::string name;
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+    fb::DataType dataType = fb::DataType::FLOAT;
+
+    /// An intermediate produced and consumed inside the graph; never allocated by the caller.
+    bool isVirtual = false;
+
+    /// Set for a pass-by-value scalar such as a norm's epsilon; the frontend refuses one given
+    /// as an ordinary tensor.
+    std::optional<float> scalarValue;
+};
+
+/// The graph's three declared dtypes, kept separate as in the schema.
+struct GraphTypes
+{
+    fb::DataType io = fb::DataType::FLOAT;
+    fb::DataType intermediate = fb::DataType::FLOAT;
+    fb::DataType compute = fb::DataType::FLOAT;
+
+    /// One element type throughout.
+    static GraphTypes uniform(fb::DataType type)
+    {
+        return {type, type, type};
+    }
+};
+
+namespace detail
+{
+
+inline flatbuffers::Offset<fb::TensorAttributes> addTensor(flatbuffers::FlatBufferBuilder& builder,
+                                                           const TensorSpec& tensor)
+{
+    if(tensor.scalarValue.has_value())
+    {
+        const fb::Float32Value value(*tensor.scalarValue);
+        return fb::CreateTensorAttributesDirect(builder,
+                                                tensor.uid,
+                                                tensor.name.c_str(),
+                                                tensor.dataType,
+                                                &tensor.strides,
+                                                &tensor.dims,
+                                                tensor.isVirtual,
+                                                fb::TensorValue::Float32Value,
+                                                builder.CreateStruct(value).Union());
+    }
+    return fb::CreateTensorAttributesDirect(builder,
+                                            tensor.uid,
+                                            tensor.name.c_str(),
+                                            tensor.dataType,
+                                            &tensor.strides,
+                                            &tensor.dims,
+                                            tensor.isVirtual);
+}
+
+inline GraphBytes finish(flatbuffers::FlatBufferBuilder& builder,
+                         const std::string& name,
+                         const GraphTypes& types,
+                         std::vector<flatbuffers::Offset<fb::TensorAttributes>>& tensors,
+                         std::vector<flatbuffers::Offset<fb::Node>>& nodes)
+{
+    // Named arguments: the generated order is (name, compute, intermediate, io).
+    const auto graph = fb::CreateGraphDirect(builder,
+                                             name.c_str(),
+                                             /*compute_data_type=*/types.compute,
+                                             /*intermediate_data_type=*/types.intermediate,
+                                             /*io_data_type=*/types.io,
+                                             &tensors,
+                                             &nodes);
+    builder.Finish(graph);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+} // namespace detail
+
+/// Spatial parameters shared by the three convolution directions.
+struct ConvGeometry
+{
+    std::vector<int64_t> prePadding;
+    std::vector<int64_t> postPadding;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> dilation;
+    fb::ConvMode mode = fb::ConvMode::CROSS_CORRELATION;
+};
+
+/// @brief Forward convolution.
+///
+/// No group count: the frontend derives it as `x.dims[1] / w.dims[1]`, so a depthwise
+/// convolution gives @p w one input channel.
+inline GraphBytes convolutionForward(const TensorSpec& x,
+                                     const TensorSpec& w,
+                                     const TensorSpec& y,
+                                     const ConvGeometry& geometry,
+                                     const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, x),
+                                                                   detail::addTensor(builder, w),
+                                                                   detail::addTensor(builder, y)};
+
+    const auto attributes = fb::CreateConvolutionFwdAttributesDirect(builder,
+                                                                     x.uid,
+                                                                     w.uid,
+                                                                     y.uid,
+                                                                     &geometry.prePadding,
+                                                                     &geometry.postPadding,
+                                                                     &geometry.stride,
+                                                                     &geometry.dilation,
+                                                                     geometry.mode);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "conv_fwd",
+                             types.compute,
+                             fb::NodeAttributes::ConvolutionFwdAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "conv_fwd", types, tensors, nodes);
+}
+
+/// @brief Convolution, optional bias add, activation: the fusion MIOpen runs as one plan.
+///
+/// Three nodes with @p bias (conv -> ADD -> activation), two without. Intermediates are
+/// virtual fp32; conv and activation compute in fp32 and the bias add in the bias type, as
+/// MIOpen's ConvFwdBiasActiv builder requires.
+inline GraphBytes convolutionBiasActivation(const TensorSpec& x,
+                                            const TensorSpec& w,
+                                            const std::optional<TensorSpec>& bias,
+                                            const TensorSpec& y,
+                                            const ConvGeometry& geometry,
+                                            fb::PointwiseMode activation,
+                                            const GraphTypes& types)
+{
+    constexpr int64_t CONV_OUT_UID = 101;
+    constexpr int64_t BIAS_OUT_UID = 102;
+    TensorSpec convOut = y;
+    convOut.uid = CONV_OUT_UID;
+    convOut.name = "conv_out";
+    convOut.dataType = fb::DataType::FLOAT;
+    convOut.isVirtual = true;
+    TensorSpec biasOut = convOut;
+    biasOut.uid = BIAS_OUT_UID;
+    biasOut.name = "bias_out";
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, w),
+        detail::addTensor(builder, convOut),
+        detail::addTensor(builder, y)};
+    if(bias.has_value())
+    {
+        tensors.push_back(detail::addTensor(builder, *bias));
+        tensors.push_back(detail::addTensor(builder, biasOut));
+    }
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    const auto conv = fb::CreateConvolutionFwdAttributesDirect(builder,
+                                                               x.uid,
+                                                               w.uid,
+                                                               convOut.uid,
+                                                               &geometry.prePadding,
+                                                               &geometry.postPadding,
+                                                               &geometry.stride,
+                                                               &geometry.dilation,
+                                                               geometry.mode);
+    nodes.push_back(fb::CreateNodeDirect(builder,
+                                         "conv_fwd",
+                                         fb::DataType::FLOAT,
+                                         fb::NodeAttributes::ConvolutionFwdAttributes,
+                                         conv.Union()));
+    int64_t activationIn = convOut.uid;
+    if(bias.has_value())
+    {
+        const auto add = fb::CreatePointwiseAttributes(builder,
+                                                       fb::PointwiseMode::ADD,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt, // axis
+                                                       convOut.uid,
+                                                       bias->uid,
+                                                       flatbuffers::nullopt, // in_2
+                                                       biasOut.uid);
+        nodes.push_back(fb::CreateNodeDirect(
+            builder, "bias", bias->dataType, fb::NodeAttributes::PointwiseAttributes, add.Union()));
+        activationIn = biasOut.uid;
+    }
+    const auto activate = fb::CreatePointwiseAttributes(builder,
+                                                        activation,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt,
+                                                        flatbuffers::nullopt, // axis
+                                                        activationIn,
+                                                        flatbuffers::nullopt, // in_1
+                                                        flatbuffers::nullopt, // in_2
+                                                        y.uid);
+    nodes.push_back(fb::CreateNodeDirect(builder,
+                                         "activation",
+                                         fb::DataType::FLOAT,
+                                         fb::NodeAttributes::PointwiseAttributes,
+                                         activate.Union()));
+    return detail::finish(builder, "conv_bias_activation", types, tensors, nodes);
+}
+
+/// @brief Convolution data gradient. @p dx extents are explicit: under a stride several
+///        inputs give the same output.
+inline GraphBytes convolutionBackwardData(const TensorSpec& dy,
+                                          const TensorSpec& w,
+                                          const TensorSpec& dx,
+                                          const ConvGeometry& geometry,
+                                          const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, dy),
+                                                                   detail::addTensor(builder, w),
+                                                                   detail::addTensor(builder, dx)};
+
+    const auto attributes = fb::CreateConvolutionBwdAttributesDirect(builder,
+                                                                     dy.uid,
+                                                                     w.uid,
+                                                                     dx.uid,
+                                                                     &geometry.prePadding,
+                                                                     &geometry.postPadding,
+                                                                     &geometry.stride,
+                                                                     &geometry.dilation,
+                                                                     geometry.mode);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "conv_dgrad",
+                             types.compute,
+                             fb::NodeAttributes::ConvolutionBwdAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "conv_dgrad", types, tensors, nodes);
+}
+
+/// @brief Convolution weight gradient.
+inline GraphBytes convolutionBackwardWeights(const TensorSpec& x,
+                                             const TensorSpec& dy,
+                                             const TensorSpec& dw,
+                                             const ConvGeometry& geometry,
+                                             const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, x),
+                                                                   detail::addTensor(builder, dy),
+                                                                   detail::addTensor(builder, dw)};
+
+    const auto attributes = fb::CreateConvolutionWrwAttributesDirect(builder,
+                                                                     x.uid,
+                                                                     dy.uid,
+                                                                     dw.uid,
+                                                                     &geometry.prePadding,
+                                                                     &geometry.postPadding,
+                                                                     &geometry.stride,
+                                                                     &geometry.dilation,
+                                                                     geometry.mode);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "conv_wgrad",
+                             types.compute,
+                             fb::NodeAttributes::ConvolutionWrwAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "conv_wgrad", types, tensors, nodes);
+}
+
+/// @brief Matrix multiply, C = A x B.
+inline GraphBytes
+    matmul(const TensorSpec& a, const TensorSpec& b, const TensorSpec& c, const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, a),
+                                                                   detail::addTensor(builder, b),
+                                                                   detail::addTensor(builder, c)};
+
+    const auto attributes = fb::CreateMatmulAttributes(builder, a.uid, b.uid, c.uid);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "matmul",
+                             types.compute,
+                             fb::NodeAttributes::MatmulAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "matmul", types, tensors, nodes);
+}
+
+/// @brief A matmul followed by a bias add, an activation, or both in that order.
+///
+/// Intermediates are virtual fp32 and every node computes in fp32. At least one of @p bias
+/// and @p activation is required.
+inline GraphBytes matmulEpilogue(const TensorSpec& a,
+                                 const TensorSpec& b,
+                                 const std::optional<TensorSpec>& bias,
+                                 const std::optional<fb::PointwiseMode>& activation,
+                                 const TensorSpec& c,
+                                 const GraphTypes& types)
+{
+    constexpr int64_t MATMUL_OUT_UID = 101;
+    constexpr int64_t BIAS_OUT_UID = 102;
+    const auto intermediate = [&c](int64_t uid, const char* name) {
+        TensorSpec spec = c;
+        spec.uid = uid;
+        spec.name = name;
+        spec.dataType = fb::DataType::FLOAT;
+        spec.isVirtual = true;
+        return spec;
+    };
+    // The last node writes c; every earlier output is virtual.
+    const auto matmulOut = (bias || activation) ? intermediate(MATMUL_OUT_UID, "matmul_out") : c;
+    const auto biasOut = activation ? intermediate(BIAS_OUT_UID, "bias_out") : c;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, a),
+                                                                   detail::addTensor(builder, b),
+                                                                   detail::addTensor(builder, c)};
+    if(bias || activation)
+    {
+        tensors.push_back(detail::addTensor(builder, matmulOut));
+    }
+    if(bias)
+    {
+        tensors.push_back(detail::addTensor(builder, *bias));
+        if(activation)
+        {
+            tensors.push_back(detail::addTensor(builder, biasOut));
+        }
+    }
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    const auto mm = fb::CreateMatmulAttributes(builder, a.uid, b.uid, matmulOut.uid);
+    nodes.push_back(fb::CreateNodeDirect(
+        builder, "matmul", fb::DataType::FLOAT, fb::NodeAttributes::MatmulAttributes, mm.Union()));
+    int64_t next = matmulOut.uid;
+    if(bias)
+    {
+        const auto add = fb::CreatePointwiseAttributes(builder,
+                                                       fb::PointwiseMode::ADD,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt, // axis
+                                                       matmulOut.uid,
+                                                       bias->uid,
+                                                       flatbuffers::nullopt, // in_2
+                                                       biasOut.uid);
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "bias",
+                                             fb::DataType::FLOAT,
+                                             fb::NodeAttributes::PointwiseAttributes,
+                                             add.Union()));
+        next = biasOut.uid;
+    }
+    if(activation)
+    {
+        const auto act = fb::CreatePointwiseAttributes(builder,
+                                                       *activation,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt, // axis
+                                                       next,
+                                                       flatbuffers::nullopt, // in_1
+                                                       flatbuffers::nullopt, // in_2
+                                                       c.uid);
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "activation",
+                                             fb::DataType::FLOAT,
+                                             fb::NodeAttributes::PointwiseAttributes,
+                                             act.Union()));
+    }
+    return detail::finish(builder, "matmul_epilogue", types, tensors, nodes);
+}
+
+/// @brief C = dequantize(A, scaleA) x dequantize(B, scaleB): a block-scaled (MX) matmul.
+///
+/// Three nodes: each operand is dequantized into a virtual fp32 tensor and the matmul consumes
+/// those. Every node computes in fp32.
+inline GraphBytes blockScaledMatmul(const TensorSpec& a,
+                                    const TensorSpec& aScale,
+                                    const TensorSpec& b,
+                                    const TensorSpec& bScale,
+                                    const TensorSpec& c,
+                                    const std::vector<int32_t>& blockSize,
+                                    const GraphTypes& types)
+{
+    constexpr int64_t A_DEQUANTIZED_UID = 101;
+    constexpr int64_t B_DEQUANTIZED_UID = 102;
+    const auto dequantized = [](const TensorSpec& operand, int64_t uid, const char* name) {
+        TensorSpec spec = operand;
+        spec.uid = uid;
+        spec.name = name;
+        spec.dataType = fb::DataType::FLOAT;
+        spec.isVirtual = true;
+        return spec;
+    };
+    const auto aDeq = dequantized(a, A_DEQUANTIZED_UID, "a_dequantized");
+    const auto bDeq = dequantized(b, B_DEQUANTIZED_UID, "b_dequantized");
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, a),
+        detail::addTensor(builder, aScale),
+        detail::addTensor(builder, b),
+        detail::addTensor(builder, bScale),
+        detail::addTensor(builder, aDeq),
+        detail::addTensor(builder, bDeq),
+        detail::addTensor(builder, c)};
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    for(const auto* operand : {&a, &b})
+    {
+        const auto& scale = operand == &a ? aScale : bScale;
+        const auto& out = operand == &a ? aDeq : bDeq;
+        const auto deq = fb::CreateBlockScaleDequantizeAttributesDirect(
+            builder, operand->uid, scale.uid, out.uid, &blockSize, /*is_negative_scale=*/false);
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "block_scale_dequantize",
+                                             fb::DataType::FLOAT,
+                                             fb::NodeAttributes::BlockScaleDequantizeAttributes,
+                                             deq.Union()));
+    }
+    const auto mm = fb::CreateMatmulAttributes(builder, aDeq.uid, bDeq.uid, c.uid);
+    nodes.push_back(fb::CreateNodeDirect(
+        builder, "matmul", fb::DataType::FLOAT, fb::NodeAttributes::MatmulAttributes, mm.Union()));
+    return detail::finish(builder, "block_scaled_matmul", types, tensors, nodes);
+}
+
+/// Mode-specific pointwise scalars, written only when set: a present value changes the
+/// operation (a relu_upper_clip of 0 makes ReLU a clamp to [0, 0]).
+struct PointwiseScalars
+{
+    flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt;
+    flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt;
+    flatbuffers::Optional<float> reluLowerClipSlope = flatbuffers::nullopt;
+    flatbuffers::Optional<float> swishBeta = flatbuffers::nullopt;
+    flatbuffers::Optional<float> eluAlpha = flatbuffers::nullopt;
+    flatbuffers::Optional<float> softplusBeta = flatbuffers::nullopt;
+};
+
+/// @brief Binary elementwise pointwise.
+///
+/// Unused tensor uids stay null; a literal 0 would reference tensor uid 0 and fail to
+/// deserialize.
+inline GraphBytes pointwiseBinary(const TensorSpec& inA,
+                                  const TensorSpec& inB,
+                                  const TensorSpec& out,
+                                  fb::PointwiseMode mode,
+                                  const PointwiseScalars& scalars,
+                                  const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, inA),
+                                                                   detail::addTensor(builder, inB),
+                                                                   detail::addTensor(builder, out)};
+
+    const auto attributes = fb::CreatePointwiseAttributes(builder,
+                                                          mode,
+                                                          scalars.reluLowerClip,
+                                                          scalars.reluUpperClip,
+                                                          scalars.reluLowerClipSlope,
+                                                          flatbuffers::nullopt, // axis
+                                                          inA.uid,
+                                                          inB.uid,
+                                                          flatbuffers::nullopt, // in_2
+                                                          out.uid,
+                                                          scalars.swishBeta,
+                                                          scalars.eluAlpha,
+                                                          scalars.softplusBeta);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "pointwise",
+                             types.compute,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "pointwise", types, tensors, nodes);
+}
+
+/// @brief One operand in, one result out: an activation or a unary math function.
+///
+/// in_1 stays null: MIOpen's activation builder requires a single-input pointwise node.
+inline GraphBytes pointwiseUnary(const TensorSpec& in,
+                                 const TensorSpec& out,
+                                 fb::PointwiseMode mode,
+                                 const PointwiseScalars& scalars,
+                                 const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, in),
+                                                                   detail::addTensor(builder, out)};
+
+    const auto attributes = fb::CreatePointwiseAttributes(builder,
+                                                          mode,
+                                                          scalars.reluLowerClip,
+                                                          scalars.reluUpperClip,
+                                                          scalars.reluLowerClipSlope,
+                                                          flatbuffers::nullopt, // axis
+                                                          in.uid,
+                                                          flatbuffers::nullopt, // in_1
+                                                          flatbuffers::nullopt, // in_2
+                                                          out.uid,
+                                                          scalars.swishBeta,
+                                                          scalars.eluAlpha,
+                                                          scalars.softplusBeta);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "pointwise",
+                             types.compute,
+                             fb::NodeAttributes::PointwiseAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "pointwise_unary", types, tensors, nodes);
+}
+
+/// @brief Reduction. The output extents are a parameter because they *are* the statement of
+///        which axes reduce; nothing infers them.
+inline GraphBytes reduction(const TensorSpec& in,
+                            const TensorSpec& out,
+                            fb::ReductionMode mode,
+                            bool deterministic,
+                            const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, in),
+                                                                   detail::addTensor(builder, out)};
+
+    const auto attributes
+        = fb::CreateReductionAttributes(builder, mode, in.uid, out.uid, deterministic);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "reduction",
+                             types.compute,
+                             fb::NodeAttributes::ReductionAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "reduction", types, tensors, nodes);
+}
+
+/// @brief LayerNorm forward.
+inline GraphBytes layernormForward(const TensorSpec& x,
+                                   const TensorSpec& scale,
+                                   const TensorSpec& bias,
+                                   const TensorSpec& epsilon,
+                                   const TensorSpec& y,
+                                   int64_t normalizedDimCount,
+                                   fb::NormFwdPhase phase,
+                                   const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, bias),
+        detail::addTensor(builder, epsilon),
+        detail::addTensor(builder, y)};
+
+    const auto attributes = fb::CreateLayernormAttributes(builder,
+                                                          x.uid,
+                                                          scale.uid,
+                                                          bias.uid,
+                                                          epsilon.uid,
+                                                          y.uid,
+                                                          normalizedDimCount,
+                                                          flatbuffers::nullopt, // mean
+                                                          flatbuffers::nullopt, // inv_variance
+                                                          phase);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "layernorm",
+                             types.compute,
+                             fb::NodeAttributes::LayernormAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "layernorm_fwd", types, tensors, nodes);
+}
+
+/// @brief RMSNorm forward, without the schema's optional bias (it changes the tensor set, so
+///        it belongs in a separate entry).
+inline GraphBytes rmsNormForward(const TensorSpec& x,
+                                 const TensorSpec& scale,
+                                 const TensorSpec& epsilon,
+                                 const TensorSpec& y,
+                                 fb::NormFwdPhase phase,
+                                 const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, epsilon),
+        detail::addTensor(builder, y)};
+
+    const auto attributes = fb::CreateRMSNormAttributes(builder,
+                                                        x.uid,
+                                                        scale.uid,
+                                                        epsilon.uid,
+                                                        y.uid,
+                                                        flatbuffers::nullopt, // bias
+                                                        flatbuffers::nullopt, // inv_rms
+                                                        phase);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "rmsnorm",
+                             types.compute,
+                             fb::NodeAttributes::RMSNormAttributes,
+                             attributes.Union())};
+    return detail::finish(builder, "rmsnorm_fwd", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Attention
+// ---------------------------------------------------------------------------
+
+/// Attention options. Each is part of the problem and selects different kernels.
+struct SdpaOptions
+{
+    bool causalMask = false;
+    bool paddingMask = false;
+    bool alibiMask = false;
+    bool generateStats = false;
+
+    /// Softmax scale; part of the problem since a kernel may fold a known scale in.
+    float attnScale = 0.0F;
+
+    /// Dropout rate. Non-zero changes the kernel: an RNG and a mask are generated.
+    float dropoutProbability = 0.0F;
+
+    /// Sliding-window bounds; -1 means unbounded (full attention).
+    int64_t leftBound = -1;
+    int64_t rightBound = -1;
+
+    /// Anchor of the causal diagonal, used only under a causal mask. At seqlen_q < seqlen_k
+    /// the two anchors mask different triangles.
+    fb::DiagonalAlignment diagonalAlignment = fb::DiagonalAlignment::TOP_LEFT;
+};
+
+/// @brief Scaled dot-product attention, forward.
+///
+/// The schema's other optional tensor uids (paged KV, dropout, descale, sinks) stay null.
+/// Stats are generated only when `generateStats` is set and @p stats is given.
+inline GraphBytes sdpaForward(const TensorSpec& q,
+                              const TensorSpec& k,
+                              const TensorSpec& v,
+                              const TensorSpec& o,
+                              const SdpaOptions& options,
+                              const GraphTypes& types,
+                              const std::optional<TensorSpec>& stats = std::nullopt)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, q),
+                                                                   detail::addTensor(builder, k),
+                                                                   detail::addTensor(builder, v),
+                                                                   detail::addTensor(builder, o)};
+    const bool withStats = options.generateStats && stats.has_value();
+    if(withStats)
+    {
+        tensors.push_back(detail::addTensor(builder, *stats));
+    }
+
+    fb::SdpaAttributesBuilder attributes(builder);
+    attributes.add_q_tensor_uid(q.uid);
+    attributes.add_k_tensor_uid(k.uid);
+    attributes.add_v_tensor_uid(v.uid);
+    attributes.add_o_tensor_uid(o.uid);
+    // Causality is written as bounds (right 0, left unbounded) plus diagonal_alignment. The
+    // deprecated causal_mask flag stays false: providers read it as top-left regardless of the
+    // alignment (SdpaPlanUtils::getMaskType).
+    const bool causal = options.causalMask && options.rightBound < 0;
+    attributes.add_causal_mask(false);
+    attributes.add_padding_mask(options.paddingMask);
+    attributes.add_alibi_mask(options.alibiMask);
+    attributes.add_generate_stats(withStats);
+    if(withStats)
+    {
+        attributes.add_stats_tensor_uid(stats->uid);
+    }
+    if(options.attnScale != 0.0F)
+    {
+        attributes.add_attn_scale_value(options.attnScale);
+    }
+    if(options.dropoutProbability != 0.0F)
+    {
+        attributes.add_dropout_probability(options.dropoutProbability);
+    }
+    if(options.leftBound >= 0)
+    {
+        attributes.add_left_bound(options.leftBound);
+    }
+    if(options.rightBound >= 0)
+    {
+        attributes.add_right_bound(options.rightBound);
+    }
+    else if(causal)
+    {
+        attributes.add_right_bound(0);
+    }
+    attributes.add_diagonal_alignment(options.diagonalAlignment);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{fb::CreateNodeDirect(
+        builder, "sdpa_fwd", types.compute, fb::NodeAttributes::SdpaAttributes, node.Union())};
+    return detail::finish(builder, "sdpa_fwd", types, tensors, nodes);
+}
+
+/// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
+///        not optional: the backward pass reads them rather than recomputing the softmax.
+inline GraphBytes sdpaBackward(const TensorSpec& q,
+                               const TensorSpec& k,
+                               const TensorSpec& v,
+                               const TensorSpec& o,
+                               const TensorSpec& dO,
+                               const TensorSpec& stats,
+                               const TensorSpec& dq,
+                               const TensorSpec& dk,
+                               const TensorSpec& dv,
+                               const SdpaOptions& options,
+                               const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, q),
+        detail::addTensor(builder, k),
+        detail::addTensor(builder, v),
+        detail::addTensor(builder, o),
+        detail::addTensor(builder, dO),
+        detail::addTensor(builder, stats),
+        detail::addTensor(builder, dq),
+        detail::addTensor(builder, dk),
+        detail::addTensor(builder, dv)};
+
+    fb::SdpaBackwardAttributesBuilder attributes(builder);
+    attributes.add_q_tensor_uid(q.uid);
+    attributes.add_k_tensor_uid(k.uid);
+    attributes.add_v_tensor_uid(v.uid);
+    attributes.add_o_tensor_uid(o.uid);
+    attributes.add_do_tensor_uid(dO.uid);
+    attributes.add_stats_tensor_uid(stats.uid);
+    attributes.add_dq_tensor_uid(dq.uid);
+    attributes.add_dk_tensor_uid(dk.uid);
+    attributes.add_dv_tensor_uid(dv.uid);
+    // Same encoding as sdpaForward: causality as bounds plus diagonal_alignment.
+    const bool causal = options.causalMask && options.rightBound < 0;
+    attributes.add_causal_mask(false);
+    attributes.add_padding_mask(options.paddingMask);
+    attributes.add_alibi_mask(options.alibiMask);
+    if(options.attnScale != 0.0F)
+    {
+        attributes.add_attn_scale_value(options.attnScale);
+    }
+    if(options.dropoutProbability != 0.0F)
+    {
+        attributes.add_dropout_probability(options.dropoutProbability);
+    }
+    if(options.leftBound >= 0)
+    {
+        attributes.add_left_bound(options.leftBound);
+    }
+    if(options.rightBound >= 0)
+    {
+        attributes.add_right_bound(options.rightBound);
+    }
+    else if(causal)
+    {
+        attributes.add_right_bound(0);
+    }
+    attributes.add_diagonal_alignment(options.diagonalAlignment);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "sdpa_bwd",
+                             types.compute,
+                             fb::NodeAttributes::SdpaBackwardAttributes,
+                             node.Union())};
+    return detail::finish(builder, "sdpa_bwd", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Normalization, backward
+// ---------------------------------------------------------------------------
+
+/// @brief LayerNorm backward.
+inline GraphBytes layernormBackward(const TensorSpec& dy,
+                                    const TensorSpec& x,
+                                    const TensorSpec& scale,
+                                    const TensorSpec& dx,
+                                    const TensorSpec& dscale,
+                                    const TensorSpec& dbias,
+                                    int64_t normalizedDimCount,
+                                    const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, dy),
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, dx),
+        detail::addTensor(builder, dscale),
+        detail::addTensor(builder, dbias)};
+
+    fb::LayernormBackwardAttributesBuilder attributes(builder);
+    attributes.add_dy_tensor_uid(dy.uid);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_dx_tensor_uid(dx.uid);
+    attributes.add_dscale_tensor_uid(dscale.uid);
+    attributes.add_dbias_tensor_uid(dbias.uid);
+    attributes.add_normalized_dim_count(normalizedDimCount);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "layernorm_bwd",
+                             types.compute,
+                             fb::NodeAttributes::LayernormBackwardAttributes,
+                             node.Union())};
+    return detail::finish(builder, "layernorm_bwd", types, tensors, nodes);
+}
+
+/// @brief RMSNorm backward. inv_rms is required: it carries the forward pass's normalizer.
+inline GraphBytes rmsNormBackward(const TensorSpec& dy,
+                                  const TensorSpec& x,
+                                  const TensorSpec& scale,
+                                  const TensorSpec& invRms,
+                                  const TensorSpec& dx,
+                                  const TensorSpec& dscale,
+                                  const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, dy),
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, invRms),
+        detail::addTensor(builder, dx),
+        detail::addTensor(builder, dscale)};
+
+    fb::RMSNormBackwardAttributesBuilder attributes(builder);
+    attributes.add_dy_tensor_uid(dy.uid);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_inv_rms_tensor_uid(invRms.uid);
+    attributes.add_dx_tensor_uid(dx.uid);
+    attributes.add_dscale_tensor_uid(dscale.uid);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "rmsnorm_bwd",
+                             types.compute,
+                             fb::NodeAttributes::RMSNormBackwardAttributes,
+                             node.Union())};
+    return detail::finish(builder, "rmsnorm_bwd", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Batch normalization
+// ---------------------------------------------------------------------------
+
+/// Optional batchnorm running statistics, blended by a pass-by-value momentum. All five or
+/// none.
+struct BatchnormRunningStats
+{
+    TensorSpec prevMean;
+    TensorSpec prevVariance;
+    TensorSpec momentum;
+    TensorSpec nextMean;
+    TensorSpec nextVariance;
+};
+
+namespace detail
+{
+/// A virtual fp32 intermediate shaped like @p like: one node's output, the next node's input.
+inline TensorSpec intermediateLike(const TensorSpec& like, int64_t uid, const char* name)
+{
+    TensorSpec spec = like;
+    spec.uid = uid;
+    spec.name = name;
+    spec.dataType = fb::DataType::FLOAT;
+    spec.isVirtual = true;
+    return spec;
+}
+
+/// The activation node that ends a fused batchnorm: @p in to @p out, parameters unset.
+inline flatbuffers::Offset<fb::Node> activationNode(flatbuffers::FlatBufferBuilder& builder,
+                                                    fb::PointwiseMode mode,
+                                                    int64_t in,
+                                                    int64_t out)
+{
+    const auto act = fb::CreatePointwiseAttributes(builder,
+                                                   mode,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt, // axis
+                                                   in,
+                                                   flatbuffers::nullopt, // in_1
+                                                   flatbuffers::nullopt, // in_2
+                                                   out);
+    return fb::CreateNodeDirect(builder,
+                                "activation",
+                                fb::DataType::FLOAT,
+                                fb::NodeAttributes::PointwiseAttributes,
+                                act.Union());
+}
+} // namespace detail
+
+/// @brief BatchNorm training forward, optionally with running statistics and a trailing
+/// activation (then batchnorm writes a virtual fp32 tensor and the activation writes @p y).
+/// `peer_stats_tensor_uid` stays empty: a peer-reduced batchnorm is a different problem.
+inline GraphBytes
+    batchnormForwardTraining(const TensorSpec& x,
+                             const TensorSpec& scale,
+                             const TensorSpec& bias,
+                             const TensorSpec& epsilon,
+                             const TensorSpec& y,
+                             const TensorSpec& mean,
+                             const TensorSpec& invVariance,
+                             const GraphTypes& types,
+                             const std::optional<BatchnormRunningStats>& running = std::nullopt,
+                             const std::optional<fb::PointwiseMode>& activation = std::nullopt)
+{
+    const auto bnOut = activation ? detail::intermediateLike(y, 101, "bn_out") : y;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, bias),
+        detail::addTensor(builder, epsilon),
+        detail::addTensor(builder, y),
+        detail::addTensor(builder, mean),
+        detail::addTensor(builder, invVariance)};
+    if(activation)
+    {
+        tensors.push_back(detail::addTensor(builder, bnOut));
+    }
+    if(running)
+    {
+        for(const auto* t : {&running->prevMean,
+                             &running->prevVariance,
+                             &running->momentum,
+                             &running->nextMean,
+                             &running->nextVariance})
+        {
+            tensors.push_back(detail::addTensor(builder, *t));
+        }
+    }
+
+    const std::vector<int64_t> noPeers;
+    const auto peers = builder.CreateVector(noPeers);
+
+    fb::BatchnormAttributesBuilder attributes(builder);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_bias_tensor_uid(bias.uid);
+    attributes.add_epsilon_tensor_uid(epsilon.uid);
+    attributes.add_peer_stats_tensor_uid(peers);
+    attributes.add_y_tensor_uid(bnOut.uid);
+    attributes.add_mean_tensor_uid(mean.uid);
+    attributes.add_inv_variance_tensor_uid(invVariance.uid);
+    if(running)
+    {
+        attributes.add_prev_running_mean_tensor_uid(running->prevMean.uid);
+        attributes.add_prev_running_variance_tensor_uid(running->prevVariance.uid);
+        attributes.add_momentum_tensor_uid(running->momentum.uid);
+        attributes.add_next_running_mean_tensor_uid(running->nextMean.uid);
+        attributes.add_next_running_variance_tensor_uid(running->nextVariance.uid);
+    }
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "batchnorm",
+                             types.compute,
+                             fb::NodeAttributes::BatchnormAttributes,
+                             node.Union())};
+    if(activation)
+    {
+        nodes.push_back(detail::activationNode(builder, *activation, bnOut.uid, y.uid));
+    }
+    return detail::finish(builder, "batchnorm_training", types, tensors, nodes);
+}
+
+/// @brief BatchNorm inference: statistics are inputs, not outputs. With @p activation,
+/// batchnorm writes a virtual fp32 tensor and the activation writes @p y.
+inline GraphBytes batchnormInference(const TensorSpec& x,
+                                     const TensorSpec& mean,
+                                     const TensorSpec& invVariance,
+                                     const TensorSpec& scale,
+                                     const TensorSpec& bias,
+                                     const TensorSpec& y,
+                                     const GraphTypes& types,
+                                     const std::optional<fb::PointwiseMode>& activation
+                                     = std::nullopt)
+{
+    const auto bnOut = activation ? detail::intermediateLike(y, 101, "bn_out") : y;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, mean),
+        detail::addTensor(builder, invVariance),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, bias),
+        detail::addTensor(builder, y)};
+    if(activation)
+    {
+        tensors.push_back(detail::addTensor(builder, bnOut));
+    }
+
+    fb::BatchnormInferenceAttributesBuilder attributes(builder);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_mean_tensor_uid(mean.uid);
+    attributes.add_inv_variance_tensor_uid(invVariance.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_bias_tensor_uid(bias.uid);
+    attributes.add_y_tensor_uid(bnOut.uid);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "batchnorm_inference",
+                             types.compute,
+                             fb::NodeAttributes::BatchnormInferenceAttributes,
+                             node.Union())};
+    if(activation)
+    {
+        nodes.push_back(detail::activationNode(builder, *activation, bnOut.uid, y.uid));
+    }
+    return detail::finish(builder, "batchnorm_inference", types, tensors, nodes);
+}
+
+/// @brief BatchNorm backward.
+inline GraphBytes batchnormBackward(const TensorSpec& dy,
+                                    const TensorSpec& x,
+                                    const TensorSpec& scale,
+                                    const TensorSpec& dx,
+                                    const TensorSpec& dscale,
+                                    const TensorSpec& dbias,
+                                    const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, dy),
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, dx),
+        detail::addTensor(builder, dscale),
+        detail::addTensor(builder, dbias)};
+
+    const std::vector<int64_t> noPeers;
+    const auto peers = builder.CreateVector(noPeers);
+
+    fb::BatchnormBackwardAttributesBuilder attributes(builder);
+    attributes.add_dy_tensor_uid(dy.uid);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_peer_stats_tensor_uid(peers);
+    attributes.add_dx_tensor_uid(dx.uid);
+    attributes.add_dscale_tensor_uid(dscale.uid);
+    attributes.add_dbias_tensor_uid(dbias.uid);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "batchnorm_bwd",
+                             types.compute,
+                             fb::NodeAttributes::BatchnormBackwardAttributes,
+                             node.Union())};
+    return detail::finish(builder, "batchnorm_bwd", types, tensors, nodes);
+}
+
+/// @brief Backward pass through a fused batchnorm inference and activation.
+///
+/// Three nodes: inference recomputes y (virtual), the activation backward writes the gradient
+/// (virtual), and batchnorm backward writes dx, dscale and dbias.
+inline GraphBytes batchnormInferenceActivationBackward(const TensorSpec& x,
+                                                       const TensorSpec& mean,
+                                                       const TensorSpec& invVariance,
+                                                       const TensorSpec& scale,
+                                                       const TensorSpec& bias,
+                                                       const TensorSpec& dy,
+                                                       const TensorSpec& dx,
+                                                       const TensorSpec& dscale,
+                                                       const TensorSpec& dbias,
+                                                       fb::PointwiseMode activationBackward,
+                                                       const GraphTypes& types)
+{
+    const auto y = detail::intermediateLike(dy, 101, "bn_out");
+    const auto dyBn = detail::intermediateLike(dy, 102, "dy_bn");
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, mean),
+        detail::addTensor(builder, invVariance),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, bias),
+        detail::addTensor(builder, dy),
+        detail::addTensor(builder, dx),
+        detail::addTensor(builder, dscale),
+        detail::addTensor(builder, dbias),
+        detail::addTensor(builder, y),
+        detail::addTensor(builder, dyBn)};
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes;
+    {
+        fb::BatchnormInferenceAttributesBuilder attributes(builder);
+        attributes.add_x_tensor_uid(x.uid);
+        attributes.add_mean_tensor_uid(mean.uid);
+        attributes.add_inv_variance_tensor_uid(invVariance.uid);
+        attributes.add_scale_tensor_uid(scale.uid);
+        attributes.add_bias_tensor_uid(bias.uid);
+        attributes.add_y_tensor_uid(y.uid);
+        const auto node = attributes.Finish();
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "batchnorm_inference",
+                                             types.compute,
+                                             fb::NodeAttributes::BatchnormInferenceAttributes,
+                                             node.Union()));
+    }
+    {
+        const auto act = fb::CreatePointwiseAttributes(builder,
+                                                       activationBackward,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt,
+                                                       flatbuffers::nullopt, // axis
+                                                       dy.uid, // in_0: gradient
+                                                       y.uid, // in_1: forward output
+                                                       flatbuffers::nullopt, // in_2
+                                                       dyBn.uid);
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "activation_bwd",
+                                             fb::DataType::FLOAT,
+                                             fb::NodeAttributes::PointwiseAttributes,
+                                             act.Union()));
+    }
+    {
+        const std::vector<int64_t> noPeers;
+        const auto peers = builder.CreateVector(noPeers);
+        fb::BatchnormBackwardAttributesBuilder attributes(builder);
+        attributes.add_dy_tensor_uid(dyBn.uid);
+        attributes.add_x_tensor_uid(x.uid);
+        attributes.add_mean_tensor_uid(mean.uid);
+        attributes.add_inv_variance_tensor_uid(invVariance.uid);
+        attributes.add_scale_tensor_uid(scale.uid);
+        attributes.add_peer_stats_tensor_uid(peers);
+        attributes.add_dx_tensor_uid(dx.uid);
+        attributes.add_dscale_tensor_uid(dscale.uid);
+        attributes.add_dbias_tensor_uid(dbias.uid);
+        const auto node = attributes.Finish();
+        nodes.push_back(fb::CreateNodeDirect(builder,
+                                             "batchnorm_bwd",
+                                             types.compute,
+                                             fb::NodeAttributes::BatchnormBackwardAttributes,
+                                             node.Union()));
+    }
+    return detail::finish(builder, "batchnorm_activation_bwd", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Resample
+// ---------------------------------------------------------------------------
+
+/// Window, stride and padding of a pooling problem.
+struct ResampleGeometry
+{
+    std::vector<int64_t> window;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> prePadding;
+    std::vector<int64_t> postPadding;
+    fb::ResampleMode mode = fb::ResampleMode::MAXPOOL;
+    fb::PaddingMode paddingMode = fb::PaddingMode::ZERO_PAD;
+};
+
+/// @brief Resample forward (pooling). @p index, when given, receives each window's max
+///        position for the backward pass.
+inline GraphBytes resampleForward(const TensorSpec& x,
+                                  const TensorSpec& y,
+                                  const ResampleGeometry& geometry,
+                                  const GraphTypes& types,
+                                  const std::optional<TensorSpec>& index = std::nullopt)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, x),
+                                                                   detail::addTensor(builder, y)};
+    if(index)
+    {
+        tensors.push_back(detail::addTensor(builder, *index));
+    }
+
+    const auto node = fb::CreateResampleFwdAttributesDirect(
+        builder,
+        x.uid,
+        y.uid,
+        index ? flatbuffers::Optional<int64_t>(index->uid) : flatbuffers::nullopt,
+        &geometry.prePadding,
+        &geometry.postPadding,
+        &geometry.stride,
+        &geometry.window,
+        geometry.mode,
+        geometry.paddingMode,
+        index ? flatbuffers::Optional<bool>(true) : flatbuffers::nullopt);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "resample_fwd",
+                             types.compute,
+                             fb::NodeAttributes::ResampleFwdAttributes,
+                             node.Union())};
+    return detail::finish(builder, "resample_fwd", types, tensors, nodes);
+}
+
+/// @brief Resample backward. @p index, when given, holds the forward pass's max positions.
+inline GraphBytes resampleBackward(const TensorSpec& dy,
+                                   const TensorSpec& dx,
+                                   const ResampleGeometry& geometry,
+                                   const GraphTypes& types,
+                                   const std::optional<TensorSpec>& index = std::nullopt)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{detail::addTensor(builder, dy),
+                                                                   detail::addTensor(builder, dx)};
+    if(index)
+    {
+        tensors.push_back(detail::addTensor(builder, *index));
+    }
+
+    const auto node = fb::CreateResampleBwdAttributesDirect(
+        builder,
+        dy.uid,
+        dx.uid,
+        index ? flatbuffers::Optional<int64_t>(index->uid) : flatbuffers::nullopt,
+        &geometry.prePadding,
+        &geometry.postPadding,
+        &geometry.stride,
+        &geometry.window,
+        geometry.mode,
+        geometry.paddingMode);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "resample_bwd",
+                             types.compute,
+                             fb::NodeAttributes::ResampleBwdAttributes,
+                             node.Union())};
+    return detail::finish(builder, "resample_bwd", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Block scaling
+// ---------------------------------------------------------------------------
+
+/// @brief Block-scale quantize. `blockSize` is a scalar here and a vector on the dequantize
+///        side; that asymmetry is the schema's, not a transcription slip.
+inline GraphBytes blockScaleQuantize(const TensorSpec& x,
+                                     const TensorSpec& y,
+                                     const TensorSpec& scale,
+                                     int32_t blockSize,
+                                     bool transpose,
+                                     const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, y),
+        detail::addTensor(builder, scale)};
+
+    fb::BlockScaleQuantizeAttributesBuilder attributes(builder);
+    attributes.add_x_tensor_uid(x.uid);
+    attributes.add_y_tensor_uid(y.uid);
+    attributes.add_scale_tensor_uid(scale.uid);
+    attributes.add_block_size(blockSize);
+    attributes.add_transpose(transpose);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "block_scale_quantize",
+                             types.compute,
+                             fb::NodeAttributes::BlockScaleQuantizeAttributes,
+                             node.Union())};
+    return detail::finish(builder, "block_scale_quantize", types, tensors, nodes);
+}
+
+/// @brief Block-scale dequantize.
+inline GraphBytes blockScaleDequantize(const TensorSpec& x,
+                                       const TensorSpec& scale,
+                                       const TensorSpec& y,
+                                       const std::vector<int32_t>& blockSize,
+                                       bool negativeScale,
+                                       const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, x),
+        detail::addTensor(builder, scale),
+        detail::addTensor(builder, y)};
+
+    const auto node = fb::CreateBlockScaleDequantizeAttributesDirect(
+        builder, x.uid, scale.uid, y.uid, &blockSize, negativeScale);
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "block_scale_dequantize",
+                             types.compute,
+                             fb::NodeAttributes::BlockScaleDequantizeAttributes,
+                             node.Union())};
+    return detail::finish(builder, "block_scale_dequantize", types, tensors, nodes);
+}
+
+// ---------------------------------------------------------------------------
+// Mixture of experts
+// ---------------------------------------------------------------------------
+
+/// @brief MoE grouped matmul.
+///
+/// Routing lives in the contents of `firstTokenOffset` and `tokenIndex`, which the graph does
+/// not declare; a measurement covers whatever routing the bench's buffers hold.
+inline GraphBytes moeGroupedMatmul(const TensorSpec& token,
+                                   const TensorSpec& weight,
+                                   const TensorSpec& firstTokenOffset,
+                                   const TensorSpec& output,
+                                   fb::MoeGroupedMatmulMode mode,
+                                   int32_t topK,
+                                   const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, token),
+        detail::addTensor(builder, weight),
+        detail::addTensor(builder, firstTokenOffset),
+        detail::addTensor(builder, output)};
+
+    fb::MoeGroupedMatmulAttributesBuilder attributes(builder);
+    attributes.add_token_tensor_uid(token.uid);
+    attributes.add_weight_tensor_uid(weight.uid);
+    attributes.add_first_token_offset_tensor_uid(firstTokenOffset.uid);
+    attributes.add_output_tensor_uid(output.uid);
+    attributes.add_mode(mode);
+    attributes.add_top_k(topK);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "moe_grouped_matmul",
+                             types.compute,
+                             fb::NodeAttributes::MoeGroupedMatmulAttributes,
+                             node.Union())};
+    return detail::finish(builder, "moe_grouped_matmul", types, tensors, nodes);
+}
+
+/// @brief MoE grouped matmul, weight gradient.
+inline GraphBytes moeGroupedMatmulBackward(const TensorSpec& dOutput,
+                                           const TensorSpec& token,
+                                           const TensorSpec& firstTokenOffset,
+                                           const TensorSpec& dWeight,
+                                           const GraphTypes& types)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
+        detail::addTensor(builder, dOutput),
+        detail::addTensor(builder, token),
+        detail::addTensor(builder, firstTokenOffset),
+        detail::addTensor(builder, dWeight)};
+
+    fb::MoeGroupedMatmulBwdAttributesBuilder attributes(builder);
+    attributes.add_doutput_tensor_uid(dOutput.uid);
+    attributes.add_token_tensor_uid(token.uid);
+    attributes.add_first_token_offset_tensor_uid(firstTokenOffset.uid);
+    attributes.add_dweight_tensor_uid(dWeight.uid);
+    const auto node = attributes.Finish();
+
+    std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "moe_grouped_matmul_bwd",
+                             types.compute,
+                             fb::NodeAttributes::MoeGroupedMatmulBwdAttributes,
+                             node.Union())};
+    return detail::finish(builder, "moe_grouped_matmul_bwd", types, tensors, nodes);
+}
+
+} // namespace hipdnn_corpus_gen::builders

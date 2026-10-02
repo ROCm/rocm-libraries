@@ -104,12 +104,15 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD using the legacy `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
         "name": f"{config.engine.local_name} selector",
-        "kind": "native",
-        "payload": config.score_symbol,
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.score_symbol},
     }
 
 
@@ -126,7 +129,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        # RFC 0019 §3.1: the loader rejects the legacy bare `heuristic` pointer.
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
