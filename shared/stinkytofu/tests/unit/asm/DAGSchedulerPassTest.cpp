@@ -1041,6 +1041,77 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     EXPECT_EQ(waits, 2);
 }
 
+// LockDsReadOrder chains ds_loads that share a memory token into
+// dsReadPriority order. Both loads here use LDS token 0. `high` feeds an
+// earlier WMMA than `low`, but three WMMAs that already read its dest keep
+// it unready while `low` is free. No barrier is involved. The stinkytofu
+// default is on; this test turns it off explicitly for the second case,
+// which lets `low` issue first.
+TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
+    auto schedule = [&](bool lockDsReadOrder) {
+        am.clear();
+        func = std::make_unique<Function>(lockDsReadOrder ? "lock_ds_order" : "free_ds_order");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        StinkyInstruction* low =
+            createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/0);
+        for (int i = 0; i < 3; ++i)
+            createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+        StinkyInstruction* high =
+            createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.lockDsReadOrder = lockDsReadOrder;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        return std::pair{positionOf(*bb, high), positionOf(*bb, low)};
+    };
+
+    const auto [lockedHigh, lockedLow] = schedule(/*lockDsReadOrder=*/true);
+    EXPECT_LT(lockedHigh, lockedLow)
+        << "LockDsReadOrder must issue same-token ds_loads in dsReadPriority order";
+
+    const auto [freeHigh, freeLow] = schedule(/*lockDsReadOrder=*/false);
+    EXPECT_LT(freeLow, freeHigh)
+        << "without LockDsReadOrder a ready lower-priority ds_load may issue first";
+}
+
+// Same readiness shape as AllDsLoadsIssueInDsReadPriorityOrder, but the two
+// ds_loads carry different LDS tokens. Priority would still like `high` first.
+// Per-token chaining must not hold the already-ready `low` behind `high`.
+TEST_F(DAGSchedulerPassTest, LockDsReadOrderDoesNotCrossMemoryTokens) {
+    am.clear();
+    func = std::make_unique<Function>("lock_ds_order_per_token");
+    setFunctionArch(*func, arch);
+    bb = func->createBasicBlock("loop_body");
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* low = createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/1);
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+    StinkyInstruction* high = createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.lockDsReadOrder = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    EXPECT_LT(positionOf(*bb, low), positionOf(*bb, high))
+        << "ds_loads on different memory tokens must not be chained together";
+}
+
 // DS reads + WMMAs: scheduler must not issue WMMAs back-to-back when other
 // instructions exist. With real ds_load latency, WMMAs are not latency-free
 // until ds_reads are issued and latency elapses, so we get: 4 ds_load, then 2
