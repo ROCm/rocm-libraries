@@ -12,7 +12,7 @@ This tool applies only the additions:
                         --live "$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>" \\
                         [--report splice_report.json] [--check]
 
-Pairing and checks, all before anything is written:
+Pairing and checks, all before anything is written, and all run by `--check` too:
 
   * Documents pair by file name; kernel entries of a paired KDP pair by `name`.
     Each pair contributes `scratch id -> live id` to one UUID map.
@@ -210,11 +210,29 @@ def plan(live_dir: Path, scratch_dir: Path) -> dict:
                 for k in new_files[name].get(KERNELS, [])
             ]
 
+    # Every refusal happens here, before anything is written, so `--check` and a
+    # real run refuse the same inputs. A rewritten KDP must keep its retained bytes:
+    # only a file the generator's serializer reproduces can be rewritten.
+    writes = []
+    for name, doc in spliced.items():
+        path = live_dir / name
+        text, newline = _read(path)
+        if dump(json.loads(text)) != text:
+            raise SpliceRefused(
+                f"{name}: re-serialising the live file does not reproduce its text, so "
+                "a rewrite would change retained bytes. Format it with the generator's "
+                "serializer (json.dumps indent=2) in a separate commit first."
+            )
+        writes.append((path, dump(doc).replace("\n", newline).encode("utf-8")))
+    for name, doc in new_files.items():
+        writes.append((live_dir / name, dump(doc).encode("utf-8")))
+
     return {
         "live_dir": str(live_dir),
         "scratch_dir": str(scratch_dir),
         "spliced": spliced,
         "new_files": new_files,
+        "writes": writes,
         "added_kernels": added,
         "retained_kernels": sum(
             len(live[n].get(KERNELS, [])) for n in live if _is_kdp(n)
@@ -224,24 +242,10 @@ def plan(live_dir: Path, scratch_dir: Path) -> dict:
 
 
 def apply(result: dict) -> None:
-    """Write the planned splice. Checks byte preservation first, then writes."""
-    live_dir = Path(result["live_dir"])
-    writes = []
-    for name, doc in result["spliced"].items():
-        path = live_dir / name
-        text, newline = _read(path)
-        before = json.loads(text)
-        if dump(before) != text:
-            raise SpliceRefused(
-                f"{name}: re-serialising the live file does not reproduce its text, so "
-                "a rewrite would change retained bytes. Format it with the generator's "
-                "serializer (json.dumps indent=2) in a separate commit first."
-            )
-        writes.append((path, dump(doc), newline))
-    for name, doc in result["new_files"].items():
-        writes.append((live_dir / name, dump(doc), "\n"))
-    for path, text, newline in writes:
-        path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+    """Write the splice `plan` checked; `plan` has already refused anything that
+    would change retained bytes."""
+    for path, data in result["writes"]:
+        path.write_bytes(data)
 
 
 def main(argv: list[str] | None = None) -> int:

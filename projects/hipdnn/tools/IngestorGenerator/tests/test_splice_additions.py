@@ -171,6 +171,23 @@ def test_check_mode_writes_nothing(tmp_path, live):
     assert _snapshot(live) == before
 
 
+@pytest.mark.parametrize("mode", [["--check"], []], ids=["check", "splice"])
+def test_a_live_kdp_the_serializer_cannot_reproduce_is_refused(tmp_path, live, mode):
+    """`--check` is the verify step, so it must refuse what the real run refuses: a
+    live KDP written with indent=4 cannot be rewritten without changing its bytes."""
+    kdp = live / _KDP
+    indent4 = json.dumps(json.loads(kdp.read_text(encoding="utf-8")), indent=4) + "\n"
+    kdp.write_bytes(indent4.encode("utf-8"))
+    before = _snapshot(live)
+    scratch = _render(_with(_add_kernel), tmp_path, "scratch")
+
+    result = _splice(live, scratch, *mode)
+
+    assert result.returncode == 1, result.stdout
+    assert "re-serialising the live file does not reproduce its text" in result.stderr
+    assert _snapshot(live) == before
+
+
 def _change_retained_priority(config: dict) -> None:
     _add_kernel(config)
     config["packs"][0]["kernels"][0]["priority"] = 5
