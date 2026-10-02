@@ -3987,10 +3987,10 @@ try
     // whose data is packed contiguously.
     auto all_bricks_contiguous = [](const std::vector<rocfft_field_t>& fields) {
         return std::all_of(fields.begin(), fields.end(), [](const rocfft_field_t& field) {
-            return std::all_of(
-                field.bricks.begin(), field.bricks.end(), [](const rocfft_brick_t& brick) {
-                    return brick.layout.is_contiguous();
-                });
+            const auto& bricks = field.get_bricks();
+            return std::all_of(bricks.begin(), bricks.end(), [](const rocfft_brick_t& brick) {
+                return brick.layout.is_contiguous();
+            });
         });
     };
     if(!all_bricks_contiguous(desc.inFields) || !all_bricks_contiguous(desc.outFields))
