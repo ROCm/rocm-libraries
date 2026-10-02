@@ -57,8 +57,13 @@ function(hiprtc_runtime_header out_var)
         set(HIPRTC_OBJCOPY_EXE "${CMAKE_OBJCOPY}")
     endif()
 
-    if(NOT HIPRTC_BUILTINS_LIBRARY OR NOT HIPRTC_OBJCOPY_EXE)
-        message(WARNING "libhiprtc-builtins.so or objcopy not found; "
+    # The dumped section ends in a line of raw bytes (the section's terminator, which is
+    # not part of the header text) that clang rejects, so it is stripped below. sed edits
+    # the file in place, which keeps this to one extra command and no temporary file.
+    find_program(HIPRTC_SED_EXE NAMES sed)
+
+    if(NOT HIPRTC_BUILTINS_LIBRARY OR NOT HIPRTC_OBJCOPY_EXE OR NOT HIPRTC_SED_EXE)
+        message(WARNING "libhiprtc-builtins.so, objcopy or sed not found; "
                         "the hipRTC runtime header will not be generated.")
         return()
     endif()
@@ -76,6 +81,8 @@ function(hiprtc_runtime_header out_var)
             COMMAND ${HIPRTC_OBJCOPY_EXE}
                     --dump-section .hipRTC_header=${_header}
                     ${HIPRTC_BUILTINS_LIBRARY} /dev/null
+            # Drop the trailing non-text line left behind by the section dump.
+            COMMAND ${HIPRTC_SED_EXE} -i "$d" ${_header}
             DEPENDS ${HIPRTC_BUILTINS_LIBRARY}
             COMMENT "Extracting hipRTC runtime header from ${HIPRTC_BUILTINS_LIBRARY}"
             VERBATIM)
