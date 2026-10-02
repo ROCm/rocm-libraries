@@ -678,3 +678,17 @@ result from splitting the single `LDSTrInst` parameter into per-tensor
 `LDSTrInstA`/`LDSTrInstB` fields that now feed the solution naming hash.
 These targets have no LDSTr hardware, so `err` codes and emitted assembly
 are unchanged; only the recorded hash text differs.
+
+## D46 — Refresh LDSTrInstA/LDSTrInstB results after rebasing onto develop
+
+**ADR:** [`adr/0030-refresh-ldstrinst-ab-results-after-develop-rebase.md`](adr/0030-refresh-ldstrinst-ab-results-after-develop-rebase.md)
+
+**Decision:** Re-record exactly the 82 failing saved-result nodes (54 files)
+surfaced by running the full characterization suite after rebasing this
+branch onto a newer `develop` tip and rebuilding `rocisa` in-tree: 45
+`_codegen` goldens whose basenames had a real merge conflict with develop's
+own independent regenerations, plus 3 previously-unaffected families
+(`LibraryIO`, `SolutionClass`, `ValidParameters`) that pin the full
+derived-parameter-state dict/roster and had not yet recorded the two new
+`LDSTrInstA`/`LDSTrInstB` keys. Only basenames and/or those two new dict
+entries changed; kernel counts and `err` codes are unchanged.

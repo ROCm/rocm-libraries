@@ -1408,6 +1408,8 @@
     'KernelLanguage',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrInstA',
+    'LDSTrInstB',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -1967,6 +1969,24 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'LDSTrInstA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'LDSTrInstB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LdsBlockSizePerPadA': dict({
