@@ -1,0 +1,72 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx950AttentionDense external integration test categories.
+#
+# Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Matches BSHD bundles
+# under integration-test-bundles/{quick,standard}/SdpaFwd/bshd/.
+# The harness skips any case the engine does not service.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+  - "*SdpaBackward*"
+
+test_categories:
+  quick:
+    description: "Quick gfx950 dense attention BSHD bundle coverage"
+    test_patterns:
+      - "quick_*Sdpa*bshd*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard gfx950 dense attention BSHD bundle coverage"
+    test_patterns:
+      - "quick_*Sdpa*bshd*"
+      - "standard_*Sdpa*bshd*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive gfx950 dense attention coverage"
+    test_patterns:
+      - "*Sdpa*bshd*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full gfx950 dense attention coverage"
+    test_patterns:
+      - "*Sdpa*bshd*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: BSHD quick bundles"
+    test_patterns:
+      - "quick_*Sdpa*bshd*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

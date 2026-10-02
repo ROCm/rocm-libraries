@@ -734,9 +734,76 @@ def test_build_from_metadata_no_args_raises():
 def test_build_from_metadata_streamk_batched_grid():
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]),
-        {"MatrixInstruction": [16, 16, 16, 1], "StreamK": 2, "ProblemType": {"Batched": True}},
+        {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
+         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": True}},
     )
     assert ck["grid"][0] == "StreamKWithBatch"
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("num_workgroups_arg", [False, True])
+def test_build_from_metadata_persistent_data_parallel_grid(batched, num_workgroups_arg):
+    args = [_D_ARG] + ([_NUMWG_ARG] if num_workgroups_arg else [])
+    ck = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml(args),
+        {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "DataParallel",
+         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": batched}},
+    )
+    assert ck["grid"] == ["PersistentGrid", "One", "One"]
+
+
+def test_prebuilt_custom_config_preserves_persistent_policy_and_layout(tmp_path):
+    write_kernel(tmp_path / "persistent.s", """
+        InternalSupportParams:
+          KernArgsVersion: 2
+          PersistentLoopArgsVersion: 0
+        TileProcessingStrategy: DataParallel
+        WorkAssignment: StaticGrid
+    """)
+    config = getCustomKernelConfig("persistent", {}, str(tmp_path))
+    assert config["TileProcessingStrategy"] == "DataParallel"
+    assert config["WorkAssignment"] == "StaticGrid"
+    assert config["InternalSupportParams"]["KernArgsVersion"] == 2
+    assert config["InternalSupportParams"]["PersistentLoopArgsVersion"] == 0
+    assert config["CustomKernel"]["name"] == "persistent"
+    assert config["CustomKernel"]["grid"] == ["PersistentGrid", "One", "One"]
+
+
+@pytest.mark.parametrize("old,new,value", [
+    ("StreamKXCCMapping", "PersistentXCCMapping", 2),
+    ("StreamKWorkStealing", "WorkQueueStealing", 1),
+])
+def test_custom_shared_controls_survive_until_policy_inheritance(tmp_path, old, new, value):
+    for suffix, extra in (("old", ""), ("equal", f"{new}: {value}")):
+        name = f"shared_{suffix}"
+        write_kernel(tmp_path / f"{name}.s", f"""
+            InternalSupportParams:
+              KernArgsVersion: 2
+            {old}: {value}
+            {extra}
+        """)
+        config = getCustomKernelConfig(name, {}, str(tmp_path))
+        assert config[new] == value
+        assert old not in config
+        assert "TileProcessingStrategy" not in config
+    write_kernel(tmp_path / "conflict.s", f"""
+        InternalSupportParams:
+          KernArgsVersion: 2
+        {old}: {value}
+        {new}: 0
+    """)
+    with pytest.raises(ValueError, match=f"Conflicting {old} and {new}"):
+        getCustomKernelConfig("conflict", {}, str(tmp_path))
+
+
+def test_custom_config_rejects_unknown_persistent_argument_layout(tmp_path):
+    write_kernel(tmp_path / "unknown_layout.s", """
+        InternalSupportParams:
+          KernArgsVersion: 3
+          PersistentLoopArgsVersion: 9
+    """)
+    with pytest.raises(ValueError, match="Unsupported PersistentLoopArgsVersion"):
+        getCustomKernelConfig("unknown_layout", {}, str(tmp_path))
 
 
 def test_build_from_metadata_numworkgroups_grid():

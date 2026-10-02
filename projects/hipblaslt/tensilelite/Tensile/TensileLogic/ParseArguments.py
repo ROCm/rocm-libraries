@@ -25,7 +25,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-from Tensile.Toolchain.Validators import ToolchainDefaults
+from ..Toolchain.Validators import ToolchainDefaults
 
 BUNDLED_KNOWN_BUGS = object()
 
@@ -73,18 +73,6 @@ def parseArguments():
         default="all",
         help="semicolon-separated list of gfx architectures to validate "
         "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
-    )
-    argParser.add_argument(
-        "--require-gfx1250v0-overlay",
-        dest="RequireGfx1250v0Overlay",
-        action="store_true",
-        help="with --check-all, fail if the gfx1250v0 overlay directory is "
-        "missing. Opt-in for the caller that actually owns the gfx1250/"
-        "gfx1250v0 split (hipBLASLt's dedicated gfx1250v0 device-library "
-        "build); not implied by --architecture=gfx1250v0 alone, since a "
-        "shared invocation can request that architecture against a corpus "
-        "that never did a v0/v1 split for gfx1250 in the first place (e.g. "
-        "hipSPARSELt's)",
     )
 
     group = argParser.add_mutually_exclusive_group()

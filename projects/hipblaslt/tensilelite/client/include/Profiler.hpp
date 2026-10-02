@@ -3,9 +3,8 @@
 
 #pragma once
 
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
+#include "ClientConfig.hpp"
+
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 
 #include <rocprofiler-sdk/rocprofiler.h>
