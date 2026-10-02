@@ -93,9 +93,11 @@ entry is reported as a catalog gap.
 | `dtype` | `HALF` maps to `fp16`; `BFLOAT16` maps to `bf16`. |
 | `layout` | Dense channels-last. |
 | `groups` | X dimension 1 divided by W dimension 1; must divide both C and K; at most 65535; must be 1 for a pointwise 1x1/stride-1/unpadded problem (grouped pointwise is declined). |
-| `tile_m`, `tile_n`, `tile_k` | Compiled KMD fields; only `tile_k` is an exposed engine knob. |
+| `tile_m`, `tile_n`, `tile_k` | Compiled KMD fields; `tile_k` is an exposed engine knob (as is `kernel_family`, below). Direct kernels carry `tile_k=0`, so on a graph the direct family serves the knob also advertises 0, which forces the direct family (a known quirk; prefer `kernel_family`). |
 | `warp_m`, `warp_n`, `warp_tile_m`, `warp_tile_n`, `warp_tile_k`, `wave_size` | Resolved compile-time tuning, checked by the builder and native geometry. |
 | `pipeline`, `epilogue` | Dispatcher-resolved and carried in metadata. The catalog ships `mem`; the native matcher also admits `compv3`, `compv4` and `basic`, which share its launch. The `default` epilogue is admitted only when `K/groups` is odd, `cshuffle` always. |
+| `kernel_family` | `0` implicit GEMM (KMD default), `1` direct depthwise; also an integer engine knob. Any other value is refused. |
+| `direct_variant`, `block_w`, `block_waves` | `none`, 0, 0 (KMD defaults) for implicit GEMM; for direct kernels see section 6. |
 
 Physical layouts (strides in elements):
 
@@ -110,3 +112,42 @@ and writes output channels `[g*K/G, (g+1)*K/G)`.
 
 A unit-extent axis does not participate in address arithmetic, so its declared
 stride need not equal the canonical value. All nondegenerate axes must match.
+
+## 6. Direct depthwise family
+
+Kernels with `kernel_family=1` are rocKE's direct depthwise kernels from
+`kernels/common/conv_direct_grouped.py`. Their implicit-GEMM fields hold
+placeholders that the matcher requires exactly: `tile_m`, `tile_n`, `tile_k`,
+`warp_m`, `warp_n` and the three `warp_tile_*` fields are 0, `wave_size` is 64,
+and `pipeline` and `epilogue` are `none`. An implicit-GEMM kernel must carry
+`direct_variant=none` and `block_w=block_waves=0`. Both the Python adapter and
+the native matcher enforce these rules and the guard below.
+
+| `direct_variant` | rocKE spec | `block_w` | `block_waves` | Channels |
+|---|---|---|---|---|
+| `std` | `DirectDepthwiseSpec` | Output columns per workgroup, positive | 1 to 16 | Any |
+| `spatial` | `DirectDepthwiseSpatialSpec` | 0; the kernel uses `block_waves * (64 / groups)` | 1 to 16 | Fewer than 64 |
+
+A graph is served by the direct family only when all of these hold; otherwise
+only implicit-GEMM kernels match it:
+
+- pure depthwise: `groups == C == K` (W dimension 1 is 1 and there is no
+  channel multiplier);
+- `stride[0] == stride[1]`, `pre_padding[0] == pre_padding[1]` (padding is
+  already symmetric), and dilation 1 on both axes;
+- row and column coverage: `floor((Hi - 1) / stride) == Ho - 1`, and the same
+  for `Wi` and `Wo`. rocKE's direct kernels emit output row `p / stride` as
+  they stream input row `p` (for `p` divisible by the stride), so other
+  paddings leave output rows unproduced or, on the runtime row loop, write past
+  the last output row into the next image;
+- grid axes at most 65535, including grid z, which is N.
+
+Launch geometry, block `(64 * block_waves, 1, 1)`, no LDS and no workspace:
+
+| Variant | Grid |
+|---|---|
+| `std` | `(ceil(Wo / block_w), ceil(groups / (64 * block_waves)), N)` |
+| `spatial` | `(ceil(Wo / (block_waves * (64 / groups))), 1, N)` |
+
+The tensor storage, argument list and byte counts are the same as for implicit
+GEMM (section 5).

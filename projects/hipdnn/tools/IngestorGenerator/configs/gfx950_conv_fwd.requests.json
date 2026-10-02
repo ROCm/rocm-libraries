@@ -484,6 +484,18 @@
       64,
       128
     ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
     "_provenance": {
       "graph": "verification/depthwise_c32_3x3/fp16",
       "sources": [
@@ -516,6 +528,18 @@
     "_catalog_tile_k": [
       64,
       128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
     ],
     "_provenance": {
       "graph": "verification/depthwise_c32_3x3/bf16",
@@ -550,6 +574,18 @@
       64,
       128
     ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
     "_provenance": {
       "graph": "verification/depthwise_c32_3x3_s2/fp16",
       "sources": [
@@ -582,6 +618,18 @@
     "_catalog_tile_k": [
       64,
       128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
     ],
     "_provenance": {
       "graph": "verification/depthwise_c32_3x3_s2/bf16",
@@ -616,6 +664,18 @@
       64,
       128
     ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
     "_provenance": {
       "graph": "verification/depthwise_c5_7x7/fp16",
       "sources": [
@@ -648,6 +708,18 @@
     "_catalog_tile_k": [
       64,
       128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
     ],
     "_provenance": {
       "graph": "verification/depthwise_c5_7x7/bf16",
@@ -787,6 +859,780 @@
         {
           "source": "verification_matrix",
           "case": "grouped_g2_5x5_dil2"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 14,
+    "Wi": 14,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 3,
+        "block_waves": 2
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 14,
+    "Wi": 14,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 3,
+        "block_waves": 2
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 17,
+    "Wi": 17,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3_s2_odd/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3_s2_odd"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 17,
+    "Wi": 17,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3_s2_odd/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3_s2_odd"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 16,
+    "Wi": 18,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3_s2_even/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3_s2_even"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 96,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 16,
+    "Wi": 18,
+    "C": 96,
+    "K": 96,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c96_3x3_s2_even/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c96_3x3_s2_even"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 64,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 70,
+    "Wi": 40,
+    "C": 64,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 32,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c64_3x3_hloop/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c64_3x3_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 64,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 70,
+    "Wi": 40,
+    "C": 64,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 32,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c64_3x3_hloop/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c64_3x3_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 64,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 70,
+    "Wi": 40,
+    "C": 64,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 32,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c64_3x3_s2_hloop/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c64_3x3_s2_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 64,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 70,
+    "Wi": 40,
+    "C": 64,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "std",
+        "block_w": 4,
+        "block_waves": 1
+      },
+      {
+        "direct_variant": "std",
+        "block_w": 32,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c64_3x3_s2_hloop/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c64_3x3_s2_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 5,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 8,
+    "pad_w": 8,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 56,
+    "Wi": 24,
+    "C": 5,
+    "K": 5,
+    "Y": 17,
+    "X": 17,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c5_17x17_hloop/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c5_17x17_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 5,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 8,
+    "pad_w": 8,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 56,
+    "Wi": 24,
+    "C": 5,
+    "K": 5,
+    "Y": 17,
+    "X": 17,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_catalog_direct": [
+      {
+        "direct_variant": "spatial",
+        "block_w": 0,
+        "block_waves": 1
+      }
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c5_17x17_hloop/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c5_17x17_hloop"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 12,
+    "Wi": 12,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_pad0/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_pad0"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 12,
+    "Wi": 12,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_pad0/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_pad0"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 12,
+    "Wi": 12,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_pad2/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_pad2"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 12,
+    "Wi": 12,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_pad2/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_pad2"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 2,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 13,
+    "Wi": 13,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_s2x1/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_s2x1"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 2,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 13,
+    "Wi": 13,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_s2x1/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_s2x1"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 2,
+    "dilation_w": 2,
+    "N": 2,
+    "Hi": 13,
+    "Wi": 13,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_dil2/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_dil2"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 24,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 2,
+    "dilation_w": 2,
+    "N": 2,
+    "Hi": 13,
+    "Wi": 13,
+    "C": 24,
+    "K": 24,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/depthwise_c24_3x3_dil2/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "depthwise_c24_3x3_dil2"
         }
       ]
     }

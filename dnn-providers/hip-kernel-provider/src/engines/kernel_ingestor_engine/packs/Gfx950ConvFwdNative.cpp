@@ -230,11 +230,103 @@ bool metadataEquals(const KernelDefinition& kernel, const char* field, const T& 
     return value != nullptr && *value == expected;
 }
 
-bool kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
+std::optional<int64_t> intMetadata(const KernelDefinition& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    const auto* value = it == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&it->second);
+    return value == nullptr ? std::nullopt : std::optional<int64_t>(*value);
+}
+
+const std::string* stringMetadata(const KernelDefinition& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    return it == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&it->second);
+}
+
+/// The implicit-GEMM tuning fields; a direct kernel holds 0 in each.
+constexpr std::array<const char*, 8> GEMM_TUNING_FIELDS{
+    "tile_m", "tile_n", "tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"};
+
+std::optional<conv::LaunchGeometry> implicitGemmLaunch(const MatchedProblem& matched,
+                                                       const KernelDefinition& kernel)
+{
+    // The tuning values are whatever the build validated for this exact geometry: rocKE's
+    // is_valid_spec_for_problem ran on every variant before it was compiled, and the
+    // geometry fields above pin each kernel to one problem. What stays reviewed here is the
+    // launch contract. These pipelines all launch warp_m * warp_n * 64 threads over an
+    // (N-tiles, M-tiles, groups) grid with static LDS; "wavelet" appends load waves and is
+    // not accepted. rocKE derives vec_c from the per-group K (default_vector_sizes(cpg,
+    // kpg)) and picks vec_c > 1 when it is even; the default epilogue then needs scalar
+    // stores, so an even K / groups takes cshuffle only.
+    const auto& p = matched.problem;
+    const auto* pipelineName = stringMetadata(kernel, "pipeline");
+    if(pipelineName == nullptr
+       || (*pipelineName != "mem" && *pipelineName != "compv3" && *pipelineName != "compv4"
+           && *pipelineName != "basic"))
+    {
+        return std::nullopt;
+    }
+    if(!metadataEquals(kernel, "epilogue", std::string("cshuffle"))
+       && !((p.k / p.groups) % 2 != 0
+            && metadataEquals(kernel, "epilogue", std::string("default"))))
+    {
+        return std::nullopt;
+    }
+
+    std::array<int64_t, GEMM_TUNING_FIELDS.size()> tuning{};
+    for(size_t i = 0; i < GEMM_TUNING_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, GEMM_TUNING_FIELDS[i]);
+        if(!value || *value <= 0)
+        {
+            return std::nullopt;
+        }
+        tuning[i] = *value;
+    }
+    return conv::launchGeometry(
+        p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64);
+}
+
+/// Mirrors _direct_error in rocke/library/builders/common/convolution_forward.py. Two
+/// rocKE direct-kernel wrong-answer paths are guarded here, not fixed: see
+/// conv::directRowsCovered. Everything the guard declines stays on implicit GEMM.
+std::optional<conv::LaunchGeometry> directLaunch(const MatchedProblem& matched,
+                                                 const KernelDefinition& kernel,
+                                                 conv::DirectVariant variant,
+                                                 int64_t blockW,
+                                                 int64_t blockWaves)
+{
+    const auto& p = matched.problem;
+    if(!conv::directProblemSupported(p))
+    {
+        return std::nullopt;
+    }
+    // The implicit-GEMM fields a direct kernel does not read hold exact placeholders, so
+    // a forced tile_k of 64 or 128 never selects one and no descriptor is ambiguous.
+    for(const auto* field : GEMM_TUNING_FIELDS)
+    {
+        if(!metadataEquals(kernel, field, int64_t{0}))
+        {
+            return std::nullopt;
+        }
+    }
+    if(!metadataEquals(kernel, "pipeline", std::string("none"))
+       || !metadataEquals(kernel, "epilogue", std::string("none")))
+    {
+        return std::nullopt;
+    }
+    return conv::directLaunchGeometry(
+        p, matched.geometry, variant, blockW, blockWaves, conv::DIRECT_WAVE_SIZE);
+}
+
+/// The launch geometry when @p kernel is packaged code compiled for exactly this
+/// problem under a launch contract this pack reviewed; std::nullopt otherwise.
+std::optional<conv::LaunchGeometry> kernelFits(const MatchedProblem& matched,
+                                               const KernelDefinition& kernel)
 {
     if(kernel.source.kind != KernelSourceKind::KPACK)
     {
-        return false;
+        return std::nullopt;
     }
     const auto& p = matched.problem;
     const std::array<std::pair<const char*, int64_t>, 13> fields{{{"N", p.n},
@@ -254,7 +346,7 @@ bool kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
     {
         if(!metadataEquals(kernel, field.first, field.second))
         {
-            return false;
+            return std::nullopt;
         }
     }
     const std::string dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
@@ -263,55 +355,34 @@ bool kernelFits(const MatchedProblem& matched, const KernelDefinition& kernel)
        || !metadataEquals(kernel, "groups", p.groups)
        || !metadataEquals(kernel, "wave_size", int64_t{64}))
     {
-        return false;
+        return std::nullopt;
     }
 
-    // The tuning values are whatever the build validated for this exact geometry: rocKE's
-    // is_valid_spec_for_problem ran on every variant before it was compiled, and the
-    // geometry fields above pin each kernel to one problem. What stays reviewed here is the
-    // launch contract. These pipelines all launch warp_m * warp_n * 64 threads over an
-    // (N-tiles, M-tiles, groups) grid with static LDS; "wavelet" appends load waves and is
-    // not accepted. rocKE derives vec_c from the per-group K (default_vector_sizes(cpg,
-    // kpg)) and picks vec_c > 1 when it is even; the default epilogue then needs scalar
-    // stores, so an even K / groups takes cshuffle only.
-    const auto pipeline = kernel.metadata.find("pipeline");
-    const auto* pipelineName
-        = pipeline == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&pipeline->second);
-    if(pipelineName == nullptr
-       || (*pipelineName != "mem" && *pipelineName != "compv3" && *pipelineName != "compv4"
-           && *pipelineName != "basic"))
+    // Both value sets are closed: an unknown family or variant is a kernel this build
+    // cannot launch, never one to guess at. The descriptor loader completes omitted
+    // fields with their KMD defaults, so a missing field is malformed metadata.
+    const auto familyValue = intMetadata(kernel, "kernel_family");
+    const auto family = familyValue ? conv::parseKernelFamily(*familyValue) : std::nullopt;
+    const auto* variantName = stringMetadata(kernel, "direct_variant");
+    const auto variant
+        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
+    const auto blockW = intMetadata(kernel, "block_w");
+    const auto blockWaves = intMetadata(kernel, "block_waves");
+    if(!family || !variant || !blockW || !blockWaves)
     {
-        return false;
+        return std::nullopt;
     }
-    if(!metadataEquals(kernel, "epilogue", std::string("cshuffle"))
-       && !((p.k / p.groups) % 2 != 0
-            && metadataEquals(kernel, "epilogue", std::string("default"))))
+    if(*family == conv::KernelFamily::IMPLICIT_GEMM)
     {
-        return false;
-    }
-
-    std::array<int64_t, 8> tuning{};
-    const std::array<const char*, 8> tuningFields{"tile_m",
-                                                  "tile_n",
-                                                  "tile_k",
-                                                  "warp_m",
-                                                  "warp_n",
-                                                  "warp_tile_m",
-                                                  "warp_tile_n",
-                                                  "warp_tile_k"};
-    for(size_t i = 0; i < tuningFields.size(); ++i)
-    {
-        const auto it = kernel.metadata.find(tuningFields[i]);
-        const auto* value
-            = it == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&it->second);
-        if(value == nullptr || *value <= 0)
+        // The direct fields stay at their KMD defaults, so no descriptor carries a
+        // direct arm that this branch would silently launch as implicit GEMM.
+        if(*variant != conv::DirectVariant::NONE || *blockW != 0 || *blockWaves != 0)
         {
-            return false;
+            return std::nullopt;
         }
-        tuning[i] = *value;
+        return implicitGemmLaunch(matched, kernel);
     }
-    return conv::launchGeometry(p, matched.geometry, tuning[0], tuning[1], tuning[3], tuning[4], 64)
-        .has_value();
+    return directLaunch(matched, kernel, *variant, *blockW, *blockWaves);
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -319,7 +390,27 @@ bool kernelMatches(const MatchContext& context,
                    const KernelDefinition& kernel)
 {
     const auto matched = matchProblem(context);
-    return matched && kernelFits(*matched, kernel);
+    return matched && kernelFits(*matched, kernel).has_value();
+}
+
+/// Whether @p kernel is gfx950_conv_fwd_direct_spec_for_request's choice with no
+/// overrides: spatial with one wave below 64 groups, otherwise std block_w 4, one wave.
+bool isDefaultDirectArm(const KernelDefinition& kernel)
+{
+    const auto groups = intMetadata(kernel, "groups");
+    if(!groups)
+    {
+        return false;
+    }
+    if(*groups < conv::DIRECT_WAVE_SIZE)
+    {
+        return metadataEquals(kernel, "direct_variant", std::string("spatial"))
+               && metadataEquals(kernel, "block_w", int64_t{0})
+               && metadataEquals(kernel, "block_waves", conv::DEFAULT_DIRECT_BLOCK_WAVES);
+    }
+    return metadataEquals(kernel, "direct_variant", std::string("std"))
+           && metadataEquals(kernel, "block_w", conv::DEFAULT_DIRECT_BLOCK_W)
+           && metadataEquals(kernel, "block_waves", conv::DEFAULT_DIRECT_BLOCK_WAVES);
 }
 
 double score(const MatchContext& /*context*/,
@@ -327,8 +418,15 @@ double score(const MatchContext& /*context*/,
              const KernelDefinition& kernel)
 {
     // Deterministic fallback only. BenchmarkPlan replaces this order with measurements
-    // when benchmarking is enabled. The top score is the gfx950 dispatcher's own pick,
-    // so an unbenchmarked run serves what rocKE would; its tile_k=128 sibling is next.
+    // across both families when benchmarking is enabled. A direct depthwise kernel ranks
+    // first where one fits, its default arm highest. Next is the gfx950 dispatcher's own
+    // implicit-GEMM pick, so an unbenchmarked run without a direct kernel serves what
+    // rocKE would; its tile_k=128 sibling follows.
+    if(metadataEquals(
+           kernel, "kernel_family", static_cast<int64_t>(conv::KernelFamily::DIRECT_DEPTHWISE)))
+    {
+        return isDefaultDirectArm(kernel) ? 4.0 : 3.0;
+    }
     const bool dispatcherTile = metadataEquals(kernel, "tile_m", int64_t{64})
                                 && metadataEquals(kernel, "tile_n", int64_t{64})
                                 && metadataEquals(kernel, "warp_m", int64_t{2})
@@ -371,7 +469,8 @@ void requireOutput(const MatchContext& context, const MatchedProblem& matched)
 }
 
 /// The kernel ABI buildIngestorKernelCode verifies the loaded symbol against:
-/// build_implicit_gemm_conv emits (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32).
+/// build_implicit_gemm_conv emits (A*, B*, D*, A_bytes:i32, B_bytes:i32, D_bytes:i32), and
+/// build_direct_depthwise and build_direct_depthwise_spatial emit the same parameters.
 /// Names and offsets are unused for this comparison; see requireSignatureMatch.
 const std::vector<KernelArgument>& gfx950ConvFwdKernelSignature()
 {
@@ -427,7 +526,9 @@ public:
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
     {
-        return 0; // The kernel uses registers and statically allocated LDS only.
+        // Implicit GEMM uses registers and statically allocated LDS only; the direct
+        // depthwise kernels use no LDS at all.
+        return 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -435,7 +536,8 @@ public:
                                               const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(context);
-        if(!matched || !kernelFits(*matched, kernel))
+        const auto launch = matched ? kernelFits(*matched, kernel) : std::nullopt;
+        if(!launch)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -446,17 +548,11 @@ public:
         requireOutput(context, *matched);
 
         // This pack ships prebuilt code objects only; kernelFits already refused every
-        // other source kind.
+        // other source kind. Both families take the same ABI, so one signature serves.
         auto code
             = buildIngestorKernelCode(_loader, context, kernel, gfx950ConvFwdKernelSignature());
-        const auto launch = conv::launchGeometry(matched->problem,
-                                                 matched->geometry,
-                                                 kernel.getIntMetadata("tile_m"),
-                                                 kernel.getIntMetadata("tile_n"),
-                                                 kernel.getIntMetadata("warp_m"),
-                                                 kernel.getIntMetadata("warp_n"),
-                                                 kernel.getIntMetadata("wave_size"));
-        // kernelFits checked this exact geometry before loading the archive.
+        // kernelFits computed this family's launch for this exact geometry before loading
+        // the archive. Neither family uses dynamic LDS.
         code.setBlockSize(launch->blockX, 1, 1);
         code.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
         code.setSharedMemBytes(0);
@@ -502,8 +598,9 @@ public:
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "gfx950_conv_fwd requires nonoverlapping input, filter, and output storage");
         }
-        // build_implicit_gemm_conv, conv_implicit_gemm.py: A*, B*, D*, A_bytes:i32,
-        // B_bytes:i32, D_bytes:i32. These are storage byte sizes, not element counts.
+        // build_implicit_gemm_conv, conv_implicit_gemm.py, and both direct depthwise
+        // builders, conv_direct_grouped.py: A*, B*, D*, A_bytes:i32, B_bytes:i32,
+        // D_bytes:i32. These are storage byte sizes, not element counts.
         convPrepared.kernelForStream(handle.getStream())
             .launch(handle.getStream(), a.ptr, b.ptr, d.ptr, bytes[0], bytes[1], bytes[2]);
     }
