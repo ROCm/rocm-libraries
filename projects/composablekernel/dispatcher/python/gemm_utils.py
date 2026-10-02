@@ -2191,7 +2191,14 @@ def _build_compile_jobs(
     if not registry_bypass:
         link_cmd.append(str(static_lib))
     link_cmd += ["-o", str(lib_path)]
-    job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
+    job = {
+        "compile_cmd": compile_cmd,
+        "link_cmd": link_cmd,
+        "lib_path": str(lib_path),
+        # Fixed-width instantiations of large tiles can exceed 600 seconds.
+        # Keep the native and linker limits unchanged.
+        "compile_timeout": 1200 if any(config.vector_sizes) else 300,
+    }
     return job, lib_path
 
 

@@ -19,10 +19,15 @@ build the same tile with narrower fixed widths instead; these tests lock in:
 Run: python3 -m pytest tests/test_gemm_vector_sizes.py -v
 """
 
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
@@ -164,6 +169,99 @@ class TestResolution(unittest.TestCase):
     def test_rejects_warp_tile_k_not_multiple(self):
         _, reason = _resolve("rcr", (4, 8, 8), warp_tile=(32, 32, 2))
         self.assertIsNotNone(reason)
+
+
+class TestFixedWidthLdsCapacity(unittest.TestCase):
+    def test_gfx950_reported_tiles(self):
+        # The reported cutoff is the 160 KiB gfx950 capacity, not a tile-size
+        # blacklist. Different fixed widths/layouts must make the same decision.
+        for tile, kib in [
+            ((128, 128, 128), 64), ((128, 256, 128), 96),
+            ((256, 128, 128), 96), ((128, 128, 256), 128),
+            ((128, 256, 256), 192), ((256, 128, 256), 192),
+            ((256, 256, 256), 256),
+        ]:
+            for layout in ("rcr", "rrr", "crr", "ccr"):
+                for vec in ((1, 2, 8), (4, 4, 8), (8, 8, 1)):
+                    with self.subTest(tile=tile, layout=layout, vec=vec):
+                        _, reason = _resolve(layout, vec, tile=tile)
+                        if kib <= 160:
+                            self.assertIsNone(reason)
+                        else:
+                            self.assertIsNotNone(reason)
+                            self.assertIn(f"LDS staging needs {kib * 1024} bytes", reason)
+                            self.assertIn("gfx950/compv3 limit 163840 bytes", reason)
+
+    def test_capacity_depends_on_arch_pipeline_and_dtype(self):
+        for arch, pipeline, tile, dtype, accepted in [
+            ("gfx942", "compv3", (128, 128, 128), "bf16", True),
+            ("gfx942", "compv3", (128, 256, 128), "bf16", False),
+            ("gfx950:xnack-", "compv3", (64, 256, 256), "bf16", True),
+            ("gfx950", "compv4", (64, 256, 128), "bf16", True),
+            ("gfx950", "compv4", (128, 256, 128), "bf16", False),
+            ("gfx950", "mem", (128, 128, 256), "fp32", False),
+            ("gfx950", "mem", (128, 256, 256), "fp8", True),
+            ("gfx1250", "compv3", (256, 256, 256), "bf16", True),
+        ]:
+            with self.subTest(arch=arch, pipeline=pipeline, tile=tile, dtype=dtype):
+                _, reason = _resolve(
+                    "rcr", (1, 1, 1), gfx_arch=arch, pipeline=pipeline,
+                    tile=tile, dtype_a=dtype, dtype_b=dtype,
+                )
+                if accepted:
+                    self.assertIsNone(reason)
+                else:
+                    self.assertIsNotNone(reason)
+                    self.assertIn("LDS staging", reason)
+
+    def test_native_requests_keep_existing_validation(self):
+        for vec in ((0, 0, 0), (8, 8, 8)):
+            self.assertEqual(_resolve("rcr", vec, tile=(256, 256, 256)), ((0, 0, 0), None))
+
+    def test_sweep_counts_capacity_rejects_before_build(self):
+        from gemm_utils import expand_sweep
+
+        config = _bridge_config()[0].to_codegen_json()
+        config["tile_config"]["tile_m"] = [128, 256]
+        config["tile_config"]["tile_n"] = [128, 256]
+        config["tile_config"]["tile_k"] = [256]
+        # expand_sweep reads the op's range/value-list format.
+        for section in ("tile_config", "trait_config"):
+            config[section] = {key: {"values": value} for key, value in config[section].items()}
+        vfb = VectorFallback([{"M": 256, "N": 256, "K": 257}], "rcr", "bf16", "standard")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "large_tiles.json"
+            path.write_text(json.dumps(config))
+            configs = expand_sweep(str(path), "gfx950", dtype="bf16", **vfb.expand_kwargs)
+        fixed = [c for c in configs if any(c.vector_sizes)]
+        self.assertEqual([(c.tile_m, c.tile_n, c.tile_k) for c in fixed], [(128, 128, 256)])
+        self.assertEqual(sum(vfb.rejects.values()), 3)
+        self.assertTrue(all("LDS staging" in r for r in vfb.rejects))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            vfb.report_rejects()
+            vfb.report_builds(configs, [Path("built.so")] * len(configs))
+        self.assertIn("4 fixed-width kernels requested, 3 rejected before compile, "
+                      "0 failed to compile, 1 built", output.getvalue())
+
+
+class TestCompileTimeout(unittest.TestCase):
+    def test_fixed_compile_budget_reaches_worker_without_changing_link_budget(self):
+        import ctypes_utils
+        import gemm_utils
+
+        for vec, expected_timeout in [((0, 0, 0), 300), ((1, 1, 8), 1200)]:
+            with self.subTest(vec=vec), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                cfg, reason = _bridge_config(vec)
+                self.assertIsNone(reason)
+                with mock.patch.object(ctypes_utils, "get_build_dir", return_value=root), \
+                     mock.patch.object(gemm_utils, "_tile_engine_codegen_flags", return_value=[]):
+                    job, _ = gemm_utils._build_compile_jobs(cfg, root / "kernel.hpp")
+                with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run:
+                    self.assertTrue(ctypes_utils._run_hipcc_subprocess(job)[0])
+                self.assertEqual([c.kwargs["timeout"] for c in run.call_args_list],
+                                 [expected_timeout, 300])
 
 
 class TestNamingAgreement(unittest.TestCase):

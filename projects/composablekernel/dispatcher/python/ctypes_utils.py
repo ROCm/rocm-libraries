@@ -1072,7 +1072,12 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
 
     try:
         lib_path.parent.mkdir(parents=True, exist_ok=True)
-        res_c = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=300)
+        res_c = subprocess.run(
+            compile_cmd,
+            capture_output=True,
+            text=True,
+            timeout=args.get("compile_timeout", 300),
+        )
         if res_c.returncode != 0:
             return False, None, f"Compile failed: {res_c.stderr}"
 

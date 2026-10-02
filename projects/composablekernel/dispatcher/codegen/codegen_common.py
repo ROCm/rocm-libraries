@@ -869,7 +869,7 @@ def resolve_gemm_vector_sizes(
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
         dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch
     )
-    tile_m, tile_n, _ = tile
+    tile_m, tile_n, tile_k = tile
     warp_tile_m, warp_tile_n, warp_tile_k = warp_tile
     eff = tuple(min(r, nv) if r else nv for r, nv in zip(requested, native))
     if eff == native:
@@ -905,6 +905,27 @@ def resolve_gemm_vector_sizes(
         shuffles = per_thread // eff[2]
         if per_thread % eff[2] or (tile_m if c_row else tile_n) % shuffles:
             return eff, f"CShuffle cannot split {per_thread} elements/thread by vector_size_c={eff[2]}"
+
+    # The sweep's ctypes validator checks warp/trait legality, not LDS capacity.
+    # Reject over-budget fixed widths here so they are counted before codegen
+    # rather than reported as failed builds when codegen emits no header.
+    # gfx9's packed/XOR descriptors still hold M*K and N*K elements after
+    # narrowing; GetSmemSizeA/B round each operand up to 16 bytes. This is a
+    # lower bound for architectures whose descriptors add bank padding.
+    from arch_specs_generated import get_lds_limit
+
+    staging_bytes = sum(
+        (mn * tile_k * elem + 15) // 16 * 16
+        for mn, elem in ((tile_m, ea), (tile_n, eb))
+    )
+    # CompV4's budget already accounts for its two staging buffers.
+    arch = normalize_gfx_arch(gfx_arch)
+    limit = get_lds_limit(arch, pipeline)
+    if staging_bytes > limit:
+        return eff, (
+            f"fixed-width LDS staging needs {staging_bytes} bytes > "
+            f"{arch}/{pipeline} limit {limit} bytes"
+        )
     return eff, None
 
 
