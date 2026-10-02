@@ -188,32 +188,21 @@ function(add_instance_library INSTANCE_NAME)
             if(source_name MATCHES "gemm_wmma_universal" AND source_name MATCHES "f8")
                 list(FILTER INST_TARGETS INCLUDE REGEX "gfx12")
             endif()
-            # gfx1250-exclusive instances must never be offloaded to another architecture.
-            # Their LDS footprint (up to 197104 B) is legal only on the 320 KB LDS of
-            # gfx1250; emitting them for a 64 KB target is a hard ld.lld failure.
+            set(offload_targets)
+            # gfx1250-exclusive instances must never be offloaded to another architecture: their
+            # LDS footprint (up to 197104 B) is legal only on the 320 KB LDS of gfx1250, and
+            # emitting them for a 64 KB target is a hard ld.lld failure.
+            # hip::device has already put an --offload-arch on the command line for every
+            # GPU_TARGETS entry (or auto-detected / cached arch), and --offload-arch is additive,
+            # so restricting INST_TARGETS alone cannot narrow the set. Clear it first.
+            # Only these sources are restricted this way; every other source keeps the arch set
+            # it has always had.
             if(source_name MATCHES "_gfx1250")
                 list(FILTER INST_TARGETS INCLUDE REGEX "gfx1250")
+                string(APPEND offload_targets "--no-offload-arch=all ")
             endif()
-            # A TU whose target list is empty must not be compiled at all; emitting no
-            # --offload-arch would silently fall back to the compiler's default arch.
-            if(NOT INST_TARGETS)
-                message(DEBUG "skipping ${source}: no supported targets remain")
-                continue()
-            endif()
-            set(offload_targets)
             foreach(target IN LISTS INST_TARGETS)
                 string(APPEND offload_targets "--offload-arch=${target} ")
-            endforeach()
-            # When the caller sets GPU_TARGETS (rather than GPU_ARCHS), CMakeLists.txt:361-365
-            # does not unset it before find_package(hip), so hip::device injects
-            # --offload-arch for EVERY target globally. Per-source flags are appended after
-            # those and can only widen the set, never narrow it -- which silently defeats the
-            # filtering above for every consumer that uses GPU_TARGETS, MIOpen included.
-            # Subtract the unwanted architectures explicitly so the filtering actually binds.
-            set(EXCLUDED_TARGETS ${SUPPORTED_GPU_TARGETS})
-            list(REMOVE_ITEM EXCLUDED_TARGETS ${INST_TARGETS})
-            foreach(target IN LISTS EXCLUDED_TARGETS)
-                string(APPEND offload_targets "--no-offload-arch=${target} ")
             endforeach()
             set_source_files_properties(${source} PROPERTIES COMPILE_FLAGS "${offload_targets}")
             list(APPEND INST_OBJ ${source})
