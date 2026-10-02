@@ -642,6 +642,14 @@ def test_kernel_names_identical_across_steppings(
 MULTICAST_MARKERS = ("MulticastMask", "multicast mask")
 
 
+def _stableLabels(src):
+    # StinkyTofu suffixes labels with a random 16-char [0-9a-zA-Z] hash, which
+    # canonicalize_asm only renames when it happens to be all [A-Z0-9]. Run this
+    # first, on the raw source, so every hash takes the same path in both emits.
+    ids = {}
+    return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
+
+
 def _emit(archName, stinkyArchName=""):
     from Tensile.Common.GlobalParameters import globalParameters
     from Tensile.Common.Types import DebugConfig
@@ -691,7 +699,7 @@ def _emit(archName, stinkyArchName=""):
         ri = _init_rocisa_for(kernel)
         _prepare_kernel(kernel, False)
         res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-        return canonicalize_asm(res.src), res.err, kwa.states.archCaps
+        return canonicalize_asm(_stableLabels(res.src)), res.err, kwa.states.archCaps
 
 
 def test_gfx1250_emits_multicast_gfx1250_strict_does_not(gfx1250_cxx):
@@ -3718,13 +3726,7 @@ def test_gfx1250v0_emits_what_gfx1250_strict_emits(gfx1250_cxx):
     assert strictErr == 0 and v0Err == 0
     assert v0Caps[CAP_MULTICAST] is False
     assert not any(m in v0Src for m in MULTICAST_MARKERS)
-
-    def _stableLabels(src):
-        # canonicalize_asm misses the mixed-case suffixes some labels carry.
-        ids = {}
-        return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
-
-    assert _stableLabels(v0Src) == _stableLabels(strictSrc)
+    assert v0Src == strictSrc
 
 
 def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
