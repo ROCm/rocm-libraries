@@ -168,6 +168,19 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
     EXPECT_TRUE(validator.mayUseSynchronizer());
 }
 
+// AdaptiveGemmGSUA kernels switch to MBSK whenever the pointer is non-null,
+// which the grouped user-args launch always passes, even for a static MB mode.
+TEST(SynchronizerValidatorReporting, AdaptiveGsuaSolutionIsChecked)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, TileProcessingStrategy::None, 2);
+    solution.sizeMapping.adaptiveGemmGSUA = 1;
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.mayUseSynchronizer());
+}
+
 // Unknown solution means unknown answer; scan rather than skip.
 TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
 {

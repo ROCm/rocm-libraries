@@ -67,6 +67,9 @@ namespace TensileLite
             // when the resolved accumulation is MBSK; getAccumulation() returns
             // either the static globalAccumulation or MultipleBuffer, so the
             // MBSK check covers it.
+            // AdaptiveGemmGSUA kernels pick MBSK at run time by checking the
+            // pointer for null, and the grouped user-args launch always passes
+            // it, so they are scanned regardless of the static mode.
             // Generated kernels never take the custom-arg dispatch, so their
             // declared args are not consulted.
             // Parallel Stream-K reduction passes Flags=nullptr, but excluding it
@@ -85,7 +88,7 @@ namespace TensileLite
             bool const  partialReduction = sm.requiresPartialReduction();
             bool const  customStreamK    = ck.workspaceType == CustomWorkspaceType::StreamK
                                         || ck.workspaceType == CustomWorkspaceType::StreamKWithReduction;
-            bool const  mbsk             = sm.globalAccumulation == 3;
+            bool const  mbsk             = sm.globalAccumulation == 3 || sm.adaptiveGemmGSUA == 1;
             bool const  handwritten      = !ck.name.empty() && !ck.generated;
             bool const  customArg
                 = handwritten
