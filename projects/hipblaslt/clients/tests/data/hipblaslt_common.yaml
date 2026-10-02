@@ -468,10 +468,10 @@ Real precisions 1 bytes: &real_precisions_mx
     { a_type: f4_r, b_type: f6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   - &mxf4_mxbf6_precision_dst_fp32
     { a_type: f4_r, b_type: bf6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  # HostPreSwizzle (1001): legacy *real_precisions_mx suites (odd M/N, K=128)
-  # are not in the shipping NoSwizzle F4 tile set; dedicated
-  # matmul_subtile_fp4_noswizzle_* cases cover scaleA:3 separately.
+  # Pure f4×f4: exercise both NoSwizzle (3) and HostPreSwizzle (1001).
   - &mxf4_mxf4_precision_dst_fp32
+    { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  - &mxf4_mxf4_precision_dst_fp32_hps
     { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
   - &mxf8_mxfp8_precision_dst_fp16
     { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
@@ -522,6 +522,8 @@ Real precisions 1 bytes: &real_precisions_mx
   - &mxf4_mxbf6_precision_dst_fp16
     { a_type: f4_r, b_type: bf6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   - &mxf4_mxf4_precision_dst_fp16
+    { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  - &mxf4_mxf4_precision_dst_fp16_hps
     { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
   - &mxf8_mxfp8_precision_dst_bfp16
     { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
@@ -572,6 +574,8 @@ Real precisions 1 bytes: &real_precisions_mx
   - &mxf4_mxbf6_precision_dst_bfp16
     { a_type: f4_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   - &mxf4_mxf4_precision_dst_bfp16
+    { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  - &mxf4_mxf4_precision_dst_bfp16_hps
     { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
 
 # rocRoller predicate

@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 #
 # gfx950 subtile MX FP4 with MXScaleFormat=NoSwizzle (VEC32 / scaleA=3).
-# Companion to subtile_mxfp4.yaml (HostPreSwizzle). Intentionally a focused
-# overnight suite for NoSwizzle gather emit — not full HostPreSwizzle parity.
+# Companion to subtile_mxfp4.yaml (HostPreSwizzle).
 #
-# Coverage beyond the original smoke (StreamK=0, F4→bf16, K=DepthU only):
+# Coverage:
 #   - StreamK=0 and StreamK=3
-#   - K > DepthU (MultiDU / deep K)
+#   - K < DepthU (partial / tail-only; shipping tiles are DepthU=256)
+#   - K = DepthU and K > DepthU (MultiDU / deep K)
 #   - Modest edge M/N (odd / non-aligned)
 #   - One F4HS (fp16 dest) path
 #   - One bias + relu (F4BS) epilogue path
@@ -79,6 +79,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          # K < DepthU (partial / StreamK tail-only; DepthU=256)
+          - Exact: [64,   64,  1, 128]
+          - Exact: [96,   96,  1, 128]
+          - Exact: [128, 128, 1, 128]
           # Full-tile / near-full (K = 1×DU)
           - Exact: [64,  64,  1, 256]
           - Exact: [128, 128, 1, 256]
@@ -130,6 +134,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
           - Exact: [63,   63, 1, 256]
@@ -176,6 +181,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
           - Exact: [128, 128, 1, 256]
           - Exact: [128, 128, 1, 512]
         - BiasTypeArgs: ['s']
