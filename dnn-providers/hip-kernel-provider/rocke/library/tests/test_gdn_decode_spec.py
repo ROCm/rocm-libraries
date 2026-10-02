@@ -327,7 +327,8 @@ class TestLaunchShape(unittest.TestCase):
 
 class TestEmission(unittest.TestCase):
     """Every admitted spec must lower AND compile to a code object without
-    spilling to scratch. No GPU needed."""
+    spilling to scratch, except the exemptions named in each test. No GPU
+    needed."""
 
     def test_default_spec_compiles(self):
         spec = GdnDecodeSpec()
@@ -345,10 +346,17 @@ class TestEmission(unittest.TestCase):
     def test_registered_gdn_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
+        # nw1_wtk1_bpv1 gives each lane the whole K reduction, so it needs 512
+        # VGPRs and spills (448 B with ROCm 7.1 on gfx950). It stays registered
+        # because it can be pinned and is the fallback when DEFAULT_TILE is
+        # illegal. Require only that it compiles.
+        spills = {"nw1_wtk1_bpv1"}
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch="gfx950"))
-        for result in (results[0], results[len(results) // 2], results[-1]):
+        for result in results:
             with self.subTest(spec_id=result.candidate.spec_id):
-                self.assertEqual(_compiled_scratch_bytes(self, result.spec), 0)
+                scratch = _compiled_scratch_bytes(self, result.spec)
+                if result.candidate.spec_id not in spills:
+                    self.assertEqual(scratch, 0)
 
     def test_every_kda_tuned_tile_compiles(self):
         from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
