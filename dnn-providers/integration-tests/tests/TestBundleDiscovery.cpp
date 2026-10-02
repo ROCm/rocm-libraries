@@ -404,6 +404,62 @@ TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkCycleAcrossSiblingsIsNotFollo
     EXPECT_EQ(suites, (std::vector<std::string>{"a_good", "a_to_b_fine", "b_fine", "b_to_a_good"}));
 }
 
+// A link out of the root to one of the root's own parents (think root/x -> $HOME)
+// leads back to the root. It must not be followed: the walk would cover the whole
+// parent tree first, here a bundle that sits beside the root, before it reached the
+// root again.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAParentOfTheRootIsNotFollowed)
+{
+    const auto root = _tempDir / "root";
+    createMinimalBundle(root / "conv" / "good", "good");
+    createMinimalBundle(_tempDir / "beside" / "other", "other");
+    try
+    {
+        std::filesystem::create_directory_symlink(root.parent_path(), root / "conv" / "up");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A directory the run may not list is skipped with a warning. Before, the walk threw
+// on it and discovery failed, losing every bundle in the root.
+TEST_F(TestBundleDiscoveryFixture, UnlistableDirectoryIsSkipped)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto locked = _tempDir / "locked";
+    createMinimalBundle(locked / "hidden", "hidden");
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    } restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
     // A .json directly at the data root uses the root folder name as suite.

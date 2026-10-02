@@ -101,17 +101,34 @@ inline std::filesystem::path canonicalDirectory(const std::filesystem::path& pat
     return error ? path.lexically_normal() : canonical;
 }
 
+// False when `directory` cannot be listed for lack of permission. The walk probes
+// before descending because the iterator cannot report such a directory and go on:
+// without skip_permission_denied the first one throws and ends discovery, and with it
+// the directory is dropped without a word.
+inline bool canListDirectory(const std::filesystem::path& directory)
+{
+    std::error_code error;
+    const std::filesystem::directory_iterator probe(directory, error);
+    return error != std::errc::permission_denied;
+}
+
 // Visits every entry at or under `root`, the one walk every discovery scan uses.
 // Directory symlinks are followed at any depth, so a bundle root assembled from
 // links (for example quick/SdpaFwd linked to an installed tree) is discovered like
 // the same tree copied. Entries keep their path through the link, which is what
 // test names are derived from.
 //
-// The walk keeps the canonical directory of every level it is currently inside. A
-// directory that resolves to one of them is a cycle (a link to its own ancestor, or
-// a/to_b -> b next to b/to_a -> a), so it is skipped rather than descended. Two
-// links to the same directory from different branches are not a cycle; both are
-// walked, as a copied tree would be.
+// The walk keeps the canonical directory of every level it is currently inside,
+// starting with the root. A directory that resolves to one of them, or to a parent
+// of one of them, would lead the walk back to where it already is, so it is a cycle
+// and is skipped with a warning rather than descended. That covers a link to its own
+// ancestor, a/to_b -> b next to b/to_a -> a, and a link out of the root to one of
+// the root's parents (say / or $HOME), which would otherwise walk that whole tree
+// before reaching the root again. Two links to the same directory from different
+// branches are not a cycle; both are walked, as a copied tree would be.
+//
+// A directory the walk may not list is skipped with a warning, so one unreadable
+// folder under a linked tree does not end discovery.
 template <typename Visit>
 void forEachBundleTreeEntry(const std::filesystem::path& root, Visit&& visit)
 {
@@ -127,10 +144,23 @@ void forEachBundleTreeEntry(const std::filesystem::path& root, Visit&& visit)
         if(it->is_directory())
         {
             auto directory = canonicalDirectory(it->path());
-            if(std::find(ancestry.begin(), ancestry.end(), directory) != ancestry.end())
+            const bool leadsBack
+                = std::any_of(ancestry.begin(), ancestry.end(), [&](const fs::path& level) {
+                      return isDescendantOf(level, directory);
+                  });
+            if(leadsBack)
             {
                 HIPDNN_PLUGIN_LOG_WARN(
-                    "Not following bundle directory that is already being walked (cycle): "
+                    "Not following bundle directory that contains one already being walked "
+                    "(cycle): "
+                    << it->path() << " -> " << directory);
+                it.disable_recursion_pending();
+                continue;
+            }
+            if(!canListDirectory(it->path()))
+            {
+                HIPDNN_PLUGIN_LOG_WARN(
+                    "Skipping bundle directory that cannot be listed (permission denied): "
                     << it->path());
                 it.disable_recursion_pending();
                 continue;

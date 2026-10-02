@@ -115,7 +115,9 @@ that holds only the pieces you want. They can be copies or directory symlinks in
 an existing tree, e.g. `quick/SdpaFwd -> <install>/lib/integration-test-bundles/quick/SdpaFwd`.
 Discovery follows directory links at any depth. Tests take their names from the
 path through the link, so a linked subtree gets the same test names as a copy. A
-link back to one of its own parent directories is skipped with a warning.
+link that would lead the walk back into a directory it is already inside (one of
+the link's own parents, including the parents of `--gd` itself) is skipped with a
+warning, and so is a directory the run is not allowed to list.
 
 ### When to use which
 
