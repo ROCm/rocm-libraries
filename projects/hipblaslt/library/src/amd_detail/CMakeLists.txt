@@ -38,6 +38,9 @@ if(HIPBLASLT_ENABLE_JIT)
     set(hipblaslt_jit_process_backend hipblaslt-jit-no-backend.cpp)
     set(hipblaslt_jit_opt_in_backends hipblaslt-jit-no-opt-in-backend.cpp)
     if(HIPBLASLT_JIT_TESTING)
+        # HIPBLASLT_JIT_TESTING also lets HIPBLASLT_JIT_TEST_BACKENDS replace the
+        # backends heuristic queries use with mock backends.
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_JIT_TESTING)
         target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp")
         set(hipblaslt_jit_process_backend hipblaslt-jit-test-backend.cpp)
     endif()

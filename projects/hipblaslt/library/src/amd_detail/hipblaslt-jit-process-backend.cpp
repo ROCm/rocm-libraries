@@ -10,7 +10,11 @@
 #include <exception>
 #include <functional>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
+#ifdef HIPBLASLT_JIT_TESTING
+#include "hipblaslt-jit-mock.hpp"
+#endif
 
 namespace hipblaslt_jit
 {
@@ -23,8 +27,70 @@ namespace hipblaslt_jit
             std::function<Status(ProcessBackend&)> make;
         };
 
+#ifdef HIPBLASLT_JIT_TESTING
+        // HIPBLASLT_JIT_TEST_BACKENDS: ';'-separated mock backends that replace
+        // the build's, each id[+flag...]=bundle[,bundle...]. The flags are optin,
+        // unavailable (configuration fails), and the mock faults unsupported,
+        // generate and trap.
+        std::vector<Candidate> testCandidates(const std::string& variable)
+        {
+            namespace mock     = hipblaslt_ext::experimental::jit::mock;
+            using Fault        = mock::Options::Fault;
+            const auto invalid = [&](const std::string& why) {
+                return std::invalid_argument("HIPBLASLT_JIT_TEST_BACKENDS=" + variable + ": "
+                                             + why);
+            };
+            std::vector<Candidate> all;
+            std::istringstream     items(variable);
+            for(std::string item; std::getline(items, item, ';');)
+            {
+                const auto equals = item.find('=');
+                if(equals == std::string::npos)
+                    throw invalid(item + " lists no bundle");
+                mock::Options      options;
+                bool               optIn = false, unavailable = false;
+                std::istringstream head(item.substr(0, equals));
+                std::getline(head, options.id, '+');
+                for(std::string flag; std::getline(head, flag, '+');)
+                    if(flag == "optin")
+                        optIn = true;
+                    else if(flag == "unavailable")
+                        unavailable = true;
+                    else if(flag == "unsupported")
+                        options.fault = Fault::Unsupported;
+                    else if(flag == "generate")
+                        options.fault = Fault::Generate;
+                    else if(flag == "trap")
+                        options.fault = Fault::Trap;
+                    else
+                        throw invalid("unknown flag " + flag);
+                std::istringstream bundles(item.substr(equals + 1));
+                for(std::string path; std::getline(bundles, path, ',');)
+                    options.replay.push_back(path);
+                all.push_back({{options.id, options.id},
+                               optIn,
+                               [options, unavailable](ProcessBackend& made) -> Status {
+                                   if(unavailable)
+                                       return {Status::Code::Failed,
+                                               Stage::Configure,
+                                               "JIT backend " + options.id
+                                                   + " not available: HIPBLASLT_JIT_TEST_BACKENDS"
+                                                     " marks it unavailable"};
+                                   made.backend = mock::makeBackend(options);
+                                   return {};
+                               }});
+            }
+            return all;
+        }
+#endif
+
         std::vector<Candidate> candidates()
         {
+#ifdef HIPBLASLT_JIT_TESTING
+            if(const char* value = rocblaslt_secure_getenv("HIPBLASLT_JIT_TEST_BACKENDS");
+               value && *value)
+                return testCandidates(value);
+#endif
             std::vector<Candidate> all{
                 {defaultProcessBackendName(), false, makeDefaultProcessBackend}};
             for(auto& backend : optInProcessBackends())

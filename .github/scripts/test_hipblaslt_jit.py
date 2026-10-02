@@ -34,6 +34,18 @@ HEURISTIC_ROUTES = (
     "debug-file",
     "debug-killed-child",
 )
+# test_heuristic.py routes on mock backends that replay the committed gfx950 bundles.
+MULTI_ROUTES = (
+    "both",
+    "order",
+    "optin",
+    "unavailable",
+    "count",
+    "domain",
+    "exclude",
+    "fellshort",
+    "capture",
+)
 
 
 def main():
@@ -72,6 +84,7 @@ def main():
             "bundle-failures",
             "helper-failures",
             *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
+            *(f"heuristic-multi-{route}" for route in MULTI_ROUTES),
             "hipkittens-backend",
             "hipkittens-gemm",
             "hipkittens-bench",
@@ -426,9 +439,31 @@ def main():
             )
         )
 
+    skipped = {}
+    # HIPBLASLT_JIT_TESTING builds read the mock backends; the bundles hold gfx950 code.
+    for route in MULTI_ROUTES:
+        name = f"heuristic-multi-{route}"
+        if not (staging / "hipblaslt-jit-mock-backend-test").exists():
+            skipped[name] = "the build has no mock backends (HIPBLASLT_JIT_TESTING)"
+        elif args.architecture != "gfx950":
+            skipped[name] = "the committed bundles hold gfx950 code"
+        commands.append(
+            (
+                name,
+                [
+                    sys.executable,
+                    str(heuristic_script),
+                    str(heuristic_test),
+                    f"multi-{route}",
+                    str(output / name),
+                ],
+                {},
+                900,
+            )
+        )
+
     # Built only with HIPBLASLT_JIT_ENABLE_HIPKITTENS; the kernels need gfx950.
     hipkittens_test = staging / "hipblaslt-jit-hipkittens-test"
-    skipped = {}
     for name in ("hipkittens-backend", "hipkittens-gemm", "hipkittens-bench", "hipkittens-install"):
         if not hipkittens_test.exists():
             skipped[name] = "the build has no HipKittens backend"

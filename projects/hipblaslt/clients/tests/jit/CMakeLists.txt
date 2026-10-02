@@ -157,6 +157,12 @@ if(HIPBLASLT_JIT_TESTING)
                     --replay "${hipblaslt_jit_splitk}")
             endforeach()
         endif()
+        # Several backends: mock backends that replace the build's.
+        foreach(route both order optin unavailable count domain exclude fellshort capture)
+            hipblaslt_jit_python_test(jit-heuristic-multi-${route} jit-gpu test_heuristic.py
+                $<TARGET_FILE:hipblaslt-jit-heuristic-test> multi-${route}
+                "${hipblaslt_jit_scratch}/heuristic-multi-${route}")
+        endforeach()
     endif()
 endif()
 
