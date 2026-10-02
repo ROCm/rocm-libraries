@@ -2116,6 +2116,305 @@ inline void rpp_store48_f32pln3_to_u8pkd3_avx(Rpp8u* dstPtr, __m256* p) {
                     _mm_srli_si128(px[3], 8)); /* store last 4 bytes [B15|R16|G16|B16] */
 }
 
+// Store 42 bytes (14 pixels x 3 channels) - for 3x3 gaussian filter multithreading safety
+// Optimized SIMD version that stores exactly 42 bytes
+inline void rpp_store42_f32pln3_to_u8pkd3_avx(Rpp8u* dstPtr, __m256* p) {
+    __m256i pxCvt[3];
+    __m128i px[5];
+    __m128i pxMask = _mm_setr_epi8(0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, 12, 13, 14, 15);
+
+    // Process pixels 0-7
+    pxCvt[0] = _mm256_cvtps_epi32(p[0]); /* convert to int32 for R0-7 */
+    pxCvt[1] = _mm256_cvtps_epi32(p[2]); /* convert to int32 for G0-7 */
+    pxCvt[2] = _mm256_cvtps_epi32(p[4]); /* convert to int32 for B0-7 */
+    px[3] =
+        _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 0),
+                         _mm256_extracti128_si256(pxCvt[1], 0)); /* pack pixels 0-3 as R0-3|G0-3 */
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 0), xmm_px0); /* pack B0-3|X */
+    px[0] = _mm_packus_epi16(
+        px[3], px[4]); /* pack pixels 0-3 as [R0|R1|R2|R3|G0|G1|G2|G3|B0|B1|B2|B3|00|00|00|00] */
+    px[3] =
+        _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 1),
+                         _mm256_extracti128_si256(pxCvt[1], 1)); /* pack pixels 4-7 as R4-7|G4-7 */
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 1), xmm_px0); /* pack B4-7|X */
+    px[1] = _mm_packus_epi16(
+        px[3], px[4]); /* pack pixels 4-7 as [R4|R5|R6|R7|G4|G5|G6|G7|B4|B5|B6|B7|00|00|00|00] */
+
+    // Process pixels 8-13 (only 6 pixels, not 8)
+    pxCvt[0] = _mm256_cvtps_epi32(p[1]); /* convert to int32 for R8-15 */
+    pxCvt[1] = _mm256_cvtps_epi32(p[3]); /* convert to int32 for G8-15 */
+    pxCvt[2] = _mm256_cvtps_epi32(p[5]); /* convert to int32 for B8-15 */
+    px[3] = _mm_packus_epi32(
+        _mm256_extracti128_si256(pxCvt[0], 0),
+        _mm256_extracti128_si256(pxCvt[1], 0)); /* pack pixels 8-11 as R8-11|G8-11 */
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 0), xmm_px0); /* pack B8-11|X */
+    px[2] = _mm_packus_epi16(
+        px[3],
+        px[4]); /* pack pixels 8-11 as [R8|R9|R10|R11|G8|G9|G10|G11|B8|B9|B10|B11|00|00|00|00] */
+
+    // Shuffle to interleaved format
+    px[0] = _mm_shuffle_epi8(px[0], pxMask); /* [R0|G0|B0|R1|G1|B1|R2|G2|B2|R3|G3|B3|00|00|00|00] */
+    px[1] = _mm_shuffle_epi8(px[1], pxMask); /* [R4|G4|B4|R5|G5|B5|R6|G6|B6|R7|G7|B7|00|00|00|00] */
+    px[2] = _mm_shuffle_epi8(px[2],
+                             pxMask); /* [R8|G8|B8|R9|G9|B9|R10|G10|B10|R11|G11|B11|00|00|00|00] */
+
+    // Store pixels 0-11 (36 bytes)
+    _mm_storeu_si128((__m128i*)dstPtr, px[0]);        /* store 16 bytes (pixels 0-3 + padding) */
+    _mm_storeu_si128((__m128i*)(dstPtr + 12), px[1]); /* store 16 bytes (pixels 4-7 + padding) */
+    _mm_storeu_si128((__m128i*)(dstPtr + 24), px[2]); /* store 16 bytes (pixels 8-11 + padding) */
+
+    // Process and store pixels 12-13 (6 bytes) - extract from high part of p[1], p[3], p[5]
+    px[3] = _mm_packus_epi32(
+        _mm256_extracti128_si256(pxCvt[0], 1),
+        _mm256_extracti128_si256(pxCvt[1], 1)); /* pack pixels 12-15 as R12-15|G12-15 */
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 1), xmm_px0); /* pack B12-15|X */
+    px[3] = _mm_packus_epi16(
+        px[3], px[4]); /* [R12|R13|R14|R15|G12|G13|G14|G15|B12|B13|B14|B15|00|00|00|00] */
+    px[3] = _mm_shuffle_epi8(
+        px[3], pxMask); /* [R12|G12|B12|R13|G13|B13|R14|G14|B14|R15|G15|B15|00|00|00|00] */
+
+    // Store only 6 bytes for pixels 12-13
+    rpp_storeu_si32(dstPtr + 36, px[3]); /* store 4 bytes [R12|G12|B12|R13] */
+    *((Rpp16u*)(dstPtr + 40)) = (Rpp16u)_mm_extract_epi16(px[3], 2); /* store 2 bytes [G13|B13] */
+}
+
+// Store 42 bytes (14 pixels x 3 channels) - for 3x3 gaussian filter multithreading safety
+inline void rpp_store42_f32pln3_to_i8pkd3_avx(Rpp8s* dstPtr, __m256* p) {
+    __m256i pxCvt[3];
+    __m128i px[5];
+    __m128i pxMask = _mm_setr_epi8(0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, 12, 13, 14, 15);
+
+    // Process pixels 0-7 (R, G, B channels)
+    pxCvt[0] = _mm256_cvtps_epi32(p[0]);
+    pxCvt[1] = _mm256_cvtps_epi32(p[2]);
+    pxCvt[2] = _mm256_cvtps_epi32(p[4]);
+    px[3] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 0),
+                             _mm256_extracti128_si256(pxCvt[1], 0));
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 0), xmm_px0);
+    px[0] = _mm_packus_epi16(px[3], px[4]);
+    px[3] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 1),
+                             _mm256_extracti128_si256(pxCvt[1], 1));
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 1), xmm_px0);
+    px[1] = _mm_packus_epi16(px[3], px[4]);
+
+    // Process pixels 8-13 (R, G, B channels)
+    pxCvt[0] = _mm256_cvtps_epi32(p[1]);
+    pxCvt[1] = _mm256_cvtps_epi32(p[3]);
+    pxCvt[2] = _mm256_cvtps_epi32(p[5]);
+    px[3] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 0),
+                             _mm256_extracti128_si256(pxCvt[1], 0));
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 0), xmm_px0);
+    px[2] = _mm_packus_epi16(px[3], px[4]);
+    px[3] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 1),
+                             _mm256_extracti128_si256(pxCvt[1], 1));
+    px[4] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[2], 1), xmm_px0);
+    px[3] = _mm_packus_epi16(px[3], px[4]);
+
+    // Convert back to i8
+    px[0] = _mm_sub_epi8(px[0], xmm_pxConvertI8);
+    px[1] = _mm_sub_epi8(px[1], xmm_pxConvertI8);
+    px[2] = _mm_sub_epi8(px[2], xmm_pxConvertI8);
+    px[3] = _mm_sub_epi8(px[3], xmm_pxConvertI8);
+
+    // Shuffle to interleave RGB
+    px[0] = _mm_shuffle_epi8(px[0], pxMask);
+    px[1] = _mm_shuffle_epi8(px[1], pxMask);
+    px[2] = _mm_shuffle_epi8(px[2], pxMask);
+    px[3] = _mm_shuffle_epi8(px[3], pxMask);
+
+    // Store pixels 0-11 (36 bytes)
+    _mm_storeu_si128((__m128i*)dstPtr, px[0]);
+    _mm_storeu_si128((__m128i*)(dstPtr + 12), px[1]);
+    _mm_storeu_si128((__m128i*)(dstPtr + 24), px[2]);
+
+    // Store pixels 12-13 (6 bytes)
+    rpp_storeu_si32(dstPtr + 36, px[3]);
+    *((Rpp16u*)(dstPtr + 40)) = (Rpp16u)_mm_extract_epi16(px[3], 2);
+}
+
+// Store 84 bytes (14 pixels x 3 channels x 2 bytes) - for 3x3 gaussian filter multithreading safety
+inline void rpp_store42_f32pln3_to_f16pkd3_avx(Rpp16f* dstPtr, __m256* p) {
+    __m128 p128[4];
+    __m128i px128[4];
+
+    // Process pixels 0-3 (24 bytes)
+    p128[0] = _mm256_extractf128_ps(p[0], 0);
+    p128[1] = _mm256_extractf128_ps(p[2], 0);
+    p128[2] = _mm256_extractf128_ps(p[4], 0);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    px128[0] = _mm_cvtps_ph(p128[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    __m128i packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    __m128i packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 0, packed01);
+    rpp_storeu_si32(dstPtr + 4, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 6, packed23);
+    rpp_storeu_si32(dstPtr + 10, _mm_srli_si128(packed23, 8));
+
+    // Process pixels 4-7 (24 bytes)
+    p128[0] = _mm256_extractf128_ps(p[0], 1);
+    p128[1] = _mm256_extractf128_ps(p[2], 1);
+    p128[2] = _mm256_extractf128_ps(p[4], 1);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    px128[0] = _mm_cvtps_ph(p128[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 12, packed01);
+    rpp_storeu_si32(dstPtr + 16, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 18, packed23);
+    rpp_storeu_si32(dstPtr + 22, _mm_srli_si128(packed23, 8));
+
+    // Process pixels 8-11 (24 bytes)
+    p128[0] = _mm256_extractf128_ps(p[1], 0);
+    p128[1] = _mm256_extractf128_ps(p[3], 0);
+    p128[2] = _mm256_extractf128_ps(p[5], 0);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    px128[0] = _mm_cvtps_ph(p128[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[3] = _mm_cvtps_ph(p128[3], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], px128[3]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 24, packed01);
+    rpp_storeu_si32(dstPtr + 28, _mm_srli_si128(packed01, 8));
+    rpp_storeu_si64(dstPtr + 30, packed23);
+    rpp_storeu_si32(dstPtr + 34, _mm_srli_si128(packed23, 8));
+
+    // Process pixels 12-13 (12 bytes)
+    p128[0] = _mm256_extractf128_ps(p[1], 1);
+    p128[1] = _mm256_extractf128_ps(p[3], 1);
+    p128[2] = _mm256_extractf128_ps(p[5], 1);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    px128[0] = _mm_cvtps_ph(p128[0], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[1] = _mm_cvtps_ph(p128[1], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    px128[2] = _mm_cvtps_ph(p128[2], _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    packed01 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[0], px128[1]),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, -1, -1, -1, -1));
+    packed23 =
+        _mm_shuffle_epi8(_mm_unpacklo_epi64(px128[2], _mm_setzero_si128()),
+                         _mm_setr_epi8(0, 1, 2, 3, 4, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1));
+    rpp_storeu_si64(dstPtr + 36, packed01);
+    rpp_storeu_si32(dstPtr + 40, _mm_srli_si128(packed01, 8));
+    // Store only 6 bytes for last 2 pixels (pixels 12-13 remaining channels)
+    rpp_storeu_si32(dstPtr + 42, packed23);
+    *((Rpp16u*)(dstPtr + 44)) = (Rpp16u)_mm_extract_epi16(packed23, 2);
+}
+
+// Store 168 bytes (14 pixels x 3 channels x 4 bytes) - for 3x3 gaussian filter multithreading
+// safety
+inline void rpp_store42_f32pln3_to_f32pkd3_avx(Rpp32f* dstPtr, __m256* p) {
+    __m128 p128[4];
+
+    // Process pixels 0-3 (48 bytes)
+    p128[0] = _mm256_castps256_ps128(p[0]);
+    p128[1] = _mm256_castps256_ps128(p[2]);
+    p128[2] = _mm256_castps256_ps128(p[4]);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    _mm_storeu_ps(dstPtr, p128[0]);
+    _mm_storeu_ps(dstPtr + 3, p128[1]);
+    _mm_storeu_ps(dstPtr + 6, p128[2]);
+    _mm_storeu_ps(dstPtr + 9, p128[3]);
+
+    // Process pixels 4-7 (48 bytes)
+    p128[0] = _mm256_extractf128_ps(p[0], 1);
+    p128[1] = _mm256_extractf128_ps(p[2], 1);
+    p128[2] = _mm256_extractf128_ps(p[4], 1);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    _mm_storeu_ps(dstPtr + 12, p128[0]);
+    _mm_storeu_ps(dstPtr + 15, p128[1]);
+    _mm_storeu_ps(dstPtr + 18, p128[2]);
+    _mm_storeu_ps(dstPtr + 21, p128[3]);
+
+    // Process pixels 8-11 (48 bytes)
+    p128[0] = _mm256_castps256_ps128(p[1]);
+    p128[1] = _mm256_castps256_ps128(p[3]);
+    p128[2] = _mm256_castps256_ps128(p[5]);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    _mm_storeu_ps(dstPtr + 24, p128[0]);
+    _mm_storeu_ps(dstPtr + 27, p128[1]);
+    _mm_storeu_ps(dstPtr + 30, p128[2]);
+    _mm_storeu_ps(dstPtr + 33, p128[3]);
+
+    // Process pixels 12-13 (24 bytes)
+    p128[0] = _mm256_extractf128_ps(p[1], 1);
+    p128[1] = _mm256_extractf128_ps(p[3], 1);
+    p128[2] = _mm256_extractf128_ps(p[5], 1);
+    _MM_TRANSPOSE4_PS(p128[0], p128[1], p128[2], p128[3]);
+    _mm_storeu_ps(dstPtr + 36, p128[0]);
+    rpp_storeu_si64(dstPtr + 39, _mm_castps_si128(p128[1]));
+    ((Rpp32f*)dstPtr)[41] = _mm_cvtss_f32(_mm_movehl_ps(p128[1], p128[1]));
+}
+
+// Store 14 elements (not 16) for NCHW→NCHW 3×3 - prevents thread buffer corruption
+inline void rpp_store14_f32_to_f32_avx(Rpp32f* dstPtr, __m256* pDst) {
+    _mm256_storeu_ps(dstPtr, pDst[0]);                        // Floats 0-7 (32 bytes)
+    __m128 p1_low = _mm256_castps256_ps128(pDst[1]);          // Floats 8-11
+    __m128 p1_high = _mm256_extractf128_ps(pDst[1], 1);       // Floats 12-15
+    _mm_storeu_ps(dstPtr + 8, p1_low);                        // Floats 8-11 (16 bytes)
+    rpp_storeu_si64(dstPtr + 12, _mm_castps_si128(p1_high));  // Floats 12-13 (8 bytes)
+}
+
+inline void rpp_store14_f32_to_f16_avx(Rpp16f* dstPtr, __m256* pDst) {
+    __m128i ph0 = _mm256_cvtps_ph(pDst[0], _MM_FROUND_TO_ZERO);  // Halfs 0-7
+    __m128i ph1 = _mm256_cvtps_ph(pDst[1], _MM_FROUND_TO_ZERO);  // Halfs 8-15
+    _mm_storeu_si128((__m128i*)dstPtr, ph0);                     // Halfs 0-7 (16 bytes)
+    _mm_storel_epi64((__m128i*)(dstPtr + 8), ph1);               // Halfs 8-11 (8 bytes)
+    rpp_storeu_si32(dstPtr + 12, _mm_srli_si128(ph1, 8));        // Halfs 12-13 (4 bytes)
+}
+
+inline void rpp_store14_f32_to_i8_avx(Rpp8s* dstPtr, __m256* pDst) {
+    __m256i pxCvt;
+    __m128i px[3];
+    pxCvt = _mm256_cvtps_epi32(pDst[0]);
+    px[1] =
+        _mm_packus_epi32(_mm256_extracti128_si256(pxCvt, 0), _mm256_extracti128_si256(pxCvt, 1));
+    pxCvt = _mm256_cvtps_epi32(pDst[1]);
+    px[2] =
+        _mm_packus_epi32(_mm256_extracti128_si256(pxCvt, 0), _mm256_extracti128_si256(pxCvt, 1));
+    px[0] = _mm_packus_epi16(px[1], px[2]);
+    px[0] = _mm_sub_epi8(px[0], xmm_pxConvertI8); /* convert back to i8 */
+    // Store 14 bytes carefully: 8+4+2 to avoid 16-byte overwrite
+    _mm_storel_epi64((__m128i*)dstPtr, px[0]);              // bytes 0-7
+    rpp_storeu_si32(dstPtr + 8, _mm_srli_si128(px[0], 8));  // bytes 8-11
+    dstPtr[12] = (Rpp8s)_mm_extract_epi8(px[0], 12);        // byte 12
+    dstPtr[13] = (Rpp8s)_mm_extract_epi8(px[0], 13);        // byte 13
+}
+
+inline void rpp_store14_f32_to_u8_avx(Rpp8u* dstPtr, __m256* pDst) {
+    __m256i pxCvt[2];
+    __m128i px[3];
+    pxCvt[0] = _mm256_cvtps_epi32(pDst[0]);
+    px[1] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[0], 0),
+                             _mm256_extracti128_si256(pxCvt[0], 1));
+    pxCvt[1] = _mm256_cvtps_epi32(pDst[1]);
+    px[2] = _mm_packus_epi32(_mm256_extracti128_si256(pxCvt[1], 0),
+                             _mm256_extracti128_si256(pxCvt[1], 1));
+    px[0] = _mm_packus_epi16(px[1], px[2]);
+    // Store 14 bytes carefully: 8+4+2 to avoid 16-byte overwrite
+    _mm_storel_epi64((__m128i*)dstPtr, px[0]);              // bytes 0-7
+    rpp_storeu_si32(dstPtr + 8, _mm_srli_si128(px[0], 8));  // bytes 8-11
+    dstPtr[12] = (Rpp8u)_mm_extract_epi8(px[0], 12);        // byte 12
+    dstPtr[13] = (Rpp8u)_mm_extract_epi8(px[0], 13);        // byte 13
+}
+
 inline void rpp_load24_u8pln3_to_f64pln3_avx(Rpp8u* srcPtrR, Rpp8u* srcPtrG, Rpp8u* srcPtrB,
                                              __m256d* p) {
     __m128i px[3];
