@@ -148,6 +148,24 @@ static unsigned getDynamicWmmaSrcExpectedWidth(const StinkyInstruction* inst, bo
     return matrixFmtWidthInRegs(fmt);
 }
 
+// GLOBAL/FLAT addressing: the vaddr field is declared as a 64-bit address, which
+// is its width when saddr is null ("off"). With a register saddr, vaddr is
+// instead a 32-bit offset from that 64-bit base.
+static bool isSaddrOffsetVaddr(const StinkyInstruction* inst, const HwInstDesc* hwDesc,
+                               const HwInstDesc::OperandFieldDesc& field, unsigned actualWidth) {
+    if (field.isDest || field.encodeField != EncodeField::vaddr || actualWidth != 1) return false;
+    const auto& srcRegs = inst->getSrcRegs();
+    unsigned srcIdx = 0;
+    for (const auto& f : hwDesc->operandFields) {
+        if (f.isDest) continue;
+        if (f.encodeField == EncodeField::saddr)
+            return srcIdx < srcRegs.size() &&
+                   srcRegs[srcIdx].dataType == StinkyRegister::Type::Register;
+        srcIdx++;
+    }
+    return false;
+}
+
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                        const AsmVerifierConfig& config) {
     const HwInstDesc* hwDesc = inst->getHwInstDesc();
@@ -193,8 +211,9 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
             // M64 operands are 64-bit lane masks that may be truncated to
             // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
+            bool saddrOffset = isSaddrOffsetVaddr(inst, hwDesc, field, reg.reg.num);
 
-            if (reg.reg.num != expectedWidth && !m64Truncated) {
+            if (reg.reg.num != expectedWidth && !m64Truncated && !saddrOffset) {
                 errors << "Instruction '";
                 inst->dump(errors);
                 errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
