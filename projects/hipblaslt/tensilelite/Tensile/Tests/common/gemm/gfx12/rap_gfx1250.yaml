@@ -76,8 +76,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512
           - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128
         # Required by RAP.
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - TDMInst: [3]
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]
@@ -145,8 +145,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 8
         # Required by RAP.
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - TDMInst: [3]
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]
@@ -212,8 +212,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
           - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128, kTiles 4
         # Required by RAP.
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - TDMInst: [3]
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]
@@ -277,8 +277,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512, kTiles 3
         # Required by RAP.
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - TDMInst: [3]
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]

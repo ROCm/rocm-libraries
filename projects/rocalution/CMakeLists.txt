@@ -113,6 +113,7 @@ else()
     gfx1153
     gfx1200
     gfx1201
+    gfx1250-strict
   )
 endif()
 if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
