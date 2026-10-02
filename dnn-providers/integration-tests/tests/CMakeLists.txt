@@ -58,6 +58,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
+    TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
     TestInputFillRecipes.cpp

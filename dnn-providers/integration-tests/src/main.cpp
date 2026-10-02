@@ -595,14 +595,19 @@ int main(int argc, char** argv) noexcept
             // neither is allowed to run empty.
             if(hipdnn_integration_tests::TestConfig::get().hasEngineName() || dataDirFound)
             {
-                // Print the counts, not a guess: "0 registered" is a build or
-                // discovery problem, "N registered, 0 selected" is a filter
-                // problem. They have different fixes and these numbers are the
+                // Print the counts, not a guess. "0 discovered" is a build or
+                // discovery problem; "N discovered, all excluded by the filter" is a
+                // filter problem. They have different fixes and these numbers are the
                 // only way to tell them apart from a CI log.
                 const int suiteCount = unitTest->total_test_suite_count();
+                const auto& registration
+                    = hipdnn_integration_tests::bundle::bundleRegistrationStats();
                 std::cerr << "Error: zero tests ran.\n"
                           << "  registered:      " << unitTest->total_test_count() << " test(s) in "
                           << suiteCount << " suite(s)\n"
+                          << "  discovered:      " << registration.discovered << " bundle test(s), "
+                          << registration.excludedByFilter
+                          << " excluded by --gtest_filter before loading\n"
                           << "  selected:        0 (nothing matched --gtest_filter)\n"
                           << "  gtest_filter:    " << GTEST_FLAG_GET(filter) << "\n"
                           << "  bundle data dir: " << dataDir

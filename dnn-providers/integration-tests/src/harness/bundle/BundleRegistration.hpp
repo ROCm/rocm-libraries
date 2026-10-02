@@ -21,6 +21,7 @@
 
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/GTestFilter.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
@@ -263,6 +264,22 @@ inline std::optional<LoadedEngine> resolveEngineUnderTest()
     return std::nullopt;
 }
 
+/// What registration did with the bundles it discovered, for the zero-tests diagnostic
+/// in main(): "nothing discovered" and "everything filtered out before loading" are
+/// different faults with different fixes, and the registered-test count alone cannot
+/// tell them apart now that --gtest_filter is applied before loading.
+struct BundleRegistrationStats
+{
+    size_t discovered = 0;
+    size_t excludedByFilter = 0;
+};
+
+inline BundleRegistrationStats& bundleRegistrationStats()
+{
+    static BundleRegistrationStats s_stats;
+    return s_stats;
+}
+
 namespace detail
 {
 
@@ -406,8 +423,55 @@ inline void registerBundleTests()
     const bool writing = TestConfig::get().writeSupportClaims();
     const bool observing = engineUnderTest.has_value() && !writing;
 
-    const auto discovered = detail::discoverDataDirBundles();
+    auto discovered = detail::discoverDataDirBundles();
     if(!discovered.has_value())
+    {
+        return;
+    }
+
+    auto& stats = bundleRegistrationStats();
+    stats.discovered = discovered->bundles.size();
+
+    // GTest applies --gtest_filter only inside RUN_ALL_TESTS(), after every bundle
+    // below would have been parsed, expanded and had its tensors read. Drop what the
+    // filter is about to drop first, so a run's cost follows what it selects instead
+    // of the size of the bundle tree.
+    //
+    // Not in authoring mode: --write-support-claims needs every graph loaded, because
+    // `graphsFound` is the denominator for the graphs it did not observe.
+    std::vector<DiscoveredBundle> excluded;
+    if(!writing)
+    {
+        auto split = splitByGTestFilter(std::move(discovered->bundles), GTEST_FLAG_GET(filter));
+        discovered->bundles = std::move(split.selected);
+        excluded = std::move(split.excluded);
+    }
+    stats.excludedByFilter = excluded.size();
+
+    if(!excluded.empty())
+    {
+        std::cerr << "--gtest_filter excluded " << excluded.size() << " of " << stats.discovered
+                  << " discovered bundle test(s) before loading\n";
+    }
+
+    // The coverage ladder counts every claim-bearing graph on disk and attributes the
+    // gap to the filter (`not_selected`), so excluded bundles are still counted -- by
+    // sidecar presence only, which is what the load would have counted too. A bundle
+    // that would have failed to load is counted here and was not before; such a bundle
+    // is already a red test whenever a run does select it.
+    if(observing)
+    {
+        for(const auto& bundle : excluded)
+        {
+            supportClaimCoverage().graphsFound++;
+            if(std::filesystem::exists(detail::claimLocatorFor(bundle).sidecarPath))
+            {
+                supportClaimCoverage().graphsWithClaims++;
+            }
+        }
+    }
+
+    if(discovered->bundles.empty())
     {
         return;
     }
