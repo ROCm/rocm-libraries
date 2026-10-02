@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-loader.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
 #include "hipblaslt-jit-tensilelite.hpp"

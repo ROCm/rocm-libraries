@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/UtilsOrigami.hpp>

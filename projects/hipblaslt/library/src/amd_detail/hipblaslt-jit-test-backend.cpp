@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-mock.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include <sstream>
 #include <string_view>

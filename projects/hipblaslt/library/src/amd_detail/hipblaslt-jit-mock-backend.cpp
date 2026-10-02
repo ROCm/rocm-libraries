@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-mock.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/Tensile.hpp>
 #include <algorithm>
