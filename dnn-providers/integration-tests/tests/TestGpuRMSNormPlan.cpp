@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "EpsilonTestUtils.hpp"
+#include "ScalarTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuRMSNormPlan.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -373,7 +373,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         builder, SCALE_UID, "scale", scaleDataType, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(
-        createEpsilonTensorAttributes(builder, EPSILON_UID, 1e-5, epsilonDataType));
+        createScalarTensorAttributes(builder, EPSILON_UID, 1e-5, epsilonDataType, "epsilon"));
 
     auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,

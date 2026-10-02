@@ -16,11 +16,11 @@ This plugin implements the following hipDNN Plugin SDK interfaces:
 
 | Interface | File | Purpose |
 |-----------|------|---------|
-| **Plugin API** | `PluginApi.h` | Plugin metadata (name, version, type), error reporting, logging callbacks |
-| **Engine Plugin API** | `EnginePluginApi.h` | Engine lifecycle - create handle, set stream, get engines, execute graphs |
-| **IEngine** | `EngineInterface.hpp` | Engine interface - checks applicability, provides details, creates plans |
-| **IPlanBuilder** | `PlanInterface.hpp` | Builds execution plans for specific operation patterns |
-| **IPlan** | `PlanInterface.hpp` | Executable plan that runs operations on GPU |
+| **Plugin API** | `hipdnn_plugin_sdk/PluginApi.h` | Plugin metadata (name, version, type), error reporting, logging callbacks |
+| **Engine Plugin API** | `hipdnn_plugin_sdk/EnginePluginApi.h` | Engine lifecycle - create handle, set stream, get engines, execute graphs |
+| **IEngine** | `hipdnn_plugin_sdk/interfaces/IEngine.hpp` | Engine interface - checks applicability, provides details, creates plans |
+| **IPlanBuilder** | `hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp` | Builds execution plans for specific operation patterns |
+| **IPlan** | `hipdnn_plugin_sdk/interfaces/IPlan.hpp` | Executable plan that runs operations on GPU |
 
 ### Execution Flow
 
@@ -37,19 +37,21 @@ FlatBuffer Graph → Engine Selection → Plan Creation → GPU Execution
 
 ### Component Linkage (Do Not Modify)
 
-- **Plugin uses**: Plugin SDK (header-only), Data SDK (header-only), MIOpen library
-- **Plugin SDK uses**: Data SDK
-- **Data SDK uses**: FlatBuffers
+- **Plugin uses**: Plugin SDK (header-only), Flatbuffers SDK (header-only), Data SDK (header-only), MIOpen library
+- **Plugin SDK uses**: Flatbuffers SDK, Data SDK
+- **Flatbuffers SDK uses**: Data SDK, FlatBuffers
 - **No direct dependencies** on hipDNN Backend or Frontend
 
 ### Key Classes
 
-- **HipdnnEnginePluginHandle**: Plugin instance with MIOpen handle, stream, engine manager
-- **EngineManager**: Manages available engines and routes requests to applicable engines
+- **HipdnnMiopenHandle**: Plugin instance with MIOpen handle, stream, engine manager
+- **MiopenContainer**: Owns the `EngineManager` and registers engines and plan builders
+- **EngineManager** (from Plugin SDK): Manages available engines and routes requests to applicable engines
 - **MiopenEngine**: Concrete engine with multiple plan builders for different operations
-- **HipdnnEnginePluginExecutionContext**: Stores the execution plan for a graph
+- **HipdnnMiopenContext**: Stores the execution plan for a graph
+- **HipdnnMiopenSettings**: Per-context execution settings (benchmarking, workspace size limit)
 - **Plan Builders**: `MiopenConvPlanBuilder`, `MiopenBatchnormPlanBuilder`, etc.
-- **Plans**: `MiopenConvFwdPlan`, `MiopenBatchnormFwdPlan`, etc.
+- **Plans**: `ConvFwdPlan`, `BatchnormFwdInferencePlan`, etc.
 
 ---
 
@@ -64,7 +66,7 @@ cmake --preset miopen-provider
 cmake --build build
 ```
 
-This uses the `miopen-provider` preset which builds both hipDNN and miopen-provider together. Other available presets: `hipdnn` (hipDNN only), `hipblaslt-provider` (hipDNN + hipblaslt-provider).
+This uses the `miopen-provider` preset which builds both hipDNN and miopen-provider together. Other available presets: `hipdnn` (hipDNN only), `hipblaslt-provider` (hipDNN + hipblaslt-provider). See the root `CMakePresets.json` for the full list.
 
 In the superbuild, targets are prefixed and YAML category-driven (e.g., `miopen-provider-check`, `miopen-provider-quick-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
 
@@ -116,11 +118,11 @@ When requested to build/test:
 - **Avoid implicit casts** — use explicit `static_cast<>`. The codebase compiles with `-Wconversion` and `-Wsign-conversion`
 - Always use braces for if/for/while bodies, even single-line
 - Use CMake for managing C/C++ dependencies
-- Use Flatbuffers for serialization (via Data SDK wrapper classes: IGraph, GraphWrapper, etc.)
+- Use Flatbuffers for serialization (via Flatbuffers SDK wrapper classes: IGraph, GraphWrapper, etc.)
 
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
-- Never generate a `main()` function in test files — gtest provides its own
+- Never generate a `main()` function in test files — `tests/main.cpp` and `integration_tests/main.cpp` provide it
 - Use TEST(), TEST_F(), or TEST_P() macros as appropriate
 
 #### Test Suite Naming
@@ -131,7 +133,7 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
 2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
-3. Core Feature / Subject under test (PascalCase, no underscores)
+3. Core Feature / Subject under test (PascalCase, no underscores); may include a layout token: `Nhwc`, `Nchw`, `Ndhwc`, `Ncdhw`
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
 Omit any optional position that does not apply.

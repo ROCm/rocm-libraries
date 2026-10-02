@@ -12,7 +12,8 @@ and the destination have their own dtype, fragment length, and layout. Historica
 A/B projections refer to `srcs[0]`/`srcs[1]`; C projections refer to `dst`.
 
 A source's optional `MmaScaleOperand` owns its scale `dtype`, `block_size`,
-logical `frag_len`, and `layout`. Scale values are independent of matrix dtypes
+logical `frag_len`, and `layout`. `block_size` is the number of matrix elements
+along K that share one scale value: 16 or 32, independently of the atom's K. Scale values are independent of matrix dtypes
 and register carriers. Block sizes normalize to `MmaScaleBlockK.K16` or `K32`.
 Generic metadata can describe different block sizes for each source. Scaled
 WMMA requires a complete pair with a shared block size; its backend also checks
@@ -53,7 +54,7 @@ rebuild for the indexed struct layout and role enum changes.
 
 ### gfx1250 Scale Mapping and Packing
 
-The four gfx1250 FP8/BF8 scaled atoms provide these scale maps: lane `l` and
+The six gfx1250 FP8/BF8/FP4 scaled atoms provide these scale maps: lane `l` and
 slot `j` map to `(l % 16, j)` for A and `(j, l % 16)` for B. Both half-waves
 duplicate the scales. K32 uses four E8M0 elements per lane packed into i32;
 K16 uses eight packed into i64, with slot `j` at bit offset `8*j`. Matrix A/B
@@ -133,7 +134,7 @@ Pass `NULL` (`nullptr` in C++) for unconstrained scales, or a pointer to
 The scale-contract rules above apply. No match, or a null target, returns
 `NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
 errors at a C++ boundary before returning to C. In particular, the scaled
-FP8/BF8 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
+FP8/BF8/FP4 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
 lookup is ambiguous.
 
 ## Operation IDs and Migration

@@ -51,42 +51,6 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
-bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHandle_t& handle)
-{
-    char git_version[128];
-    hipblasLtGetGitRevision(handle, &git_version[0]);
-    static std::string cached_firstline;
-    static std::string cached_path;
-    static bool        cached = false;
-    std::string        firstline;
-
-    if(!cached || cached_path != override.file_path)
-    {
-        std::ifstream file_read(override.file_path);
-        std::getline(file_read, firstline);
-        cached_firstline = firstline;
-        cached_path      = override.file_path;
-        cached           = true;
-    }
-    else
-    {
-        firstline = cached_firstline;
-    }
-
-    std::string header = "Git Version: ";
-    size_t      pos    = firstline.find(header);
-    if(pos != std::string::npos)
-    {
-        std::string file_version = firstline.substr(pos + header.length());
-        if(file_version == git_version)
-            return true;
-    }
-
-    override.env_mode = false;
-
-    return false;
-}
-
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)
@@ -130,7 +94,7 @@ struct hipblasLtFusedEpilogueDescriptor
     // communicator's world size is checked where the communicator is visible.
     int64_t                           a2a_extent     = 0;
     bool                              a2a_extent_set = false;
-    hipblasLtA2ACompletionMode_t      a2a_completion = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+    hipblasLtA2ACompletionMode_t      a2a_completion = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
     uint32_t                          comm_channel   = 0;
     std::vector<void*>                a2a_recv_ptrs;
     std::vector<hipblasLtSdmaQueue_t> a2a_queues;
@@ -172,11 +136,10 @@ namespace
         return !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
     }
 
-    // Checked when the descriptor is attached to a matmul descriptor: every stage
-    // present must have the parameters it cannot run without. World size is not
-    // known here, so the per-rank arrays are checked for content but not length;
-    // validate_fused_a2a_launch compares both against it.
-    hipblasStatus_t validate_fused_epilogue_attach(const hipblasLtFusedEpilogueDescriptor* desc)
+    // Every stage present must have the parameters it cannot run without. World
+    // size is not known here, so the per-rank arrays are checked for content but
+    // not length; validate_fused_a2a_launch compares both against it.
+    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusedEpilogueDescriptor* desc)
     {
         if(!fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
@@ -295,10 +258,7 @@ namespace
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
 
-        // The request is well formed; no architecture carries a fused all-to-all
-        // kernel in this release.
-        log_error(__func__, "no fused all-to-all implementation for the selected device");
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
+        return HIPBLAS_STATUS_SUCCESS;
     }
 
     // Runs the checks a matmul carrying a fused epilogue owes before it is
@@ -315,6 +275,10 @@ namespace
         if(desc == nullptr
            || !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
+
+        const hipblasStatus_t contents = validate_fused_epilogue_contents(desc);
+        if(contents != HIPBLAS_STATUS_SUCCESS)
+            return contents;
 
         return validate_fused_a2a_launch(
             (rocblaslt_handle)handle, desc, (rocblaslt_matrix_layout)Ddesc);
@@ -368,6 +332,23 @@ namespace
         handle->device_comm_channels = 0;
         handle->device_comm_world    = 0;
     }
+}
+
+// The two pointers alias the descriptor's own storage; they stay valid only as long as
+// the descriptor does.
+bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* desc,
+                                      RocblasltFusedEpilogueInfo&             out)
+{
+    if(desc == nullptr)
+        return false;
+
+    out.hasA2APrefix = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
+    out.a2aSdmaQueues = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
+    out.a2aRecvPtrs = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
+    out.a2aExtent         = desc->a2a_extent;
+    out.a2aCompletionMode = desc->a2a_completion;
+    out.commChannel       = desc->comm_channel;
+    return true;
 }
 #endif
 
@@ -689,26 +670,6 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescSetAttribute");
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    // Attaching a fused epilogue is where the stages are checked for completeness:
-    // the descriptor stops being a work in progress at this call.
-    if(matmulAttr == HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE && buf != nullptr
-       && sizeInBytes >= sizeof(hipblasLtFusedEpilogueDescriptor_t))
-    {
-        hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-        memcpy(&fused, buf, sizeof(fused));
-        if(fused != nullptr)
-        {
-            hipblasStatus_t attach_status = validate_fused_epilogue_attach(fused);
-            if(attach_status != HIPBLAS_STATUS_SUCCESS)
-            {
-                rocblaslt::Debug::Instance().markerStop();
-                return attach_status;
-            }
-        }
-    }
-#endif
-
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_matmul_desc_set_attribute((rocblaslt_matmul_desc)matmulDesc,
                                             (rocblaslt_matmul_desc_attributes)matmulAttr,
@@ -838,9 +799,9 @@ try
             status = HIPBLAS_STATUS_INVALID_VALUE;
             break;
         }
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         memcpy(&mode, buf, sizeof(mode));
-        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL)
+        if(mode != HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL)
         {
             log_error(__func__, "unsupported all-to-all completion mode", (int)mode);
             status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -1170,18 +1131,6 @@ try
         return fused_status;
     }
 #endif
-
-    OverrideSingleton& override = OverrideSingleton::getInstance();
-    if(override.env_mode)
-    {
-        bool override_success = override_path_compare_git_version(override, handle);
-        if(override_success)
-            log_info(__func__, "HIPBLASLT_TUNING_OVERRIDE_FILE is the correct setting.");
-        else
-            log_error(
-                __func__,
-                "The hipBLASLt git version and the override file git version are not the same.");
-    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,

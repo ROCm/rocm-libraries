@@ -26,6 +26,11 @@
  */
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 
+/* Mirrors _DEFAULT_WS_REPLICAS in the Python instance. */
+#ifndef ROCKE_WGRAD_DEFAULT_WS_REPLICAS
+#define ROCKE_WGRAD_DEFAULT_WS_REPLICAS 8
+#endif
+
 #include <cstdint> /* int64_t */
 #include <cstdio> /* snprintf */
 #include <cstring> /* strcmp, memset, memcpy */
@@ -67,6 +72,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.chiplet_num_xcds = 8;
     s.chiplet_chunk_size = 64;
     s.split_k = 1;
+    s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
     return s;
 }
 
@@ -121,31 +127,37 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
     /* split_k == 1 (and the -1 auto sentinel, which only ever resolves to >= 1):
-     *   plain store, always deterministic.
-     * split_k > 1 + two_stage (or force_deterministic, which the builder
-     *   promotes to two_stage at split_k > 1): workspace-reduce, deterministic.
-     * split_k > 1 without either: atomic adds, non-deterministic.
+     *   plain store, no atomics, deterministic.
+     * split_k > 1: non-deterministic, two_stage or not. The two-stage path is
+     *   NOT an exception. It used to be -- Stage 1 wrote one private slab per
+     *   K-slice and Stage 2 folded them in a fixed order -- but Stage 1 now
+     *   f32-atomic-adds into ws_replicas shared slabs, so the order in which a
+     *   group's slices land in a slab is scheduler-dependent and f32 addition
+     *   is not associative. Stage 2's fold over the replicas is ordered, which
+     *   does nothing for partial sums that were already reordered.
      * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
-     *   argument and the epilogue is always packed atomics. It can never be
-     *   promoted to two-stage -- both effective_two_stage_v and the builder's
-     *   promotion require sk > 1 -- so it is never deterministic, and
-     *   force_deterministic cannot make it so. Treating 0 as "<= 1" here would
-     *   tell a host that an atomic kernel produces reproducible dW. */
+     *   argument and the epilogue is always packed atomics. Treating 0 as
+     *   "<= 1" here would tell a host that an atomic kernel produces
+     *   reproducible dW. */
     if(s->split_k == 0)
         return false;
-    return (s->split_k <= 1) || s->two_stage || s->force_deterministic;
+    return s->split_k <= 1;
 }
 
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
-    if(!s->two_stage && !s->force_deterministic)
+    if(!s->two_stage)
         return 0;
     if(s->split_k <= 1)
         return 0;
     int wg_M = rocke_wgrad_conv_spec_wg_M(s);
     int wg_N = rocke_wgrad_conv_spec_wg_N(s);
     int groups = s->problem.groups > 0 ? s->problem.groups : 1;
-    return (size_t)groups * (size_t)s->split_k * (size_t)wg_M * (size_t)wg_N * sizeof(float);
+    /* R replica slabs per group, no split_k factor: a group's K-slices
+     * atomic-add on top of each other inside those slabs rather than each
+     * getting its own. Mirrors Python wgrad_two_stage_workspace_nbytes. */
+    int reps = s->ws_replicas > 0 ? s->ws_replicas : 1;
+    return (size_t)groups * (size_t)reps * (size_t)wg_M * (size_t)wg_N * sizeof(float);
 }
 
 /* wg_K_padded = ceil(wg_K / (tile_k * split_k)) * (tile_k * split_k) */
@@ -203,11 +215,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, pad{N}, spk{N}, spkauto  -- Python boolean flags */
+    /* flags: async, kouter, pad{N}, spk{N}/spkauto/spkrt, twostage, wsr{N} */
     char spk_flag[32] = {0};
     char pad_flag[32] = {0};
-    const char* flag_names[5];
-    int flag_on[5];
+    const char* flag_names[6];
+    int flag_on[6];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -251,18 +263,32 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     }
 
     /* Tag the EFFECTIVE two-stage flag, not the raw field.  The builder promotes
-     * force_deterministic to two-stage at split_k > 1 into a local
-     * (effective_two_stage) without writing back to spec->two_stage, so naming
+     * two_stage into a local (effective_two_stage) without writing back to
+     * spec->two_stage, so naming
      * off s->two_stage would emit a two-stage body -- which carries an extra
      * `ws` workspace pointer parameter and needs a Stage-2 reduce launch --
      * under a symbol identical to the split-K atomic kernel built from the same
-     * spec with force_deterministic=false.  That is both an ABI collision for a
+     * spec with two_stage=false.  That is both an ABI collision for a
      * cache keyed on the kernel name (same hazard the lds_k_pad comment above
      * describes) and a byte-identity break against Python, which promotes by
      * rewriting the spec before the IRBuilder is named. */
     flag_names[n_flags] = "twostage";
-    flag_on[n_flags] = (s->two_stage || (s->force_deterministic && s->split_k > 1)) ? 1 : 0;
+    flag_on[n_flags] = s->two_stage ? 1 : 0;
     n_flags++;
+
+    /* wsr<R>: same reasoning as gm/pad -- the replica count changes the scratch
+     * addressing and so the emitted body. Gated on two_stage as well as on the
+     * default, because there is no scratch at all on the atomic path; tagging
+     * it there renames every single-stage wgrad kernel over a knob its body
+     * never reads. Tracks the `twostage` flag above. */
+    char wsr_buf[32];
+    if(s->two_stage && s->ws_replicas > 1)
+    {
+        snprintf(wsr_buf, sizeof(wsr_buf), "wsr%d", s->ws_replicas);
+        flag_names[n_flags] = wsr_buf;
+        flag_on[n_flags] = 1;
+        n_flags++;
+    }
 
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
@@ -351,6 +377,21 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      "with split_k=1 there is nothing to reduce and two_stage is a no-op");
         return false;
     }
+    /* Mirrors Python is_valid_wgrad_spec / WgradConvSpec.validate(). Without
+     * this a C++-built spec with a zero or negative count is accepted, the
+     * emitter's `reps > 1` guards elide the slab term, and Stage 1 silently
+     * writes a single slab -- a layout Stage 2 (which validates the same field)
+     * will not fold. */
+    if(s->ws_replicas < 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "ws_replicas must be >= 1 (got %d); it is the number of scratch "
+                     "slabs a group's K-slices spread over",
+                     s->ws_replicas);
+        return false;
+    }
 
     /* split_k > 1 or split_k == 0 (runtime atomic) requires a MFMA arch
      * (ctx->atom != NULL at build time).
@@ -385,7 +426,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
          * The local per-group computation is deliberate: the shared
          * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
          * and is used for workspace sizing, so it is not interchangeable here. */
-        const bool effective_two_stage_gate = (s->two_stage || s->force_deterministic) && sk > 1;
+        const bool effective_two_stage_gate = s->two_stage && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
@@ -429,8 +470,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                              "wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
                              "<2 x dtype> atomic pairs are dword-aligned only on an even row, "
                              "and sv=1 leaves no partner); got wg_N=%lld, store_vec=%d "
-                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true (or "
-                             "force_deterministic=true) to reach split-K via the f32 "
+                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true "
+                             "to reach split-K via the f32 "
                              "workspace path, which emits no atomics.",
                              dt,
                              (long long)wg_N_v,
@@ -448,7 +489,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * the scattered MFMA layout, so it needs cshuffle's contiguous pairs.  This
      * is an atomic-epilogue constraint only, and there are two ways to not be
      * on it: at split_k == 1 the epilogue is a direct store, and under
-     * two_stage (or force_deterministic with split_k > 1) it is a
+     * two_stage (with split_k > 1) it is a
      * workspace store.  Neither emits packed atomics, so the default epilogue
      * is fine for both.  Guarding on sk rather than on dtype alone keeps the
      * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
@@ -457,10 +498,10 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(sk > 1 || sk == 0)
     {
         /* The `sk > 1` term applies to two_stage as well, not just to
-         * force_deterministic: the builder computes
+         * the builder computes
          * is_two_stage = split_k > 1 && two_stage, so at sk == 0 a two_stage
          * spec still lands on the atomic epilogue and must stay gated. */
-        bool effective_two_stage_v = (s->two_stage || s->force_deterministic) && sk > 1;
+        bool effective_two_stage_v = s->two_stage && sk > 1;
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
@@ -1171,18 +1212,20 @@ static void wgrad_a_load_override(rocke_ir_builder_t* b,
 // ---------------------------------------------------------------------------
 
 /*
- * Emit per-lane plain f32 stores to the workspace buffer for two_stage=True.
+ * Emit per-lane f32 atomic-adds into the scratch accumulator for two_stage=True.
  * Mirrors Python _emit_wgrad_workspace_store_epilogue.
  *
- * Each CTA (blockIdx.z = k_id) writes its partial f32 accumulator to its own
- * private slice of the workspace: ws_ptr[k_id * wg_M * wg_N + c_m * wg_N + c_n].
- * Because every k_id writes to a distinct, non-overlapping slice, no atomics are
- * needed.  Stage 2 (conv_wgrad_workspace_reduce) then reduces the slices
- * sequentially, guaranteeing bit-exact, deterministic output.
+ * Every CTA adds its partial into one of its group's R replica slabs:
+ *   ws_ptr[(group * R + blockIdx.z % R) * wg_M * wg_N + c_m * wg_N + c_n]
+ * so the reduction over split_k is done by the hardware atomics and Stage 2
+ * (conv_wgrad_workspace_reduce) only folds the R slabs and casts.  R > 1 exists
+ * because a dW-sized scratch is a few dozen cache lines and pointing every CTA
+ * at one slab serialises the atomics in L2.
  *
- * The output is always f32 regardless of dtype_d; the dtype conversion happens in
- * Stage 2.  Out-of-bounds elements are guarded by scf_if rather than a sentinel
- * offset (global_store to a sentinel would compute a real address and fault).
+ * The scratch is always f32 regardless of dtype_d; the dtype conversion happens
+ * in Stage 2.  The caller must zero the scratch first -- these are adds.
+ * Out-of-bounds elements are guarded by scf_if rather than a sentinel offset
+ * (an atomic to a sentinel would compute a real address and fault).
  */
 static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                                                 const rocke_conv_build_ctx_t* ctx,
@@ -1202,9 +1245,43 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
     rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
 
-    /* 2. k_id = block_id_z, slice_off -- Python: k_id = b.to_sgpr_u32(b.block_id_z()) */
-    rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
-    rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
+    /* 2. slab_off -- Python: slab index = group * R + (block_id_z % R), elided
+     *    entirely for the ungrouped R == 1 case so that path keeps its SSA
+     *    numbering. */
+    /* Every sub-expression is sequenced through a local: C++ leaves the
+     * evaluation order of call arguments unspecified, and the builder hands
+     * out SSA ids in call order, so an inline nest renumbers the module
+     * against Python (which evaluates left-to-right). The order below is
+     * Python's, statement for statement. */
+    const int reps = spec->ws_replicas;
+    const int slab_elems = wg_M * wg_N;
+    rocke_value_t* group_v = ctx->group_idx;
+    rocke_value_t* slab_idx = NULL;
+    if(group_v != NULL && reps > 1)
+    {
+        rocke_value_t* c_reps_a = rocke_b_const_i32(b, reps);
+        rocke_value_t* grp_term = rocke_b_mul(b, group_v, c_reps_a);
+        rocke_value_t* z = rocke_b_block_id_z(b);
+        rocke_value_t* c_reps_b = rocke_b_const_i32(b, reps);
+        rocke_value_t* rep_term = rocke_b_mod(b, z, c_reps_b);
+        slab_idx = rocke_b_add(b, grp_term, rep_term);
+    }
+    else if(group_v != NULL)
+    {
+        slab_idx = group_v;
+    }
+    else if(reps > 1)
+    {
+        rocke_value_t* z = rocke_b_block_id_z(b);
+        rocke_value_t* c_reps = rocke_b_const_i32(b, reps);
+        slab_idx = rocke_b_mod(b, z, c_reps);
+    }
+    rocke_value_t* slab_off = NULL;
+    if(slab_idx != NULL)
+    {
+        rocke_value_t* c_slab = rocke_b_const_i32(b, slab_elems);
+        slab_off = rocke_b_mul(b, slab_idx, c_slab);
+    }
 
     /* 3. Per-warp M/N offsets -- Python: warp_m_off = b.mul(warp_m_idx, ...) */
     rocke_value_t* warp_m_off
@@ -1268,7 +1345,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
                 rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* OOB guard: scf_if instead of sentinel -- global_store to a
+                /* OOB guard: scf_if instead of sentinel -- an atomic to a
                  * sentinel offset would compute a real address and fault. */
                 rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
                 rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
@@ -1277,9 +1354,10 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                 rocke_if_t if_op = rocke_b_scf_if(b, in_bounds);
                 rocke_b_region_enter(b, if_op.then_region);
                 {
-                    rocke_value_t* ws_off = rocke_b_add(
-                        b, slice_off, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n));
-                    rocke_b_global_store(b, ws_ptr, ws_off, val_f32, 4);
+                    rocke_value_t* ws_off = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n);
+                    if(slab_off != NULL)
+                        ws_off = rocke_b_add(b, slab_off, ws_off);
+                    rocke_b_global_atomic_add(b, ws_ptr, ws_off, val_f32, NULL);
                 }
                 rocke_b_region_leave(b);
             }
@@ -2268,11 +2346,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
     }
 
-    /* force_deterministic: promote to two_stage when split_k > 1.
-     * Use a local mutable copy so we do not mutate the caller's spec. */
     bool effective_two_stage = spec->two_stage;
-    if(spec->force_deterministic && split_k > 1)
-        effective_two_stage = true;
 
     bool is_split_k = (split_k > 1 || split_k == 0);
     bool split_k_runtime = (split_k == 0);
@@ -2352,8 +2426,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         memset(&ws_opts, 0, sizeof(ws_opts));
         ws_opts.noalias = true;
         ws_opts.noalias_set = true;
-        ws_opts.writeonly = true;
-        ws_opts.writeonly_set = true;
+        /* Not writeonly: an atomicrmw reads its target. */
         ws_opts.align = 16;
         ws_opts.align_set = true;
         ws_ptr = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ws_opts);

@@ -17,7 +17,7 @@
 // decomposes each fp32 operand into a (big, small) BF16 pair and runs three
 // BF16 MFMAs (big*big + big*small + small*big). The split is performed once
 // per Y_LOCAL in the input main loop and once per filter tap in the weight
-// prologue via fp32x8_to_bf16_pair; the main loop calls the overload
+// prologue via fp32xN_to_bf16_pair; the main loop calls the overload
 // mfma_16x16x32(bf16_pair_x8, bf16_pair_x8, fp32x4_t) in mfma_dispatch.h that
 // expands to the three BF16 MFMAs above. This keeps the per-MFMA-call cost
 // identical to FP16/BF16 8c and avoids repeating the fp32 -> bf16 split inside
@@ -119,11 +119,11 @@ struct GroupedDataTraits<DataType::tf32>
     static constexpr bool needs_lds_pack = false;
     static __device__ __forceinline__ mfma_operand_t to_mfma_operand(operand_t raw)
     {
-        return fp32x8_to_bf16_pair(raw);
+        return fp32xN_to_bf16_pair(raw);
     }
     static __device__ __forceinline__ mfma_operand_t zero_operand()
     {
-        return fp32x8_to_bf16_pair(fp32x8_t{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f});
+        return fp32xN_to_bf16_pair(fp32x8_t{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f});
     }
 };
 
@@ -629,7 +629,7 @@ __device__ void conv2d_grouped_8c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
                 issue_input_load(y + 1, tic);
 
             // Load input operand B and convert to mfma_operand_t (identity for
-            // fp16/bf16, fp32x8_to_bf16_pair for tf32). The conversion is the
+            // fp16/bf16, fp32xN_to_bf16_pair for tf32). The conversion is the
             // caller-side pre-split done once per Y_LOCAL, so the R-loop reuses
             // the prebuilt operand without recomputing.
             operand_t input_raw = *reinterpret_cast<const operand_t*>(
@@ -768,7 +768,7 @@ __global__ void conv2d_grouped_8c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -822,7 +822,7 @@ public:
     // 8c kernel does not yet support Dgrad with stride=2: the Toeplitz 16x32
     // geometry would need a different matrix size for the stride=2 -> dilation=2
     // dgrad path. This restriction applies to all dtypes (fp16/bf16/tf32).
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(!GroupedConvKernel::is_applicable(par))
             return false;
@@ -831,7 +831,7 @@ public:
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -854,7 +854,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         const int out_q          = (cfg_.direction == Direction::Dgrad) ? par.w : par.q;
         const int output_block_q = BLOCK_Q / cfg_.stride;
