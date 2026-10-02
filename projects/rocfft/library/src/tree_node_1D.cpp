@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -649,7 +649,11 @@ void CC1DNode::AssignParams_internal()
     // performance.  But if dist is 1 then we can reorganize the
     // dimensions so the kernels use the batch dimension as the
     // adjacent one.
-    if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP)
+    //
+    // Fused Bluestein is excluded: its stages' Bluestein strides and dists
+    // are set against the original geometry, which the reshape would break.
+    if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP
+       && typeBlue != BT_MULTI_KERNEL_FUSED)
     {
         // hack the plan to put batch as second dimension since it moves
         // faster than the actual second dimension
