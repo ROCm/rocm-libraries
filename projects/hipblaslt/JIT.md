@@ -472,7 +472,14 @@ same solutions at once; they publish under the library lock, which keeps one
 entry and one index per solution, so every process returns the same indices.
 An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
 rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
-reports an error.
+reports an error. Fused GEMM and all-to-all, in builds with
+`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, is not implemented: the JIT ProblemType has
+no fused all-to-all, so JIT neither looks such a problem up nor generates or
+publishes a solution for it. The query reports one lookup failure per problem;
+in fallback mode the pre-tuned sources still answer it, and in forced mode it
+returns no results. A JIT algorithm passed for a fused problem fails the
+support check, because its solution requires a problem without fused
+all-to-all.
 
 **Stream capture.** `hipblasLtMatmul` without an algorithm checks its stream
 with `hipStreamIsCapturing`; the null and legacy streams never capture. While
