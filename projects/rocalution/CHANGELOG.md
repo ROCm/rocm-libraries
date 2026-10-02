@@ -5,6 +5,11 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Resolved issues
+* Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
+
+## (Unreleased) rocALUTION 4.1.1
+
+### Resolved issues
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
 ## (Unreleased) rocALUTION 4.1.1
