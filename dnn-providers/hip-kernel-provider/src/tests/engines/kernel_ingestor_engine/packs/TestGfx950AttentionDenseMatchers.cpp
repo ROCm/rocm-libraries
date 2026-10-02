@@ -1125,6 +1125,21 @@ TEST(TestGfx950AttentionDenseGraphMatch, ServesTheDeprecatedBottomRightBooleanAt
     EXPECT_FALSE(matchesKernel(spec, unmasked));
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalMaskWithBottomRightAlignmentAtUnequalSeqLens)
+{
+    // causal_mask=true with diagonal_alignment=BOTTOM_RIGHT is bottom-right causal (the
+    // chunked-prefill spelling in dnn-benchmarking's cuDNN traces). The kernel is
+    // top-left, so at Sq != Skv it must decline; reading the flag as top-left would
+    // serve a short chunk with only the first Sq keys.
+    GraphSpec spec;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = std::nullopt;
+    spec.causalMaskDeprecated = true;
+    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    spec.seqLenKv = SEQ * 2;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // Faults and malformed input
 // ---------------------------------------------------------------------------

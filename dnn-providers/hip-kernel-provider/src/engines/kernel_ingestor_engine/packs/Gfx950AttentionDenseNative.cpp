@@ -218,10 +218,10 @@ enum class MaskType : int
  */
 std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
-    const bool topLeftDeprecated = attributes.causal_mask();
+    const bool causalDeprecated = attributes.causal_mask();
     const bool bottomRightDeprecated = attributes.causal_mask_bottom_right();
 
-    if(topLeftDeprecated && bottomRightDeprecated)
+    if(causalDeprecated && bottomRightDeprecated)
     {
         return std::nullopt;
     }
@@ -247,9 +247,14 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return std::nullopt;
     }
 
-    if(topLeftDeprecated)
+    // causal_mask takes its corner from diagonal_alignment (TOP_LEFT unless the graph
+    // set BOTTOM_RIGHT); causal_mask_bottom_right is always bottom-right. Same rule as
+    // asm_sdpa_engine's getMaskType and both SDPA references.
+    if(causalDeprecated)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
+        return attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT
+                   ? MaskType::BOTTOM_RIGHT_CAUSAL
+                   : MaskType::TOP_LEFT_CAUSAL;
     }
     if(bottomRightDeprecated)
     {

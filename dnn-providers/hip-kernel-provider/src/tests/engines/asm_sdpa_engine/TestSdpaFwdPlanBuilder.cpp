@@ -805,9 +805,11 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 //
 // These tests exercise the shared mask-precedence policy directly through
 // plan_utils::getMaskType rather than through isApplicable. A deprecated causal
-// boolean fixes the diagonal and its alignment but keeps a real left_bound
-// (a causal sliding window). Setting both deprecated booleans at once, or a
-// boolean together with a positive right_bound, throws. The policy is
+// boolean fixes the diagonal but keeps a real left_bound (a causal sliding
+// window); causal_mask takes its corner from diagonal_alignment and
+// causal_mask_bottom_right is always bottom-right. Setting both deprecated
+// booleans at once, or a boolean together with a positive right_bound, throws.
+// The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so testing the helper keeps the assertions meaningful on
 // any device — including this gfx950 box. Driving the policy through
@@ -1002,6 +1004,25 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, CausalMaskTakesBottomRightAlignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask=true with diagonal_alignment=BOTTOM_RIGHT (dnn-benchmarking's
+    // chunked-prefill spelling) is bottom-right causal. Read as top-left, a short
+    // chunk at the end of a long cache would attend only to the first Sq keys.
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsSlidingWindow)

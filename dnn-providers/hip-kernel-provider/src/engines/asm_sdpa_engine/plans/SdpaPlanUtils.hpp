@@ -88,11 +88,9 @@ inline MaskType classifyBand(int64_t left, int64_t right, bool topLeft)
 // Two sources can describe the mask: the modern left_bound / right_bound /
 // diagonal_alignment trio, and the deprecated causal_mask /
 // causal_mask_bottom_right booleans. A deprecated boolean fixes the diagonal
-// (right bound 0) and its alignment, overriding diagonal_alignment, but it keeps
-// a real left_bound: causal_mask plus left_bound is a causal sliding window, as
-// cuDNN reads set_causal_mask(true) next to a window. This matches the CPU and
-// GPU SDPA references (extractDiagonalBandParams). Without a deprecated boolean
-// the trio is authoritative.
+// (right bound 0), but it keeps a real left_bound: causal_mask plus left_bound
+// is a causal sliding window, as cuDNN reads set_causal_mask(true) next to a
+// window. Without a deprecated boolean the trio is authoritative.
 //
 // left_bound counts like flash-attn's window_size_left: with the causal diagonal,
 // left_bound L keeps L + 1 keys per row, the diagonal included. cuDNN's
@@ -105,6 +103,19 @@ inline MaskType classifyBand(int64_t left, int64_t right, bool topLeft)
 // boolean would otherwise silently override with 0 (cuDNN's Python binding and
 // the gfx950 dense pack reject that combination as well). An explicit
 // right_bound of -1 or 0 next to a boolean is accepted.
+//
+// Alignment: causal_mask_bottom_right always means bottom-right. causal_mask
+// means causal with the alignment diagonal_alignment gives, which is top-left
+// unless the graph sets BOTTOM_RIGHT. The flatbuffer cannot tell an unset
+// alignment from TOP_LEFT, so a BOTTOM_RIGHT next to causal_mask was always
+// chosen on purpose, and it is the only way to read it that uses it. cuDNN's
+// C++ frontend has no causal boolean (set_causal_mask writes right_bound=0
+// and TOP_LEFT), so set_causal_mask(true) followed by
+// set_diagonal_alignment(BOTTOM_RIGHT) is bottom-right causal there too.
+// Both rules match the CPU and GPU SDPA references (extractDiagonalBandParams).
+//
+// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
+// helper only resolves which source wins for dispatch.
 //
 // Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
 // fields as plain bool defaulting to false, with no has_*() accessor.
@@ -154,7 +165,8 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
     if(causalDeprecated || bottomRightDeprecated)
     {
         mask.right = 0;
-        mask.topLeft = causalDeprecated;
+        mask.topLeft
+            = causalDeprecated && attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT;
     }
     else
     {

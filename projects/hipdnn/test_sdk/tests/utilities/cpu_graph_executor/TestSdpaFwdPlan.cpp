@@ -776,6 +776,70 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
         << "A left bound of 2 on Sq=Skv=8 should differ from plain causal attention.";
 }
 
+TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskHonoursBottomRightAlignment)
+{
+    // causal_mask=true with diagonal_alignment=BOTTOM_RIGHT is bottom-right causal. The
+    // alignment field is the only thing that can say BOTTOM_RIGHT there, so reading the
+    // flag as top-left would throw it away. dnn-benchmarking's chunked-prefill traces
+    // spell bottom-right this way (Sq=512, Skv=65536). Sq != Skv here so the corners
+    // differ.
+    const std::vector<int64_t> qDims = {1, 2, 2, 8};
+    const std::vector<int64_t> kvDims = {1, 2, 4, 8};
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> deprecatedBundle(qDims, kvDims, kvDims, seed);
+    SdpaFwdTensorBundle<float> bottomRightBundle(qDims, kvDims, kvDims, seed);
+    SdpaFwdTensorBundle<float> topLeftBundle(qDims, kvDims, kvDims, seed);
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    auto run = [&planBuilder](SdpaFwdTensorBundle<float>& bundle,
+                              bool causalMask,
+                              std::optional<int64_t> rightBound,
+                              hipdnn_frontend::DiagonalAlignment alignment) {
+        auto graphTuple = buildSdpaFwdGraph(bundle,
+                                            DataType::FLOAT,
+                                            causalMask,
+                                            /*causalMaskBottomRight=*/false,
+                                            /*leftBound=*/std::nullopt,
+                                            rightBound,
+                                            alignment);
+        auto [bin, err] = std::get<0>(graphTuple)->to_binary();
+        ASSERT_TRUE(err.is_good()) << err.get_message();
+        const GraphWrapper wrapper(bin.data(), bin.size());
+        auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
+        const auto* attrs = wrapper.getNode(0).attributes_as_SdpaAttributes();
+        std::unordered_map<int64_t, void*> vp;
+        vp[attrs->q_tensor_uid()] = bundle.qTensor.memory().hostData();
+        vp[attrs->k_tensor_uid()] = bundle.kTensor.memory().hostData();
+        vp[attrs->v_tensor_uid()] = bundle.vTensor.memory().hostData();
+        vp[attrs->o_tensor_uid()] = bundle.oTensor.memory().hostData();
+        plan->execute(vp);
+    };
+
+    run(deprecatedBundle,
+        /*causalMask=*/true,
+        /*rightBound=*/std::nullopt,
+        hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT);
+    run(bottomRightBundle,
+        /*causalMask=*/false,
+        /*rightBound=*/0,
+        hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT);
+    run(topLeftBundle,
+        /*causalMask=*/false,
+        /*rightBound=*/0,
+        hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+
+    const CpuFpReferenceValidation<float> exact(0.0f, 0.0f);
+    EXPECT_TRUE(exact.allClose(deprecatedBundle.oTensor, bottomRightBundle.oTensor))
+        << "causal_mask=true with BOTTOM_RIGHT alignment should equal rightBound=0, "
+           "BOTTOM_RIGHT.";
+    // Control: the corners must differ at Sq != Skv, or the check above proves nothing.
+    EXPECT_FALSE(exact.allClose(deprecatedBundle.oTensor, topLeftBundle.oTensor))
+        << "Top-left and bottom-right causal should differ at Sq=2, Skv=4.";
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
 {
     // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). The dispatcher

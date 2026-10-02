@@ -888,9 +888,11 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 //
 // These tests exercise the shared mask-precedence policy directly through
 // plan_utils::resolveMask rather than through isApplicable. A deprecated causal
-// boolean fixes the diagonal and its alignment but keeps a real left_bound
-// (a causal sliding window). Setting both deprecated booleans at once, or a
-// boolean together with a positive right_bound, throws. The policy is
+// boolean fixes the diagonal but keeps a real left_bound (a causal sliding
+// window); causal_mask takes its corner from diagonal_alignment and
+// causal_mask_bottom_right is always bottom-right. Setting both deprecated
+// booleans at once, or a boolean together with a positive right_bound, throws.
+// The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -1045,13 +1047,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTog
     EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, CausalMaskWithLeftBoundIsTopLeftSlidingWindow)
+TEST_F(TestSdpaBwdPlanBuilder, CausalMaskWithLeftBoundIsSlidingWindowAtTheAlignedCorner)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // causal_mask=true plus left_bound is a causal sliding window, as cuDNN reads
     // set_causal_mask(true) next to a window. The boolean fixes the diagonal and
-    // its alignment, overriding BOTTOM_RIGHT, and keeps left_bound. Serving it as
+    // keeps left_bound; the corner comes from diagonal_alignment. Serving it as
     // plain causal would widen the window to the full triangle with no error.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/true,
@@ -1065,7 +1067,7 @@ TEST_F(TestSdpaBwdPlanBuilder, CausalMaskWithLeftBoundIsTopLeftSlidingWindow)
     EXPECT_EQ(mask.type, plan_utils::MaskType::SLIDING_WINDOW);
     EXPECT_EQ(mask.left, 64);
     EXPECT_EQ(mask.right, 0);
-    EXPECT_TRUE(mask.topLeft);
+    EXPECT_FALSE(mask.topLeft);
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
@@ -1103,6 +1105,23 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, CausalMaskTakesBottomRightAlignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask=true with diagonal_alignment=BOTTOM_RIGHT is bottom-right causal.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsBottomRightSlidingWindow)

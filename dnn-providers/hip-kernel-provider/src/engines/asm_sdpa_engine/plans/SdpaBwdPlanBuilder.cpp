@@ -1179,10 +1179,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     if(maskType == MaskType::SLIDING_WINDOW)
     {
         // Resolved bounds, not the raw attributes: a deprecated causal boolean
-        // plus left_bound is a window whose right bound and alignment come from
-        // the boolean, not from right_bound / diagonal_alignment. resolveMaskFor
-        // has already narrowed them (a bound that spans the whole sequence is -1),
-        // so an int64 bound never wraps in the int32 kernel field.
+        // plus left_bound is a window whose right bound comes from the boolean,
+        // not from right_bound (see plan_utils::resolveMask for the alignment).
+        // resolveMaskFor has already narrowed the bounds (a bound that spans the
+        // whole sequence is -1), so an int64 bound never wraps in the int32
+        // kernel field.
         params.windowLeft = static_cast<int32_t>(resolvedMask.left);
         params.windowRight = static_cast<int32_t>(resolvedMask.right);
         params.topLeftAlignment = resolvedMask.topLeft;

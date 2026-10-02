@@ -306,6 +306,75 @@ TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow
         << "A left bound of 2 on Sq=Skv=8 should differ from plain causal attention";
 }
 
+// causal_mask=true with diagonal_alignment=BOTTOM_RIGHT is bottom-right causal: the
+// alignment field is the only thing that can say BOTTOM_RIGHT there, so it must be
+// honoured (dnn-benchmarking's chunked-prefill traces spell bottom-right this way). Sq=4,
+// Skv=8, so the two corners differ: top-left would let query 0 see one key, bottom-right
+// lets it see five.
+TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskHonoursBottomRightAlignment)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+
+    const std::vector<int64_t> qDims = {1, 2, 4, 16};
+    const std::vector<int64_t> kvDims = {1, 2, 8, 16};
+
+    SdpaAttributesT attrs;
+    attrs.causal_mask = true;
+    attrs.diagonal_alignment = DiagonalAlignment::BOTTOM_RIGHT;
+    auto graphBuilder = createSdpaFwdGraph(
+        Q_UID, K_UID, V_UID, O_UID, qDims, kvDims, kvDims, qDims, DataType::FLOAT, attrs);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(qDims);
+    Tensor<float> k(kvDims);
+    Tensor<float> v(kvDims);
+    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
+    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
+    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+
+    Tensor<float> oPlan(qDims);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    auto direct = [&](bool topLeftAlignment) {
+        Tensor<float> out(qDims);
+        GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
+                                                                     k,
+                                                                     v,
+                                                                     out,
+                                                                     std::nullopt,
+                                                                     /*attnMask=*/nullptr,
+                                                                     /*leftBound=*/-1,
+                                                                     /*rightBound=*/0,
+                                                                     topLeftAlignment);
+        return out;
+    };
+    auto oBottomRight = direct(/*topLeftAlignment=*/false);
+    auto oTopLeft = direct(/*topLeftAlignment=*/true);
+
+    const float tolerance = 1e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oBottomRight, oPlan))
+        << "causal_mask=true with BOTTOM_RIGHT alignment should run bottom-right causal";
+    // Control: the corners must actually differ at Sq != Skv.
+    EXPECT_FALSE(validation.allClose(oTopLeft, oPlan))
+        << "Top-left and bottom-right causal should differ at Sq=4, Skv=8";
+}
+
 TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
 {
     SKIP_IF_NO_DEVICES();
