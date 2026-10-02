@@ -141,6 +141,7 @@ later runs reuse them. `setup_env.py` passes the environment through to pip. Fin
 
 ```bash
 export PIP_CACHE_DIR=/shared/writable/pip-cache   # every later pip run reuses downloads
+TORCH_INDEX_URL=${TORCH_INDEX_URL:-https://nightly.repo.amd.com/rocm/whl-next/}
 WS=/absolute/path/to/bench-workspace
 python3 -m venv "$WS/.venv"
 nohup "$WS/.venv/bin/python" -m pip install --pre --index-url "$TORCH_INDEX_URL" \
@@ -149,9 +150,9 @@ nohup "$WS/.venv/bin/python" -m pip install --pre --index-url "$TORCH_INDEX_URL"
 # python3 setup_env.py --workspace "$WS" --torch-mode existing -y
 ```
 
-Use the index `setup_env.py` would use for `--torch-mode rocm` (its default or your
-`--torch-index-url`). Do not run setup in another mode on that workspace while it
-downloads. To reuse
+The recipe defaults to the recommended ROCm nightly index, `whl-next`; `setup_env.py`'s
+built-in default is `whl-multi-arch`. Set `TORCH_INDEX_URL` first to use another index.
+Do not run setup in another mode on that workspace while it downloads. To reuse
 exact wheels without the network, `pip download` them once into a shared directory and
 install with `--no-index --find-links <dir>` (or `PIP_FIND_LINKS=<dir>`).
 
