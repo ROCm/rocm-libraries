@@ -68,6 +68,15 @@ Test roots hold no family folder today. The first family folder added under
 `test_descriptors/` must also gate the test binary's cases: a fixture root that goes
 dormant still leaves cases in that binary that expect its descriptors.
 
+A pack wipes its `OUT_ROOT` before refilling it, so nothing else may write there with a
+rule of its own: the next repack deletes it and no edge restores it. Files that must ship
+in a packed tree without being packed — the ASM SDPA engine's loose L1 models
+(`asm_sdpa/predict_engine/<arch>/`), declared as `HIPKERNELPROVIDER_PRODUCT_STAGE_FILES`
+in the provider's `CMakeLists.txt` — are passed as `STAGE_FILES <src> <dest>` pairs to
+`hkp_wire_pack_target()`, which copies them inside the pack command, after the packer
+and before the stamp, with each `<src>` an input. With production packaging dormant the
+provider stages and installs them itself.
+
 Two rules govern the walk:
 
 - **Hidden paths are skipped, and said so.** A dot-prefixed path segment or filename is
