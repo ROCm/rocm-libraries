@@ -1041,8 +1041,6 @@ def buildAndTest(Map conf=[:]){
         def retimage
         def arch = check_arch_name()
 
-        if(arch == "gfx1250"){image = "${env.CK_DOCKERHUB}:ck_ub24.04_gfx1250_ffm"}
-
         setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
         try {
             (retimage, image) = pullImage(conf)
