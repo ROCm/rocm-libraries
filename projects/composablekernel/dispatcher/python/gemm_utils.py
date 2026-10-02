@@ -2688,6 +2688,11 @@ def expand_sweep(
         # 12. The previous "per-wave repeat must be a power of two" rule was too
         # broad and needlessly dropped 90 valid configs. The "default" epilogue
         # stores directly and is exempt.
+        # Match TileConfig.is_valid(): the K block must divide across all K waves.
+        if variant == "stream_k":
+            k_div = wk * wtk
+            if k_div <= 0 or tk < k_div or tk % k_div != 0:
+                continue
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
