@@ -3124,10 +3124,16 @@ Tests:
 #     out-of-bounds write fails the test, as does an element never written.
 # fast_check requires integer_exact. It also models the rounding of results too
 # large for a 16-bit output, so 16-bit types can use K above 256 here.
+#
+# Runtimes below were measured on gfx942 (MI300A) with all fast_check cases in one
+# process: about 75 s for the pre_checkin cases and 260 s for the nightly cases.
+# A large case run on its own can take several seconds longer, because its device
+# memory is allocated fresh instead of reused.
 ###############################################################################
 
 # Both checks on the same results: they must agree. Covers every transpose, both
 # integer_exact alpha/beta pairs, padded leading dimensions and strided batches.
+# Runtime on gfx942: 48 cases, about 48 s.
 - name: matmul_fast_check_matches_unit_check
   category: pre_checkin
   function:
@@ -3146,6 +3152,7 @@ Tests:
 # Both checks with the epilogue fast_check supports (bias and scaleAlpha_vector),
 # and with C and D sharing memory, where D's padding must keep C's poison value.
 # lda equals A's row count here; see the padded-lda case below.
+# Runtime on gfx942: 8 cases, under 1 s.
 - name: matmul_fast_check_matches_unit_check_epilogue
   category: pre_checkin
   function:
@@ -3168,6 +3175,7 @@ Tests:
 # The same with a padded lda. The CPU reference applies scaleAlpha_vector to the
 # wrong rows of A when lda exceeds A's row count (ROCM-32062), so unit_check
 # fails a GPU result fast_check accepts. Quarantined in known_bugs.yaml.
+# Runtime on gfx942: 8 cases; skipped while quarantined.
 - name: matmul_fast_check_epilogue_padded_lda_ROCM32062
   category: pre_checkin
   function:
@@ -3185,6 +3193,7 @@ Tests:
   unit_check: 1
   fast_check: 1
 
+# Runtime on gfx942: 8 cases, about 1 s.
 - name: matmul_fast_check_matches_unit_check_c_equal_d
   category: pre_checkin
   function:
@@ -3204,6 +3213,7 @@ Tests:
 # The size_t index-overflow sweep with fast_check alone, in all three precisions.
 # matmul_size_t_index_overflow_hpa above must use rand_int because integer_exact
 # with unit_check caps 16-bit K at 256; fast_check removes that cap.
+# Runtime on gfx942: 36 cases, about 24 s.
 - name: matmul_fast_check_size_t_index_overflow
   category: pre_checkin
   function:
@@ -3222,6 +3232,7 @@ Tests:
   gpu_arch: '9(0a|42|50)'
 
 # The ROCM-26455 shape and epilogue with fast_check alone.
+# Runtime on gfx942: 8 cases, about 2 s.
 - name: matmul_fast_check_size_t_output_overflow_epilogue
   category: pre_checkin
   function:
@@ -3244,6 +3255,7 @@ Tests:
 # Output element offsets above 2^32 (32-bit unsigned wrap), and a batch base
 # offset above 2^32: 3 batches with stride 2^31 + 2 put batch 2 at element
 # 4,294,967,300.
+# Runtime on gfx942: 4 cases, about 1 s.
 - name: matmul_fast_check_offset_above_2_32
   category: nightly
   function:
@@ -3258,6 +3270,7 @@ Tests:
   fast_check: 1
   gpu_arch: '9(0a|42|50)'
 
+# Runtime on gfx942: 4 cases, about 2 s.
 - name: matmul_fast_check_batch_offset_above_2_32
   category: nightly
   function:
@@ -3276,6 +3289,7 @@ Tests:
   gpu_arch: '9(0a|42|50)'
 
 # Large shapes with partial tiles in every dimension.
+# Runtime on gfx942: 8 cases, about 10 s.
 - name: matmul_fast_check_large
   category: nightly
   function:
@@ -3288,6 +3302,7 @@ Tests:
   unit_check: 0
   fast_check: 1
 
+# Runtime on gfx942: 16 cases, about 15 s.
 - name: matmul_fast_check_large_16bit
   category: nightly
   function:
@@ -3309,6 +3324,7 @@ Tests:
 # there dropped the last stores without an error. Every offered solution runs,
 # because the defect is specific to kernels with MacroTile1 = 256. The D sentinel
 # reports the dropped stores as elements never written.
+# Runtime on gfx942: 1 case covering 1,093 solutions, about 144 s.
 - name: matmul_fast_check_store_extent_ROCM31016
   category: nightly
   function:
@@ -3330,6 +3346,7 @@ Tests:
 # ldc = ldd = 1049100 output-overflow shape. An indexing defect is usually specific
 # to one kernel, so a check of only the top pick misses it once a retune changes
 # that pick.
+# Runtime on gfx942: 2 cases covering every solution, about 88 s.
 - name: matmul_fast_check_size_t_output_overflow_all_solutions
   category: nightly
   function:

@@ -1,10 +1,13 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tests for the fast_check verifier in clients/common/include/fast_check.hpp. The FastCheck suite
-// is host-only: it builds small integer GEMM problems on the CPU, computes D exactly, injects a
-// fault, and checks that fast_check reports it. The FastCheckDevice suite exercises the padding
-// poison and scan kernels on small device buffers and launches no hipBLASLt kernels.
+// Tests for the fast_check verifier in clients/common/include/fast_check.hpp. The
+// FastCheck_pre_checkin suite is host-only: it builds small integer GEMM problems on the CPU,
+// computes D exactly, injects a fault, and checks that fast_check reports it. The
+// FastCheckDevice_pre_checkin suite exercises the padding poison, scan and probe-sum kernels on
+// small device buffers and launches no hipBLASLt kernels. The _pre_checkin suffix puts both suites
+// in the standard test tier, which selects tests by name. Together they take about 0.5 s on
+// gfx942.
 
 #include <gtest/gtest.h>
 
@@ -167,7 +170,7 @@ namespace
 
     // Guards against false failures: a correct D must pass for every transpose combination, with
     // alpha, beta, scaleAlpha_vector, bias and strided batches all in play.
-    TEST(FastCheck, correct_result_passes_all_transposes)
+    TEST(FastCheck_pre_checkin, correct_result_passes_all_transposes)
     {
         for(bool ta : {false, true})
             for(bool tb : {false, true})
@@ -180,7 +183,7 @@ namespace
     }
 
     // Fails if the row or column probe skips any element, or if a mismatch is not located.
-    TEST(FastCheck, single_wrong_element_is_found_and_located)
+    TEST(FastCheck_pre_checkin, single_wrong_element_is_found_and_located)
     {
         HostProblem hp = default_problem();
         hp.d(1, 17, 11) += 1;
@@ -196,7 +199,7 @@ namespace
 
     // A plain checksum (all-ones probe) misses errors that sum to zero within a row; the random
     // probe does not. Fails if the probe vector degenerates to constant entries.
-    TEST(FastCheck, errors_that_cancel_in_a_plain_row_sum_are_found)
+    TEST(FastCheck_pre_checkin, errors_that_cancel_in_a_plain_row_sum_are_found)
     {
         HostProblem hp = default_problem();
         hp.d(0, 5, 3) += 1;
@@ -207,7 +210,7 @@ namespace
     }
 
     // Models an off-by-one row index in the store: every column of row i holds row i+1's value.
-    TEST(FastCheck, row_shifted_by_one_is_found)
+    TEST(FastCheck_pre_checkin, row_shifted_by_one_is_found)
     {
         HostProblem hp = default_problem();
         for(int64_t j = 0; j < hp.N; j++)
@@ -217,7 +220,7 @@ namespace
     }
 
     // Models a wrong column base pointer: column 8 is written with column 7's values.
-    TEST(FastCheck, column_duplicated_from_neighbor_is_found)
+    TEST(FastCheck_pre_checkin, column_duplicated_from_neighbor_is_found)
     {
         HostProblem hp = default_problem();
         for(int64_t i = 0; i < hp.M; i++)
@@ -227,7 +230,7 @@ namespace
     }
 
     // An element still holding the NaN sentinel must be reported directly.
-    TEST(FastCheck, non_finite_element_is_reported)
+    TEST(FastCheck_pre_checkin, non_finite_element_is_reported)
     {
         HostProblem hp       = default_problem();
         uint32_t    sentinel = uint32_t(fast_check_sentinel_bits(HIP_R_32F));
@@ -239,7 +242,7 @@ namespace
 
     // The probe and the expected-value terms must use C only when beta is nonzero, and must not
     // read C at all otherwise (C may be uninitialized when beta == 0).
-    TEST(FastCheck, beta_zero_ignores_c)
+    TEST(FastCheck_pre_checkin, beta_zero_ignores_c)
     {
         HostProblem hp(16, 9, 5, 1, false, true, 2.f, 0.f, false, false);
         for(auto& v : hp.C)
@@ -250,7 +253,7 @@ namespace
 
     // bf16 holds integers exactly only below 256. A correct kernel stores the rounded value of a
     // larger result, which must pass; a stored value that is not the correct rounding must fail.
-    TEST(FastCheck, rounding_above_the_exact_range_is_modelled)
+    TEST(FastCheck_pre_checkin, rounding_above_the_exact_range_is_modelled)
     {
         const int64_t             M = 4, N = 3, K = 2;
         std::vector<float>        A = {100, 100, 1, 1, 100, 100, 1, 1}; // M x K
@@ -284,7 +287,7 @@ namespace
         EXPECT_NE(res_wrong.message.find("row 0, col 0"), std::string::npos) << res_wrong.message;
     }
 
-    TEST(FastCheck, non_integer_alpha_is_rejected)
+    TEST(FastCheck_pre_checkin, non_integer_alpha_is_rejected)
     {
         HostProblem hp = default_problem();
         auto        p  = hp.problem();
@@ -296,7 +299,7 @@ namespace
 
     // The placement record must flag a buffer that crosses a 4 GiB boundary, give the boundary,
     // and leave buffers that stay inside one 4 GiB window unflagged.
-    TEST(FastCheck, placement_record_flags_4gib_crossings)
+    TEST(FastCheck_pre_checkin, placement_record_flags_4gib_crossings)
     {
         const uint64_t four_gib = uint64_t(1) << 32;
         auto           at = [](uint64_t a) { return reinterpret_cast<const void*>(uintptr_t(a)); };
@@ -320,7 +323,7 @@ namespace
 
     // The sentinel must be a NaN wherever the type has one, so an unwritten element is non-finite.
     // FNUZ fp8 has a single NaN, 0x80, which all-ones bytes are not.
-    TEST(FastCheck, sentinel_is_nan_where_the_type_has_one)
+    TEST(FastCheck_pre_checkin, sentinel_is_nan_where_the_type_has_one)
     {
         EXPECT_EQ(fast_check_sentinel_bits(HIP_R_32F), 0xffffffffu);
         EXPECT_EQ(fast_check_sentinel_bits(HIP_R_16BF), 0xffffu);
@@ -336,7 +339,7 @@ namespace
         EXPECT_EQ(fast_check_sentinel_bits(HIP_R_32I), 0x80000000u);
     }
 
-    TEST(FastCheck, probe_entries_are_nonzero_residues_and_depend_on_seed)
+    TEST(FastCheck_pre_checkin, probe_entries_are_nonzero_residues_and_depend_on_seed)
     {
         int differ = 0;
         for(uint64_t i = 0; i < 1000; i++)
@@ -372,7 +375,7 @@ namespace
 
     // The device pass must reach the same verdict as the host pass, for a correct D and for each
     // fault, and must locate the fault the same way.
-    TEST(FastCheckDevice, device_pass_agrees_with_host_pass)
+    TEST(FastCheckDevice_pre_checkin, device_pass_agrees_with_host_pass)
     {
         struct Fault
         {
@@ -425,7 +428,7 @@ namespace
 
     // bf16 results above 256 take the device pass's per-element path: a correctly rounded value
     // passes and a wrong one fails with its location.
-    TEST(FastCheckDevice, device_pass_models_bf16_rounding)
+    TEST(FastCheckDevice_pre_checkin, device_pass_models_bf16_rounding)
     {
         const int64_t             M = 4, N = 3, K = 2;
         std::vector<float>        A = {100, 100, 1, 1, 100, 100, 1, 1};
@@ -459,7 +462,7 @@ namespace
 
     // fp8 outputs are not converted on the device; the device call copies D and uses the host
     // pass, and must still find a wrong element.
-    TEST(FastCheckDevice, fp8_output_falls_back_to_the_host_pass)
+    TEST(FastCheckDevice_pre_checkin, fp8_output_falls_back_to_the_host_pass)
     {
         HostProblem hp(24, 10, 2, 1, false, false, 1.f, 0.f, false, false); // |D| <= 8
         std::vector<hipblaslt_f8_fnuz> d8(hp.D.size());
@@ -530,7 +533,7 @@ namespace
 
     // Poison must cover all padding (column tails, batch gap, tail after the last batch) and
     // leave the region untouched.
-    TEST(FastCheckDevice, poison_fills_exactly_the_padding)
+    TEST(FastCheckDevice_pre_checkin, poison_fills_exactly_the_padding)
     {
         DeviceMatrix       m;
         std::vector<float> h(DeviceMatrix::total, 1.f);
@@ -549,7 +552,7 @@ namespace
 
     // A write into padding must be reported with its offset, in the poisoned (c_equal_d) mode and
     // in the sentinel mode.
-    TEST(FastCheckDevice, scan_reports_out_of_bounds_writes)
+    TEST(FastCheckDevice_pre_checkin, scan_reports_out_of_bounds_writes)
     {
         DeviceMatrix m;
         // Offset 36 is batch 1, row 6, col 0: column padding of batch 1.
@@ -587,7 +590,7 @@ namespace
     }
 
     // An element of the region that still holds the sentinel was never stored by the kernel.
-    TEST(FastCheckDevice, scan_reports_unwritten_elements)
+    TEST(FastCheckDevice_pre_checkin, scan_reports_unwritten_elements)
     {
         DeviceMatrix m;
         fast_check_fill_sentinel_device(m.d, HIP_R_32F, DeviceMatrix::total, 0);
@@ -608,7 +611,7 @@ namespace
     // Integer outputs saturate, and their sentinel is a valid value. A correct saturated result
     // must pass; a wrong saturated value, and an element still holding the sentinel where the
     // correct value is -1, must both fail, on the host pass and on the device pass.
-    TEST(FastCheckDevice, integer_output_saturation_and_sentinel)
+    TEST(FastCheckDevice_pre_checkin, integer_output_saturation_and_sentinel)
     {
         // D = A * B with int8 data, an int32 accumulator and an int8 output. With B = {1, 1} the
         // exact results are 200, -200, -1 and 5; the first two saturate to 127 and -128.
@@ -652,7 +655,7 @@ namespace
 
     // With the FNUZ sentinel (0x80, a NaN), the device scan reports an unwritten element of an
     // FNUZ fp8 output. An all-ones sentinel is a valid FNUZ value and would hide it.
-    TEST(FastCheckDevice, scan_reports_unwritten_fnuz_elements)
+    TEST(FastCheckDevice_pre_checkin, scan_reports_unwritten_fnuz_elements)
     {
         const int64_t rows = 4, cols = 4, ld = 8;
         const size_t  total = size_t(ld * cols);
@@ -676,7 +679,7 @@ namespace
         EXPECT_NE(res.message.find("element offset 19"), std::string::npos) << res.message;
     }
 
-    TEST(FastCheckDevice, copy_region_to_host_drops_the_padding)
+    TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
     {
         DeviceMatrix       m;
         std::vector<float> h(DeviceMatrix::total);
