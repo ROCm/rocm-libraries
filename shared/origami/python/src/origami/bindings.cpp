@@ -155,7 +155,9 @@ NB_MODULE(origami, m) {
               &origami::tensile_params_t::workgroup_mapping_xcc_group)
       .def_rw("global_split_u_coalesced", &origami::tensile_params_t::global_split_u_coalesced)
       .def_rw("global_split_u_wgm_round_robin",
-              &origami::tensile_params_t::global_split_u_wgm_round_robin);
+              &origami::tensile_params_t::global_split_u_wgm_round_robin)
+      .def_rw("one_lds_buffer", &origami::tensile_params_t::one_lds_buffer)
+      .def_rw("source_swap", &origami::tensile_params_t::source_swap);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -167,6 +169,9 @@ NB_MODULE(origami, m) {
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
+      .def_rw("cache_hints_d", &origami::config_t::cache_hints_d)
+      .def_rw("stream_k", &origami::config_t::stream_k)
+      .def_rw("index", &origami::config_t::index)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
