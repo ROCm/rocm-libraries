@@ -158,7 +158,7 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
 #ifdef CK_USE_GFX1250
-                    if(ck::is_gfx1250_supported())
+                    if(ck::is_gfx125_supported())
                     {
                         add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
                             op_ptrs);
@@ -484,7 +484,7 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
 #ifdef CK_USE_GFX1250
-                    if(ck::is_gfx1250_supported())
+                    if(ck::is_gfx125_supported())
                     {
                         add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_large_tiles_instances(
                             op_ptrs);

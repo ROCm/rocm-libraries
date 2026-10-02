@@ -838,7 +838,7 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_instances_part4(
                     op_ptrs);
 #ifdef CK_USE_GFX1250
-                if(ck::is_gfx1250_supported())
+                if(ck::is_gfx125_supported())
                 {
                     add_device_grouped_conv2d_fwd_wmma_cshufflev3_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances_large_tiles(
                         op_ptrs);
@@ -847,7 +847,7 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv2d_fwd_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_instances(
                     op_ptrs);
 #ifdef CK_USE_GFX1250
-                if(ck::is_gfx1250_supported())
+                if(ck::is_gfx125_supported())
                 {
                     add_device_grouped_conv2d_fwd_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
                         op_ptrs);
@@ -899,7 +899,7 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv3d_fwd_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_instances(
                     op_ptrs);
 #ifdef CK_USE_GFX1250
-                if(ck::is_gfx1250_supported())
+                if(ck::is_gfx125_supported())
                 {
                     add_device_grouped_conv3d_fwd_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
                         op_ptrs);
