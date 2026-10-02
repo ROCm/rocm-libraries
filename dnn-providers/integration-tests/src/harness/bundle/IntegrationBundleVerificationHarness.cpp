@@ -542,8 +542,14 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
     }
 
+    // Sub-byte graphs fill twice, once unpacked and once packed, and the two sets must
+    // hold the same values. rocRAND does not fill sub-byte types and its stream differs
+    // from the host's, so keeping both on the host is what keeps them identical.
+    const auto placement
+        = _deps.policy.useDevice() && !anySubByte ? FillPlacement::DEVICE : FillPlacement::HOST;
+
     auto fillResult = hipdnn_integration_tests::fillInputs(
-        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes);
+        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, placement);
     if(!fillResult.filled)
     {
         return unverifiable(fillResult.reason);
@@ -559,7 +565,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         }
 
         auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes);
+            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, placement);
         if(!packedFill.filled)
         {
             return unverifiable(packedFill.reason);
@@ -573,10 +579,11 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
 // ---- engine + reference runs -----------------------------------------------
 
-OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
+OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
+    return detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), _bundle->outputTensorUids, onDevice);
 }
 
 std::unordered_map<int64_t, void*>
@@ -609,7 +616,7 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
-    run.outputs = allocateSentinelOutputs();
+    run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
@@ -642,8 +649,6 @@ IntegrationBundleVerificationHarness::RefRunResult
     IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(ReferenceExecutorType type,
                                                                        OutputTensors& refOutputs)
 {
-    refOutputs = allocateSentinelOutputs();
-
     // Only an executor that asks for device pointers gets them. Handing host memory
     // to an executor that wants device memory — or the reverse — is a silent crash,
     // not an error, and the executor is the one that knows which it needs.
@@ -652,14 +657,19 @@ IntegrationBundleVerificationHarness::RefRunResult
     try
     {
         IReferenceGraphExecutor& executor = _deps.referenceExecutors->get(type);
-        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
 
+        // Before any allocation: a reference that cannot run this graph is the common
+        // case in auto mode (GPU declines, CPU takes over), and it should cost nothing.
         if(!executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
         {
             return {RefStatus::CAPABILITY_MISS,
                     refLabel(type) + " is not applicable for this graph"};
         }
+
+        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+        refOutputs = allocateSentinelOutputs(useDevice);
+        auto variantPack = buildVariantPack(refOutputs, useDevice);
+
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)

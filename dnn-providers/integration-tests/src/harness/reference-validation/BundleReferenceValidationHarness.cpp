@@ -61,7 +61,8 @@ void BundleReferenceValidationHarness::SetUp()
 OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
+    return detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice());
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a

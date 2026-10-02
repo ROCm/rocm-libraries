@@ -143,20 +143,23 @@ static void
                       &argsSize,
                       HIP_LAUNCH_PARAM_END};
 
-    // Check the device limits for grid size
-    int deviceId;
+    // The grid is one thread per element, so the element count is bounded by the
+    // device's grid limit. hipDeviceGetAttribute rather than hipGetDeviceProperties:
+    // the latter fills in the whole property block, a real cost for a call made once
+    // per input tensor of every test case.
+    int deviceId = 0;
     throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
 
-    hipDeviceProp_t deviceProps;
-    throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
-                    "hipGetDeviceProperties failed");
+    int maxGridSizeX = 0;
+    throwOnHipError(hipDeviceGetAttribute(&maxGridSizeX, hipDeviceAttributeMaxGridDimX, deviceId),
+                    "hipDeviceGetAttribute failed");
 
     const size_t gridSize = (count + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    if(gridSize > static_cast<size_t>(deviceProps.maxGridSize[0]))
+    if(gridSize > static_cast<size_t>(maxGridSizeX))
     {
         throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(gridSize)
-                                 + " > " + std::to_string(deviceProps.maxGridSize[0]));
+                                 + " > " + std::to_string(maxGridSizeX));
     }
 
     throwOnHipError(hipModuleLaunchKernel(kernel.function(),
@@ -173,11 +176,29 @@ static void
                     "hipModuleLaunchKernel failed");
 }
 
+// One rocRAND generator per thread, created on first use. Creating a generator
+// allocates its state on the device, and a fill runs once per input tensor of every
+// test case, so building a fresh one each time costs more than generating the values
+// for all but the largest tensors. The seed is set again on every fill, which restarts
+// the sequence, so reuse does not change what a given seed produces.
+//
+// Destroyed at thread exit, which for the main thread is before the HIP and rocRAND
+// libraries unload.
+inline const detail::RocRandGenerator& threadRocRandGenerator()
+{
+    thread_local const detail::RocRandGenerator s_generator(ROCRAND_RNG_PSEUDO_DEFAULT);
+    return s_generator;
+}
+
+// `synchronize` false leaves the fill in flight on the device, for a caller that fills
+// several tensors and waits once afterwards. Nothing may read the tensor on another
+// stream, or on the host, until a hipDeviceSynchronize() has returned.
 template <class T>
 static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
                                     T minValue,
                                     T maxValue,
-                                    unsigned int seed)
+                                    unsigned int seed,
+                                    bool synchronize)
 {
     tensor.memory().markDeviceModified();
 
@@ -188,7 +209,7 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
     const auto count = tensor.elementSpace();
     auto* dstPtr = tensor.memory().deviceData();
 
-    const detail::RocRandGenerator gen(ROCRAND_RNG_PSEUDO_DEFAULT);
+    const auto& gen = threadRocRandGenerator();
 
     detail::throwOnRocRandError(rocrand_set_seed(gen.generator, seed), "rocrand_set_seed");
 
@@ -202,6 +223,8 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
 
         launchScaleUniform<T>(scratch.data, dstPtr, count, minValue, maxValue);
 
+        // Not deferred: the scaling kernel is still reading `scratch`, which is freed
+        // when this block ends.
         throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else if constexpr(std::is_same_v<T, double>)
@@ -214,8 +237,6 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
-
-        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
     {
@@ -228,8 +249,6 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
-
-        throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
     else // float or other unsupported types
     {
@@ -243,20 +262,30 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
         {
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
         }
+    }
 
+    if(synchronize)
+    {
         throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
     }
 }
 #endif // USE_ROCRAND
 
+// Fills `tensor` with uniform random values in [minValue, maxValue]: on the device
+// with rocRAND when it is available, on the host otherwise. With rocRAND the data
+// lives on the device afterwards and is migrated to the host by the first non-const
+// host access; a const access cannot migrate and throws.
+//
+// `synchronize` is only honoured on the rocRAND path; see gpuFillWithRandomValues().
 template <class T>
 static void fillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& tensor,
                                  T minValue,
                                  T maxValue,
-                                 unsigned int seed = std::random_device{}())
+                                 unsigned int seed = std::random_device{}(),
+                                 [[maybe_unused]] bool synchronize = true)
 {
 #if defined(USE_ROCRAND)
-    gpuFillWithRandomValues(tensor, minValue, maxValue, seed);
+    gpuFillWithRandomValues(tensor, minValue, maxValue, seed, synchronize);
 #else
     tensor.fillWithRandomValues(minValue, maxValue, seed);
 #endif

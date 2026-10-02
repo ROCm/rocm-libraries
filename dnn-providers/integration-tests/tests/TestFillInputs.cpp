@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <vector>
@@ -469,7 +470,7 @@ FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
-    return fillInputs(*gr.graph, inputs, leafUids, recipes);
+    return fillInputs(*gr.graph, inputs, leafUids, recipes, FillPlacement::HOST);
 }
 
 } // namespace
@@ -509,7 +510,8 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto firstInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes firstRecipes;
-    const auto firstResult = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes);
+    const auto firstResult
+        = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes, FillPlacement::HOST);
     ASSERT_TRUE(firstResult.filled) << firstResult.reason;
 
     EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
@@ -519,7 +521,8 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto secondInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes secondRecipes;
-    const auto secondResult = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes);
+    const auto secondResult
+        = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes, FillPlacement::HOST);
     ASSERT_TRUE(secondResult.filled) << secondResult.reason;
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
@@ -567,7 +570,7 @@ TEST(TestFillInputs, MoeGroupedMatmulFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, FillPlacement::HOST);
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
@@ -585,9 +588,42 @@ TEST(TestFillInputs, MoeGroupedMatmulBwdFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, FillPlacement::HOST);
 
     EXPECT_TRUE(result.filled) << result.reason;
+}
+
+// DEVICE placement only changes how large tensors are generated. Small ones must take
+// the host path -- no HIP call, so this also runs where there is no GPU -- and come out
+// exactly as a HOST fill makes them, or one flag would change every small tensor's
+// values.
+TEST(TestFillInputs, DevicePlacementLeavesSmallTensorsOnTheHostPath)
+{
+    const auto graph = buildBatchnormTrainingRuntimePbvGraph();
+    const std::vector<int64_t> leafUids = {1, 3, 4, 5, 8, 9, 10};
+
+    auto hostInputs = makeTensorsFromGraph(graph, leafUids);
+    InputFillRecipes hostRecipes;
+    ASSERT_TRUE(
+        fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, FillPlacement::HOST).filled);
+
+    auto deviceInputs = makeTensorsFromGraph(graph, leafUids);
+    InputFillRecipes deviceRecipes;
+    ASSERT_TRUE(
+        fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, FillPlacement::DEVICE)
+            .filled);
+
+    for(const int64_t uid : leafUids)
+    {
+        auto& expected = *hostInputs.at(uid);
+        auto& actual = *deviceInputs.at(uid);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace()) << "uid " << uid;
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

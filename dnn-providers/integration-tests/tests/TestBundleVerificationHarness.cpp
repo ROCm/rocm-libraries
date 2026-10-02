@@ -256,6 +256,76 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
     EXPECT_EQ(variantPack.at(K_UNKNOWN_UID), inputs.at(K_UNKNOWN_UID)->rawDeviceData());
     EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
 }
+
+// One output per element width the device fill handles (1, 2 and 4 bytes) and one it
+// leaves to the host (8 bytes: double), plus a type whose sentinel is its largest value
+// rather than a NaN.
+std::shared_ptr<IntegrationTestBundle> makeMixedTypeOutputBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {7};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<DataType> types = {DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         DataType::INT32,
+                                         DataType::FP8_E4M3,
+                                         DataType::DOUBLE,
+                                         DataType::BOOLEAN};
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    for(size_t i = 0; i < types.size(); ++i)
+    {
+        const auto uid = static_cast<int64_t>(i) + 1;
+        tensors.push_back(
+            CreateTensorAttributesDirect(builder, uid, "output", types[i], &strides, &dims));
+        bundle->outputTensorUids.push_back(uid);
+    }
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    builder.Finish(CreateGraphDirect(builder,
+                                     "mixed_types",
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     &tensors,
+                                     &nodes));
+    bundle->graphBuffer = builder.Release();
+    return bundle;
+}
+
+// Writing the sentinel on the device instead of filling the host buffer and uploading
+// it must leave every output holding the same bytes, or a tensor an engine never wrote
+// would stop looking untouched.
+TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
+{
+    SKIP_IF_NO_DEVICES();
+    auto bundle = makeMixedTypeOutputBundle();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& attributes = wrapper.getTensorMap();
+
+    auto hostOutputs
+        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/false);
+    auto deviceOutputs
+        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/true);
+
+    for(const int64_t uid : bundle->outputTensorUids)
+    {
+        auto& expected = *hostOutputs.at(uid);
+        auto& actual = *deviceOutputs.at(uid);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace()) << "uid " << uid;
+
+        // The first non-const host access migrates the device-written bytes back.
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
 } // namespace
 
 TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)

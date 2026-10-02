@@ -390,7 +390,7 @@ private:
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
 
-    OutputTensors allocateSentinelOutputs() const;
+    OutputTensors allocateSentinelOutputs(bool onDevice) const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
