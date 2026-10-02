@@ -81,8 +81,14 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+# The .co tree installs beside the plugin library (see the install(DIRECTORY ...) rule in
+# the provider's top-level CMakeLists.txt). AsmKernelPath.hpp looks for AITER_ASM_SUBDIR
+# next to the loaded module first, so a relocated install finds its own kernels; the
+# configure-time AITER_ASM_DIR is only the fallback.
+set(ASM_KERNEL_SUBDIR "hip_kernel_provider/asm_kernels")
 target_compile_definitions(hip_kernel_provider_impl PRIVATE
-    AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
+    AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${ASM_KERNEL_SUBDIR}"
+    AITER_ASM_SUBDIR="${ASM_KERNEL_SUBDIR}"
 )
 
 # Copy ASM kernel binaries to build directory for local testing
