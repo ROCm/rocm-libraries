@@ -160,8 +160,8 @@ using fmha_bwd_pipeline_dq_{F_idx} =
 using fmha_bwd_pipeline_dkdv_{F_idx} =
     typename fmha_bwd_product_pipelines_{F_idx}::dkdv;
 
-// Keep the historical alias bound to the DKDV/default side so workspace
-// helpers retain their previous ABI and sizing behavior.
+// Route workspace helpers through DKDV: product-dual needs no workspace,
+// while all other instantiations retain the default workspace behavior.
 using fmha_bwd_pipeline_{F_idx} = fmha_bwd_pipeline_dkdv_{F_idx};
 
 using fmha_bwd_dk_epilogue_{F_idx} = ck_tile::Default2DEpilogue<
@@ -192,7 +192,15 @@ using fmha_bwd_dkdv_kernel_{F_idx} =
     ck_tile::FmhaBwdDQDKDVKernel<fmha_bwd_pipeline_dkdv_{F_idx},
                                  fmha_bwd_dk_epilogue_{F_idx},
                                  fmha_bwd_dv_epilogue_{F_idx},
-                                 fmha_bwd_dq_epilogue_{F_idx}>;
+                                 fmha_bwd_dq_epilogue_{F_idx},
+                                 fmha_bwd_product_dual_{F_idx}>;
+
+// Only product-dual DKDV omits dQ workspace; generic kernels keep their defaults.
+static_assert(fmha_bwd_dkdv_kernel_{F_idx}::kSkipDqWorkspace ==
+              fmha_bwd_product_dual_{F_idx});
+static_assert(!fmha_bwd_product_dual_{F_idx} ||
+              (fmha_bwd_dkdv_kernel_{F_idx}::kNoDqWorkspace &&
+               !fmha_bwd_dkdv_kernel_{F_idx}::NeedsZeroDqAcc()));
 
 using fmha_bwd_dq_dk_dv_kernel_{F_idx} =
     fmha_bwd_dkdv_kernel_{F_idx};

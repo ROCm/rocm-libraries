@@ -5,6 +5,7 @@
 
 """Regression test for the gfx12 BF16 D=128 product-dual codegen path."""
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -72,6 +73,51 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
             self.assertIn("BlockFmhaBwdDQOnlyQMajor", kernel_source)
             self.assertIn("BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt", kernel_source)
             self.assertIn("product_dual@", kernel_source)
+
+            # The host workspace helpers use the DKDV alias. Only that wrapper
+            # receives the product predicate; dQ still writes its output directly.
+            idx = re.search(r"using fmha_bwd_dkdv_kernel_(\d+) =", kernel_source).group(
+                1
+            )
+            dkdv_alias = kernel_source.split(f"using fmha_bwd_dkdv_kernel_{idx} =", 1)[
+                1
+            ].split(";", 1)[0]
+            self.assertIn(f"fmha_bwd_product_dual_{idx}>", dkdv_alias)
+            dq_alias = kernel_source.split(f"using fmha_bwd_dq_kernel_{idx} =", 1)[
+                1
+            ].split(";", 1)[0]
+            self.assertNotIn(f"fmha_bwd_product_dual_{idx}", dq_alias)
+            self.assertIn(f"fmha_bwd_dkdv_kernel_{idx}::kNoDqWorkspace", kernel_source)
+            self.assertIn(
+                f"!fmha_bwd_dkdv_kernel_{idx}::NeedsZeroDqAcc()", kernel_source
+            )
+
+            # These specializations must retain a false workspace-skip predicate.
+            # Check actual emitted guards, not just the generator template.
+            for suffix, guard in (
+                (
+                    "fp16_batch_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntrload_gfx12.cpp",
+                    "FmhaBwdBf16>",
+                ),
+                (
+                    "bf16_batch_*_npad_nbias_ndbias_nmask_ndropout_deterministic_ntrload_gfx12.cpp",
+                    "!(true)",
+                ),
+                (
+                    "bf16_group_*_npad_nbias_ndbias_nmask_ndropout_ndeterministic_ntrload_gfx12.cpp",
+                    "!(true)",
+                ),
+            ):
+                with self.subTest(fallback=suffix):
+                    candidates = list(output_dir.glob("fmha_bwd_d128_" + suffix))
+                    self.assertTrue(candidates, suffix)
+                    source = candidates[0].read_text()
+                    predicate = source.split(
+                        "static constexpr bool fmha_bwd_product_dual_", 1
+                    )[1].split(";", 1)[0]
+                    self.assertIn(guard, predicate)
+                    if suffix.startswith("fp16"):
+                        self.assertRegex(source, r"using fmha_dtype_\d+ = FmhaBwdFp16;")
 
             api_source = (output_dir / "fmha_bwd_api.cpp").read_text()
             self.assertIn("product_dual_dispatch_", api_source)
