@@ -1334,7 +1334,7 @@ std::string fallThroughLabelAfter(StinkyInstruction* latch) {
     BasicBlock* parent = latch->getParent();
     if (parent == nullptr) return {};
     for (auto it = std::next(BasicBlock::iterator(latch)); it != parent->end(); ++it) {
-        if (dyn_cast<AsmDirective>(it.getNodePtr()) != nullptr) continue;
+        // Directives such as .align are not instructions, so one cast skips them.
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (!isLabel(*inst)) return {};

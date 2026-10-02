@@ -101,6 +101,13 @@ def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitte
               and not preLoopLocalReadDrainEmitted)
 
 
+def clusterBarrierSplitWaveLoop(kernel):
+  # InitCIterWmma clones every chain head and skips v_mov, so the wave-split
+  # loop has to stay off or that clone cannot cover the accumulators.
+  return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
+              and kernel.get("InitCIterWmma", 0) != 1)
+
+
 # Make const values immutable
 @dataclass(frozen=True)
 class ConstValues():
@@ -7164,11 +7171,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
                                # InsertClusterBarrierPass duplicates the Rule 3 loop only for
                                # HalfPLR kernels that already post a cluster barrier.
-                               # InitCIterWmma commits to cloning every chain head and skipping
-                               # v_mov, so the split must stay off or the clone cannot cover them.
-                               "ClusterBarrierSplitWaveLoop": bool(
-                                   kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
-                                   and kernel.get("InitCIterWmma", 0) != 1),
+                               "ClusterBarrierSplitWaveLoop": clusterBarrierSplitWaveLoop(kernel),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.

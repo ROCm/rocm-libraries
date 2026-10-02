@@ -136,7 +136,8 @@ StinkyInstruction* alignInstAt(BasicBlock* start, int index) {
 
 /// Wrap each bare `s_barrier_signal -3` so the shared init clone, which every
 /// wave executes, still lets only wave 0 post the signal.
-bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID archId) {
+bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID archId,
+                            int& gateSerial) {
     std::vector<StinkyInstruction*> bare;
     for (BasicBlock* bb : blocks) {
         StinkyInstruction* prevReal = nullptr;
@@ -154,7 +155,6 @@ bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID ar
     }
     if (bare.empty()) return false;
 
-    static int gateSerial = 0;
     static const HwInstDesc labelMCID{
         GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -446,7 +446,7 @@ PostCloneFn postCloneFor(const std::string& specName) {
 /// Clone one region into a stage placed before it, then reroute pre-region
 /// entries through the clone. Returns false if skipped (logged inline).
 bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const RegionRange& region,
-                    GfxArchID archId, bool& insertedSymbolic) {
+                    GfxArchID archId, bool& insertedSymbolic, int& gateSerial) {
     // 1. Re-derive boundaryBB (an earlier job's split may have moved this inst).
     BasicBlock* boundaryBB = region.endInst->getParent();
     if (!boundaryBB) return false;
@@ -500,7 +500,7 @@ bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const 
     // The shared init clone runs for every wave. A bare signal copied from the
     // wave-0 body has to grow its check back, and the tail has to send non-zero
     // waves into the other copy instead of back into wave 0.
-    if (gateBareClusterSignals(cr.clonedBBs, archId)) insertedSymbolic = true;
+    if (gateBareClusterSignals(cr.clonedBBs, archId, gateSerial)) insertedSymbolic = true;
 
     std::string waveNzTail;
     if (wave0BB != nullptr && loop1BB != nullptr) {
@@ -611,6 +611,9 @@ class RegionClonePass : public StinkyInstPass {
 
         bool mutated = false;
         bool insertedSymbolic = false;
+        // Per-run, not process-lifetime: a static serial survives into the next
+        // kernel compiled in this process and makes otherwise identical emits differ.
+        int gateSerial = 0;
         size_t jobIdx = 0;
         for (const CloneSpec& spec : cloneList_) {
             const auto regions = findRegions(func, spec.startLabel);
@@ -620,7 +623,8 @@ class RegionClonePass : public StinkyInstPass {
                                  << spec.startLabel << "): " << regions.size() << " region(s)\n");
 
             for (const auto& region : regions) {
-                if (cloneOneRegion(func, spec, jobIdx++, region, archId, insertedSymbolic)) {
+                if (cloneOneRegion(func, spec, jobIdx++, region, archId, insertedSymbolic,
+                                   gateSerial)) {
                     mutated = true;
                 }
             }
