@@ -163,8 +163,8 @@ option(MIOPEN_ENABLE_HIPDNN_WRAPPER
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     message(STATUS
         "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
-        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
-        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+        "wrapper over libMIOpen_private.so. Set MIOPEN_HIPDNN_FORWARDING=enabled "
+        "at run time to forward the convolution entry points to hipDNN.")
 endif()
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)

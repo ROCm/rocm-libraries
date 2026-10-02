@@ -82,6 +82,18 @@ constexpr const char* kDisableEnvVar    = "MIOPEN_DISABLE_HIPDNN_FOR";
 constexpr std::string_view kTestEntries[] = {"miopenConvolutionForward", "miopenCreate"};
 const ForwardingSet kTestSet{kTestEntries};
 
+// gtest_discover_tests names each parameterized case after its printed value.
+// Without a PrintTo, gtest prints a struct's raw bytes, and the string-literal
+// addresses in them change on every run, so the ctest names would too. The
+// PrintTo overloads below print only a case's input, which is unique per case.
+void PrintEnvValue(const char* value, std::ostream* os)
+{
+    if(value == nullptr)
+        *os << "<unset>";
+    else
+        *os << '"' << value << '"';
+}
+
 // ---------------------------------------------------------------------------
 // ParseForwardingMode: raw env value -> mode, plus what the user is told.
 // ---------------------------------------------------------------------------
@@ -105,6 +117,8 @@ struct ParseCase
     ForwardingMode expectedMode;
     bool expectsOutput; // false means the parser must say nothing at all
 };
+
+void PrintTo(const ParseCase& c, std::ostream* os) { PrintEnvValue(c.value, os); }
 
 class CPU_WrapperRoutingParse_NONE : public ::testing::TestWithParam<ParseCase>
 {
@@ -241,6 +255,12 @@ struct ResolveCase
     Route expected;
 };
 
+void PrintTo(const ResolveCase& c, std::ostream* os)
+{
+    *os << (c.mode == ForwardingMode::Enabled ? "Enabled " : "Disabled ");
+    PrintEnvValue(c.entryPoint, os);
+}
+
 class CPU_WrapperRoutingResolve_NONE : public ::testing::TestWithParam<ResolveCase>
 {
 };
@@ -304,6 +324,8 @@ struct DisabledCase
     bool disablesCreate;
     bool expectsWarning;
 };
+
+void PrintTo(const DisabledCase& c, std::ostream* os) { PrintEnvValue(c.value, os); }
 
 class CPU_WrapperRoutingDisabledSet_NONE : public ::testing::TestWithParam<DisabledCase>
 {
