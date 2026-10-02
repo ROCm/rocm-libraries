@@ -6659,11 +6659,44 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         torch_stub.__file__ = os.path.join(site, "torch", "__init__.py")
         return site, core_lib, torch_stub
 
+    def _enter_fake_process(
+        self, stack, tmp, site, modules, absent=(), maps=None, root_libdirs=None
+    ):
+        """Patch this process to look like one that imported ``modules`` (and
+        not ``absent``), has ``site`` on sys.path, maps the libs listed in the
+        ``maps`` file and finds the ROCm installs ``root_libdirs``."""
+        import importlib
+        import os
+        import sys
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        stack.enter_context(mock.patch.dict(sys.modules, modules))
+        stack.enter_context(mock.patch.object(sys, "path", [site] + sys.path))
+        stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", False))
+        stack.enter_context(
+            mock.patch.object(rc, "_PROC_MAPS", maps or os.path.join(tmp, "no-maps"))
+        )
+        if root_libdirs is not None:
+            stack.enter_context(
+                mock.patch.object(rc, "_rocm_root_libdirs", return_value=root_libdirs)
+            )
+        stack.enter_context(mock.patch.object(comgr_mod, "_lib", None))
+        stack.enter_context(mock.patch.dict(os.environ))
+        for name in ("_rocm_sdk_core",) + tuple(absent):
+            sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+        os.environ.pop("ROCKE_HIP_LIB", None)
+        os.environ.pop("ROCKE_COMGR_LIB", None)
+
     def test_torch_lib_resolves_into_the_rocm_sdk_core_wheel(self):
         import importlib
         import os
         import sys
         import tempfile
+        import types
         from unittest import mock
 
         from rocke.runtime import runtime_coexistence as rc
@@ -6673,9 +6706,12 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         # runtime and hipModuleGetFunction failed with hipError(500).
         with tempfile.TemporaryDirectory() as tmp:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
-            with mock.patch.dict(sys.modules, {"torch": torch_stub}), mock.patch.object(
-                sys, "path", [site] + sys.path
-            ), mock.patch.object(rc, "_IS_WINDOWS", False), mock.patch.object(
+            with mock.patch.dict(
+                sys.modules,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+            ), mock.patch.object(sys, "path", [site] + sys.path), mock.patch.object(
+                rc, "_IS_WINDOWS", False
+            ), mock.patch.object(
                 rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")
             ), mock.patch.dict(
                 os.environ
@@ -6695,6 +6731,26 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 os.environ["ROCKE_HIP_LIB"] = "/custom/libamdhip64.so"
                 paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
                 self.assertEqual(paths[:2], ["/custom/libamdhip64.so", hip])
+
+    def test_rocm_sdk_core_libs_need_therock_torch(self):
+        import contextlib
+        import os
+        import tempfile
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # A CUDA, CPU or older ROCm torch in a venv that also has rocm-sdk-core
+        # installed: torch loaded no ROCm libs and rocm_sdk is not imported.
+        # Binding to the wheel's HIP there picks a runtime nothing else uses.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            self._enter_fake_process(
+                stack, tmp, site, {"torch": torch_stub}, absent=("rocm_sdk",)
+            )
+            self.assertIsNone(rc._torch_bundled_lib("amdhip64"))
+            self.assertIsNone(rc._torch_bundled_lib("amd_comgr"))
+            paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+            self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
 
     def test_torch_lib_prefers_the_copy_already_mapped(self):
         import os
@@ -6792,7 +6848,6 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            sys.modules.pop("rocm_sdk", None)  # older-wheel case: no TheRock SDK
             with mock.patch.object(
                 rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
             ):
@@ -6811,7 +6866,6 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
-            sys.modules.pop("rocm_sdk", None)  # older-wheel case: no TheRock SDK
             with mock.patch.object(
                 rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
             ):
@@ -6822,33 +6876,147 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                     self.assertTrue(rc._torch_comgr_is_stale())
 
     def test_therock_torch_compares_its_rocm_release_not_its_hip_version(self):
-        import sys
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
+        # 10.2); its _rocm_sdk_core comgr belongs to the wheel's ROCm release.
+        # Read as a release, 7.17 is older than any /opt/rocm-10.x, so the
+        # wheel's comgr was always demoted, even beside the same release.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            bundled = os.path.join(core_lib, "libamd_comgr.so.3")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[os.path.join(tmp, "rocm-10.2.0", "lib")],
+            )
+            sdk_stub.__version__ = "10.2.0a20261001"
+            self.assertEqual(rc._torch_rocm_version(bundled), (10, 2))
+            self.assertFalse(rc._torch_comgr_is_stale(bundled))
+            # An older release beside it is still stale: the check compares.
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self.assertTrue(rc._torch_comgr_is_stale(bundled))
+
+    def test_mapped_rocm_sdk_core_comgr_is_never_demoted(self):
+        import contextlib
+        import os
+        import tempfile
         import types
         from unittest import mock
 
         from rocke.runtime import runtime_coexistence as rc
 
-        # TheRock torch reports the HIP version in torch.version.hip (7.17 on ROCm
-        # 10.2) and its ROCm release in rocm_sdk.__version__. Read as a release,
-        # 7.17 is older than any /opt/rocm-10.x, so the wheel's comgr was always
-        # demoted, even beside the same release.
-        torch_stub = types.ModuleType("torch")
-        torch_stub.version = types.SimpleNamespace(hip="7.17.26384-0000000")
-        sdk_stub = types.ModuleType("rocm_sdk")
-
-        with mock.patch.dict(
-            sys.modules, {"torch": torch_stub, "rocm_sdk": sdk_stub}
-        ), mock.patch.object(
-            rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
-        ), mock.patch.object(
-            rc.os.path, "realpath", return_value="/opt/rocm-10.2.0/lib"
-        ):
-            sdk_stub.__version__ = "10.2.0a20261001"
-            self.assertEqual(rc._torch_rocm_version(), (10, 2))
-            self.assertFalse(rc._torch_comgr_is_stale())
-            # An older release beside it is still stale: the check compares.
+        # ROCm 10.1 TheRock torch on a ROCm 10.2 host. initialize_process loaded
+        # the wheel comgr RTLD_GLOBAL; demoting it made rocke load the 10.2 comgr
+        # beside it, and two LLVMs in one process abort ("support is already
+        # registered for analysis").
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
+            sdk_stub = types.ModuleType("rocm_sdk")
             sdk_stub.__version__ = "10.1.0a20260822"
-            self.assertTrue(rc._torch_comgr_is_stale())
+            comgr = os.path.join(core_lib, "libamd_comgr.so.3")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], comgr)
+            self.assertEqual(paths.count(comgr), 1)
+            # The staleness check itself still fires; only the demotion is skipped.
+            self.assertTrue(rc._torch_comgr_is_stale(comgr))
+            # Control: the same wheel comgr, not loaded yet, is still demoted.
+            stack.enter_context(
+                mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps"))
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_mapped_torch_lib_comgr_is_still_demoted_when_stale(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older wheels keep comgr in torch/lib; the demotion they were written
+        # for is unchanged, mapped or not.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                fh.write(f"7f00-7f01 r-xp 00000000 08:01 11 {comgr}\n")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub},
+                absent=("rocm_sdk",),
+                maps=maps,
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+
+    def test_torch_lib_comgr_version_ignores_an_unrelated_rocm_sdk(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Older ROCm 7.0 torch with comgr in torch/lib on a ROCm 7.2 host, with
+        # rocm_sdk 10.2 imported for something else. The comgr is 7.0 and stale;
+        # reading rocm_sdk.__version__ called it 10.2 and kept it first, while
+        # resolved_lib_rocm_version (by path) said 7.0.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+            comgr = os.path.join(site, "torch", "lib", "libamd_comgr.so")
+            open(comgr, "w").close()
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.2.0a20261001"
+            root = os.path.join(tmp, "rocm-7.2.3", "lib")
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                root_libdirs=[root],
+            )
+            paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+            self.assertEqual(paths[0], os.path.join(root, "libamd_comgr.so"))
+            self.assertEqual(paths[-2:], [comgr, "libamd_comgr.so"])
+            # Both version readers agree on the lib that will load.
+            self.assertEqual(comgr_mod.resolved_lib_path(), comgr)
+            self.assertEqual(rc._torch_rocm_version(comgr), (7, 0))
+            self.assertEqual(comgr_mod.resolved_lib_rocm_version(), (7, 0))
 
     def test_rocm_sdk_core_comgr_reports_the_wheel_release(self):
         import importlib
