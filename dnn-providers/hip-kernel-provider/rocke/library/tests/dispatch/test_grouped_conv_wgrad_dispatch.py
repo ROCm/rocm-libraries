@@ -213,8 +213,15 @@ class TestTwoStageSelection(unittest.TestCase):
             for dtype in ("fp16", "bf16"):
                 r = dispatch_conv_grouped(
                     _wgrad(
-                        "gfx950", C=G, K=G, G=G, Y=Y, X=X,
-                        pad_h=Y // 2, pad_w=X // 2, dtype=dtype,
+                        "gfx950",
+                        C=G,
+                        K=G,
+                        G=G,
+                        Y=Y,
+                        X=X,
+                        pad_h=Y // 2,
+                        pad_w=X // 2,
+                        dtype=dtype,
                     )
                 )
                 p = _problem(r.request)
@@ -222,7 +229,9 @@ class TestTwoStageSelection(unittest.TestCase):
                 if ws.group_merge <= 1 or ws.split_k <= 1:
                     continue
                 seen_merged += 1
-                where = f"G={G} {Y}x{X} {dtype} gm={ws.group_merge} split_k={ws.split_k}"
+                where = (
+                    f"G={G} {Y}x{X} {dtype} gm={ws.group_merge} split_k={ws.split_k}"
+                )
                 self.assertTrue(
                     ws.two_stage, f"{where}: merged split-K must be two-stage"
                 )
@@ -497,9 +506,7 @@ class TestWgradMergeDegree(unittest.TestCase):
 
     def _dw(self, G, Y, X, arch="gfx950", **kw):
         # Depthwise is C == K == groups (cpg == kpg == 1).
-        return _wgrad(
-            arch, C=G, K=G, G=G, Y=Y, X=X, pad_h=Y // 2, pad_w=X // 2, **kw
-        )
+        return _wgrad(arch, C=G, K=G, G=G, Y=Y, X=X, pad_h=Y // 2, pad_w=X // 2, **kw)
 
     # ---- admissibility -------------------------------------------------------
 
@@ -517,8 +524,9 @@ class TestWgradMergeDegree(unittest.TestCase):
                     inst = r.spec.to_wgrad_spec(_problem(r.request))
                     ok, why = wgrad_group_merge_available(inst, arch="gfx950")
                     self.assertTrue(
-                        ok, f"G={G} {Y}x{X} {dtype} -> tile_n={r.spec.tile_n} "
-                            f"gm={r.spec.group_merge}: {why}"
+                        ok,
+                        f"G={G} {Y}x{X} {dtype} -> tile_n={r.spec.tile_n} "
+                        f"gm={r.spec.group_merge}: {why}",
                     )
                     inst.validate()
                     n += 1
