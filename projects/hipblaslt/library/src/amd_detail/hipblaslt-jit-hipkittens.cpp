@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-hash.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
@@ -110,6 +111,78 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             return {};
         }
 
+        struct Candidate
+        {
+            const detail::Variant* variant;
+            std::vector<uint8_t>   entry; // with the packed strides pinned
+        };
+
+        // The target's variants whose entry solves the request, or why none can.
+        Status candidates(const hipblaslt_jit::OperationRequest& request,
+                          const hipblaslt_jit::DeviceTarget&     target,
+                          std::vector<Candidate>&                found)
+        {
+            found.clear();
+            const auto* gemm = dynamic_cast<const jit::detail::GemmRequest*>(&request);
+            if(!gemm)
+                return {Status::Code::NotSupported,
+                        Stage::Generate,
+                        "HipKittens generates GEMM kernels only"};
+            const auto& variants = detail::resources().variants;
+            if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& v) {
+                   return v.isa == target.isa;
+               }))
+                return {Status::Code::TargetMismatch,
+                        Stage::Configure,
+                        "HipKittens has no kernel for " + target.isa};
+            const auto problem = hipblaslt_jit::lowerForJit(*gemm);
+            hipblaslt_jit::CanonicalGemm shape;
+            try
+            {
+                shape = hipblaslt_jit::canonicalGemm(problem);
+            }
+            catch(const std::runtime_error& e)
+            {
+                return {Status::Code::NotSupported, Stage::Generate, e.what()};
+            }
+            for(const auto* tensor : {&problem.a(), &problem.b(), &problem.d()})
+                if(tensor->totalAllocatedBytes() >= tensorLimit)
+                    return {Status::Code::NotSupported,
+                            Stage::Generate,
+                            "HipKittens kernels need tensors smaller than 4 GiB"};
+            // The kernels read packed A and B and write packed D; JIT library
+            // rows match only sizes, so the entry also pins the strides.
+            const std::vector<hipblaslt_jit::msgpack_io::IndexedPredicate> packed{
+                {"StrideAEqual", 1, shape.k},
+                {"StrideBEqual", 1, shape.k},
+                {"StrideDEqual", 1, shape.m}};
+            for(const auto& variant : variants)
+            {
+                if(variant.isa != target.isa)
+                    continue;
+                Candidate candidate{&variant, {}};
+                if(auto status = hipblaslt_jit::msgpack_io::appendEntryPredicates(
+                       bytes(variant.entry), packed, candidate.entry);
+                   !status.ok())
+                    return status;
+                const auto library = std::dynamic_pointer_cast<Master>(
+                    TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
+                        candidate.entry));
+                if(!library || library->solutions.size() != 1)
+                    return {Status::Code::Failed,
+                            Stage::Generate,
+                            "The HipKittens entry of " + std::string(variant.name)
+                                + " does not load"};
+                if((*library->solutions.begin()->second->problemPredicate)(problem))
+                    found.push_back(std::move(candidate));
+            }
+            if(found.empty())
+                return {Status::Code::NotSupported,
+                        Stage::Generate,
+                        "No HipKittens kernel solves this problem"};
+            return {};
+        }
+
         class HipKittensBackend final : public hipblaslt_jit::Backend
         {
         public:
@@ -135,70 +208,29 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 return m_info;
             }
 
+            Status accepts(const hipblaslt_jit::OperationRequest& request,
+                           const hipblaslt_jit::DeviceTarget&     target) const override
+            {
+                std::vector<Candidate> found;
+                return candidates(request, target, found);
+            }
+
             Status generate(const hipblaslt_jit::GenerationRequest&        request,
                             std::vector<hipblaslt_jit::GeneratedSolution>& solutions) const override
             {
                 solutions.clear();
-                const auto* gemm = dynamic_cast<const jit::detail::GemmRequest*>(&request.request);
-                if(!gemm)
-                    return {Status::Code::NotSupported,
-                            Stage::Generate,
-                            "HipKittens generates GEMM kernels only"};
-                const auto& variants = detail::resources().variants;
-                if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& v) {
-                       return v.isa == request.target.isa;
-                   }))
-                    return {Status::Code::TargetMismatch,
-                            Stage::Configure,
-                            "HipKittens has no kernel for " + request.target.isa};
-                const auto problem = hipblaslt_jit::lowerForJit(*gemm);
-                hipblaslt_jit::CanonicalGemm shape;
-                try
+                std::vector<Candidate> found;
+                if(auto status = candidates(request.request, request.target, found); !status.ok())
+                    return status;
+                for(auto& candidate : found)
                 {
-                    shape = hipblaslt_jit::canonicalGemm(problem);
-                }
-                catch(const std::runtime_error& e)
-                {
-                    return {Status::Code::NotSupported, Stage::Generate, e.what()};
-                }
-                for(const auto* tensor : {&problem.a(), &problem.b(), &problem.d()})
-                    if(tensor->totalAllocatedBytes() >= tensorLimit)
-                        return {Status::Code::NotSupported,
-                                Stage::Generate,
-                                "HipKittens kernels need tensors smaller than 4 GiB"};
-                // The kernels read packed A and B and write packed D; JIT library
-                // rows match only sizes, so the entry also pins the strides.
-                const std::vector<hipblaslt_jit::msgpack_io::IndexedPredicate> packed{
-                    {"StrideAEqual", 1, shape.k},
-                    {"StrideBEqual", 1, shape.k},
-                    {"StrideDEqual", 1, shape.m}};
-                bool excluded = false;
-                for(const auto& variant : variants)
-                {
-                    if(variant.isa != request.target.isa || solutions.size() >= request.count)
+                    const auto& variant = *candidate.variant;
+                    const auto& skip    = request.excludeKernels;
+                    if(solutions.size() >= request.count
+                       || std::find(skip.begin(), skip.end(), variant.kernelName) != skip.end())
                         continue;
-                    std::vector<uint8_t> entry;
-                    if(auto status = hipblaslt_jit::msgpack_io::appendEntryPredicates(
-                           bytes(variant.entry), packed, entry);
-                       !status.ok())
-                        return status;
-                    const auto library = std::dynamic_pointer_cast<Master>(
-                        TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(entry));
-                    if(!library || library->solutions.size() != 1)
-                        return {Status::Code::Failed,
-                                Stage::Generate,
-                                "The HipKittens entry of " + std::string(variant.name)
-                                    + " does not load"};
-                    if(!(*library->solutions.begin()->second->problemPredicate)(problem))
-                        continue;
-                    const auto& skip = request.excludeKernels;
-                    if(std::find(skip.begin(), skip.end(), variant.kernelName) != skip.end())
-                    {
-                        excluded = true;
-                        continue;
-                    }
                     hipblaslt_jit::GeneratedSolution solution;
-                    solution.entry      = std::move(entry);
+                    solution.entry      = std::move(candidate.entry);
                     solution.kernelName = std::string(variant.kernelName);
                     solution.hipFlags   = variant.hipFlags;
                     hipblaslt_jit::BuildUnit unit;
@@ -210,10 +242,6 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     solution.units.push_back(std::move(unit));
                     solutions.push_back(std::move(solution));
                 }
-                if(solutions.empty() && !excluded)
-                    return {Status::Code::NotSupported,
-                            Stage::Generate,
-                            "No HipKittens kernel solves this problem"};
                 return {};
             }
 
@@ -256,5 +284,14 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             diagnostics.message = e.what();
             return HIPBLAS_STATUS_INTERNAL_ERROR;
         }
+    }
+
+    Status detail::makeProcessBackend(hipblaslt_jit::ProcessBackend& made)
+    {
+        std::vector<hipblaslt_jit::IncludeFile> headers;
+        auto                                    status = readHeaders({}, headers);
+        if(status.ok())
+            made.backend = std::make_shared<const HipKittensBackend>(std::move(headers));
+        return status;
     }
 }

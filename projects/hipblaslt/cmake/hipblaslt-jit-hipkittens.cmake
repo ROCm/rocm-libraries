@@ -119,6 +119,7 @@ target_sources(hipblaslt PRIVATE
     "${_hk_resources}")
 set_source_files_properties("${_hk_resources}" TARGET_DIRECTORY hipblaslt
     PROPERTIES INCLUDE_DIRECTORIES "${_hk_source}")
+set(hipblaslt_jit_opt_in_backends hipblaslt-jit-hipkittens-backend.cpp)
 target_compile_definitions(hipblaslt PRIVATE
     HIPBLASLT_JIT_HIPKITTENS
     HIPBLASLT_JIT_HIPKITTENS_DIR="${_hk_relative}"

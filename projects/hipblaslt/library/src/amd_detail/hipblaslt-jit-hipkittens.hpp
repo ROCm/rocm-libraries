@@ -12,6 +12,12 @@
 // in process. Each kernel variant serves a narrow set of problems; others are
 // NOT_SUPPORTED. The HipKittens headers it includes are installed with the
 // library under hipblaslt/hipkittens/<commit>.
+namespace hipblaslt_jit
+{
+    struct ProcessBackend;
+    struct Status;
+}
+
 namespace hipblaslt_ext::experimental::jit::hipkittens
 {
     struct Options
@@ -61,5 +67,9 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             std::vector<Variant>    variants;
         };
         HIPBLASLT_EXPORT const Resources& resources();
+
+        // The backend heuristic queries use when HIPBLASLT_JIT_BACKENDS names
+        // hipkittens: the headers Options{} finds. Fails like createBackend.
+        hipblaslt_jit::Status makeProcessBackend(hipblaslt_jit::ProcessBackend& made);
     }
 }

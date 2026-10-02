@@ -143,6 +143,12 @@ namespace hipblaslt_jit
         // means the request is outside the backend's domain.
         virtual Status generate(const GenerationRequest&, std::vector<GeneratedSolution>&) const
             = 0;
+        // NotSupported or TargetMismatch when the request is outside the
+        // backend's domain, without generating; heuristic queries then skip it.
+        virtual Status accepts(const OperationRequest&, const DeviceTarget&) const
+        {
+            return {};
+        }
     };
 
     struct CodeObject

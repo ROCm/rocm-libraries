@@ -16,25 +16,51 @@ namespace hipblaslt_jit
         std::shared_ptr<const TuningKnowledge> knowledge; // iff predictor
     };
 
+    struct ProcessBackendName
+    {
+        std::string id; // as HIPBLASLT_JIT_BACKENDS names the backend
+        std::string name; // as reports name it
+    };
+
     // Defined by the one provider the build links, which hipBLASLt's CMake
     // configuration selects. A provider that cannot generate returns a
-    // Configure failure; processJit reports it for every query.
-    Status makeDefaultProcessBackend(ProcessBackend& made);
+    // Configure failure, which every query reports, and has an empty id.
+    Status             makeDefaultProcessBackend(ProcessBackend& made);
+    ProcessBackendName defaultProcessBackendName();
 
-    // The Jit for this process, built on first use from
-    // makeDefaultProcessBackend, the comgr builder and the Tensile loader,
-    // publishing to JitLibrary::process(). Null, with why set, when the
-    // provider fails.
-    std::shared_ptr<const Jit> processJit(Status& why);
+    // A backend heuristic queries use only when HIPBLASLT_JIT_BACKENDS names it.
+    struct OptInProcessBackend
+    {
+        ProcessBackendName name;
+        Status (*make)(ProcessBackend& made);
+    };
+
+    // Defined by the one opt-in provider the build links, which may list none.
+    std::vector<OptInProcessBackend> optInProcessBackends();
+
+    struct ProcessJit
+    {
+        ProcessBackendName         name;
+        std::shared_ptr<const Jit> jit; // null when configuration failed
+        Status                     configured; // the configuration failure
+    };
+
+    // The backends heuristic queries use, in order: those HIPBLASLT_JIT_BACKENDS
+    // lists, or when it is unset or empty, the default one. Each is built on
+    // first use with the comgr builder and the Tensile loader, publishing to
+    // JitLibrary::process(). HIPBLASLT_JIT_BACKENDS names that this build does
+    // not have are reported once and ignored.
+    const std::vector<ProcessJit>& processJits();
 
     // The JIT solutions for one heuristic query.
     struct HeuristicFill
     {
-        std::vector<int32_t> indices; // JIT library indices, published ones first
+        std::vector<int32_t> indices; // JIT library indices, grouped by backend, published first
         std::vector<Status>  failures; // in the order they happened
-        std::string          summary; // the backend's note, when it generated
-        bool                 repeated = false; // generation fell short before; not retried
-        bool                 skipped  = false; // short, and a LookupOnly prevented generation
+        // The backend's note when it generated; with several backends, what each returned.
+        std::string summary;
+        bool        repeated = false; // generation fell short before; not retried
+        bool        skipped  = false; // short, and a LookupOnly prevented generation
     };
 
     // While one is alive, fillHeuristic on this thread returns only published
@@ -57,11 +83,13 @@ namespace hipblaslt_jit
     };
 
     // Up to count JIT library indices for request on device that need at most
-    // workspaceLimit and use none of excludeKernels: solutions already published
-    // for exactly this problem, then new ones processJit() generates and
-    // publishes unless a LookupOnly is active. One thread at a time generates a
-    // problem, and a problem whose generation fell short is not generated again
-    // in this process.
+    // workspaceLimit and use none of excludeKernels. Each processJits() backend
+    // that accepts the request, in order, gets what is still missing less one
+    // slot per later one: solutions it already published for exactly this
+    // problem, then new ones it generates and publishes unless a LookupOnly is
+    // active. One thread at a time generates a problem with a backend, and a
+    // backend whose generation of a problem fell short does not generate it
+    // again in this process. With several backends, failures name theirs.
     HeuristicFill fillHeuristic(const OperationRequest&         request,
                                 int                             device,
                                 size_t                          count,

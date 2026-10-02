@@ -11,4 +11,9 @@ namespace hipblaslt_jit
     {
         return hipblaslt_ext::experimental::jit::tensilelite::detail::makeProcessBackend(made);
     }
+
+    ProcessBackendName defaultProcessBackendName()
+    {
+        return {"tensilelite", "TensileLite"};
+    }
 }

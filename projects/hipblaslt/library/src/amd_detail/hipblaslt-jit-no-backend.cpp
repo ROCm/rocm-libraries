@@ -12,4 +12,9 @@ namespace hipblaslt_jit
                 Stage::Configure,
                 "hipBLASLt was built without a JIT generator backend"};
     }
+
+    ProcessBackendName defaultProcessBackendName()
+    {
+        return {};
+    }
 }
