@@ -751,47 +751,40 @@ class TestEveryRequestSemanticSurvivesMining:
         assert suites == {"suite_a", "suite_b"}, "a merged duplicate lost its vote"
 
 
-_ROCKE_BENCHMARKS = (
-    Path(__file__).resolve().parents[5]
-    / "dnn-providers"
-    / "hip-kernel-provider"
-    / "rocke"
-    / "library"
-    / "benchmarks"
-)
+def _emitted(variant: str, seqlens: list[int], hq: int, hkv: int, **over) -> dict:
+    """One record as the dense prefill benchmarks' `--emit-shapes` writes it: the
+    rocKE trace schema plus an explicit `causal`, and `varlen`/`seqlens` for a packed
+    ragged batch. Synthetic, so the tests do not follow the benchmarks' shape lists."""
+    record = {
+        "model": "benchmark_dense_prefill_live",
+        "variant": variant,
+        "label": variant,
+        "num_seqs": len(seqlens),
+        "max_seqlen_q": max(seqlens),
+        "max_seqlen_k": max(seqlens),
+        "num_query_heads": hq,
+        "num_kv_heads": hkv,
+        "head_size": 128,
+        "q_dtype": "bf16",
+        "causal": True,
+        "window_size": [-1, 0],
+        "has_sinks": False,
+    }
+    record.update(over)
+    return record
 
 
-class TestTheOwnerDenseBenchmarksEmitMinableShapes:
-    """The dense prefill benchmarks keep their shape lists in Python. `--emit-shapes`
-    writes them in the trace schema this miner reads, without torch, so the owner's
-    benchmark population enters the corpus without hand transcription."""
+class TestAnEmittedBenchmarkShapeListIsMinable:
+    """The dense prefill benchmarks write their shape lists with `--emit-shapes` in
+    the trace schema this miner reads. A whole emitted list, mined through the CLI,
+    keeps the full, windowed and packed rows apart from the causal ones."""
 
-    def _emit_and_mine(self, tmp_path: Path, arch: str):
-        bench = (
-            _ROCKE_BENCHMARKS
-            / arch
-            / "attention/prefill/benchmark_dense_prefill_live.py"
-        )
+    def _mine(self, tmp_path: Path, *records: dict):
         tree = tmp_path / "bench"
         tree.mkdir()
-        emitted = tree / "dense_prefill_live_shapes.json"
-        # torch is made unimportable: emitting must not need it.
-        emit = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import runpy, sys; sys.modules['torch'] = None; "
-                f"sys.argv = ['bench', '--emit-shapes', {str(emitted)!r}]; "
-                f"runpy.run_path({str(bench)!r}, run_name='__main__')",
-            ],
-            capture_output=True,
-            text=True,
+        (tree / "dense_prefill_live_shapes.json").write_text(
+            "".join(json.dumps(r) + "\n" for r in records)
         )
-        if "ModuleNotFoundError" in emit.stderr and "torch" not in emit.stderr:
-            pytest.skip(
-                f"the rocKE library cannot be imported here: {emit.stderr[-300:]}"
-            )
-        assert emit.returncode == 0, emit.stdout + emit.stderr
         out = tmp_path / "shapes.json"
         mined = subprocess.run(
             [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
@@ -801,15 +794,30 @@ class TestTheOwnerDenseBenchmarksEmitMinableShapes:
         assert mined.returncode == 0, mined.stdout + mined.stderr
         return mined.stdout, json.loads(out.read_text())
 
-    def test_gfx942_emits_its_whole_shape_list_without_torch(self, tmp_path):
-        """21 distinct requests: the causal, MHA, GQA, full and windowed rows at the
-        default bf16 Hq128/Hkv8 D128; the persistent rows repeat causal shapes."""
-        output, shapes = self._emit_and_mine(tmp_path, "gfx942")
-        assert len(shapes) == 21, output
-        assert sum(s["mask_type"] == 0 for s in shapes) == 2, "the full-mode rows"
-        assert {s["sliding_window"] for s in shapes} == {0, 512, 1024, 2048}
+    def test_full_and_windowed_rows_stay_distinct_and_repeats_merge(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("causal/mha", [1024], 8, 8),
+            _emitted("causal/gqa", [1024], 8, 2),
+            _emitted("full/mha", [1024], 8, 8, causal=False, window_size=[-1, -1]),
+            _emitted("swa/w512", [1024], 8, 8, window_size=[511, 0]),
+            # The persistent mode re-measures a causal shape on another grid.
+            _emitted("persistent/mha", [1024], 8, 8),
+        )
+        assert len(shapes) == 4, output
+        assert "1 duplicate shape(s) merged" in output
+        by_mask = sorted((s["mask_type"], s["sliding_window"]) for s in shapes)
+        assert by_mask == [(0, 0), (1, 0), (1, 0), (2, 512)], by_mask
+        full = next(s for s in shapes if s["mask_type"] == 0)
+        assert (full["nhead_q"], full["nhead_k"]) == (8, 8)
 
-    def test_gfx950_emits_its_shapes_and_flags_the_packed_varlen_rows(self, tmp_path):
-        output, shapes = self._emit_and_mine(tmp_path, "gfx950")
-        assert len(shapes) == 15, output
-        assert "8 rocKE varlen record(s) skipped" in output
+    def test_packed_varlen_rows_are_skipped_and_counted(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("dense/s512", [512], 8, 8),
+            _emitted("dense/s2048", [2048], 8, 8),
+            _emitted("varlen/4seq", [512, 1024, 300, 2048], 8, 8, varlen=True),
+        )
+        assert sorted(s["seqlen_q"] for s in shapes) == [512, 2048], output
+        assert all(s["batch"] == 1 for s in shapes)
+        assert "1 rocKE varlen record(s) skipped" in output
