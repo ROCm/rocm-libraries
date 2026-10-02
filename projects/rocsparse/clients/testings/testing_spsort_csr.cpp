@@ -214,7 +214,9 @@ void testing_spsort_csr(const Arguments& arg)
     rocsparse_index_base base = arg.baseA;
     rocsparse_spsort_alg alg  = static_cast<rocsparse_spsort_alg>(arg.algo);
 
-    const int64_t batch_count = std::max<int64_t>(arg.batch_count, 1);
+    // A batch count of one for A sorts the single matrix A into every batch of B.
+    const int64_t batch_count_A = std::max<int64_t>(arg.batch_count_A, 1);
+    const int64_t batch_count_B = std::max<int64_t>(arg.batch_count_B, 1);
 
     rocsparse_local_handle handle(arg);
 
@@ -228,15 +230,15 @@ void testing_spsort_csr(const Arguments& arg)
     const int64_t offsets_size = (M > 0) ? static_cast<int64_t>(M) + 1 : 0;
 
     // A is padded between batches to check that its strides are honoured, B is packed.
-    const int64_t offsets_batch_stride_A        = (batch_count > 1) ? offsets_size + 2 : 0;
-    const int64_t offsets_batch_stride_B        = (batch_count > 1) ? offsets_size : 0;
-    const int64_t columns_values_batch_stride_A = (batch_count > 1) ? nnz + 3 : 0;
-    const int64_t columns_values_batch_stride_B = (batch_count > 1) ? nnz : 0;
+    const int64_t offsets_batch_stride_A        = (batch_count_A > 1) ? offsets_size + 2 : 0;
+    const int64_t offsets_batch_stride_B        = (batch_count_B > 1) ? offsets_size : 0;
+    const int64_t columns_values_batch_stride_A = (batch_count_A > 1) ? nnz + 3 : 0;
+    const int64_t columns_values_batch_stride_B = (batch_count_B > 1) ? nnz : 0;
 
-    const int64_t size_ptr_A = (batch_count - 1) * offsets_batch_stride_A + offsets_size;
-    const int64_t size_ptr_B = (batch_count - 1) * offsets_batch_stride_B + offsets_size;
-    const int64_t size_A     = (batch_count - 1) * columns_values_batch_stride_A + nnz;
-    const int64_t size_B     = (batch_count - 1) * columns_values_batch_stride_B + nnz;
+    const int64_t size_ptr_A = (batch_count_A - 1) * offsets_batch_stride_A + offsets_size;
+    const int64_t size_ptr_B = (batch_count_B - 1) * offsets_batch_stride_B + offsets_size;
+    const int64_t size_A     = (batch_count_A - 1) * columns_values_batch_stride_A + nnz;
+    const int64_t size_B     = (batch_count_B - 1) * columns_values_batch_stride_B + nnz;
 
     // The batches are uniform: they all share one shuffled sparsity pattern, and only their
     // values are scaled differently, so that a mix up between batches shows up in the result.
@@ -253,26 +255,31 @@ void testing_spsort_csr(const Arguments& arg)
 
     rocsparse_seedrand();
     host_shuffle_csr(hA_single);
-    for(int64_t batch = 0; batch < batch_count; ++batch)
+    for(int64_t batch = 0; batch < batch_count_B; ++batch)
     {
+        const int64_t batch_A = (batch_count_A == 1) ? 0 : batch;
+
         host_csr_matrix<T, I, J> hA_batch(hA_single);
         for(int64_t k = 0; k < nnz; ++k)
         {
-            hA_batch.val[k] = hA_batch.val[k] * static_cast<T>(batch + 1);
+            hA_batch.val[k] = hA_batch.val[k] * static_cast<T>(batch_A + 1);
         }
 
         host_csr_matrix<T, I, J> hB_batch(hA_batch);
         host_spsort_csr(hB_batch);
 
-        std::copy(hA_batch.ptr.data(),
-                  hA_batch.ptr.data() + offsets_size,
-                  hA_ptr.data() + batch * offsets_batch_stride_A);
-        std::copy(hA_batch.ind.data(),
-                  hA_batch.ind.data() + nnz,
-                  hA_ind.data() + batch * columns_values_batch_stride_A);
-        std::copy(hA_batch.val.data(),
-                  hA_batch.val.data() + nnz,
-                  hA_val.data() + batch * columns_values_batch_stride_A);
+        if(batch < batch_count_A)
+        {
+            std::copy(hA_batch.ptr.data(),
+                      hA_batch.ptr.data() + offsets_size,
+                      hA_ptr.data() + batch * offsets_batch_stride_A);
+            std::copy(hA_batch.ind.data(),
+                      hA_batch.ind.data() + nnz,
+                      hA_ind.data() + batch * columns_values_batch_stride_A);
+            std::copy(hA_batch.val.data(),
+                      hA_batch.val.data() + nnz,
+                      hA_val.data() + batch * columns_values_batch_stride_A);
+        }
         std::copy(hB_batch.ptr.data(),
                   hB_batch.ptr.data() + offsets_size,
                   hB_ptr_gold.data() + batch * offsets_batch_stride_B);
@@ -287,7 +294,7 @@ void testing_spsort_csr(const Arguments& arg)
     // The in place sort keeps the padding of A, and the row pointer is unchanged.
     host_dense_vector<J> hA_ind_gold(hA_ind);
     host_dense_vector<T> hA_val_gold(hA_val);
-    for(int64_t batch = 0; batch < batch_count; ++batch)
+    for(int64_t batch = 0; batch < batch_count_A; ++batch)
     {
         std::copy(hB_ind_gold.data() + batch * columns_values_batch_stride_B,
                   hB_ind_gold.data() + batch * columns_values_batch_stride_B + nnz,
@@ -325,9 +332,9 @@ void testing_spsort_csr(const Arguments& arg)
                                base,
                                get_datatype<T>());
     CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(
-        matA, batch_count, offsets_batch_stride_A, columns_values_batch_stride_A));
+        matA, batch_count_A, offsets_batch_stride_A, columns_values_batch_stride_A));
     CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(
-        matB, batch_count, offsets_batch_stride_B, columns_values_batch_stride_B));
+        matB, batch_count_B, offsets_batch_stride_B, columns_values_batch_stride_B));
 
     rocsparse_spsort_descr descr;
     CHECK_ROCSPARSE_ERROR(rocsparse_spsort_descr_create(handle, &descr, nullptr));
@@ -369,74 +376,6 @@ void testing_spsort_csr(const Arguments& arg)
         hA_ind.unit_check(dA_ind);
         hA_val.unit_check(dA_val);
 
-        if(batch_count > 1)
-        {
-            // Broadcast: the first batch of A, as a single matrix, is sorted into every batch of B.
-            host_dense_vector<I> hA0_ptr(offsets_size);
-            host_dense_vector<J> hA0_ind(nnz);
-            host_dense_vector<T> hA0_val(nnz);
-            std::copy(hA_ptr.data(), hA_ptr.data() + offsets_size, hA0_ptr.data());
-            std::copy(hA_ind.data(), hA_ind.data() + nnz, hA0_ind.data());
-            std::copy(hA_val.data(), hA_val.data() + nnz, hA0_val.data());
-
-            host_dense_vector<I> hB0_ptr_gold(size_ptr_B);
-            host_dense_vector<J> hB0_ind_gold(size_B);
-            host_dense_vector<T> hB0_val_gold(size_B);
-            for(int64_t batch = 0; batch < batch_count; ++batch)
-            {
-                std::copy(hB_ptr_gold.data(),
-                          hB_ptr_gold.data() + offsets_size,
-                          hB0_ptr_gold.data() + batch * offsets_batch_stride_B);
-                std::copy(hB_ind_gold.data(),
-                          hB_ind_gold.data() + nnz,
-                          hB0_ind_gold.data() + batch * columns_values_batch_stride_B);
-                std::copy(hB_val_gold.data(),
-                          hB_val_gold.data() + nnz,
-                          hB0_val_gold.data() + batch * columns_values_batch_stride_B);
-            }
-
-            device_dense_vector<I> dA0_ptr(hA0_ptr);
-            device_dense_vector<J> dA0_ind(hA0_ind);
-            device_dense_vector<T> dA0_val(hA0_val);
-            rocsparse_local_spmat  matA0(M,
-                                        N,
-                                        nnz,
-                                        dA0_ptr,
-                                        dA0_ind,
-                                        dA0_val,
-                                        get_indextype<I>(),
-                                        get_indextype<J>(),
-                                        base,
-                                        get_datatype<T>());
-
-            size_t broadcast_buffer_size = 0;
-            CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(handle,
-                                                               descr,
-                                                               matA0,
-                                                               matB,
-                                                               rocsparse_spsort_stage_compute,
-                                                               &broadcast_buffer_size,
-                                                               nullptr));
-            void* broadcast_dbuffer = nullptr;
-            CHECK_HIP_ERROR(rocsparse_hipMalloc(&broadcast_dbuffer, broadcast_buffer_size));
-            CHECK_ROCSPARSE_ERROR(rocsparse_spsort(handle,
-                                                   descr,
-                                                   matA0,
-                                                   matB,
-                                                   rocsparse_spsort_stage_compute,
-                                                   broadcast_buffer_size,
-                                                   broadcast_dbuffer,
-                                                   nullptr));
-            CHECK_HIP_ERROR(rocsparse_hipFree(broadcast_dbuffer));
-
-            hB0_ptr_gold.unit_check(dB_ptr);
-            hB0_ind_gold.unit_check(dB_ind);
-            hB0_val_gold.unit_check(dB_val);
-            hA0_ptr.unit_check(dA0_ptr);
-            hA0_ind.unit_check(dA0_ind);
-            hA0_val.unit_check(dA0_val);
-        }
-
         // In place: A is sorted into itself.
         size_t in_place_buffer_size = 0;
         CHECK_ROCSPARSE_ERROR(rocsparse_spsort_buffer_size(handle,
@@ -477,7 +416,7 @@ void testing_spsort_csr(const Arguments& arg)
                                                dbuffer,
                                                nullptr);
 
-        const double gbyte_count = batch_count * spsort_csr_gbyte_count<I, J, T>(M, nnz);
+        const double gbyte_count = batch_count_B * spsort_csr_gbyte_count<I, J, T>(M, nnz);
         const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
@@ -486,8 +425,10 @@ void testing_spsort_csr(const Arguments& arg)
                             N,
                             display_key_t::nnz,
                             nnz,
-                            display_key_t::batch_count,
-                            batch_count,
+                            display_key_t::batch_count_A,
+                            batch_count_A,
+                            display_key_t::batch_count_B,
+                            batch_count_B,
                             display_key_t::bandwidth,
                             gpu_gbyte,
                             display_key_t::time_ms,

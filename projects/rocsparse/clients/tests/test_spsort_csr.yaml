@@ -26,15 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: spsort_csr_bad_arg
-  category: pre_checkin
-  function: spsort_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-
-#
 # quick
-#
 - name: spsort_csr
   category: quick
   function: spsort_csr
@@ -42,6 +34,9 @@ Tests:
   precision: *single_double_precisions
   M: [0, 10]
   N: [0, 33]
+  batch_count_A: [1, 7]
+  batch_count_B: [7]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
@@ -52,8 +47,10 @@ Tests:
   precision: *single_double_precisions
   M: [300]
   N: [242]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [1]
   baseA: *all_rocsparse_index_base
-  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_csr
@@ -63,6 +60,9 @@ Tests:
   precision: *single_only_precisions
   M: [1]
   N: [1, 242]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -73,9 +73,10 @@ Tests:
   precision: *single_double_precisions
   M: [10]
   N: [33]
-  batch_count: [2]
+  batch_count_A: [1, 2]
+  batch_count_B: [2]
+  algo: [1]
   baseA: [rocsparse_index_base_one]
-  algo: [0, 1]
   matrix: [rocsparse_matrix_random]
 
 - name: spsort_csr_file
@@ -85,13 +86,20 @@ Tests:
   precision: *double_only_precisions
   M: 1
   N: 1
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1]
 
-#
 # pre_checkin
-#
+- name: spsort_csr_bad_arg
+  category: pre_checkin
+  function: spsort_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+
 - name: spsort_csr
   category: pre_checkin
   function: spsort_csr
@@ -99,6 +107,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [2000]
   N: [1623]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [1]
   baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
@@ -109,6 +120,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [8, 1623]
   N: [1623, 8]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -119,7 +133,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [2000]
   N: [1623]
-  batch_count: [2]
+  batch_count_A: [1, 2]
+  batch_count_B: [2]
+  algo: [1]
   baseA: *all_rocsparse_index_base
   matrix: [rocsparse_matrix_random]
 
@@ -130,7 +146,9 @@ Tests:
   precision: *single_double_precisions
   M: [2000]
   N: [1623]
-  batch_count: [17]
+  batch_count_A: [1, 17]
+  batch_count_B: [17]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -141,6 +159,9 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [1]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron2]
@@ -152,13 +173,14 @@ Tests:
   precision: *double_only_precisions
   M: 1
   N: 1
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [0]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10]
 
-#
 # nightly
-#
 - name: spsort_csr
   category: nightly
   function: spsort_csr
@@ -166,6 +188,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [29593, 159382, 738249]
   N: [9173, 82940, 538192]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [1]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -176,7 +201,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [159382]
   N: [82940]
-  batch_count: [2]
+  batch_count_A: [1, 2]
+  batch_count_B: [2]
+  algo: [0]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -187,7 +214,9 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [29593, 159382]
   N: [9173, 82940]
-  batch_count: [4]
+  batch_count_A: [1, 4]
+  batch_count_B: [4]
+  algo: [1]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
@@ -198,6 +227,9 @@ Tests:
   precision: *double_only_precisions
   M: 1
   N: 1
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [0]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mc2depi,
@@ -210,6 +242,9 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
+  batch_count_A: [1]
+  batch_count_B: [1]
+  algo: [1]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chebyshev4,
