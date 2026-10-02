@@ -200,6 +200,62 @@ inline double decodeBfloat16(uint16_t bits)
     return static_cast<double>(value);
 }
 
+/// One element's bytes -> double, per storage type. Separate functions so decodeElement() and
+/// firstDisagreement()'s per-type loops share one decode rather than keeping two that could
+/// drift: a decode that differed between them would make the mismatch detail name an element
+/// the comparison never flagged.
+inline double decodeDoubleAt(const uint8_t* bytes)
+{
+    double value = 0.0;
+    std::memcpy(&value, bytes, sizeof(value));
+    return value;
+}
+
+inline double decodeFloatAt(const uint8_t* bytes)
+{
+    float value = 0.0F;
+    std::memcpy(&value, bytes, sizeof(value));
+    return static_cast<double>(value);
+}
+
+inline double decodeHalfAt(const uint8_t* bytes)
+{
+    uint16_t value = 0;
+    std::memcpy(&value, bytes, sizeof(value));
+    return decodeHalf(value);
+}
+
+inline double decodeBfloat16At(const uint8_t* bytes)
+{
+    uint16_t value = 0;
+    std::memcpy(&value, bytes, sizeof(value));
+    return decodeBfloat16(value);
+}
+
+inline double decodeInt64At(const uint8_t* bytes)
+{
+    int64_t value = 0;
+    std::memcpy(&value, bytes, sizeof(value));
+    return static_cast<double>(value);
+}
+
+inline double decodeInt32At(const uint8_t* bytes)
+{
+    int32_t value = 0;
+    std::memcpy(&value, bytes, sizeof(value));
+    return static_cast<double>(value);
+}
+
+inline double decodeInt8At(const uint8_t* bytes)
+{
+    return static_cast<double>(static_cast<int8_t>(*bytes));
+}
+
+inline double decodeByteAt(const uint8_t* bytes)
+{
+    return static_cast<double>(*bytes); // UINT8, BOOLEAN
+}
+
 /// Element @p index of @p image, which the caller has already bounds-checked.
 inline double decodeElement(const std::vector<uint8_t>& image,
                             size_t index,
@@ -210,40 +266,21 @@ inline double decodeElement(const std::vector<uint8_t>& image,
     switch(dataType)
     {
     case DataType::DOUBLE:
-    {
-        double value = 0.0;
-        std::memcpy(&value, bytes, sizeof(value));
-        return value;
-    }
+        return decodeDoubleAt(bytes);
     case DataType::FLOAT:
-    {
-        float value = 0.0F;
-        std::memcpy(&value, bytes, sizeof(value));
-        return static_cast<double>(value);
-    }
+        return decodeFloatAt(bytes);
     case DataType::HALF:
+        return decodeHalfAt(bytes);
     case DataType::BFLOAT16:
-    {
-        uint16_t value = 0;
-        std::memcpy(&value, bytes, sizeof(value));
-        return dataType == DataType::HALF ? decodeHalf(value) : decodeBfloat16(value);
-    }
+        return decodeBfloat16At(bytes);
     case DataType::INT64:
-    {
-        int64_t value = 0;
-        std::memcpy(&value, bytes, sizeof(value));
-        return static_cast<double>(value);
-    }
+        return decodeInt64At(bytes);
     case DataType::INT32:
-    {
-        int32_t value = 0;
-        std::memcpy(&value, bytes, sizeof(value));
-        return static_cast<double>(value);
-    }
+        return decodeInt32At(bytes);
     case DataType::INT8:
-        return static_cast<double>(static_cast<int8_t>(*bytes));
+        return decodeInt8At(bytes);
     default:
-        return static_cast<double>(*bytes); // UINT8, BOOLEAN
+        return decodeByteAt(bytes);
     }
 }
 
@@ -480,7 +517,8 @@ inline double agreementFloor(NumericKind kind)
     }
 }
 
-/// Where two images of the same tensor first differ, or empty when they agree.
+/// firstDisagreement() over one storage type's @p decode: where two images of the same
+/// tensor first differ, or empty when they agree.
 ///
 /// `|a - b| <= rtol * max(|a|, |b|) + atol`, per element. Both terms are load-bearing:
 ///
@@ -498,27 +536,30 @@ inline double agreementFloor(NumericKind kind)
 ///    one ulp at the tensor's magnitude, so an element down in the noise is judged against
 ///    the noise, and an element at full magnitude is judged against itself.
 ///
-/// Two all-zero images agree: they are identical, and identical is not a difference.
-inline std::string firstDisagreement(const std::string& name,
-                                     hipdnn_frontend::DataType dataType,
+/// A template over the decoder so the type is chosen once per tensor rather than once per
+/// element. Decoding through decodeElement() inside both loops cost ~16 s per candidate on a
+/// large gfx942 bf16 attention problem -- more host time over the sweep than the GPU spent
+/// on every warmup, timed and validation launch together. Same arithmetic in the same order,
+/// so the verdict and the element a mismatch names are those of the per-element form.
+template <typename Decode>
+std::string firstDisagreementDecoded(const std::string& name,
+                                     NumericKind kind,
+                                     size_t width,
                                      const std::vector<uint8_t>& reference,
-                                     const std::vector<uint8_t>& candidate)
+                                     const std::vector<uint8_t>& candidate,
+                                     Decode decode)
 {
-    const auto kind = numericKind(dataType);
-    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
-    if(kind == NumericKind::NONE || width == 0 || reference.size() != candidate.size())
-    {
-        return {}; // Not comparable; the caller counts it as skipped rather than as agreement.
-    }
     const size_t count = reference.size() / width;
+    const uint8_t* referenceBytes = reference.data();
+    const uint8_t* candidateBytes = candidate.data();
 
     // The tensor's magnitude, which only the absolute term uses: the noise an element near
     // zero carries came from terms the size of the tensor, not the size of the element.
     double scale = 0.0;
     for(size_t index = 0; index < count; ++index)
     {
-        const double left = decodeElement(reference, index, dataType);
-        const double right = decodeElement(candidate, index, dataType);
+        const double left = decode(referenceBytes + (index * width));
+        const double right = decode(candidateBytes + (index * width));
         if(std::isfinite(left))
         {
             scale = std::max(scale, std::abs(left));
@@ -533,8 +574,8 @@ inline std::string firstDisagreement(const std::string& name,
 
     for(size_t index = 0; index < count; ++index)
     {
-        const double left = decodeElement(reference, index, dataType);
-        const double right = decodeElement(candidate, index, dataType);
+        const double left = decode(referenceBytes + (index * width));
+        const double right = decode(candidateBytes + (index * width));
         // A candidate that produced NaN where the reference produced a number is the
         // clearest possible disagreement, and `NaN > threshold` is false, so the
         // non-finite cases are decided before the magnitude test rather than by it.
@@ -557,6 +598,50 @@ inline std::string firstDisagreement(const std::string& name,
         }
     }
     return {};
+}
+
+/// Where two images of the same tensor first differ, or empty when they agree -- the rule
+/// documented on firstDisagreementDecoded(). Two all-zero images agree: they are identical,
+/// and identical is not a difference.
+inline std::string firstDisagreement(const std::string& name,
+                                     hipdnn_frontend::DataType dataType,
+                                     const std::vector<uint8_t>& reference,
+                                     const std::vector<uint8_t>& candidate)
+{
+    using hipdnn_frontend::DataType;
+    const auto kind = numericKind(dataType);
+    const auto width = static_cast<size_t>(elementBits(dataType) / 8);
+    if(kind == NumericKind::NONE || width == 0 || reference.size() != candidate.size())
+    {
+        return {}; // Not comparable; the caller counts it as skipped rather than as agreement.
+    }
+    // Identical bytes decode to identical values, and the rule passes an element equal to
+    // itself -- a finite one is within any threshold, and a NaN or infinity meets its own
+    // twin in the same-non-finite case -- so the decode cannot disagree where this agrees.
+    // It is the common case for a catalog whose candidates share a reduction order.
+    if(reference == candidate)
+    {
+        return {};
+    }
+    switch(dataType)
+    {
+    case DataType::DOUBLE:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeDoubleAt);
+    case DataType::FLOAT:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeFloatAt);
+    case DataType::HALF:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeHalfAt);
+    case DataType::BFLOAT16:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeBfloat16At);
+    case DataType::INT64:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt64At);
+    case DataType::INT32:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt32At);
+    case DataType::INT8:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeInt8At);
+    default:
+        return firstDisagreementDecoded(name, kind, width, reference, candidate, decodeByteAt);
+    }
 }
 
 /// True when every comparable tensor of @p candidate is still the zero fill it was

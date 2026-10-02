@@ -28,6 +28,8 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -452,4 +454,128 @@ TEST(TestNumericalValidation, ACandidateThatJoinsACohortDoesNotKeepItsImage)
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::AGREED);
     EXPECT_EQ(verdicts[3].verdict, NumericalVerdict::DISAGREED);
     EXPECT_NE(verdicts[3].reason.find("tensor 'Y' element 1"), std::string::npos);
+}
+
+namespace
+{
+
+/// The comparison as it was written before it was specialized per type: every element
+/// decoded through decodeElement(), in the same two passes. Kept here as the oracle the
+/// specialized form is held to.
+std::string perElementDisagreement(const std::string& name,
+                                   hipdnn_frontend::DataType dataType,
+                                   const std::vector<uint8_t>& reference,
+                                   const std::vector<uint8_t>& candidate)
+{
+    namespace detail = hipdnn_bench::detail;
+    const auto kind = detail::numericKind(dataType);
+    const auto width = static_cast<size_t>(hipdnn_bench::elementBits(dataType) / 8);
+    if(kind == detail::NumericKind::NONE || width == 0 || reference.size() != candidate.size())
+    {
+        return {};
+    }
+    const size_t count = reference.size() / width;
+    double scale = 0.0;
+    for(size_t index = 0; index < count; ++index)
+    {
+        const double left = detail::decodeElement(reference, index, dataType);
+        const double right = detail::decodeElement(candidate, index, dataType);
+        if(std::isfinite(left))
+        {
+            scale = std::max(scale, std::abs(left));
+        }
+        if(std::isfinite(right))
+        {
+            scale = std::max(scale, std::abs(right));
+        }
+    }
+    const double relative = detail::agreementTolerance(kind);
+    const double absolute = detail::agreementFloor(kind) * scale;
+    for(size_t index = 0; index < count; ++index)
+    {
+        const double left = detail::decodeElement(reference, index, dataType);
+        const double right = detail::decodeElement(candidate, index, dataType);
+        const bool bothNonFinite = !std::isfinite(left) && !std::isfinite(right);
+        const bool sameNonFinite = bothNonFinite && !(left < right) && !(right < left)
+                                   && std::isnan(left) == std::isnan(right);
+        if(sameNonFinite)
+        {
+            continue;
+        }
+        const double threshold = (relative * std::max(std::abs(left), std::abs(right))) + absolute;
+        if(!std::isfinite(left) || !std::isfinite(right) || std::abs(left - right) > threshold)
+        {
+            std::ostringstream detailText;
+            detailText.precision(3);
+            detailText << "tensor '" << name << "' element " << index << " is " << std::scientific
+                       << right << " against the catalog's " << left << ", outside a tolerance of "
+                       << threshold;
+            return detailText.str();
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+TEST(TestNumericalValidation, TheTypedComparisonDecidesEveryPairAsThePerElementOneDid)
+{
+    // The comparison picks its decoder once per tensor and skips the decode for byte-identical
+    // images, because decoding element by element dominated a large sweep's host time. Neither
+    // may move a verdict or the element a mismatch names, so both are held to the per-element
+    // form over every decodable type, on random bit patterns -- NaNs, infinities and
+    // denormals included -- and on near-copies that differ in their last bits or in one
+    // element by a lot.
+    using hipdnn_frontend::DataType;
+    std::mt19937_64 random(0x5EEDULL);
+    for(const auto dataType : {DataType::DOUBLE,
+                               DataType::FLOAT,
+                               DataType::HALF,
+                               DataType::BFLOAT16,
+                               DataType::INT64,
+                               DataType::INT32,
+                               DataType::INT8,
+                               DataType::UINT8,
+                               DataType::BOOLEAN})
+    {
+        const auto width = static_cast<size_t>(hipdnn_bench::elementBits(dataType) / 8);
+        for(int trial = 0; trial < 200; ++trial)
+        {
+            std::vector<uint8_t> reference(width * 64);
+            for(auto& byte : reference)
+            {
+                byte = static_cast<uint8_t>(random());
+            }
+            auto candidate = reference;
+            switch(trial % 4)
+            {
+            case 0: // byte-identical, the shortcut's case
+                break;
+            case 1: // the lowest byte of a few elements, rounding-sized for the float types
+                for(int flip = 0; flip < 3; ++flip)
+                {
+                    candidate[(random() % 64) * width]
+                        ^= static_cast<uint8_t>(1U << (random() % 3));
+                }
+                break;
+            case 2: // one element replaced outright
+            {
+                const size_t element = random() % 64;
+                for(size_t byte = 0; byte < width; ++byte)
+                {
+                    candidate[(element * width) + byte] = static_cast<uint8_t>(random());
+                }
+                break;
+            }
+            default: // unrelated images
+                for(auto& byte : candidate)
+                {
+                    byte = static_cast<uint8_t>(random());
+                }
+            }
+            EXPECT_EQ(hipdnn_bench::detail::firstDisagreement("Y", dataType, reference, candidate),
+                      perElementDisagreement("Y", dataType, reference, candidate))
+                << "dtype " << static_cast<int>(dataType) << " trial " << trial;
+        }
+    }
 }
