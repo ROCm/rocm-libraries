@@ -67,7 +67,8 @@ try
     I batch_count = 1;
 
     // memory workspace sizes:
-    // size of the status array of the multishift algorithm
+    // sizes of the integer and scalar workspaces of the multishift algorithm (status
+    // arrays, flags, grid barrier counters, reflections of the sweep and band copy)
     size_t size_work, size_workT;
     rocsolver_hseqr_getMemorySize<T>(n, batch_count, &size_work, &size_workT);
 

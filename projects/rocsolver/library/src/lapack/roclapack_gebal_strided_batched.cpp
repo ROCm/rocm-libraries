@@ -60,7 +60,8 @@ try
     rocblas_stride shiftA = 0;
 
     // memory workspace sizes:
-    // size of the counts used by the permutation step
+    // size of the workspace (the counts of the permutation step, and the state and
+    // partial results of the multi-block algorithm for large matrices)
     size_t size_work;
     rocsolver_gebal_getMemorySize<T>(job, n, batch_count, &size_work);
 

@@ -216,7 +216,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) hseqr_kernel(const rocsolver_schur_j
     const I ilo = std::min(std::max(iloA[bid], I(1)), n);
     const I ihi = std::min(std::max(ihiA[bid], ilo), n);
 
-    __shared__ I s_red[2][BS / 32];
+    __shared__ I s_red[2][HQR_RED(BS)];
     int buf = 0;
 
     // copy eigenvalues isolated by GEBAL
@@ -417,9 +417,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr0_part2_kernel(const I n,
                                                                I* status,
                                                                T* statusT)
 {
-    __shared__ I s_ired[2][HQR_RED(BS)];
-    int ibuf = 0;
-    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT, s_ired, ibuf);
+    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT);
 }
 
 template <int BS, typename T, typename I>
@@ -478,8 +476,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr5_build_u_kernel(const I ktop,
 /** LAQR5_LEFT_APPLY_KERNEL applies the reflections of a chunk from the left to the
     columns j0:j0+gridDim.x-1 of H (laqr5_left_apply_block), one thread-block per column. **/
 template <int BS, typename T, typename I>
-ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr5_left_apply_kernel(const I n,
-                                                                    const I ktop,
+ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr5_left_apply_kernel(const I ktop,
                                                                     const I kbot,
                                                                     const I nbmps,
                                                                     const I incol,
@@ -489,7 +486,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr5_left_apply_kernel(const I n,
                                                                     const I j0)
 {
     extern __shared__ double lmem[];
-    laqr5_left_apply_block<BS>(n, ktop, kbot, nbmps, incol, Vbuf, H, ldh, j0 + I(hipBlockIdx_x),
+    laqr5_left_apply_block<BS>(ktop, kbot, nbmps, incol, Vbuf, H, ldh, j0 + I(hipBlockIdx_x),
                                reinterpret_cast<T*>(lmem));
 }
 
@@ -643,6 +640,14 @@ I hseqr_aed_window_cap(const I nh, const bool hybrid)
     return cap;
 }
 
+/** HSEQR_RESET_BARRIER_KERNEL sets the arrivals counter of laqr5_grid_barrier to 0 before a
+    launch of the chunk kernel (with an atomic store, through the L2 cache: a memset may be done
+    by another engine and leave a stale copy of the counter in the cache). **/
+ROCSOLVER_KERNEL void hseqr_reset_barrier_kernel(unsigned* bar)
+{
+    __hip_atomic_store(bar, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+}
+
 /** HSEQR_MULTISHIFT computes the Schur form of one Hessenberg matrix with the
     multishift QR algorithm with aggressive early deflation of LAPACK ZLAQR0. The
     control flow runs on the host; each iteration launches the iteration kernel (active
@@ -661,14 +666,6 @@ I hseqr_aed_window_cap(const I nh, const bool hybrid)
     window always uses ZLAHQR, and in a different order of operations, so that the
     results are equally valid but not bitwise identical): the window is copied to the
     host and back in each iteration. **/
-/** HSEQR_RESET_BARRIER_KERNEL sets the arrivals counter of laqr5_grid_barrier to 0 before a
-    launch of the chunk kernel (with an atomic store, through the L2 cache: a memset may be done
-    by another engine and leave a stale copy of the counter in the cache). **/
-ROCSOLVER_KERNEL void hseqr_reset_barrier_kernel(unsigned* bar)
-{
-    __hip_atomic_store(bar, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-}
-
 template <typename T, typename I>
 rocblas_status hseqr_multishift(rocblas_handle handle,
                                 const bool wantt,
@@ -724,9 +721,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
     // hold one of them (checked with the occupancy of the kernel; otherwise a single
     // thread-block is used). Kernels running concurrently on the side stream may delay
     // some of them, but not indefinitely, as those kernels do not wait for the chase.
-    int device, ncu, occupancy = 0;
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipDeviceGetAttribute(&ncu, hipDeviceAttributeMultiprocessorCount, device));
+    const int ncu = rocblas_internal_get_device_prop(handle)->multiProcessorCount;
+    int occupancy = 0;
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &occupancy, laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T, I>, HSEQR_CHASE_BLOCKSIZE, 0));
     const I maxgroups
@@ -802,6 +798,9 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
         // done when kbot falls below ilo
         if(kbot < ilo)
         {
+            // (copies from the host workspace may still be pending)
+            if(hybrid)
+                HIP_CHECK(hipStreamSynchronize(stream));
             info = 0;
             return rocblas_status_success;
         }
@@ -1045,10 +1044,10 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 }
 
                 // With accum, the chunk kernel works on a compact copy of the part of H that
-                // it reads, H(r0:r1, r0:r1) (with leading dimension layout.ldw): with the leading dimension of
-                // a large H, the columns of the window span so much memory that most of its
-                // accesses miss the address translation caches (the time per step can grow
-                // several-fold when they span more than a few tens of MB). It only reads and writes
+                // it reads, H(r0:r1, r0:r1) (with leading dimension layout.ldw): with the
+                // leading dimension of a large H, the columns of the window span so much
+                // memory that most of its accesses miss the address translation caches (the
+                // time per step grows several-fold). It only reads and writes
                 // entries (i, j) with i <= j + 3 (the Hessenberg part and the bulges), and
                 // writes only within H(lo:r1, lo:r1), so only that band is copied in and back:
                 // the entries further below are the workspace of the off-window products,
@@ -1067,8 +1066,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 T* Hc = Wwin - (r0 - 1) - size_t(r0 - 1) * ldw;
                 // (the counter of the grid barriers starts at 0 in each launch)
                 if(ngroups > 1)
-                    ROCSOLVER_LAUNCH_KERNEL(hseqr_reset_barrier_kernel, dim3(1), dim3(1), 0,
-                                            stream, dbar);
+                    ROCSOLVER_LAUNCH_KERNEL(hseqr_reset_barrier_kernel, dim3(1), dim3(1), 0, stream,
+                                            dbar);
                 ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
                                         dim3(ngroups > 1 ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE),
                                         0, stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,
@@ -1090,7 +1089,7 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                     HIP_CHECK(hipStreamWaitEvent(stream, side.far[1 - slot], 0));
                 if(jl0 <= jl1)
                     ROCSOLVER_LAUNCH_KERNEL((laqr5_left_apply_kernel<64, T>), dim3(jl1 - jl0 + 1),
-                                            dim3(64), sizeof(T) * kdu, stream, n, ktop, kbot, nbmps,
+                                            dim3(64), sizeof(T) * kdu, stream, ktop, kbot, nbmps,
                                             incol, (const T*)Vb, H, ldh, jl0);
 
                 // side stream: form U, then update the far-from-diagonal entries of H and,
@@ -1170,6 +1169,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
     }
 
     // iteration limit exceeded
+    if(hybrid)
+        HIP_CHECK(hipStreamSynchronize(stream));
     info = kbot;
     return rocblas_status_success;
 }

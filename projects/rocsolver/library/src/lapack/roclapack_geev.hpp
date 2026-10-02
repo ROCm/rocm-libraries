@@ -59,8 +59,8 @@ ROCSOLVER_BEGIN_NAMESPACE
  *    normalization, and unscaling of the eigenvalues. All the matrices of a
  *    batch go through each stage together; the scaling decisions are taken on the
  *    device, but GEHRD and UNGHR take their range ilo:ihi as a host argument, so
- *    the ranges computed by GEBAL are read back to the host (a synchronization). When all the matrices of a batch have the same range, they are
- *    reduced together; otherwise they are reduced in groups with the same range
+ *    the ranges computed by GEBAL are read back to the host (a synchronization).
+ *    When all the matrices of a batch have the same range, they are reduced together; otherwise they are reduced in groups with the same range
  *    (through arrays of pointers), each group with exactly its own range. A common
  *    larger range would be exact in exact arithmetic (the reflectors outside a
  *    matrix's own range are identities), but 0 * NaN = NaN would carry a NaN or an

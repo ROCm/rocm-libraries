@@ -807,13 +807,8 @@ struct gebal_mb_state
     }
 };
 
-template <typename T, typename I, typename S>
-ROCSOLVER_KERNEL void gebal_mb_init_kernel(const rocsolver_balance job,
-                                           const I n,
-                                           const I bc,
-                                           char* ws,
-                                           S* scaleA,
-                                           const rocblas_stride strideS)
+template <typename S, typename I>
+ROCSOLVER_KERNEL void gebal_mb_init_kernel(const I n, const I bc, char* ws)
 {
     gebal_mb_state<S, I> st(ws, n, bc);
     const I b = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -839,6 +834,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) gebal_mb_rowcnt_kernel(const I n,
                                                                    char* ws)
 {
     constexpr int RB = 64;
+    static_assert(BS % RB == 0, "the block size must be a multiple of 64");
     constexpr int NC = BS / RB;
     gebal_mb_state<S, I> st(ws, n, bc);
     const I bid = hipBlockIdx_y;
@@ -1021,6 +1017,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) gebal_mb_stats_kernel(const I n,
     else
     {
         constexpr int NCL = BS / BW;
+        static_assert(BS % BW == 0, "the block size must be a multiple of GEBAL_BATCH");
         const int r = tid % BW;
         const int cl = tid / BW;
         const int64_t len = int64_t(n) - k;
@@ -1099,6 +1096,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) gebal_mb_decide_kernel(const I n,
     __shared__ int s_any;
     for(I idx = tid; idx < nb * nb; idx += BS)
         blk[(idx % nb) + (idx / nb) * BW] = A[idx2D(ib0 + idx % nb, ib0 + idx / nb, lda)];
+    static_assert(BS >= 2 * BW, "the block size must be at least 2 * GEBAL_BATCH");
     if(tid < 2 * nb)
     {
         const int part = tid / nb;
@@ -1242,6 +1240,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) gebal_mb_apply_kernel(const I n,
     else
     {
         constexpr int NCL = BS / BW;
+        static_assert(BS % BW == 0, "the block size must be a multiple of GEBAL_BATCH");
         const int r = tid % BW;
         const int cl = tid / BW;
         const int64_t len = int64_t(n) - k;
@@ -1298,8 +1297,8 @@ rocblas_status gebal_multiblock(rocblas_handle handle,
     const I bcb = (bc - 1) / BS1 + 1;
     gebal_mb_state<S, I> st(ws, n, bc);
 
-    ROCSOLVER_LAUNCH_KERNEL((gebal_mb_init_kernel<T, I>), dim3(bcb), dim3(BS1), 0, stream, job, n,
-                            bc, ws, scale, strideS);
+    ROCSOLVER_LAUNCH_KERNEL((gebal_mb_init_kernel<S, I>), dim3(bcb), dim3(BS1), 0, stream, n, bc,
+                            ws);
     if(job != rocsolver_balance_scale)
     {
         ROCSOLVER_LAUNCH_KERNEL((gebal_mb_rowcnt_kernel<BS, T, I, S>), dim3((n - 1) / 64 + 1, bc),

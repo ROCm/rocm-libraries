@@ -906,11 +906,12 @@ __host__ __device__ __forceinline__ I lahqr_block(const bool wantt,
  * ===========================================================================
  */
 #define HQR_LDS_NMAX 64
-// packed matrix (2205 entries for n = 64), 2*HQR_LDS_NMAX transformations, and
-// HQR_LDS_NMAX + 2 integers (column offsets and a reduction variable; 40 entries of at
-// least 8 bytes)
-// (the packed matrix of order HQR_LDS_NMAX has 2205 entries, rounded up to 2208)
-#define HQR_LDS_PACKED_SIZE 2208
+// packed matrix, 2*HQR_LDS_NMAX transformations, and HQR_LDS_NMAX + 2 integers (column
+// offsets and a reduction variable; 40 entries of at least 8 bytes). The packed matrix of
+// order n keeps min(j + 2, n) entries of column j: n(n+1)/2 + 2n - 3 entries (rounded up to
+// a multiple of 8).
+#define HQR_LDS_PACKED_SIZE \
+    (((HQR_LDS_NMAX * (HQR_LDS_NMAX + 1) / 2 + 2 * HQR_LDS_NMAX - 3 + 7) / 8) * 8)
 #define HQR_LDS_WS_SIZE (HQR_LDS_PACKED_SIZE + 2 * HQR_LDS_NMAX + 40)
 
 /** HQR_LARFG2_FAST computes a 2-element reflection like hqr_larfg<2>, directly when
@@ -947,6 +948,8 @@ __device__ __forceinline__ I
     lahqr_lds_block(const I n, T* Hg, const I ldh, T* Wg, T* Zg, const I ldz, T* ws)
 {
     static_assert(BS >= HQR_LDS_NMAX, "lahqr_lds_block needs at least HQR_LDS_NMAX threads");
+    static_assert((HQR_LDS_NMAX + 2) * sizeof(int) <= 40 * sizeof(T),
+                  "the integers must fit in the last 40 entries of the workspace");
     using S = decltype(std::real(T{}));
     const I tid = hipThreadIdx_x;
 

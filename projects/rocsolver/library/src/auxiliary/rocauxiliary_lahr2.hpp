@@ -423,9 +423,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // number of compute units (for the split of the products with A, see below)
-    int device, ncu;
-    HIP_CHECK(hipGetDevice(&device));
-    HIP_CHECK(hipDeviceGetAttribute(&ncu, hipDeviceAttributeMultiprocessorCount, device));
+    const int ncu = rocblas_internal_get_device_prop(handle)->multiProcessorCount;
 
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 

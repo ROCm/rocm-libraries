@@ -19090,8 +19090,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle 
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
     the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
     interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
-    entry of \f$D\f$. The
-    permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
     (version 3.12), except for rounding in the computation of the row and column norms, and in
@@ -19198,8 +19198,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal(rocblas_handle handle,
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
     the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
     interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
-    entry of \f$D\f$. The
-    permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
     (version 3.12), except for rounding in the computation of the row and column norms, and in
@@ -19235,7 +19235,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal(rocblas_handle handle,
     @param[out]
     ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
                 ihi[l] is the 1-based index of the last row and column of the submatrix B_l.
-                If n = 0, ilo[l] = 1 and ihi[l] = 0.
+                If job is rocsolver_balance_none or rocsolver_balance_scale, ilo[l] = 1 and
+                ihi[l] = n. If n = 0, ilo[l] = 1 and ihi[l] = 0.
     @param[out]
     scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
                 The permutations and scaling factors applied to A_l.
@@ -19320,8 +19321,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_batched(rocblas_handle handle,
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
     the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
     interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
-    entry of \f$D\f$. The
-    permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
+    entry of \f$D\f$. The permutations are applied in the order n, n-1, ..., ihi+1, followed by
+    1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
     (version 3.12), except for rounding in the computation of the row and column norms, and in
@@ -19361,7 +19362,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_batched(rocblas_handle handle,
     @param[out]
     ihi         pointer to rocblas_int. Array of batch_count integers on the GPU.
                 ihi[l] is the 1-based index of the last row and column of the submatrix B_l.
-                If n = 0, ilo[l] = 1 and ihi[l] = 0.
+                If job is rocsolver_balance_none or rocsolver_balance_scale, ilo[l] = 1 and
+                ihi[l] = n. If n = 0, ilo[l] = 1 and ihi[l] = 0.
     @param[out]
     scale       pointer to real type. Array on the GPU (the size depends on the value of strideS).
                 The permutations and scaling factors applied to A_l.
@@ -19529,7 +19531,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak(rocblas_handle handle,
     eigenvectors as \f$P D^{-1} V\f$.
 
     The values of ilo, ihi and scale are read from device memory and are not validated;
-    they must be those returned by GEBAL.
+    they must be those returned by GEBAL_BATCHED.
 
     @param[in]
     handle      rocblas_handle.
@@ -19639,7 +19641,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_batched(rocblas_handle handle,
     eigenvectors as \f$P D^{-1} V\f$.
 
     The values of ilo, ihi and scale are read from device memory and are not validated;
-    they must be those returned by GEBAL.
+    they must be those returned by GEBAL_STRIDED_BATCHED.
 
     @param[in]
     handle      rocblas_handle.
@@ -19773,6 +19775,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_strided_batched(rocblas_handle 
     rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
     latency-bound computation) is computed on the host; the rest of the algorithm runs on the
     GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
     The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
     subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
     its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
@@ -19883,6 +19890,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
     rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
     latency-bound computation) is computed on the host; the rest of the algorithm runs on the
     GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
     The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
     subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
     its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
@@ -19916,7 +19928,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
     @param[inout]
     H           array of pointers to type. Each pointer points to an array on the GPU of dimension ldh*n.
                 On entry, the upper Hessenberg matrices H_l. On exit, if job = rocsolver_schur_form and
-                info[l] = 0, the Schur forms T_l.
+                info[l] = 0, the Schur forms T_l. Otherwise, the contents of H_l are unspecified.
     @param[in]
     ldh         rocblas_int. ldh >= max(1, n).
                 Specifies the leading dimension of matrices H_l.
@@ -19929,7 +19941,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
                 There is no restriction for the value of strideW. Normal use case is strideW >= n.
     @param[inout]
     Z           array of pointers to type. Each pointer points to an array on the GPU of dimension ldz*n.
-                The Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
+                If compz = rocsolver_schur_vectors_update, on entry the unitary matrices Q_l. On exit,
+                the Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
     @param[in]
     ldz         rocblas_int. ldz >= 1, and ldz >= n if compz is not rocsolver_schur_vectors_none.
                 Specifies the leading dimension of matrices Z_l.
@@ -20001,6 +20014,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
     rocsolver_alg_mode_hybrid), the Schur form of the deflation windows of the latter (a small,
     latency-bound computation) is computed on the host; the rest of the algorithm runs on the
     GPU.
+
+    \note
+    For n > 75, the multishift algorithm is driven from the host: it reads a small status
+    array back in each iteration (a synchronization of the stream) and runs some matrix-matrix
+    products on an internal stream, so that HSEQR cannot be captured in a HIP graph.
     The active block H(ilo:ihi, ilo:ihi) splits into irreducible diagonal blocks at its
     subdiagonal entries that are exactly zero. A 1x1 block deflates at once, as in LAPACK:
     its diagonal entry is its eigenvalue, even if it is a NaN or infinite. If the Hessenberg
@@ -20034,7 +20052,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
     @param[inout]
     H           pointer to type. Array on the GPU (the size depends on the value of strideH).
                 On entry, the upper Hessenberg matrices H_l. On exit, if job = rocsolver_schur_form and
-                info[l] = 0, the Schur forms T_l.
+                info[l] = 0, the Schur forms T_l. Otherwise, the contents of H_l are unspecified.
     @param[in]
     ldh         rocblas_int. ldh >= max(1, n).
                 Specifies the leading dimension of matrices H_l.
@@ -20051,7 +20069,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
                 There is no restriction for the value of strideW. Normal use case is strideW >= n.
     @param[inout]
     Z           pointer to type. Array on the GPU (the size depends on the value of strideZ).
-                The Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
+                If compz = rocsolver_schur_vectors_update, on entry the unitary matrices Q_l. On exit,
+                the Schur vectors Z_l (or Q_l*Z_l). Not referenced if compz = rocsolver_schur_vectors_none.
     @param[in]
     ldz         rocblas_int. ldz >= 1, and ldz >= n if compz is not rocsolver_schur_vectors_none.
                 Specifies the leading dimension of matrices Z_l.

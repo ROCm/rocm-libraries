@@ -2393,11 +2393,9 @@ inline rocblas_status rocsolver_geev(bool STRIDED,
                                      rocblas_int* info,
                                      rocblas_int bc)
 {
-    return STRIDED ? rocsolver_cgeev_strided_batched(handle, jobvl, jobvr, n, A, lda, stA, W,
-                                                     stW, VL, ldvl, stVL, VR, ldvr, stVR,
-                                                     info, bc)
-                   : rocsolver_cgeev(handle, jobvl, jobvr, n, A, lda, W, VL, ldvl, VR, ldvr,
-                                     info);
+    return STRIDED ? rocsolver_cgeev_strided_batched(handle, jobvl, jobvr, n, A, lda, stA, W, stW,
+                                                     VL, ldvl, stVL, VR, ldvr, stVR, info, bc)
+                   : rocsolver_cgeev(handle, jobvl, jobvr, n, A, lda, W, VL, ldvl, VR, ldvr, info);
 }
 
 inline rocblas_status rocsolver_geev(bool STRIDED,
@@ -2419,11 +2417,9 @@ inline rocblas_status rocsolver_geev(bool STRIDED,
                                      rocblas_int* info,
                                      rocblas_int bc)
 {
-    return STRIDED ? rocsolver_zgeev_strided_batched(handle, jobvl, jobvr, n, A, lda, stA, W,
-                                                     stW, VL, ldvl, stVL, VR, ldvr, stVR,
-                                                     info, bc)
-                   : rocsolver_zgeev(handle, jobvl, jobvr, n, A, lda, W, VL, ldvl, VR, ldvr,
-                                     info);
+    return STRIDED ? rocsolver_zgeev_strided_batched(handle, jobvl, jobvr, n, A, lda, stA, W, stW,
+                                                     VL, ldvl, stVL, VR, ldvr, stVR, info, bc)
+                   : rocsolver_zgeev(handle, jobvl, jobvr, n, A, lda, W, VL, ldvl, VR, ldvr, info);
 }
 
 // batched
@@ -2446,8 +2442,8 @@ inline rocblas_status rocsolver_geev(bool STRIDED,
                                      rocblas_int* info,
                                      rocblas_int bc)
 {
-    return rocsolver_cgeev_batched(handle, jobvl, jobvr, n, A, lda, W, stW, VL, ldvl, VR,
-                                    ldvr, info, bc);
+    return rocsolver_cgeev_batched(handle, jobvl, jobvr, n, A, lda, W, stW, VL, ldvl, VR, ldvr,
+                                   info, bc);
 }
 
 inline rocblas_status rocsolver_geev(bool STRIDED,
@@ -2469,8 +2465,8 @@ inline rocblas_status rocsolver_geev(bool STRIDED,
                                      rocblas_int* info,
                                      rocblas_int bc)
 {
-    return rocsolver_zgeev_batched(handle, jobvl, jobvr, n, A, lda, W, stW, VL, ldvl, VR,
-                                    ldvr, info, bc);
+    return rocsolver_zgeev_batched(handle, jobvl, jobvr, n, A, lda, W, stW, VL, ldvl, VR, ldvr,
+                                   info, bc);
 }
 /*****************************************************/
 

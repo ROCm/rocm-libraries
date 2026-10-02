@@ -387,9 +387,10 @@ __host__ __device__ __forceinline__ void hseqr_iparmq(const I nh, I& ns, I& nw)
 }
 
 /** Maximum number of shifts of the sweeps of laqr4_block, and the size of the window
-    above which aed_core_block uses laqr4_block for its Schur form (on the device). **/
+    above which aed_core_block uses laqr4_block for its Schur form (on the device; the
+    smaller windows use lahqr_lds_block). **/
 #define LAQR4_MAX_SHIFTS 32
-#define LAQR4_NMIN 64
+#define LAQR4_NMIN HQR_LDS_NMAX
 
 template <int BS, typename T, typename I>
 __device__ __forceinline__ I laqr4_block(const I n,
@@ -437,8 +438,9 @@ struct hqr_host_ops
     on the host, with BS = 1. On the device, lds_ws (shared memory of HQR_LDS_WS_SIZE
     entries, if given, with BS >= HQR_LDS_NMAX) is used for the Schur form of windows of
     at most HQR_LDS_NMAX entries (lahqr_lds_block). On the host, the routines of host_ops (if
-    given) replace the generic ones (see hqr_host_ops). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
-    status arrays and the reflections of laqr4_block in shared memory), windows with
+    given) replace the generic ones (see hqr_host_ops). With MULTISHIFT (on the device, with
+    st4, stT4 and sV4, the status arrays and the reflections of laqr4_block in shared
+    memory), windows with
     jw > LAQR4_NMIN are reduced to Schur form by laqr4_block (the multishift QR
     algorithm, as LAPACK ZLAQR3 calls ZLAQR4), whose own deflation windows use this
     function without MULTISHIFT. (It is a template parameter so that the kernels of small
@@ -728,8 +730,9 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
       arrives: a full fence would also write back the L2 cache of its XCD, which is slow when it
       holds many modified lines (for example of the matrix products on the side stream).
     - Elsewhere: bar[0] counts the arrivals of the current barrier (the last one sets it back to
-      0) and bar[1] is the generation, with full fences. (The variant above gave wrong results on
-      gfx11: some thread-blocks read data of the previous step.) **/
+      0) and bar[1] is the generation, with full fences. (The scheme above relies on the
+      gfx94x fences; on gfx11, for example, thread-blocks could read data of the previous step.)
+      **/
 __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
 {
 #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
@@ -1053,7 +1056,7 @@ __device__ __forceinline__ void laqr5_chunk_block(const bool wantt,
         }
 
         // apply the reflection of bulge m (2-by-2 if m == m22) from the right to the
-        // pair or triplet of columns starting at column c of the matrix A
+        // entries (a1, a2[, a3]) of one row
         auto apply_right = [&](const I m, T& a1, T& a2, T& a3) {
             const T v1 = vv(1, m);
             const T v2 = vv(2, m);
@@ -1203,8 +1206,8 @@ __device__ __forceinline__ void laqr5_chunk_block(const bool wantt,
         __syncthreads();
 
         // 3. multiply H by reflections from the right (and, without accum, Z; with accum
-        //    they were stored in Vbuf). Delay filling in the last row until the vigilant deflation check
-        //    is complete. The bulges act on disjoint columns, so all the (bulge, row) pairs
+        //    they were stored in Vbuf). Delay filling in the last row until the vigilant
+        //    deflation check is complete. The bulges act on disjoint columns, so all the (bulge, row) pairs
         //    are independent and are distributed among the threads.
         {
             // H: rows jtop:min(kbot,k+3) of each bulge (the range of the last bulge is the
@@ -1401,8 +1404,7 @@ __device__ __forceinline__ void laqr5_build_u_block(const I ktop,
     act on disjoint rows. This updates the columns that the next chunk will use, so that
     the matrix-matrix products with U can run concurrently with the next chunk. **/
 template <int BS, typename T, typename I>
-__device__ __forceinline__ void laqr5_left_apply_block(const I n,
-                                                       const I ktop,
+__device__ __forceinline__ void laqr5_left_apply_block(const I ktop,
                                                        const I kbot,
                                                        const I nbmps,
                                                        const I incol,
@@ -1596,7 +1598,7 @@ __host__ __device__ void laqr0_shifts_tail(const bool sort,
  *    itself, which are left to the caller. LAPACK computes the Schur forms of the
  *    deflation window and of the too-few-shifts submatrix with ZLAQR4 for sizes above
  *    NMIN = 75, and with ZLAHQR otherwise. Here, on the device, windows larger than
- *    LAQR4_NMIN (64, the largest size of the shared memory kernel lahqr_lds_block) use
+ *    LAQR4_NMIN (the largest size of the shared memory kernel lahqr_lds_block) use
  *    laqr4_block, deferred to laqr0_core4_block, and the other windows, the
  *    too-few-shifts submatrix and all the windows of the hybrid mode use ZLAHQR (the
  *    window is capped by hseqr_aed_window_cap, but can still grow to (n-1)/3 when the
@@ -1716,9 +1718,7 @@ __device__ __forceinline__ void laqr0_part2_block(const I n,
                                                   const I ldh,
                                                   T* W,
                                                   I* status,
-                                                  T* statusT,
-                                                  I (*s_ired)[HQR_RED(BS)],
-                                                  int& ibuf)
+                                                  T* statusT)
 {
     using S = decltype(std::real(T{}));
 
@@ -1726,7 +1726,7 @@ __device__ __forceinline__ void laqr0_part2_block(const I n,
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
 
     constexpr I kexsh = 6;
-    constexpr I nmin = 75; // LAPACK NMIN (IPARMQ, ISPEC = 12)
+    constexpr I nmin = HSEQR_NMIN; // LAPACK NMIN (IPARMQ, ISPEC = 12)
     constexpr I nibble = 14;
     const S wilk1 = S(0.75);
 
@@ -1982,7 +1982,7 @@ __device__ __forceinline__ I laqr4_block(const I n,
             }
         }
         hqr_sync();
-        laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, st, stT, s_ired, ibuf);
+        laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, st, stT);
         hqr_sync();
 
         const I ktop = st[LAQR0_KTOP];
@@ -2122,7 +2122,7 @@ __device__ __forceinline__ void laqr0_iteration_block(const I n,
     }
     __syncthreads();
 
-    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT, s_ired, ibuf);
+    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT);
 }
 
 /** LAQR0_CORE4_BLOCK completes an iteration that laqr0_iteration_block deferred
@@ -2177,7 +2177,7 @@ __device__ __forceinline__ void laqr0_core4_block(const I n,
     }
     hqr_sync();
 
-    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT, s_ired, ibuf);
+    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT);
 }
 
 ROCSOLVER_END_NAMESPACE
