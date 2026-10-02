@@ -14,6 +14,10 @@ namespace hipblaslt_jit
             {
                 return "catalog.v1";
             }
+            std::string version() const override
+            {
+                return "1";
+            }
             std::vector<CandidateSeed> seeds(const OperationRequest&,
                                              const DeviceTarget& target) const override
             {
@@ -42,7 +46,10 @@ namespace hipblaslt_jit
                 }
                 std::vector<CandidateSeed> seeds;
                 for(const auto& tile : tiles)
+                {
                     seeds.push_back({tile, {{32, 1}, {64, 2}}, hints});
+                    seeds.back().policies = {ExecutionPolicy{}};
+                }
                 return seeds;
             }
             std::vector<TuningParameter>

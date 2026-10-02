@@ -253,6 +253,7 @@ namespace
             {"timing,bogus", debug::Timing, "bogus"},
             {"0,timing", debug::Timing, "0"},
             {"2, x ,progress", debug::Progress, "2,x"},
+            {"Knowledge,prediction", debug::Knowledge | debug::Prediction, ""},
         };
         for(const auto& c : cases)
         {
@@ -260,6 +261,9 @@ namespace
             require(debug::parse(c.value, unknown) == c.categories && unknown == c.unknown,
                     std::string("Wrong parse of \"") + c.value + "\": unknown \"" + unknown + "\"");
         }
+        require(debug::names(debug::All) == "timing,progress,knowledge,prediction"
+                    && debug::names(debug::Progress | debug::Knowledge) == "progress,knowledge",
+                "Wrong category names");
         std::cout << "PASS HIPBLASLT_JIT_DEBUG names categories or all; numbers are unknown\n";
     }
 
@@ -334,7 +338,7 @@ namespace
             const auto& process = lines[0];
             require(field(process, "cat") == "timing" && field(process, "q") == "null"
                         && field(process, "mode") == "1"
-                        && field(process, "categories") == "timing,progress"
+                        && field(process, "categories") == "timing,progress,knowledge,prediction"
                         && field(process, "destination") == "stderr"
                         && contains(process, "\"wall\":\"") && contains(process, "\"comgr_cache\":"),
                     "Wrong process line: " + process);
@@ -444,7 +448,8 @@ namespace
             require(run.log
                         == std::string("hipblaslt warning: HIPBLASLT_JIT_DEBUG=") + value
                                + ": ignoring " + value
-                               + "; the value is timing, progress or all, comma-separated\n"
+                               + "; the value is timing, progress, knowledge, prediction or all, "
+                                 "comma-separated\n"
                                  "categories=0\n",
                     std::string(value) + ": wrong warning:\n" + run.log);
         }

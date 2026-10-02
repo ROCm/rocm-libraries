@@ -60,10 +60,10 @@ namespace hipblaslt_jit
             return configure(
                 "HIPBLASLT_JIT_TEST_FAULT=record requires a file in HIPBLASLT_JIT_TEST_RECORD");
 
-        made.predictor   = makeOrigamiPredictor();
-        made.knowledge   = makeCatalogKnowledge();
-        options.contract = std::string(made.predictor->modeledContract());
-        made.backend     = mock::makeBackend(options);
+        made.predictor    = makeOrigamiPredictor();
+        made.knowledge    = makeCatalogKnowledge();
+        options.contracts = made.predictor->modeledContracts();
+        made.backend      = mock::makeBackend(options);
         return {};
     }
 }

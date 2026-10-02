@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <hip/hip_runtime_api.h>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -126,10 +127,10 @@ namespace hipblaslt_jit
 
     struct BackendInfo
     {
-        std::string id;
-        std::string name; // reported as Diagnostics::backend
-        std::string consumesPrediction; // modeled contract, or empty
-        std::string version; // changes whenever the generated solutions can change
+        std::string           id;
+        std::string           name; // reported as Diagnostics::backend
+        std::set<std::string> contracts; // modeled contracts it transports; empty: no prediction
+        std::string           version; // changes whenever the generated solutions can change
     };
 
     class Backend
@@ -229,7 +230,7 @@ namespace hipblaslt_jit
         };
 
         // Throws std::invalid_argument when a required component is missing or
-        // the predictor's contract differs from the backend's.
+        // the predictor models no contract the backend transports.
         explicit Jit(Components components);
 
         // Predict, generate, build and check support, then publish, or load when
@@ -247,7 +248,8 @@ namespace hipblaslt_jit
         }
 
     private:
-        Components m_components;
+        Components            m_components;
+        std::set<std::string> m_contracts; // the backend's and the predictor's
     };
 }
 

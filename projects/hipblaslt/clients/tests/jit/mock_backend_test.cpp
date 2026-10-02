@@ -568,7 +568,7 @@ namespace
         std::cout << "PASS the record fault appends each request and fails: " << lines[0] << '\n';
 
         mock::Options predicted{{replay}};
-        predicted.contract = "origami.gemm.dp.v1";
+        predicted.contracts = {"origami.gemm.dp.v1"};
         require(jit::getJitAlgo(device, request, backend(predicted), bytes, solution, diagnostics)
                         == HIPBLAS_STATUS_SUCCESS
                     && diagnostics.message.find("ranked candidates") != std::string::npos,
@@ -577,7 +577,7 @@ namespace
                   << '\n';
 
         jit::Backend rejected;
-        predicted.contract = "test.unmodeled.v1";
+        predicted.contracts = {"test.unmodeled.v1"};
         mock::Options unrecorded{{replay}, mock::Options::Fault::Record};
         for(const auto& options : {mock::Options{}, unrecorded, predicted})
             require(mock::createBackend(options, rejected, diagnostics)

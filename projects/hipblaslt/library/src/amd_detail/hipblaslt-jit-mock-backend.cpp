@@ -51,7 +51,7 @@ namespace hipblaslt_ext::experimental::jit::mock
             explicit MockBackend(const Options& options)
                 : m_fault(options.fault)
                 , m_record(options.record)
-                , m_info{"mock", "mock", options.contract, ""}
+                , m_info{"mock", "mock", options.contracts, ""}
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The mock backend has no bundle to replay");
@@ -189,7 +189,7 @@ namespace hipblaslt_ext::experimental::jit::mock
         diagnostics = {"mock", ""};
         try
         {
-            const bool predicted = !options.contract.empty();
+            const bool predicted = !options.contracts.empty();
             backend              = detail::BackendAccess::make(
                 std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
                     makeBackend(options),

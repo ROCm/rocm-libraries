@@ -535,11 +535,12 @@ comma-separated list of category names, in any case:
 | --- | --- |
 | `timing` | One line when each heuristic query, `hipblasLtMatmul` call, generation and generated solution finishes, with the duration of each step |
 | `progress` | One line per step as it happens: lookups, waits, generation stages, builds and publication |
+| `knowledge`, `prediction` | Reserved; no lines yet |
 | `all` | Every category, including categories added later |
 
 Unset or empty prints nothing. A number, including `0` and `1`, or an unknown
 name prints `hipblaslt warning: HIPBLASLT_JIT_DEBUG=<value>: ignoring <names>;
-the value is timing, progress or all, comma-separated` once and is ignored; the
+the value is timing, progress, knowledge, prediction or all, comma-separated` once and is ignored; the
 names beside it still apply. hipBLASLt reads the variable once per process.
 With `HIPBLASLT_JIT` off, and in a build without JIT, it prints nothing and no
 warning.

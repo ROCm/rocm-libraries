@@ -376,13 +376,7 @@ namespace hipblaslt_jit::debug
 
     std::string childCategories()
     {
-        const unsigned on = categories();
-        std::string    out;
-        if(on & Timing)
-            out = "timing";
-        if(on & Progress)
-            out += out.empty() ? "progress" : ",progress";
-        return out;
+        return names(categories() & (Timing | Progress));
     }
 
     struct ChildObserver::State

@@ -109,6 +109,10 @@ namespace
         {
             return "fake-knowledge";
         }
+        std::string version() const override
+        {
+            return "3";
+        }
         std::vector<hj::CandidateSeed> seeds(const hj::OperationRequest&,
                                              const hj::DeviceTarget&) const override
         {
@@ -125,8 +129,10 @@ namespace
 
     struct Predictor final : hj::Predictor
     {
-        Log&       log;
-        hj::Status result;
+        Log&               log;
+        hj::Status         result;
+        mutable size_t     workspaceLimit = 0;
+        std::string        other; // the contract of a second candidate, when set
         Predictor(Log& l, hj::Status r = {})
             : log(l)
             , result(std::move(r))
@@ -136,20 +142,25 @@ namespace
         {
             return "fake-model";
         }
-        std::string_view modeledContract() const noexcept override
+        std::set<std::string> modeledContracts() const override
         {
-            return "fake.v1";
+            return {"fake.v1", "spare.v1"};
         }
-        hj::Status predict(const hj::OperationRequest& request,
-                           const hj::DeviceTarget&     target,
-                           const hj::TuningKnowledge&  knowledge,
-                           hj::Prediction&             prediction) const override
+        hj::Status predict(const hj::PredictionRequest& request,
+                           const hj::TuningKnowledge&   knowledge,
+                           hj::Prediction&              prediction) const override
         {
             log.add("predict");
+            workspaceLimit = request.workspaceLimit;
             if(!result.ok())
                 return result;
-            const auto seeds = knowledge.seeds(request, target);
+            const auto seeds = knowledge.seeds(request.request, request.target);
             prediction.modeledContract = "fake.v1";
+            if(!other.empty())
+            {
+                prediction.ranked.push_back({6, 1.0, {{"DepthU", "0"}}, {}});
+                prediction.ranked.back().contract = other;
+            }
             prediction.ranked.push_back({7, 1.0, {{"DepthU", std::to_string(seeds.size())}}, {}});
             return {};
         }
@@ -167,12 +178,13 @@ namespace
         mutable std::vector<std::string> excludeKernels;
         mutable const hj::Prediction*    prediction = nullptr;
         mutable std::string              candidate;
+        mutable std::vector<uint32_t>    ranked;
         mutable std::vector<fs::path>    scratches;
         mutable const hj::DeviceTarget*  target = nullptr;
 
-        Backend(Log& l, std::vector<std::string> k, std::string contract = {})
+        Backend(Log& l, std::vector<std::string> k, std::set<std::string> contracts = {})
             : log(l)
-            , information{"fake-backend", "Fake", std::move(contract)}
+            , information{"fake-backend", "Fake", std::move(contracts)}
             , kernels(std::move(k))
             , result{Code::Success, Stage::Generate, "generated"}
         {
@@ -194,6 +206,10 @@ namespace
                 candidate      = request.prediction && !request.prediction->ranked.empty()
                                      ? request.prediction->ranked[0].parameters.at(0).json
                                      : "";
+                ranked.clear();
+                if(request.prediction)
+                    for(const auto& c : request.prediction->ranked)
+                        ranked.push_back(c.id);
                 target         = &request.target;
                 scratches.push_back(request.scratch);
             }
@@ -322,8 +338,8 @@ namespace
         ProbeRequest               request;
         hj::DeviceTarget           target;
 
-        explicit Fixture(std::vector<std::string> kernels, std::string contract = {})
-            : backend(std::make_shared<Backend>(log, std::move(kernels), std::move(contract)))
+        explicit Fixture(std::vector<std::string> kernels, std::set<std::string> contracts = {})
+            : backend(std::make_shared<Backend>(log, std::move(kernels), std::move(contracts)))
             , predictor(std::make_shared<Predictor>(log))
         {
             target.device = 0;
@@ -374,8 +390,10 @@ namespace
     {
         Log  log;
         auto backend   = std::make_shared<Backend>(log, std::vector<std::string>{});
-        auto predicted = std::make_shared<Backend>(log, std::vector<std::string>{}, "fake.v1");
-        auto other     = std::make_shared<Backend>(log, std::vector<std::string>{}, "other.v1");
+        auto predicted = std::make_shared<Backend>(
+            log, std::vector<std::string>{}, std::set<std::string>{"fake.v1", "other.v1"});
+        auto other = std::make_shared<Backend>(
+            log, std::vector<std::string>{}, std::set<std::string>{"other.v1"});
         auto predictor = std::make_shared<Predictor>(log);
         auto knowledge = std::make_shared<Knowledge>(log);
         auto builder   = std::make_shared<Builder>(log);
@@ -438,14 +456,32 @@ namespace
                     "Predict ran for a backend that consumes no prediction");
         }
         {
-            Fixture f({"a"}, "fake.v1");
+            Fixture f({"a"}, {"fake.v1"});
             const auto outcome = f.run();
             require(f.log.count("predict") == 1 && f.log.count("seeds") == 1
                         && f.backend->prediction != nullptr && f.backend->candidate == "1"
+                        && f.predictor->workspaceLimit == 4096
                         && names(outcome) == std::vector<std::string>{"a"},
                     "The backend did not receive the prediction");
         }
         std::cout << "PASS Predict runs only for backends that consume a prediction\n";
+
+        {
+            Fixture f({"a"}, {"fake.v1"});
+            f.predictor->other = "spare.v1";
+            f.run();
+            require(f.backend->ranked == std::vector<uint32_t>{7},
+                    "A candidate the backend does not transport reached it");
+            f.backend->information.contracts = {"spare.v1"};
+            f.predictor->other               = "";
+            failure(f.run(),
+                    Code::NotSupported,
+                    Stage::Predict,
+                    "No predicted candidate",
+                    "No transported candidate");
+            require(f.log.count("generate") == 1, "Generation ran without a candidate");
+        }
+        std::cout << "PASS Jit keeps only candidates whose contract the backend transports\n";
 
         {
             Fixture f({"a", "b"});
@@ -494,7 +530,7 @@ namespace
     void stages()
     {
         {
-            Fixture f({"a"}, "fake.v1");
+            Fixture f({"a"}, {"fake.v1"});
             f.predictor = std::make_shared<Predictor>(
                 f.log, hj::Status{Code::NotSupported, Stage::Generate, "not modeled"});
             const auto outcome = f.run();
@@ -645,7 +681,9 @@ namespace
             require(seeds.size() == tiles.size(), std::string(isa) + ": wrong seed count");
             for(size_t i = 0; i < seeds.size(); ++i)
                 require(seeds[i].tile == tiles[i] && seeds[i].depthRules == depthRules
-                            && seeds[i].cacheHints == hints,
+                            && seeds[i].cacheHints == hints && !seeds[i].instruction
+                            && seeds[i].policies.size() == 1
+                            && seeds[i].policies[0].strategy == hj::ExecutionPolicy::Strategy::None,
                         std::string(isa) + ": wrong seed " + std::to_string(i));
             require(knowledge->defaults(request, target, {}).empty(),
                     "Catalog knowledge supplied parameter values");
@@ -658,7 +696,7 @@ namespace
     {
         std::cerr << "scenario published" << std::endl;
         {
-            Fixture f({"a", "b", "c"}, "fake.v1");
+            Fixture f({"a", "b", "c"}, {"fake.v1"});
             f.builder = std::make_shared<Builder>(f.log, std::set<std::string>{"b"});
             f.store   = std::make_shared<Store>(f.log);
             require(f.run(3).indices == std::vector<int32_t>{100, 101}, "published: wrong indices");

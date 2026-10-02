@@ -275,14 +275,18 @@ namespace hipblaslt_jit::debug
             return s.seen.insert(key).second;
         }
 
-        std::string names(unsigned categories)
+        constexpr std::pair<Category, const char*> categoryNames[]
+            = {{Timing, "timing"},
+               {Progress, "progress"},
+               {Knowledge, "knowledge"},
+               {Prediction, "prediction"}};
+
+        const char* nameOf(Category category) noexcept
         {
-            std::string out;
-            if(categories & Timing)
-                out = "timing";
-            if(categories & Progress)
-                out += out.empty() ? "progress" : ",progress";
-            return out;
+            for(const auto& [bit, name] : categoryNames)
+                if(bit == category)
+                    return name;
+            return "progress";
         }
 
         int modeNumber() noexcept
@@ -332,7 +336,7 @@ namespace hipblaslt_jit::debug
             static Flusher flusher;
             static_cast<void>(flusher);
             const char* cache = std::getenv("AMD_COMGR_CACHE");
-            Line(categories & Timing ? Timing : Progress, "process", Context{})
+            Line(static_cast<Category>(categories & (0u - categories)), "process", Context{})
                 .add("mode", jitMode == Mode::Forced ? 2 : 1)
                 .add("categories", names(categories))
                 .add("destination", s.path.empty() ? std::string("stderr") : s.path)
@@ -356,7 +360,8 @@ namespace hipblaslt_jit::debug
                 if(!unknown.empty())
                     std::cerr << "hipblaslt warning: HIPBLASLT_JIT_DEBUG=" << value
                               << ": ignoring " << unknown
-                              << "; the value is timing, progress or all, comma-separated"
+                              << "; the value is timing, progress, knowledge, prediction or all, "
+                                 "comma-separated"
                               << std::endl;
                 if(result)
                     start(result, jitMode);
@@ -389,12 +394,12 @@ namespace hipblaslt_jit::debug
                 std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
                     return static_cast<char>(std::tolower(c));
                 });
-                if(name == "timing")
-                    result |= Timing;
-                else if(name == "progress")
-                    result |= Progress;
-                else if(name == "all")
-                    result |= All;
+                unsigned named = name == "all" ? All : 0u;
+                for(const auto& [bit, known] : categoryNames)
+                    if(name == known)
+                        named = bit;
+                if(named)
+                    result |= named;
                 else
                     unknown += (unknown.empty() ? "" : ",") + std::string(token);
             }
@@ -402,6 +407,15 @@ namespace hipblaslt_jit::debug
                 return result;
             first = comma + 1;
         }
+    }
+
+    std::string names(unsigned categories)
+    {
+        std::string out;
+        for(const auto& [bit, name] : categoryNames)
+            if(categories & bit)
+                out += (out.empty() ? "" : ",") + std::string(name);
+        return out;
     }
 
     unsigned categories() noexcept
@@ -442,7 +456,7 @@ namespace hipblaslt_jit::debug
     {
         m_text.reserve(256);
         m_text = "{\"v\":1,\"cat\":\"";
-        m_text += category == Timing ? "timing" : "progress";
+        m_text += nameOf(category);
         m_text += "\",\"ev\":";
         m_text += quote(event);
         m_text += ",\"pid\":" + std::to_string(processId());

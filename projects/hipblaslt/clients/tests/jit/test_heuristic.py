@@ -1090,7 +1090,7 @@ def debug_off(run, output):
     seen = None
     warning = (
         "hipblaslt warning: HIPBLASLT_JIT_DEBUG=0: ignoring 0;"
-        " the value is timing, progress or all, comma-separated"
+        " the value is timing, progress, knowledge, prediction or all, comma-separated"
     )
     cases = (("unset", None, False), ("empty", "", False), ("zero", "0", True))
     for name, value, warned in cases:

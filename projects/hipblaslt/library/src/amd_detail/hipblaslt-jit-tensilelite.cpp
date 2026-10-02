@@ -276,13 +276,21 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             }
             out << "},\"hardware\":" << members(prediction.hardware)
                 << ",\"model_assumptions\":" << members(prediction.assumptions) << ",\"candidates\":[";
+            // A candidate names its contract in modeled when it is not the
+            // request's; the generator ignores fields it does not know.
             for(size_t i = 0; i != prediction.ranked.size(); ++i)
             {
                 const auto& candidate = prediction.ranked[i];
+                auto        modeled   = candidate.modeled;
+                if(!candidate.contract.empty() && candidate.contract != prediction.modeledContract)
+                    modeled.insert(modeled.begin(), {"contract", json::quote(candidate.contract)});
                 out << (i ? "," : "") << "{\"id\":" << candidate.id
                     << ",\"predicted_cycles\":" << candidate.predictedCycles
                     << ",\"parameters\":" << members(candidate.parameters)
-                    << ",\"modeled\":" << members(candidate.modeled) << '}';
+                    << ",\"modeled\":" << members(modeled);
+                if(!candidate.provenance.empty())
+                    out << ",\"knowledge\":" << candidate.provenance;
+                out << '}';
             }
             out << ']';
             count = std::min(count, prediction.ranked.size());
@@ -440,7 +448,8 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 : m_options(options)
                 , m_info{"tensilelite",
                          "TensileLite",
-                         options.configPath.empty() ? "origami.gemm.dp.v1" : "",
+                         options.configPath.empty() ? std::set<std::string>{"origami.gemm.dp.v1"}
+                                                    : std::set<std::string>{},
                          generatorVersion(options)}
             {
             }

@@ -31,9 +31,11 @@ namespace hipblaslt_jit::debug
 {
     enum Category : unsigned
     {
-        Timing   = 1u << 0,
-        Progress = 1u << 1,
-        All      = ~0u, // includes categories added later
+        Timing     = 1u << 0,
+        Progress   = 1u << 1,
+        Knowledge  = 1u << 2,
+        Prediction = 1u << 3,
+        All        = ~0u, // includes categories added later
     };
 
     // Parses a HIPBLASLT_JIT_DEBUG value: category names or "all", separated by
@@ -41,6 +43,9 @@ namespace hipblaslt_jit::debug
     // categories named. unknown receives every other non-empty token,
     // numbers included, separated by commas.
     unsigned parse(std::string_view value, std::string& unknown);
+
+    // The names of the categories set in categories, comma-separated in bit order.
+    std::string names(unsigned categories);
 
     // The categories of this process, read once from HIPBLASLT_JIT_DEBUG: zero
     // unless hipblaslt_jit::mode() is Fallback or Forced, and in privileged

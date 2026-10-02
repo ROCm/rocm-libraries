@@ -29,10 +29,13 @@ namespace hipblaslt_jit
                 throw std::runtime_error("JIT GEMM prediction: " + message);
         }
 
+        constexpr const char* dataParallelContract = "origami.gemm.dp.v1";
+
         struct Recipe
         {
             std::array<size_t, 9> matrixInstruction;
             origami::config_t     config;
+            int32_t               seed = -1;
         };
 
         std::vector<Recipe> candidates(const origami::hardware_t&        hardware,
@@ -47,7 +50,9 @@ namespace hipblaslt_jit
             });
             std::vector<Recipe> result;
             for(const auto& mi : instructions)
-                for(const auto& seed : seeds)
+                for(size_t index = 0; index < seeds.size(); ++index)
+                {
+                    const auto& seed = seeds[index];
                     for(const auto& rule : seed.depthRules)
                         for(const auto& hint : seed.cacheHints)
                         {
@@ -76,8 +81,10 @@ namespace hipblaslt_jit
                             config.prediction_mode = origami::prediction_modes_t::estimation;
                             config.target          = origami::target_t::tensilelite;
                             config.index           = result.size();
+                            candidate.seed         = static_cast<int32_t>(index);
                             result.push_back(candidate);
                         }
+                }
             return result;
         }
     }
@@ -154,7 +161,7 @@ namespace hipblaslt_jit
                 "No Origami ranking: no finite positive-latency candidates for this request");
 
         Prediction prediction;
-        prediction.modeledContract = "origami.gemm.dp.v1";
+        prediction.modeledContract = dataParallelContract;
         prediction.model           = "origami.gemm.estimation";
         prediction.hardware        = {
             {"device_id", literal(device->deviceId)},
@@ -197,6 +204,8 @@ namespace hipblaslt_jit
             Candidate candidate;
             candidate.id              = static_cast<uint32_t>(config.index);
             candidate.predictedCycles = result.latency;
+            candidate.contract        = dataParallelContract;
+            candidate.seed            = recipe.seed;
             candidate.parameters      = {
                 {"MatrixInstruction", json::array(recipe.matrixInstruction)},
                 {"DepthU", literal(config.mt.k)},
@@ -238,24 +247,24 @@ namespace hipblaslt_jit
             {
                 return "origami";
             }
-            std::string_view modeledContract() const noexcept override
+            std::set<std::string> modeledContracts() const override
             {
-                return "origami.gemm.dp.v1";
+                return {dataParallelContract};
             }
-            Status predict(const OperationRequest& request,
-                           const DeviceTarget&     target,
-                           const TuningKnowledge&  knowledge,
-                           Prediction&             prediction) const override
+            Status predict(const PredictionRequest& request,
+                           const TuningKnowledge&   knowledge,
+                           Prediction&              prediction) const override
             {
                 prediction       = {};
-                const auto* gemm = dynamic_cast<const GemmRequest*>(&request);
+                const auto* gemm = dynamic_cast<const GemmRequest*>(&request.request);
                 if(!gemm)
                     return {Status::Code::NotSupported,
                             Stage::Predict,
                             "Origami does not model this operation"};
                 try
                 {
-                    prediction = rank(request, lowerForJit(*gemm), target, knowledge);
+                    prediction
+                        = rank(request.request, lowerForJit(*gemm), request.target, knowledge);
                     return {};
                 }
                 catch(const std::bad_alloc&)

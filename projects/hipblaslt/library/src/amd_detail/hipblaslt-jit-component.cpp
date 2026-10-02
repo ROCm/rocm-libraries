@@ -4,6 +4,7 @@
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-prediction.hpp"
+#include <algorithm>
 #include <cerrno>
 #include <new>
 #include <optional>
@@ -129,12 +130,22 @@ namespace hipblaslt_jit
         const auto& c = m_components;
         if(!c.backend || !c.builder || !c.loader)
             throw std::invalid_argument("Jit requires a backend, a builder and a loader");
-        const auto& contract = c.backend->info().consumesPrediction;
-        if(!contract.empty()
-           && (!c.predictor || !c.knowledge || c.predictor->modeledContract() != contract))
+        const auto& transported = c.backend->info().contracts;
+        if(transported.empty())
+            return;
+        if(c.predictor)
+            for(const auto& contract : c.predictor->modeledContracts())
+                if(transported.count(contract))
+                    m_contracts.insert(contract);
+        if(m_contracts.empty() || !c.knowledge)
+        {
+            std::string names;
+            for(const auto& contract : transported)
+                names += (names.empty() ? "" : ", ") + contract;
             throw std::invalid_argument("Backend " + c.backend->info().id
-                                        + " requires a predictor for " + contract
+                                        + " requires a predictor for one of " + names
                                         + " and tuning knowledge");
+        }
     }
 
     Jit::Outcome Jit::generate(const OperationRequest&         request,
@@ -158,13 +169,29 @@ namespace hipblaslt_jit
         };
 
         Prediction prediction;
-        const bool predicted = !c.backend->info().consumesPrediction.empty();
+        const bool predicted = !m_contracts.empty();
         if(predicted)
         {
             debug::Phase phase("predict");
-            auto         status = guarded(
-                [&] { return c.predictor->predict(request, target, *c.knowledge, prediction); });
+            auto         status = guarded([&] {
+                return c.predictor->predict(
+                    {request, target, workspaceLimit}, *c.knowledge, prediction);
+            });
             phase.stop();
+            auto& ranked = prediction.ranked;
+            ranked.erase(std::remove_if(ranked.begin(),
+                                        ranked.end(),
+                                        [&](const Candidate& candidate) {
+                                            return !m_contracts.count(
+                                                candidate.contract.empty()
+                                                    ? prediction.modeledContract
+                                                    : candidate.contract);
+                                        }),
+                         ranked.end());
+            if(status.ok() && ranked.empty())
+                status = {Status::Code::NotSupported,
+                          Stage::Predict,
+                          "No predicted candidate has a contract the backend transports"};
             if(!status.ok())
             {
                 record(Stage::Predict, std::move(status));
