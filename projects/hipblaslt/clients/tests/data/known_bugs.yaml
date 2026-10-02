@@ -67,6 +67,11 @@ Known bugs:
   # Host-side, so every platform is affected. REMOVE this entry in the PR that
   # fixes ROCM-32139. Review by 2026-11-01.
   - { name: matmul_fast_check_aux_padded_ldd_ROCM32139, function: matmul }
+  # ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
+  # kernel arguments, so the GEMM returns success with a wrong D (seen on gfx90a;
+  # the packing is shared by every architecture). REMOVE this entry in the PR that
+  # fixes ROCM-32140. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140, function: matmul }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.

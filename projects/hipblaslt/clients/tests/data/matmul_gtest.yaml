@@ -4181,6 +4181,317 @@ Tests:
   unit_check: 1
   fast_check: 1
 
+###############################################################################
+# fast_check size thresholds and launch limits (AIHPBLAS-5018).
+#
+# Classes A, B and D on AIHPBLAS-4988 appear only past a size threshold: an
+# element index or byte offset at 2^31 or 2^32, a buffer limit at 2 or 4 GiB,
+# or a launch of 2^32 work items (2^24 tiles of 256 threads). Each sweep here
+# puts one shape just below a threshold and one just above it, so a failure
+# brackets the overflow. These need up to about 20 GiB of device memory, so they
+# are category stress (the stress tier in test_categories.yaml, for large-memory
+# runners or a weekly run), and a case skips with the amounts when the device or
+# the host does not have the memory. A shape the library offers no solution for
+# skips (allow_no_solution): declining a shape is a correct answer.
+###############################################################################
+
+# Element index through A's leading dimension: with K = 32 the last element of A
+# sits at (K - 1) * lda + M - 1, just below or just past 2^31 and 2^32.
+- name: matmul_fast_check_threshold_lda
+  category: stress
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 69273664, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 69273667, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 138547330, ldb: 32, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 138547333, ldb: 32, ldc: 64, ldd: 64 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# The same through B's leading dimension (B transposed, so K runs along ldb).
+- name: matmul_fast_check_threshold_ldb
+  category: stress
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 69273664, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 69273667, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 138547330, ldc: 64, ldd: 64 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 138547333, ldc: 64, ldd: 64 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# And through C's and D's leading dimension: the last element of D sits at
+# (N - 1) * ldd + M - 1.
+- name: matmul_fast_check_threshold_ldd
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 34087041, ldd: 34087041 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 34087043, ldd: 34087043 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 68174083, ldd: 68174083 }
+    - { M: 64, N: 64, K: 32, lda: 64, ldb: 64, ldc: 68174085, ldd: 68174085 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Element index through batch strides: batch 1 of A, then of B, ends just below
+# 2^31 or 2^32, or starts just past 2^31 (stride x batch index).
+- name: matmul_fast_check_threshold_batch_stride
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 2147479552, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 2147483650, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4294963200, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 2147479552, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 2147483650, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4294963200, stride_c: 4096, stride_d: 4096 }
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  allow_no_solution: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
+# kernel arguments, so batch 1 reads or writes the wrong place and the GEMM
+# returns success with a wrong D. Each operand's stride in turn starts batch 1
+# just past 2^32. Quarantined in known_bugs.yaml.
+- name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4294967298, stride_b: 4096, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4294967298, stride_c: 4096, stride_d: 4096 }
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4096, stride_c: 4294967298, stride_d: 4294967298 }
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  allow_no_solution: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Byte size of D around 2 GiB and 4 GiB for 4-, 2- and 1-byte outputs, with
+# N = 256 and M not a multiple of 256 (the ROCM-31016 trigger), so the last
+# MacroTile1 = 256 tile ends in partial rows.
+- name: matmul_fast_check_threshold_d_bytes_f32
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 2097151, N: 256, K: 48 }
+    - { M: 2097153, N: 256, K: 48 }
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_d_bytes_bf16
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+    - { M: 8388607, N: 256, K: 48 }
+    - { M: 8388609, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_d_bytes_int8
+  category: stress
+  function:
+    matmul: *i8_precision_dst_i8
+  matrix_size:
+    - { M: 8388607, N: 256, K: 48 }
+    - { M: 8388609, N: 256, K: 48 }
+    - { M: 16777215, N: 256, K: 48 }
+    - { M: 16777217, N: 256, K: 48 }
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# The 2 GiB bf16 bracket with every supported solution, since a buffer-limit
+# defect is specific to a few kernels (ROCM-31016 failed 170 of 1,093).
+- name: matmul_fast_check_threshold_d_bytes_all_solutions
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 4194303, N: 256, K: 48 }
+    - { M: 4194305, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# ROCM-31258: hand-written custom kernels on gfx950 bound D's stores at 2 GiB.
+# The checked store extent ldd * min(MacroTile1, N) * 4 is exactly 2 GiB at
+# M = 2097152 and past it at 2097153 and 3000000. Every supported solution,
+# custom kernels included.
+- name: matmul_fast_check_threshold_custom_kernel_ROCM31258
+  category: stress
+  function:
+    matmul: *xf32_precision
+  matrix_size:
+    - { M: 2097152, N: 256, K: 32 }
+    - { M: 2097153, N: 256, K: 32 }
+    - { M: 3000000, N: 256, K: 32 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+# ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
+# where C and D are exactly 4 GiB. One column fewer, exactly 4 GiB, and one more.
+- name: matmul_fast_check_threshold_cd_4gib_ROCM32050
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 32768, N: 32767, K: 4096 }
+    - { M: 32768, N: 32768, K: 4096 }
+    - { M: 32768, N: 32769, K: 4096 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Launch size (ROCM-31290): 2^24 tiles of 16 x 16 is 2^32 work items at 256
+# threads per tile. 65536 x 65536 is exactly 2^24 such tiles, and one more
+# column of tiles goes past it. The Stream-K variant needs
+# TENSILE_SOLUTION_SELECTION_METHOD=2 (see matmul_fast_check_streamk_repeat).
+- name: matmul_fast_check_threshold_tiles
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 65536, N: 65536, K: 16 }
+    - { M: 65536, N: 65552, K: 16 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  requested_solution_num: 32
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_threshold_tiles_streamk
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 65536, N: 65536, K: 16 }
+    - { M: 65536, N: 65552, K: 16 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  requires_streamk: 1
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
+# Grid limits per dimension: the batch count is a grid dimension, and 65535 is a
+# common per-dimension limit. Small GEMMs at 65535 and 65537 batches.
+- name: matmul_fast_check_threshold_batch_count
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 16, N: 16, K: 16 }
+  batch_count: [ 65535, 65537 ]
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 2
+  initialization: integer_exact
+  allow_no_solution: 1
+  unit_check: 0
+  fast_check: 1
+
 - name: matmul_96_complex
   category: pre_checkin
   function:

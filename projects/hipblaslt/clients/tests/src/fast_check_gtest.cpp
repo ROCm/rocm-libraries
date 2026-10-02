@@ -1073,6 +1073,17 @@ namespace
         refused(p, "combine to values below 2^61");
     }
 
+    // A case that cannot fit must say which memory is short and by how much; one that fits must
+    // get an empty answer.
+    TEST(FastCheckDevice_pre_checkin, memory_shortfall_names_the_short_memory)
+    {
+        EXPECT_EQ(fast_check_memory_shortfall(0, 0), "");
+        std::string device = fast_check_memory_shortfall(size_t(1) << 60, 0);
+        EXPECT_NE(device.find("of device memory"), std::string::npos) << device;
+        std::string host = fast_check_memory_shortfall(0, size_t(1) << 60);
+        EXPECT_NE(host.find("of host memory"), std::string::npos) << host;
+    }
+
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
     // the value it had: a correct value becomes the sentinel, and the sentinel becomes poison.
     TEST(FastCheckDevice_pre_checkin, corrupt_element_changes_exactly_one_element)

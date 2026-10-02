@@ -2455,6 +2455,35 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    // fast_check runs the large-shape cases, which can need more memory than a runner has. Skip
+    // with the amounts rather than fail an allocation or, for host memory, crash on a null buffer.
+    if(arg.fast_check)
+    {
+        size_t hostBytes = 0, deviceBytes = 0;
+        for(int i = 0; i < gemm_count; i++)
+        {
+            deviceBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB)
+                           + (arg.c_equal_d ? 0 : size_C[i]) * realDataTypeSize(To)
+                           + size_D[i] * realDataTypeSize(To) + size_E[i] * realDataTypeSize(Taux);
+            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)
+                         + size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)
+                         + size_t(M[i] * N[i] * num_batches[i]) * realDataTypeSize(To);
+            if(!fast_check_only)
+                hostBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB)
+                             + (size_C[i] + 2 * size_D[i]) * realDataTypeSize(To);
+        }
+        std::string why = fast_check_memory_shortfall(deviceBytes, hostBytes);
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     if(arg.placement[0])
     {
         static const char* operands[]
@@ -5236,6 +5265,16 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     returnedAlgoCount = heuristicResult.size();
 
+    // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
+    if(arg.allow_no_solution && returnedAlgoCount == 0)
+    {
+#ifdef GOOGLE_TEST
+        GTEST_SKIP() << "the library offers no solution for this shape";
+#else
+        hipblaslt_cout << "the library offers no solution for this shape" << std::endl;
+        return;
+#endif
+    }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
     // A placed workspace replaces the normal one, which placement runs never use: placement

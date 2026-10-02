@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -1961,4 +1962,34 @@ FastCheckResult fast_check_bias_gradient(const FastCheckProblem& p,
                          + std::string(1, source) + ") are wrong:" + msg.str() + "\n";
     }
     return result;
+}
+
+std::string fast_check_memory_shortfall(size_t device_bytes, size_t host_bytes)
+{
+    auto gib = [](size_t bytes) {
+        std::ostringstream s;
+        s.precision(3);
+        s << double(bytes) / double(size_t(1) << 30) << " GiB";
+        return s.str();
+    };
+    size_t free_bytes = 0, total_bytes = 0;
+    if(hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess && device_bytes > free_bytes)
+        return "this case needs " + gib(device_bytes) + " of device memory and " + gib(free_bytes)
+               + " is free";
+
+    std::ifstream meminfo("/proc/meminfo");
+    std::string   key;
+    size_t        kib = 0;
+    while(meminfo >> key >> kib)
+    {
+        if(key == "MemAvailable:")
+        {
+            if(host_bytes > kib * 1024)
+                return "this case needs " + gib(host_bytes) + " of host memory and "
+                       + gib(kib * 1024) + " is available";
+            break;
+        }
+        meminfo.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+    return {};
 }
