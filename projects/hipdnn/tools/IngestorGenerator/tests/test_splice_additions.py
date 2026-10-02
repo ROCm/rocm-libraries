@@ -16,6 +16,7 @@ import difflib
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -128,6 +129,35 @@ def test_unchanged_render_is_a_no_op(tmp_path, live):
     assert result.returncode == 0, result.stderr
     assert "appended 0" in result.stdout
     assert _snapshot(live) == before
+
+
+def _add_pack(scratch: Path) -> str:
+    """Write a second KDP into the scratch render, as a new pack would: fresh ids, one
+    kernel. Returns its file name."""
+    doc = json.loads((scratch / _KDP).read_text(encoding="utf-8"))
+    kernel = {**doc["kernelDescriptors"][0], "name": _NEW_KERNEL["name"]}
+    kernel["id"] = str(uuid.uuid4())
+    doc.update(id=str(uuid.uuid4()), kernelDescriptors=[kernel])
+    name = "scale_add_extra.kdp.json"
+    (scratch / name).write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return name
+
+
+def test_kernels_of_a_new_pack_count_as_added(tmp_path, live):
+    retained = len(_kernels(live))
+    scratch = _render(_BASE, tmp_path, "scratch")
+    new_kdp = _add_pack(scratch)
+    report = tmp_path / "report.json"
+
+    result = _splice(live, scratch, "--report", str(report))
+
+    assert result.returncode == 0, result.stderr
+    assert (live / new_kdp).is_file()
+    counts = json.loads(report.read_text())
+    assert counts["new_files"] == [new_kdp]
+    assert [k["name"] for k in counts["added"]] == [_NEW_KERNEL["name"]]
+    assert counts["added_kernels"] == 1
+    assert counts["total_kernels"] == retained + 1
 
 
 def test_check_mode_writes_nothing(tmp_path, live):

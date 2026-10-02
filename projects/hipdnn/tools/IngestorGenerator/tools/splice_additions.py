@@ -196,6 +196,11 @@ def plan(live_dir: Path, scratch_dir: Path) -> dict:
     new_files = {}
     for name in sorted(set(scratch) - set(live)):
         new_files[name] = remap(scratch[name], ids)
+        if _is_kdp(name):
+            added += [
+                {"file": name, "name": k["name"], "id": k["id"]}
+                for k in new_files[name].get(KERNELS, [])
+            ]
 
     return {
         "live_dir": str(live_dir),
