@@ -119,6 +119,7 @@ extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
                               : static_cast<COMPUTE_TYPE>(0);
     long long validCount = 0;
     INDEX_TYPE selectedIndex = static_cast<INDEX_TYPE>(-1);
+    bool selectedCandidate = false;
 
     // Iterate over the resample window and apply the resample operation
     for(long long kd = 0; kd < window[0]; ++kd)
@@ -158,10 +159,11 @@ extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
                 // Get the maximum value for MAXPOOL, or accumulate for AVGPOOL modes
                 if constexpr(resampleMode == ResampleMode::MAXPOOL)
                 {
-                    if(candidate > result)
+                    if(!selectedCandidate || candidate > result)
                     {
                         result = candidate;
                         selectedIndex = candidateIndex;
+                        selectedCandidate = true;
                     }
                 }
                 else

@@ -3,16 +3,8 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceResample.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
-
-#include <cstdint>
-#include <hip/hip_runtime.h>
-#include <numeric>
-#include <stdexcept>
-#include <string>
-#include <vector>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 namespace hipdnn_gpu_ref
 {
@@ -22,34 +14,6 @@ namespace
 
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefResampleArgs.h> // NOLINT(misc-include-cleaner)
-
-void launchKernel(hipFunction_t function, int64_t gridSize, void* argsPtr, size_t argsSize)
-{
-    // Check the device limits for grid size
-    detail::assertValidGridSize(gridSize, 1, 1);
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(gridSize),
-                                                  1,
-                                                  1,
-                                                  GpuFpReferenceResample::BLOCK_SIZE,
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
 
 } // namespace
 
@@ -128,8 +92,11 @@ void GpuFpReferenceResample::launchForward(const void* xPtr,
     args.n = static_cast<long long>(batchChannelDims[0]);
     args.c = static_cast<long long>(batchChannelDims[1]);
 
-    launchKernel(
-        kernel.function(), (outputElementCount + BLOCK_SIZE - 1) / BLOCK_SIZE, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(),
+                           (outputElementCount + BLOCK_SIZE - 1) / BLOCK_SIZE,
+                           BLOCK_SIZE,
+                           &args,
+                           sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

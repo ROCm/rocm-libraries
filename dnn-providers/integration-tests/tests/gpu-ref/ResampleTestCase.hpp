@@ -27,6 +27,7 @@ struct ResampleTestCase
     std::vector<int64_t> xDims; // Maps to dxDims for backward tests
     hipdnn_data_sdk::utilities::TensorLayout layout;
     std::vector<int64_t> prePadding;
+    std::vector<int64_t> postPadding;
     std::vector<int64_t> stride;
     std::vector<int64_t> window;
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode;
@@ -39,6 +40,7 @@ struct ResampleTestCase
     ResampleTestCase(std::vector<int64_t> xDims,
                      hipdnn_data_sdk::utilities::TensorLayout layout,
                      std::vector<int64_t> prePadding,
+                     std::vector<int64_t> postPadding,
                      std::vector<int64_t> stride,
                      std::vector<int64_t> window,
                      hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
@@ -47,6 +49,7 @@ struct ResampleTestCase
         : xDims(std::move(xDims))
         , layout(std::move(layout))
         , prePadding(std::move(prePadding))
+        , postPadding(std::move(postPadding))
         , stride(std::move(stride))
         , window(std::move(window))
         , resampleMode(resampleMode)
@@ -77,6 +80,8 @@ struct ResampleTestCase
         os << " layout:" << tc.layout.name;
         os << " pre-padding: ";
         hipdnn_data_sdk::utilities::vecToStream(os, tc.prePadding);
+        os << " post-padding: ";
+        hipdnn_data_sdk::utilities::vecToStream(os, tc.postPadding);
         os << " stride: ";
         hipdnn_data_sdk::utilities::vecToStream(os, tc.stride);
         os << " window: ";
@@ -100,32 +105,12 @@ private:
         for(size_t i = 0; i < spatialRank; ++i)
         {
             yDims[spatialOffset + i]
-                = (xDims[spatialOffset + i] + prePadding[i] - window[i]) / stride[i] + 1;
+                = (xDims[spatialOffset + i] + prePadding[i] + postPadding[i] - window[i])
+                      / stride[i]
+                  + 1;
         }
     }
 };
-
-template <typename T>
-constexpr float getTolerance()
-{
-    if constexpr(std::is_same_v<T, double>)
-    {
-        return 1e-7f;
-    }
-    else if constexpr(std::is_same_v<T, float>)
-    {
-        return 1e-5f;
-    }
-    else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
-    {
-        return 1e-3f;
-    }
-    else
-    {
-        static_assert(std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>);
-        return 1e-2f;
-    }
-}
 
 template <
     typename T,

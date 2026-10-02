@@ -29,6 +29,7 @@ void runGpuVsCpuResampleFwd(const std::vector<int64_t>& xDims,
                             const std::vector<int64_t>& yDims,
                             const TensorLayout& layout,
                             const std::vector<int64_t>& prePadding,
+                            const std::vector<int64_t>& postPadding,
                             const std::vector<int64_t>& stride,
                             const std::vector<int64_t>& window,
                             ResampleMode resampleMode,
@@ -61,13 +62,14 @@ void runGpuVsCpuResampleFwd(const std::vector<int64_t>& xDims,
         xTensor,
         yGpu,
         prePadding,
+        postPadding,
         stride,
         window,
         resampleMode,
         paddingMode,
         includeIndex ? &indexGpu : nullptr);
 
-    assertAllClose(yCpu, yGpu, getTolerance<YDataType>());
+    assertAllClose(yCpu, yGpu, resample::getTolerance<YDataType>());
     if(includeIndex)
     {
         assertAllExact(indexCpu, indexGpu);
@@ -90,6 +92,7 @@ protected:
                                          tc.yDims,
                                          tc.layout,
                                          tc.prePadding,
+                                         tc.postPadding,
                                          tc.stride,
                                          tc.window,
                                          tc.resampleMode,

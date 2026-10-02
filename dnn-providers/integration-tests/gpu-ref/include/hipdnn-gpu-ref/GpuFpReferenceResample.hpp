@@ -40,6 +40,7 @@ private:
     struct ResampleSpatialParams
     {
         std::vector<int64_t> prePadding;
+        std::vector<int64_t> postPadding;
         std::vector<int64_t> stride;
         std::vector<int64_t> window;
     };
@@ -62,6 +63,7 @@ public:
     static void forward(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
                         hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
                         const std::vector<int64_t>& prePadding,
+                        const std::vector<int64_t>& postPadding,
                         const std::vector<int64_t>& stride,
                         const std::vector<int64_t>& window,
                         hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
@@ -69,7 +71,7 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index = nullptr)
     {
         // Validate IO tensors, spatial parameters, and resample mode
-        validateInput(x, y, {prePadding, stride, window}, resampleMode);
+        validateInput(x, y, {prePadding, postPadding, stride, window}, resampleMode);
 
         // Validate consistency of spatial parameters with IO tensor dimensions
         const auto& xDims = x.dims();
@@ -77,7 +79,8 @@ public:
         const auto spatialDims = xDims.size() - 2;
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            const auto expectedYDim = (xDims[i + 2] + prePadding[i] - window[i]) / stride[i] + 1;
+            const auto expectedYDim
+                = (xDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
             if(expectedYDim <= 0 || yDims[i + 2] != expectedYDim)
             {
                 throw std::runtime_error(
@@ -121,7 +124,7 @@ public:
                       {y.dims().begin() + 2, y.dims().end()},
                       y.strides(),
                       {x.dims()[0], x.dims()[1]},
-                      {prePadding, stride, window},
+                      {prePadding, postPadding, stride, window},
                       {resampleMode, paddingMode},
                       defines,
                       index ? index->memory().deviceData() : nullptr);
@@ -240,6 +243,7 @@ private:
         };
 
         validateSpatialParameter(spatialParams.prePadding, true, "prePadding");
+        validateSpatialParameter(spatialParams.postPadding, true, "postPadding");
         validateSpatialParameter(spatialParams.stride, false, "stride");
         validateSpatialParameter(spatialParams.window, false, "window");
 
