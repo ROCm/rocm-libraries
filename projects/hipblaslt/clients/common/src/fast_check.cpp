@@ -235,6 +235,22 @@ namespace
         }
     }
 
+    // Stored values below this magnitude take the fast path. For integer types it leaves out the
+    // extremes: a correct result reaches them only by saturating, and the sentinel uses the
+    // minimum, so those elements are always recomputed exactly.
+    double fast_limit(hipDataType t)
+    {
+        switch(t)
+        {
+        case HIP_R_8I:
+            return 127;
+        case HIP_R_32I:
+            return 2147483647.0;
+        default:
+            return exact_limit(t);
+        }
+    }
+
     inline bool is_exact_integer(double v)
     {
         return std::isfinite(v) && v == std::trunc(v) && std::fabs(v) < 0x1p61;
@@ -702,7 +718,7 @@ FastCheckResult fast_check_result(const FastCheckProblem& p, const FastCheckExpe
 
     Report        rep(p);
     const int64_t M = p.M, N = p.N;
-    const double  out_limit = exact_limit(p.D.type);
+    const double  out_limit = fast_limit(p.D.type);
 
     for(int64_t b = 0; b < p.batch_count && !rep.over_budget; b++)
     {
@@ -1001,20 +1017,28 @@ namespace
         return bits;
     }
 
-    bool sentinel_is_nan(hipDataType t)
+    uint64_t sentinel_bits(hipDataType t)
     {
-        uint8_t bytes[8];
-        std::memset(bytes, kFastCheckSentinelByte, sizeof(bytes));
         switch(t)
         {
-        case HIP_R_32I:
-        case HIP_R_8I:
         case HIP_R_8F_E4M3_FNUZ:
         case HIP_R_8F_E5M2_FNUZ:
-            return false;
+        case HIP_R_8I:
+            return 0x80;
+        case HIP_R_32I:
+            return 0x80000000;
         default:
-            return std::isnan(load(bytes, t, 0));
+        {
+            const size_t es = element_size(t);
+            return es >= 8 ? ~uint64_t(0) : (uint64_t(1) << (8 * es)) - 1;
         }
+        }
+    }
+
+    bool sentinel_is_nan(hipDataType t)
+    {
+        uint64_t bits = sentinel_bits(t);
+        return std::isnan(load(&bits, t, 0));
     }
 
     unsigned grid_for(size_t total)
@@ -1022,8 +1046,10 @@ namespace
         return unsigned(std::min<size_t>((total + 255) / 256, 16384));
     }
 
+    // Writes `value` into every element outside the rows x cols x batch region.
     template <typename U>
-    void launch_poison(const FastCheckMatrix& m, int64_t batch, size_t total, hipStream_t stream)
+    void launch_poison(
+        const FastCheckMatrix& m, int64_t batch, size_t total, uint64_t value, hipStream_t stream)
     {
         hipLaunchKernelGGL(poison_kernel<U>,
                            dim3(grid_for(total)),
@@ -1037,7 +1063,29 @@ namespace
                            m.ld,
                            m.stride,
                            batch,
-                           U(poison_bits(m.type)));
+                           U(value));
+    }
+
+    void fill_outside_region(
+        const FastCheckMatrix& m, int64_t batch, size_t total, uint64_t value, hipStream_t stream)
+    {
+        switch(element_size(m.type))
+        {
+        case 1:
+            launch_poison<uint8_t>(m, batch, total, value, stream);
+            break;
+        case 2:
+            launch_poison<uint16_t>(m, batch, total, value, stream);
+            break;
+        case 4:
+            launch_poison<uint32_t>(m, batch, total, value, stream);
+            break;
+        case 8:
+            launch_poison<uint64_t>(m, batch, total, value, stream);
+            break;
+        default:
+            break;
+        }
     }
 
     template <typename U>
@@ -1048,8 +1096,7 @@ namespace
                      unsigned long long*    d_counters,
                      hipStream_t            stream)
     {
-        U sentinel;
-        std::memset(&sentinel, kFastCheckSentinelByte, sizeof(sentinel));
+        U sentinel      = U(sentinel_bits(m.type));
         U padding_value = expect_poison ? U(poison_bits(m.type)) : sentinel;
         hipLaunchKernelGGL(scan_kernel<U>,
                            dim3(grid_for(total)),
@@ -1144,7 +1191,7 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  p,
     }
 
     const int64_t M = p.M, N = p.N;
-    const double  out_limit = exact_limit(p.D.type);
+    const double  out_limit = fast_limit(p.D.type);
     Report        rep(p);
     const size_t  es = element_size(p.D.type);
 
@@ -1329,9 +1376,18 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  p,
     return rep.finish();
 }
 
-void fast_check_fill_sentinel_device(void* buffer, size_t bytes, hipStream_t stream)
+uint64_t fast_check_sentinel_bits(hipDataType type)
 {
-    (void)hipMemsetAsync(buffer, kFastCheckSentinelByte, bytes, stream);
+    return sentinel_bits(type);
+}
+
+void fast_check_fill_sentinel_device(void*       buffer,
+                                     hipDataType type,
+                                     size_t      elements,
+                                     hipStream_t stream)
+{
+    // An empty region makes every element padding.
+    fill_outside_region({buffer, type, 0, 0, 1, 0}, 1, elements, sentinel_bits(type), stream);
 }
 
 void fast_check_poison_padding_device(const FastCheckMatrix& m,
@@ -1339,23 +1395,7 @@ void fast_check_poison_padding_device(const FastCheckMatrix& m,
                                       size_t                 total_elements,
                                       hipStream_t            stream)
 {
-    switch(element_size(m.type))
-    {
-    case 1:
-        launch_poison<uint8_t>(m, batch_count, total_elements, stream);
-        break;
-    case 2:
-        launch_poison<uint16_t>(m, batch_count, total_elements, stream);
-        break;
-    case 4:
-        launch_poison<uint32_t>(m, batch_count, total_elements, stream);
-        break;
-    case 8:
-        launch_poison<uint64_t>(m, batch_count, total_elements, stream);
-        break;
-    default:
-        break;
-    }
+    fill_outside_region(m, batch_count, total_elements, poison_bits(m.type), stream);
 }
 
 FastCheckResult fast_check_scan_padding_device(const FastCheckMatrix& m,

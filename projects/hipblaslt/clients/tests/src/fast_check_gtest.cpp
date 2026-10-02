@@ -229,9 +229,8 @@ namespace
     // An element still holding the NaN sentinel must be reported directly.
     TEST(FastCheck, non_finite_element_is_reported)
     {
-        HostProblem hp = default_problem();
-        uint32_t    sentinel;
-        std::memset(&sentinel, kFastCheckSentinelByte, sizeof(sentinel));
+        HostProblem hp       = default_problem();
+        uint32_t    sentinel = uint32_t(fast_check_sentinel_bits(HIP_R_32F));
         std::memcpy(&hp.d(0, 0, 0), &sentinel, sizeof(sentinel));
         auto res = fast_check_gemm(hp.problem());
         ASSERT_FALSE(res.passed);
@@ -300,8 +299,8 @@ namespace
     TEST(FastCheck, placement_record_flags_4gib_crossings)
     {
         const uint64_t four_gib = uint64_t(1) << 32;
-        auto           at       = [](uint64_t a) { return reinterpret_cast<const void*>(uintptr_t(a)); };
-        std::string    record   = fast_check_describe_buffers({
+        auto           at = [](uint64_t a) { return reinterpret_cast<const void*>(uintptr_t(a)); };
+        std::string    record = fast_check_describe_buffers({
             {"A", at(3 * four_gib - 0x600000), 0x1000000}, // crosses 3 * 2^32
             {"B", at(5 * four_gib), 0x1000}, // starts exactly on a boundary
             {"C", at(7 * four_gib - 0x1000), 0x1000}, // ends exactly on a boundary
@@ -317,6 +316,24 @@ namespace
                   std::string::npos)
             << record;
         EXPECT_EQ(record.find("unused"), std::string::npos) << record;
+    }
+
+    // The sentinel must be a NaN wherever the type has one, so an unwritten element is non-finite.
+    // FNUZ fp8 has a single NaN, 0x80, which all-ones bytes are not.
+    TEST(FastCheck, sentinel_is_nan_where_the_type_has_one)
+    {
+        EXPECT_EQ(fast_check_sentinel_bits(HIP_R_32F), 0xffffffffu);
+        EXPECT_EQ(fast_check_sentinel_bits(HIP_R_16BF), 0xffffu);
+        for(hipDataType t : {HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E5M2_FNUZ})
+        {
+            uint8_t bits = uint8_t(fast_check_sentinel_bits(t));
+            EXPECT_EQ(bits, 0x80);
+            hipblaslt_f8_fnuz f;
+            std::memcpy(&f, &bits, 1);
+            EXPECT_TRUE(f.is_nan());
+        }
+        EXPECT_EQ(fast_check_sentinel_bits(HIP_R_8I), 0x80u);
+        EXPECT_EQ(fast_check_sentinel_bits(HIP_R_32I), 0x80000000u);
     }
 
     TEST(FastCheck, probe_entries_are_nonzero_residues_and_depend_on_seed)
@@ -382,8 +399,7 @@ namespace
              nullptr},
             {"sentinel left in D",
              [](HostProblem& hp) {
-                 uint32_t sentinel;
-                 std::memset(&sentinel, kFastCheckSentinelByte, sizeof(sentinel));
+                 uint32_t sentinel = uint32_t(fast_check_sentinel_bits(HIP_R_32F));
                  std::memcpy(&hp.d(1, 2, 3), &sentinel, sizeof(sentinel));
              },
              "batch 1, row 2, col 3"},
@@ -552,7 +568,7 @@ namespace
         EXPECT_NE(res.message.find("batch 1, row 6, col 0"), std::string::npos) << res.message;
 
         // Sentinel mode: fill everything, write the region, then stray into the batch gap.
-        fast_check_fill_sentinel_device(m.d, DeviceMatrix::total * sizeof(float), 0);
+        fast_check_fill_sentinel_device(m.d, HIP_R_32F, DeviceMatrix::total, 0);
         std::vector<float> s = m.read();
         for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
             if(DeviceMatrix::in_region(idx))
@@ -574,7 +590,7 @@ namespace
     TEST(FastCheckDevice, scan_reports_unwritten_elements)
     {
         DeviceMatrix m;
-        fast_check_fill_sentinel_device(m.d, DeviceMatrix::total * sizeof(float), 0);
+        fast_check_fill_sentinel_device(m.d, HIP_R_32F, DeviceMatrix::total, 0);
         std::vector<float> s = m.read();
         for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
             if(DeviceMatrix::in_region(idx) && idx != 33)
@@ -587,6 +603,77 @@ namespace
                   std::string::npos)
             << res.message;
         EXPECT_NE(res.message.find("element offset 33"), std::string::npos) << res.message;
+    }
+
+    // Integer outputs saturate, and their sentinel is a valid value. A correct saturated result
+    // must pass; a wrong saturated value, and an element still holding the sentinel where the
+    // correct value is -1, must both fail, on the host pass and on the device pass.
+    TEST(FastCheckDevice, integer_output_saturation_and_sentinel)
+    {
+        // D = A * B with int8 data, an int32 accumulator and an int8 output. With B = {1, 1} the
+        // exact results are 200, -200, -1 and 5; the first two saturate to 127 and -128.
+        const int64_t       M = 4, N = 1, K = 2;
+        std::vector<int8_t> A = {100, -100, -1, 2, 100, -100, 0, 3}; // M x K
+        std::vector<int8_t> B = {1, 1}; // K x N
+        std::vector<int8_t> D = {127, -128, -1, 5}; // M x N
+        FastCheckProblem    p;
+        p.M = M, p.N = N, p.K = K;
+        p.A            = {A.data(), HIP_R_8I, M, K, M, M * K};
+        p.B            = {B.data(), HIP_R_8I, K, N, K, K * N};
+        p.C            = {D.data(), HIP_R_8I, M, N, M, M * N};
+        p.D            = {D.data(), HIP_R_8I, M, N, M, M * N};
+        p.compute_type = HIP_R_32I;
+
+        auto host = fast_check_gemm(p);
+        EXPECT_TRUE(host.passed) << host.message;
+        auto device = device_result(p, D);
+        EXPECT_TRUE(device.passed) << device.message;
+
+        std::vector<int8_t> wrong = D;
+        wrong[0]                  = 126; // 200 saturates to 127, not 126
+        p.D.data                  = wrong.data();
+        host                      = fast_check_gemm(p);
+        ASSERT_FALSE(host.passed);
+        EXPECT_NE(host.message.find("row 0, col 0"), std::string::npos) << host.message;
+        device = device_result(p, wrong);
+        ASSERT_FALSE(device.passed);
+        EXPECT_NE(device.message.find("row 0, col 0"), std::string::npos) << device.message;
+
+        std::vector<int8_t> unwritten = D;
+        unwritten[2]                  = int8_t(fast_check_sentinel_bits(HIP_R_8I)); // expected -1
+        p.D.data                      = unwritten.data();
+        host                          = fast_check_gemm(p);
+        ASSERT_FALSE(host.passed);
+        EXPECT_NE(host.message.find("row 2, col 0"), std::string::npos) << host.message;
+        device = device_result(p, unwritten);
+        ASSERT_FALSE(device.passed);
+        EXPECT_NE(device.message.find("row 2, col 0"), std::string::npos) << device.message;
+    }
+
+    // With the FNUZ sentinel (0x80, a NaN), the device scan reports an unwritten element of an
+    // FNUZ fp8 output. An all-ones sentinel is a valid FNUZ value and would hide it.
+    TEST(FastCheckDevice, scan_reports_unwritten_fnuz_elements)
+    {
+        const int64_t rows = 4, cols = 4, ld = 8;
+        const size_t  total = size_t(ld * cols);
+        uint8_t*      d     = nullptr;
+        ASSERT_EQ(hipMalloc(&d, total), hipSuccess);
+        FastCheckMatrix m{d, HIP_R_8F_E4M3_FNUZ, rows, cols, ld, 0};
+        fast_check_fill_sentinel_device(d, HIP_R_8F_E4M3_FNUZ, total, 0);
+        std::vector<uint8_t> h(total);
+        ASSERT_EQ(hipMemcpy(h.data(), d, total, hipMemcpyDeviceToHost), hipSuccess);
+        for(int64_t j = 0; j < cols; j++)
+            for(int64_t i = 0; i < rows; i++)
+                if(!(i == 3 && j == 2))
+                    h[size_t(j * ld + i)] = 0x08; // a finite FNUZ value
+        ASSERT_EQ(hipMemcpy(d, h.data(), total, hipMemcpyHostToDevice), hipSuccess);
+        auto res = fast_check_scan_padding_device(m, 1, total, false, 0);
+        (void)hipFree(d);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("1 elements inside the region were never written"),
+                  std::string::npos)
+            << res.message;
+        EXPECT_NE(res.message.find("element offset 19"), std::string::npos) << res.message;
     }
 
     TEST(FastCheckDevice, copy_region_to_host_drops_the_padding)

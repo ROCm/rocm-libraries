@@ -26,9 +26,13 @@
 #include <string>
 #include <vector>
 
-// Byte written over all of D before each launch. 0xFF bytes form a NaN in f16, bf16, f32, f64
-// and the OCP fp8 types, so an element that is never written stands out as non-finite.
-constexpr uint8_t kFastCheckSentinelByte = 0xFF;
+// The bit pattern written over every element of D before each launch, chosen per type, in the
+// low bytes. Floating types get a NaN: all-ones bytes, or 0x80 for the FNUZ fp8 types, whose only
+// NaN is 0x80. An element that is never written then stands out as non-finite. Integer types have
+// no NaN and get their minimum value. fast_check recomputes every integer element that holds the
+// type's minimum or maximum exactly, so an unwritten element is still caught, unless its correct
+// value saturates to the minimum.
+uint64_t fast_check_sentinel_bits(hipDataType type);
 
 // Value written into the padding of A, B and C. integer_exact data lies in [-2, 2]; 40 is far
 // outside that range and is exactly representable in every input type fast_check accepts,
@@ -147,8 +151,11 @@ std::string fast_check_describe_buffers(const std::vector<FastCheckBuffer>& buff
 // memory; total_elements is the size of its allocation in elements, which may extend past the
 // last batch.
 
-// Fills every byte of a device buffer with kFastCheckSentinelByte.
-void fast_check_fill_sentinel_device(void* buffer, size_t bytes, hipStream_t stream);
+// Fills every element of a device buffer with fast_check_sentinel_bits(type).
+void fast_check_fill_sentinel_device(void*       buffer,
+                                     hipDataType type,
+                                     size_t      elements,
+                                     hipStream_t stream);
 
 // Writes kFastCheckPoisonValue into every element outside the rows x cols x batch region.
 void fast_check_poison_padding_device(const FastCheckMatrix& m,

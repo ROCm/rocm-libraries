@@ -1115,6 +1115,13 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         return "fast_check does not support scaleA, scaleB, scaleC, scaleD or scaleE";
     if(do_swizzle)
         return "fast_check does not support swizzled A or B";
+    // fast_check models the bias as one value per row of D, which is what bias_source a and d
+    // allocate. bias_source b allocates one value per column.
+    if(arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
+        return "fast_check supports a bias with one value per row of D (bias_source a or d), not "
+               "bias_source b";
+    if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < arg.M[0])
+        return "fast_check requires bias_stride to be at least M";
     for(hipDataType t : {TiA, TiB, To, Tc})
     {
         std::string why;
@@ -5473,8 +5480,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.fast_check && !arg.c_equal_d)
             {
                 for(int i = 0; i < gemm_count; i++)
-                    fast_check_fill_sentinel_device(
-                        (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To), stream);
+                    fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream);
             }
             if((arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
                && arg.c_equal_d)
