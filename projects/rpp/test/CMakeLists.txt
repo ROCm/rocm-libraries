@@ -24,7 +24,7 @@ add_test(NAME rpp_backend_macro COMMAND test_rpp_backend_macro)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_handle_lifecycle test_handle_lifecycle.cpp)
     target_link_libraries(test_handle_lifecycle PRIVATE ${PROJECT_NAME})
-    target_link_options(test_handle_lifecycle PRIVATE "-Wl,--export-dynamic")
+    target_link_options(test_handle_lifecycle PRIVATE "LINKER:--export-dynamic")
     set(lifecycle_cases host_default host_explicit host_mismatch host_invalid null)
     if("${BACKEND}" STREQUAL "HIP")
         list(APPEND lifecycle_cases hip_default hip_explicit hip_mismatch
