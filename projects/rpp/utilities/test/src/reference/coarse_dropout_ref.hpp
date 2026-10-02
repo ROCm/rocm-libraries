@@ -62,10 +62,6 @@ Per-type form
     U8  0        I8  -128 (0 intensity shifted by -128)
     F16 0.0      F32 0.0
 */
-inline double coarse_dropout_scalar(double v, DType dt, bool erased) {
-    return erased ? from_unit(0.0, dt) : v;
-}
-
 // Box membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
 void coarse_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
@@ -74,6 +70,7 @@ void coarse_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const Rp
                               Rpp32u maxBoxesPerImage) {
     std::vector<RoiBounds> b(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) b[n] = roi_bounds(roi[n], roiType);
+    const T black = from_double<T>(dtype_black(dt));
     for_each_roi_io(
         sd, dd, roi, roiType,
         [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
@@ -84,7 +81,7 @@ void coarse_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const Rp
                 const RpptRoiLtrb& bx = boxes[n * maxBoxesPerImage + k];
                 if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y) erased = true;
             }
-            dst[dstIdx] = from_double<T>(coarse_dropout_scalar(to_double(src[srcIdx]), dt, erased));
+            dst[dstIdx] = erased ? black : src[srcIdx];
         });
 }
 
