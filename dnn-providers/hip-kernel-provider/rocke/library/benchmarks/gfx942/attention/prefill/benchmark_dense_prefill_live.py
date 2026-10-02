@@ -343,8 +343,13 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
     }
 
 
-#: Every mode that measures something; "all" alone leaves out swa and persistent.
-_EMIT_MODES = ("all", "swa", "persistent")
+#: Every ``--mode`` choice. ``all`` is the union of causal, mha, gqa and full.
+_MODES = ("causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all")
+
+#: The modes ``--emit-shapes`` writes: every mode that measures something. Derived,
+#: so a mode leaving _DEFERRED_MODES is emitted without editing this line. ``all``
+#: is left out because its modes are listed one by one.
+_EMIT_MODES = tuple(m for m in _MODES if m != "all" and m not in _DEFERRED_MODES)
 
 
 def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
@@ -387,7 +392,7 @@ def _add_shape_args(ap: argparse.ArgumentParser) -> None:
     """The arguments that decide WHICH shapes run, shared with ``--emit-shapes``."""
     ap.add_argument(
         "--mode",
-        choices=["causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all"],
+        choices=_MODES,
         default="all",
     )
     ap.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
@@ -405,8 +410,12 @@ def _add_shape_args(ap: argparse.ArgumentParser) -> None:
 def main() -> int:
     pre = argparse.ArgumentParser(add_help=False)
     _add_shape_args(pre)
-    known, _ = pre.parse_known_args()
+    known, unknown = pre.parse_known_args()
     if known.emit_shapes:
+        # Only the shape filters apply to an emit. Anything else is a typo, and
+        # emitting the default set for it would look like success.
+        if unknown:
+            pre.error(f"unrecognized arguments: {' '.join(unknown)}")
         records = shape_records(known.dtype, known.hq, known.hkv, known.d)
         with open(known.emit_shapes, "w") as fh:
             fh.write("".join(json.dumps(r) + "\n" for r in records))
