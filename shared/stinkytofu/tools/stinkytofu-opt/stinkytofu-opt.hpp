@@ -71,6 +71,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMInflightGuardPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
@@ -401,6 +402,21 @@ const std::vector<PassInfo> availablePasses = {
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
+    // TDMInflightGuardPass accepts optional arg: limit=<n> (default 11; 0 disables).
+    // Calls are treated as unknown here: the tool does not hand the pass the
+    // module's callable functions.
+    {"TDMInflightGuardPass",
+     [](const std::vector<std::string>& args) -> std::unique_ptr<Pass> {
+         const std::string value =
+             passArgValue(args, "limit", std::to_string(kDefaultTDMInflightLimit));
+         if (value.empty() || value.size() > 3) return nullptr;
+         int limit = 0;
+         for (char c : value) {
+             if (c < '0' || c > '9') return nullptr;
+             limit = limit * 10 + (c - '0');
+         }
+         return createTDMInflightGuardPass(limit);
+     }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {

@@ -40,6 +40,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertVgprMsbPass.cpp
     InsertInitialUnclausedVmemPass.cpp
     InsertClusterBarrierPass.cpp
+    TDMInflightGuardPass.cpp
     TDMLoadWaveSyncPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp

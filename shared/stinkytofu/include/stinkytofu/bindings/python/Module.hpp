@@ -118,6 +118,9 @@
 // SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
 // insertion (user value wins; degenerate main-loop IR falls back to today's
 // static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
+//
+// TDMInflightLimit is the most TDM ops one wave may have in flight
+// (TDMInflightGuardPass, gfx1250); 0 disables the pass.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
     X(LockDsReadOrder, bool, true)                                    \
     X(DsReadThrottleTransitionFactor, double, 1.0)                    \
@@ -125,7 +128,8 @@
     X(DsReadThrottleLatency, int, -1)                                 \
     X(DsReadPerCap, int, -1)                                          \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                   \
+    X(TDMInflightLimit, int, 11)
 
 namespace stinkytofu {
 /**

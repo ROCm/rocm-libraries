@@ -69,6 +69,7 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMInflightGuardPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
@@ -269,6 +270,18 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
+    }
+
+    // TDM in-flight cap (whole-kernel, every OptLevel): on B0 a wave with more
+    // than TDMInflightLimit TDM ops outstanding can deadlock. Every pass that
+    // schedules, inserts or clones a TDM op or an s_wait_tensorcnt (DAG
+    // scheduler, waitcnt insertion, cluster barrier, region clone) has run by
+    // now, so the bound covers the emitted stream. It only inserts where the
+    // bound before an issue exceeds the limit - 1, which leaves kernels that stay
+    // within it untouched. See tdm-inflight-guard.md; 0 disables it.
+    if (moduleOptions.TDMInflightLimit > 0) {
+        mpm.addPass(createFunctionToModuleAdaptor(
+            createTDMInflightGuardPass(moduleOptions.TDMInflightLimit, module.getFunctions())));
     }
 
     mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));

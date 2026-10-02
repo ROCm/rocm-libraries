@@ -1,0 +1,26 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --TDMInflightGuardPass=limit=4 --print-output 2>&1
+#
+# TDMInflightGuardPass with limit=4: at most 4 TDM ops in flight per wave. The
+# fifth and sixth of six back-to-back tensor_load_to_lds would each find 4 in
+# flight, so each gets an `s_wait_tensorcnt 3` right before it.
+#
+# CHECK-LABEL: @tdm_inflight_guard_limit
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 3
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 3
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @tdm_inflight_guard_limit() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+}

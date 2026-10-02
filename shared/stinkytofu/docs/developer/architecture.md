@@ -57,6 +57,7 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 | `RedundantMovEliminationPass` | Block-local backward search: removes duplicate mov-type instructions (same opcode + dest + src, source unmodified between occurrences) |
 | `PeepholeOptimizationPass` | Declarative pattern-based optimizations compiled from `.pattern` files. See [Adding Peephole Patterns](adding-peephole-patterns.md) |
 | `InsertClusterBarrierPass` | Inserts cluster-barrier (`s_barrier_signal/wait -3`) handshakes at four rules covering the main and tail loops. See [Insert Cluster Barrier Pass](cluster-barrier.md) |
+| `TDMInflightGuardPass` | Bounds each wave's outstanding TDM ops before every issue over all CFG paths and inserts `s_wait_tensorcnt (limit-1)` only where the bound exceeds it (`TDMInflightLimit`, default 11). See [TDM In-Flight Guard Pass](tdm-inflight-guard.md) |
 | `LoopRegionRemarkPass` | Emits optimization remarks about loop health: region count, boundary causes, s_nop waste, branch count. Enabled by `StinkyTofuEnableRemarks`. See [Global Parameters](../user/global-parameters.md) |
 | `RemoveInstructionPass` | Removes instructions matching configured unified opcodes from all basic blocks. Optional last pass on gfx1250; disabled when `ModuleOptions.RemoveInstructions` is empty. See [RemoveInstructionPass](../user/remove-instruction-pass.md) |
 
