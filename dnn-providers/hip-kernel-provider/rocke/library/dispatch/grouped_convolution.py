@@ -734,10 +734,28 @@ def _resolve_wgrad_split_k(
     # mirrors the kernel-side gate in ``wgrad_group_merge_available``; keeping
     # the dispatcher's answer inside it is what stops select() from handing the
     # builder a spec the builder then rejects.
+    #
+    # As written today the ``gm > 1`` term is subsumed and never flips the
+    # result: dispatch admits only fp16/bf16, merging is depthwise-only, and a
+    # depthwise cpg == 1 forces a store-vector width of 1, so _atomic_ok is
+    # already False on every shape that can merge. It is kept because it is the
+    # term that stays true if any of those three premises moves -- an fp32 dW,
+    # or merging extended past depthwise -- and in that world it is the only
+    # thing between a merged tile and a silently wrong gradient. Deriving the
+    # invariant from the merge degree directly is also simply what the rule
+    # means. ``test_merged_split_k_never_takes_the_packed_atomic`` asserts the
+    # subsumption explicitly, so it reports when it lifts.
     two_stage = ((not _atomic_ok) or gm > 1) and split_k > 1
     # The scratch carries no split_k factor, but it does carry the replica
     # factor -- R copies of dW per group. Use the same R this module hands the
     # spec in to_wgrad_spec, or the cap bounds an allocation nobody makes.
+    #
+    # Deliberately *unmerged*: this mirrors wgrad_two_stage_workspace_nbytes,
+    # which sizes off WgradConvSpec.wg_M/wg_N -- the true per-group dims, kept
+    # separate from grid_M/grid_N for exactly this reason. The scratch is R
+    # copies of dW, and merging does not change how much dW there is; it only
+    # changes how many CTAs write it. Scaling these by gm would overstate the
+    # allocation by gm**2 and start refusing two-stage on problems that fit.
     ws_bytes = p.groups * _WGRAD_WS_REPLICAS * wg_M * wg_N * 4
     if two_stage and ws_bytes > _MAX_WGRAD_WS_BYTES:
         two_stage = False

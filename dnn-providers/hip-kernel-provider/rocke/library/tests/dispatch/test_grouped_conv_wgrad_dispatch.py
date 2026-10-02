@@ -12,7 +12,7 @@ with the per-tile dims wg_M = kpg * Gm, wg_N = spatial * cpg * Gm. ``Gm`` is the
 merged-group degree: it folds Gm consecutive groups into one tile, so it
 multiplies both GEMM extents and divides the group axis of the grid. It is 1
 for everything except gfx950 depthwise, where dispatch picks it -- see
-``TestWgradMergePlan``. This is the same grid the GPU correctness test (platform
+``TestWgradMergeDegree``. This is the same grid the GPU correctness test (platform
 tests ``test_conv_wgrad_correctness.py``) launches and validates numerically, so
 a match here proves the dispatch path launches a correct grid.
 """
@@ -26,6 +26,9 @@ from dispatch.grouped_convolution import (
     ConvGroupedRequest,
     _block,
     _problem,
+    # Deliberately the alias dispatch itself calls, not a fresh import from
+    # kernels: the test asserts on exactly the predicate dispatch consults.
+    _wgrad_atomic_epilogue_available,
     conv_grouped_candidates,
     dispatch_conv_grouped,
 )
@@ -184,6 +187,53 @@ class TestTwoStageSelection(unittest.TestCase):
         ws = r.spec.to_wgrad_spec(_problem(r.request))
         self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
         self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")
+
+    def test_merged_split_k_never_takes_the_packed_atomic(self):
+        # Merging makes two_stage a *correctness* requirement rather than a
+        # performance choice, and it overrides atomic availability. A merged
+        # tile computes a Gm x Gm block of group *pairs* and wants only the
+        # diagonal, which the packed-atomic epilogue has no way to mask off.
+        # Taking it anyway would accumulate an off-diagonal pair's partial sum
+        # into a live dW element -- wrong gradients, and nothing raises.
+        #
+        # Today the `gm > 1` clause in _resolve_wgrad_split_k is *subsumed*, and
+        # this test deliberately does not pretend otherwise. Dispatch emits only
+        # fp16/bf16, and merging is depthwise-only, so cpg == 1 forces a
+        # store-vector width of 1 and wgrad_atomic_epilogue_available already
+        # returns False on every shape that can merge -- `not atomic_ok` carries
+        # the invariant unaided. The clause is a belt kept for the case that
+        # stops being true (an fp32 dW, or merging extended past depthwise),
+        # where it becomes the only thing standing between a merged tile and a
+        # silently wrong gradient. What is asserted below is the invariant
+        # itself, which holds either way; `atomic_ok` is asserted False so that
+        # if the subsumption ever lifts, this test says so out loud instead of
+        # quietly changing meaning.
+        seen_merged = 0
+        for G, Y, X in ((256, 3, 3), (128, 3, 3), (512, 1, 3), (64, 5, 5)):
+            for dtype in ("fp16", "bf16"):
+                r = dispatch_conv_grouped(
+                    _wgrad(
+                        "gfx950", C=G, K=G, G=G, Y=Y, X=X,
+                        pad_h=Y // 2, pad_w=X // 2, dtype=dtype,
+                    )
+                )
+                p = _problem(r.request)
+                ws = r.spec.to_wgrad_spec(p)
+                if ws.group_merge <= 1 or ws.split_k <= 1:
+                    continue
+                seen_merged += 1
+                where = f"G={G} {Y}x{X} {dtype} gm={ws.group_merge} split_k={ws.split_k}"
+                self.assertTrue(
+                    ws.two_stage, f"{where}: merged split-K must be two-stage"
+                )
+                atomic_ok, _ = _wgrad_atomic_epilogue_available(p, dtype, None)
+                self.assertFalse(
+                    atomic_ok,
+                    f"{where}: the packed atomic became available on a mergeable "
+                    f"shape -- the `gm > 1` clause in _resolve_wgrad_split_k is no "
+                    f"longer subsumed and is now the sole guard; re-read it",
+                )
+        self.assertGreater(seen_merged, 0, "no merged split-K case was exercised")
 
 
 class TestTwoStageGridShape(unittest.TestCase):
