@@ -1917,10 +1917,9 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         MIOPEN_THROW(miopenStatusInternalError,
                      "Empty candidates provided to kernel config encoder");
 
-    // Fast path: use shipped precomputed embeddings and skip the neural config tower entirely.
-    if(auto precomputed = TryEncodeKernelConfigsFromTable(encoded_candidates, arch, solver))
-        return std::move(*precomputed);
-
+    // Note: the precomputed-table fast path now lives in CandidateSelectionModel::EncodeKernelConfigs
+    // (keyed on the raw candidates, before feature engineering); by the time we reach here the batch
+    // already missed the table, so run the fdeep config encoder.
     std::string key = arch + "_" + solver + "_kernel_config_encoder";
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
