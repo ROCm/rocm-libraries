@@ -113,15 +113,15 @@ using fmha_bwd_pipeline_default_{F_idx} =
     ck_tile::BlockFmhaBwdDQDKDVPipeline<fmha_bwd_pipeline_problem_{F_idx}>;
 
 static constexpr bool fmha_bwd_product_dual_{F_idx} =
+    std::is_same_v<{F_arch.tag}, ck_tile::gfx12_t> &&
     std::is_same_v<fmha_dtype_{F_idx}, FmhaBwdBf16> &&
     !({F_mode}) &&
     !({F_deterministic}) &&
     !({F_trload}) &&
     ({F_maxq} == 0) &&
     ({F_bm0} == 32) &&
-    ({F_bn0} == 32) &&
-    ({F_bhdq} == 128) &&
-    ({F_bhdv} == 128) &&
+    ((({F_bn0} == 32) && ({F_bhdq} == 128) && ({F_bhdv} == 128)) ||
+     (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64))) &&
     ({F_dpad} == 0) &&
     ({F_dvpad} == 0) &&
     !({F_dbias}) &&
@@ -434,15 +434,15 @@ FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && 
     using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
 
     static constexpr bool product_dual_dispatch_ =
+        std::is_same_v<{F_arch.tag}, ck_tile::gfx12_t> &&
         std::is_same_v<{F_dtype}, FmhaBwdBf16> &&
         !({F_mode}) &&
         !({F_deterministic}) &&
         !({F_trload}) &&
         ({F_maxq} == 0) &&
         ({F_bm0} == 32) &&
-        ({F_bn0} == 32) &&
-        ({F_bhdq} == 128) &&
-        ({F_bhdv} == 128) &&
+        ((({F_bn0} == 32) && ({F_bhdq} == 128) && ({F_bhdv} == 128)) ||
+         (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64))) &&
         ({F_dpad} == 0) &&
         ({F_dvpad} == 0) &&
         !({F_dbias}) &&
@@ -1204,6 +1204,7 @@ class FmhaBwdApiPool:
         inners_launcher = ""
         for i_trait, trait in enumerate(traits):
             inners_common = FMHA_BWD_API_INNER_DISPATCH_COMMON.format(
+                F_arch=trait.arch,
                 F_if=if_(i_trait),
                 F_mode=MODE_MAP[trait.mode],
                 F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
