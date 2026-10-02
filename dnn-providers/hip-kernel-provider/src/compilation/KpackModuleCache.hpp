@@ -62,51 +62,74 @@ struct OpenKpackArchive
     std::vector<std::string> arches;
 };
 
-/// The open archive for @p archivePath, opened on the first request and kept for the life
-/// of the process. kpack_open reads the whole compressed archive and keeps it resident, so
-/// opening per module-cache miss paid that read -- and its memory -- again for every newly
-/// used kernel; the reader's kpack_get_kernel is documented thread-safe on one handle, so
-/// every load can share it. A failed open is not kept, so a later call retries.
+/// Every kpack archive a load has opened, by the path it was asked for, kept open for the
+/// life of the process. Opening per module-cache miss repaid kpack_open for every newly
+/// used kernel -- for a zstd archive that reads the whole compressed blob and keeps it
+/// resident -- and the reader's kpack_get_kernel is documented thread-safe on one handle,
+/// so every load can share it. A failed open is not kept, so a later call retries.
 ///
-/// The handle serves the bytes it opened: an archive replaced on disk mid-process is not
-/// re-read, which is what the per-entry sha256 check in KpackModuleCache::load exists to
-/// catch rather than silently accept.
-///
-/// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
-inline std::shared_ptr<const OpenKpackArchive>
-    openSharedKpackArchive(const std::string& archivePath)
+/// A handle keeps its file open and is never reopened. An archive replaced on disk
+/// mid-process is not seen, and an uncompressed archive rewritten in place is read
+/// through the entry offsets taken at open; the per-entry sha256 check in
+/// KpackModuleCache::load catches either rather than silently accepting it.
+class SharedKpackArchives
 {
-    static std::mutex s_mutex;
-    static std::unordered_map<std::string, std::shared_ptr<const OpenKpackArchive>> s_open;
-
-    const std::lock_guard<std::mutex> guard(s_mutex);
-    if(const auto found = s_open.find(archivePath); found != s_open.end())
+public:
+    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
+    static std::shared_ptr<const OpenKpackArchive> open(const std::string& archivePath)
     {
-        return found->second;
-    }
-
-    auto opened = std::make_shared<OpenKpackArchive>();
-    KpackError error;
-    if(!opened->archive.open(archivePath, error))
-    {
-        if(error.archiveAbsent)
+        auto& shared = state();
+        const std::lock_guard<std::mutex> guard(shared.mutex);
+        if(const auto found = shared.open.find(archivePath); found != shared.open.end())
         {
+            return found->second;
+        }
+
+        auto opened = std::make_shared<OpenKpackArchive>();
+        KpackError error;
+        if(!opened->archive.open(archivePath, error))
+        {
+            if(error.archiveAbsent)
+            {
+                throw KpackModuleLoadFailure(error.stage,
+                                             "kpack archive '" + archivePath + "' does not exist ("
+                                                 + error.codeName + ")");
+            }
             throw KpackModuleLoadFailure(error.stage,
-                                         "kpack archive '" + archivePath + "' does not exist ("
+                                         "kpack archive '" + archivePath + "' could not be read ("
                                              + error.codeName + ")");
         }
-        throw KpackModuleLoadFailure(error.stage,
-                                     "kpack archive '" + archivePath + "' could not be read ("
-                                         + error.codeName + ")");
+        if(!opened->archive.architectures(opened->arches, error))
+        {
+            throw KpackModuleLoadFailure(error.stage,
+                                         "cannot read the architecture list of kpack archive '"
+                                             + archivePath + "' (" + error.codeName + ")");
+        }
+        return shared.open.emplace(archivePath, std::move(opened)).first->second;
     }
-    if(!opened->archive.architectures(opened->arches, error))
+
+    /// Tests only: closes every archive, so the next load reopens it from disk, as a test that
+    /// corrupts or deletes an archive needs. A load already holding a handle keeps it.
+    static void resetForTesting()
     {
-        throw KpackModuleLoadFailure(error.stage,
-                                     "cannot read the architecture list of kpack archive '"
-                                         + archivePath + "' (" + error.codeName + ")");
+        auto& shared = state();
+        const std::lock_guard<std::mutex> guard(shared.mutex);
+        shared.open.clear();
     }
-    return s_open.emplace(archivePath, std::move(opened)).first->second;
-}
+
+private:
+    struct State
+    {
+        std::mutex mutex;
+        std::unordered_map<std::string, std::shared_ptr<const OpenKpackArchive>> open;
+    };
+
+    static State& state()
+    {
+        static State s_state;
+        return s_state;
+    }
+};
 
 /// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
 /// sha256), loaded lazily and shared.
@@ -166,7 +189,7 @@ public:
                                   int deviceOrdinal,
                                   const std::string& expectedSha256)
     {
-        const auto opened = openSharedKpackArchive(archivePath);
+        const auto opened = SharedKpackArchives::open(archivePath);
         const auto& arches = opened->arches;
         KpackError error;
 
