@@ -292,6 +292,21 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
     return std::equal(iodimA.begin(), iodimA.end(), iodimB.begin());
 }
 
+// Output lengths, and the matching strides, that a node actually writes.
+static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(TreeNode& node)
+{
+    auto len    = node.UseOutputLengthForPadding() ? node.GetOutputLength() : node.length;
+    auto stride = node.outStride;
+    // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
+    if(node.fuseBlue == BFT_INV_CHIRP_MUL && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
+    {
+        len.erase(len.begin(), len.begin() + 2);
+        len.insert(len.begin(), node.lengthBlueN);
+        stride.erase(stride.begin() + 1);
+    }
+    return {len, stride};
+}
+
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
                                       NodeBufTestCacheKey cacheMapKey,
                                       TreeNode&           node,
@@ -429,18 +444,11 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
     auto getBufSize = [](TreeNode* node, bool input) {
-        auto lengthBlueN = {node->lengthBlueN};
-        auto outputLen   = node->fuseBlue == BFT_NONE ? node->GetOutputLength() : lengthBlueN;
-
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-        else
-        {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
-                                   node->outStride,
-                                   node->batch,
-                                   node->oDist);
-        }
+
+        const auto [outLen, outStride] = OutputFootprint(*node);
+        return compute_ptrdiff(outLen, outStride, node->batch, node->oDist);
     };
 
     size_t sizeBufIn  = 0;
