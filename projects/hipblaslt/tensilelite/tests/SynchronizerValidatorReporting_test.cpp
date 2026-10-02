@@ -92,6 +92,31 @@ namespace
         s.sizeMapping.streamKAtomic          = streamKAtomic;
     }
 
+    using TensileLite::CustomArgSemantic;
+
+    // A custom kernel with no tile-processing strategy, accumulation mode,
+    // workspace type or amaxD, so only its declared args can enable the scan.
+    void setCustomKernel(TensileLite::ContractionSolution&     s,
+                         std::vector<CustomArgSemantic> const& semantics,
+                         bool                                  generated = false)
+    {
+        setSolution(s, TileProcessingStrategy::None, 0);
+        s.customKernel.name      = "custom_kernel";
+        s.customKernel.generated = generated;
+        for(auto semantic : semantics)
+            s.customKernel.args.push_back({TensileLite::CustomArgType::address, semantic});
+    }
+
+    bool customKernelIsChecked(std::vector<CustomArgSemantic> const& semantics,
+                               bool                                  generated = false)
+    {
+        TestableSynchronizerValidator    validator(enabledArgs());
+        TensileLite::ContractionSolution solution;
+        setCustomKernel(solution, semantics, generated);
+        validator.preSolution(&solution);
+        return validator.mayUseSynchronizer();
+    }
+
 }
 
 // Passive, so it cannot turn a zero-launch codegen config (validate 0, syncs 0)
@@ -211,6 +236,64 @@ TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
 
     validator.preSolution(&solution);
     EXPECT_FALSE(validator.mayUseSynchronizer());
+}
+
+// The custom-arg dispatch passes the buffer as AddressFlags (non-parallel
+// reduction), AddressSynchronizer and AmaxSync, independent of the solution's
+// strategy, workspace type and amaxD flag.
+TEST(SynchronizerValidatorReporting, CustomAddressFlagsArgIsChecked)
+{
+    EXPECT_TRUE(customKernelIsChecked({CustomArgSemantic::AddressA, CustomArgSemantic::AddressFlags}));
+}
+
+TEST(SynchronizerValidatorReporting, CustomAddressSynchronizerArgIsChecked)
+{
+    EXPECT_TRUE(customKernelIsChecked({CustomArgSemantic::AddressSynchronizer}));
+}
+
+TEST(SynchronizerValidatorReporting, CustomAmaxSyncArgIsChecked)
+{
+    EXPECT_TRUE(customKernelIsChecked({CustomArgSemantic::AddressAmaxOut,
+                                       CustomArgSemantic::AmaxWS,
+                                       CustomArgSemantic::AmaxSync}));
+}
+
+// A custom Synchronizer arg is null unless the resolved accumulation is MBSK,
+// which requires a static globalAccumulation of 3.
+TEST(SynchronizerValidatorReporting, CustomSynchronizerArgFollowsMbsk)
+{
+    EXPECT_FALSE(customKernelIsChecked({CustomArgSemantic::Synchronizer}));
+
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setCustomKernel(solution, {CustomArgSemantic::Synchronizer});
+    solution.sizeMapping.globalAccumulation = 3;
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.mayUseSynchronizer());
+}
+
+// GSUSync is a constant, not the buffer.
+TEST(SynchronizerValidatorReporting, CustomGsuSyncArgIsSkipped)
+{
+    EXPECT_FALSE(customKernelIsChecked({CustomArgSemantic::GSUSync}));
+}
+
+TEST(SynchronizerValidatorReporting, CustomUnrelatedArgsAreSkipped)
+{
+    EXPECT_FALSE(customKernelIsChecked({CustomArgSemantic::AddressA,
+                                        CustomArgSemantic::AddressB,
+                                        CustomArgSemantic::AddressWorkspace,
+                                        CustomArgSemantic::DebugBuffer}));
+}
+
+// Generated kernels take singleCallArgs, not the custom-arg dispatch, so the
+// args they declare do not enable the scan.
+TEST(SynchronizerValidatorReporting, GeneratedKernelArgsAreSkipped)
+{
+    EXPECT_FALSE(customKernelIsChecked(
+        {CustomArgSemantic::AddressFlags, CustomArgSemantic::AddressSynchronizer,
+         CustomArgSemantic::AmaxSync, CustomArgSemantic::Synchronizer},
+        /*generated=*/true));
 }
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)

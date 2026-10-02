@@ -7,6 +7,7 @@
 
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <sstream>
 
@@ -58,10 +59,16 @@ namespace TensileLite
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_failedInSolution = false;
-            // Covers the four possible uses of the pointer: Flags in
-            // singleCallArgs for StreamK, the dstD/Synchronizer block for
-            // MBSK, AmaxSync for amaxD, and the Flags/Synchronizer args of
-            // custom StreamK kernels.
+            // Covers the possible uses of the pointer: Flags in singleCallArgs
+            // for StreamK, the dstD/Synchronizer block for MBSK, AmaxSync for
+            // amaxD, and the AddressFlags/AddressSynchronizer/AmaxSync args of
+            // handwritten custom kernels (custom StreamK workspace types are
+            // scanned as well). A custom Synchronizer arg gets the buffer only
+            // when the resolved accumulation is MBSK; getAccumulation() returns
+            // either the static globalAccumulation or MultipleBuffer, so the
+            // MBSK check covers it.
+            // Generated kernels never take the custom-arg dispatch, so their
+            // declared args are not consulted.
             // Parallel Stream-K reduction passes Flags=nullptr, but excluding it
             // requires the problem- and hardware-dependent reduction decision.
             // We conservatively scan its buffer too; it normally remains zero.
@@ -74,12 +81,20 @@ namespace TensileLite
             }
 
             auto const& sm               = solution->sizeMapping;
-            auto const  customType       = solution->customKernel.workspaceType;
+            auto const& ck               = solution->customKernel;
             bool const  partialReduction = sm.requiresPartialReduction();
-            bool const  customStreamK    = customType == CustomWorkspaceType::StreamK
-                                        || customType == CustomWorkspaceType::StreamKWithReduction;
-            bool const mbsk = sm.globalAccumulation == 3;
-            m_mayUseSynchronizer = partialReduction || customStreamK || mbsk
+            bool const  customStreamK    = ck.workspaceType == CustomWorkspaceType::StreamK
+                                        || ck.workspaceType == CustomWorkspaceType::StreamKWithReduction;
+            bool const  mbsk             = sm.globalAccumulation == 3;
+            bool const  handwritten      = !ck.name.empty() && !ck.generated;
+            bool const  customArg
+                = handwritten
+                  && std::any_of(ck.args.begin(), ck.args.end(), [](CustomArgDefinition const& a) {
+                         return a.semantic == CustomArgSemantic::AddressFlags
+                                || a.semantic == CustomArgSemantic::AddressSynchronizer
+                                || a.semantic == CustomArgSemantic::AmaxSync;
+                     });
+            m_mayUseSynchronizer = partialReduction || customStreamK || mbsk || customArg
                                    || solution->problemType.outputAmaxD;
         }
 
