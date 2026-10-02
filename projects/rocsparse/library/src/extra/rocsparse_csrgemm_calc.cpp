@@ -159,11 +159,11 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
 
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::
                 csrgemm_fill_block_per_row_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL, WARPSIZE>(
-                    block_id,
+                    static_cast<J>(block_id),
                     nk,
                     offset,
                     perm,
@@ -239,11 +239,11 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::
                 csrgemm_fill_block_per_row_multipass_device<BLOCKSIZE, WFSIZE, CHUNKSIZE, WARPSIZE>(
-                    block_id,
+                    static_cast<J>(block_id),
                     n,
                     offset,
                     perm,

@@ -157,13 +157,13 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::csrgemm_numeric_fill_block_per_row_device<BLOCKSIZE,
                                                                  WFSIZE,
                                                                  HASHSIZE,
                                                                  HASHVAL,
-                                                                 WARPSIZE>(block_id,
+                                                                 WARPSIZE>(static_cast<J>(block_id),
                                                                            nk,
                                                                            offset,
                                                                            perm,
@@ -241,36 +241,37 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::csrgemm_numeric_fill_block_per_row_multipass_device<BLOCKSIZE,
                                                                            WFSIZE,
                                                                            CHUNKSIZE,
-                                                                           WARPSIZE>(block_id,
-                                                                                     n,
-                                                                                     offset,
-                                                                                     perm,
-                                                                                     alpha,
-                                                                                     csr_row_ptr_A,
-                                                                                     csr_col_ind_A,
-                                                                                     csr_val_A,
-                                                                                     csr_row_ptr_B,
-                                                                                     csr_col_ind_B,
-                                                                                     csr_val_B,
-                                                                                     beta,
-                                                                                     csr_row_ptr_D,
-                                                                                     csr_col_ind_D,
-                                                                                     csr_val_D,
-                                                                                     csr_row_ptr_C,
-                                                                                     csr_col_ind_C,
-                                                                                     csr_val_C,
-                                                                                     workspace_B,
-                                                                                     idx_base_A,
-                                                                                     idx_base_B,
-                                                                                     idx_base_C,
-                                                                                     idx_base_D,
-                                                                                     mul,
-                                                                                     add);
+                                                                           WARPSIZE>(
+                static_cast<J>(block_id),
+                n,
+                offset,
+                perm,
+                alpha,
+                csr_row_ptr_A,
+                csr_col_ind_A,
+                csr_val_A,
+                csr_row_ptr_B,
+                csr_col_ind_B,
+                csr_val_B,
+                beta,
+                csr_row_ptr_D,
+                csr_col_ind_D,
+                csr_val_D,
+                csr_row_ptr_C,
+                csr_col_ind_C,
+                csr_val_C,
+                workspace_B,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C,
+                idx_base_D,
+                mul,
+                add);
 
             if constexpr(!GRID_STRIDE)
             {

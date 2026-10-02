@@ -602,7 +602,7 @@ namespace rocsparse
         J*                     table = (J*)shared_memory;
 
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             // Each block processes a row (apply permutation)
             J row = perm[block_id + *offset];
@@ -735,7 +735,7 @@ namespace rocsparse
         __shared__ J next_chunk;
 
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             // Each block processes a row (apply permutation)
             J row = perm[block_id + *offset];

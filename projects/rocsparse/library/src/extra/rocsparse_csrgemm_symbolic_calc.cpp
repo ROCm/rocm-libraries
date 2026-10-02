@@ -66,30 +66,31 @@ namespace rocsparse
                                                        bool                 add)
     {
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::csrgemm_symbolic_fill_block_per_row_multipass_device<BLOCKSIZE,
                                                                             WFSIZE,
                                                                             CHUNKSIZE,
-                                                                            WARPSIZE>(block_id,
-                                                                                      n,
-                                                                                      offset,
-                                                                                      perm,
-                                                                                      csr_row_ptr_A,
-                                                                                      csr_col_ind_A,
-                                                                                      csr_row_ptr_B,
-                                                                                      csr_col_ind_B,
-                                                                                      csr_row_ptr_D,
-                                                                                      csr_col_ind_D,
-                                                                                      csr_row_ptr_C,
-                                                                                      csr_col_ind_C,
-                                                                                      workspace_B,
-                                                                                      idx_base_A,
-                                                                                      idx_base_B,
-                                                                                      idx_base_C,
-                                                                                      idx_base_D,
-                                                                                      mul,
-                                                                                      add);
+                                                                            WARPSIZE>(
+                static_cast<J>(block_id),
+                n,
+                offset,
+                perm,
+                csr_row_ptr_A,
+                csr_col_ind_A,
+                csr_row_ptr_B,
+                csr_col_ind_B,
+                csr_row_ptr_D,
+                csr_col_ind_D,
+                csr_row_ptr_C,
+                csr_col_ind_C,
+                workspace_B,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C,
+                idx_base_D,
+                mul,
+                add);
 
             if constexpr(!GRID_STRIDE)
             {
@@ -200,30 +201,31 @@ namespace rocsparse
                                              bool                 add)
     {
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::csrgemm_symbolic_fill_block_per_row_device<BLOCKSIZE,
                                                                   WFSIZE,
                                                                   HASHSIZE,
                                                                   HASHVAL,
-                                                                  WARPSIZE>(block_id,
-                                                                            nk,
-                                                                            offset,
-                                                                            perm,
-                                                                            csr_row_ptr_A,
-                                                                            csr_col_ind_A,
-                                                                            csr_row_ptr_B,
-                                                                            csr_col_ind_B,
-                                                                            csr_row_ptr_D,
-                                                                            csr_col_ind_D,
-                                                                            csr_row_ptr_C,
-                                                                            csr_col_ind_C,
-                                                                            idx_base_A,
-                                                                            idx_base_B,
-                                                                            idx_base_C,
-                                                                            idx_base_D,
-                                                                            mul,
-                                                                            add);
+                                                                  WARPSIZE>(
+                static_cast<J>(block_id),
+                nk,
+                offset,
+                perm,
+                csr_row_ptr_A,
+                csr_col_ind_A,
+                csr_row_ptr_B,
+                csr_col_ind_B,
+                csr_row_ptr_D,
+                csr_col_ind_D,
+                csr_row_ptr_C,
+                csr_col_ind_C,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C,
+                idx_base_D,
+                mul,
+                add);
 
             if constexpr(GRID_STRIDE)
             {

@@ -165,10 +165,10 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
             rocsparse::bsrgemm_fill_block_per_row_2x2_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL>(
-                block_id,
+                static_cast<J>(block_id),
                 dir,
                 mb,
                 nkb,
@@ -340,10 +340,10 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
             rocsparse::bsrgemm_fill_block_per_row_device<BLOCKSIZE, HASHSIZE, HASHVAL, BLOCKDIM>(
-                block_id,
+                static_cast<J>(block_id),
                 dir,
                 mb,
                 nkb,
@@ -423,37 +423,37 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
-            rocsparse::bsrgemm_block_per_row_atomic_multipass_device<BLOCKSIZE,
-                                                                     CHUNKSIZE,
-                                                                     BLOCKDIM>(block_id,
-                                                                               dir,
-                                                                               nb,
-                                                                               block_dim,
-                                                                               offset,
-                                                                               perm,
-                                                                               alpha,
-                                                                               bsr_row_ptr_A,
-                                                                               bsr_col_ind_A,
-                                                                               bsr_val_A,
-                                                                               bsr_row_ptr_B,
-                                                                               bsr_col_ind_B,
-                                                                               bsr_val_B,
-                                                                               beta,
-                                                                               bsr_row_ptr_D,
-                                                                               bsr_col_ind_D,
-                                                                               bsr_val_D,
-                                                                               bsr_row_ptr_C,
-                                                                               bsr_col_ind_C,
-                                                                               bsr_val_C,
-                                                                               workspace_B,
-                                                                               idx_base_A,
-                                                                               idx_base_B,
-                                                                               idx_base_C,
-                                                                               idx_base_D,
-                                                                               mul,
-                                                                               add);
+            rocsparse::
+                bsrgemm_block_per_row_atomic_multipass_device<BLOCKSIZE, CHUNKSIZE, BLOCKDIM>(
+                    static_cast<J>(block_id),
+                    dir,
+                    nb,
+                    block_dim,
+                    offset,
+                    perm,
+                    alpha,
+                    bsr_row_ptr_A,
+                    bsr_col_ind_A,
+                    bsr_val_A,
+                    bsr_row_ptr_B,
+                    bsr_col_ind_B,
+                    bsr_val_B,
+                    beta,
+                    bsr_row_ptr_D,
+                    bsr_col_ind_D,
+                    bsr_val_D,
+                    bsr_row_ptr_C,
+                    bsr_col_ind_C,
+                    bsr_val_C,
+                    workspace_B,
+                    idx_base_A,
+                    idx_base_B,
+                    idx_base_C,
+                    idx_base_D,
+                    mul,
+                    add);
 
             if constexpr(!GRID_STRIDE)
             {
@@ -502,10 +502,10 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
-        for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             rocsparse::bsrgemm_block_per_row_multipass_device<BLOCKSIZE, CHUNKSIZE, BLOCKDIM>(
-                block_id,
+                static_cast<J>(block_id),
                 dir,
                 nb,
                 block_dim,
