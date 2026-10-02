@@ -80,16 +80,30 @@ bool device_code_available()
 
 } // anonymous namespace
 
-std::optional<ArchHandle> resolve_arch(std::string_view name)
+std::optional<ArchHandle> find_arch(std::string_view name)
 {
-    if(!device_code_available())
-        return std::nullopt;
     for(std::size_t i = 0; i < hipconv_arch_registry_size; ++i)
     {
         if(arch_name_matches(name, hipconv_arch_registry[i].name))
             return &hipconv_arch_registry[i];
     }
     return std::nullopt;
+}
+
+std::vector<std::string_view> arch_names()
+{
+    std::vector<std::string_view> names;
+    names.reserve(hipconv_arch_registry_size);
+    for(std::size_t i = 0; i < hipconv_arch_registry_size; ++i)
+        names.push_back(hipconv_arch_registry[i].name);
+    return names;
+}
+
+std::optional<ArchHandle> resolve_arch(std::string_view name)
+{
+    if(!device_code_available())
+        return std::nullopt;
+    return find_arch(name);
 }
 
 std::vector<ConvKernelHandle>

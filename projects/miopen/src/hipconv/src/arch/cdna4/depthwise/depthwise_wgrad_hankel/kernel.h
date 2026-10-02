@@ -42,6 +42,7 @@
 #include <hip/hip_fp16.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -55,32 +56,15 @@ using namespace hipconv;
 
 using arch = bunnies::arch_cdna4;
 
-// Thresholds for spreading the epilogue's atomics over copies of dW, which is few
-// enough lines that every atomic otherwise queues behind the same L2 sets.
-constexpr int SPLIT_REPLICAS       = 32;
-constexpr int SPLIT_MIN_PARTITIONS = 128;
-constexpr int SPLIT_MAX_LINES      = 128;
-constexpr int SPLIT_MIN_TAPS       = 25;
-constexpr size_t SPLIT_MAX_BYTES   = 8u << 20;
-constexpr int CACHE_LINE_BYTES     = 128;
-
-// Workgroups contributing to the same tap: the q tiles times the batch-by-height
-// chunks. The x dimension owns disjoint channels and never collides.
-inline int split_replicas(const dim3& grid, int dw_elems, int taps)
+// Workgroups contributing to the same tap: the q tiles times the batch-by-height chunks. The
+// x dimension owns disjoint channels, so a partition needs a slot rather than an atomic.
+inline size_t partition_count(const dim3& grid)
 {
-    if(grid.y * grid.z < SPLIT_MIN_PARTITIONS)
-        return 1;
-    const int dw_lines = (int)(dw_elems * sizeof(float) + CACHE_LINE_BYTES - 1) / CACHE_LINE_BYTES;
-    if(dw_lines >= SPLIT_MAX_LINES && taps < SPLIT_MIN_TAPS)
-        return 1;
-    // The replica count is compile-time (the epilogue's modulo, the reduce's unroll),
-    // so a dW too large to replicate falls back to plain atomics, not to fewer copies.
-    if(SPLIT_REPLICAS * sizeof(float) * dw_elems > SPLIT_MAX_BYTES)
-        return 1;
-    return SPLIT_REPLICAS;
+    return (size_t)grid.y * grid.z;
 }
 
-// Channel blocks, q tiles, then batch by row chunks.
+// Channel blocks, q tiles, then batch by row chunks. This is the work, not the launch:
+// the selection gates below read it to see how much parallelism a config exposes.
 inline dim3 grid_for(const Config& cfg, const ConvParams& par)
 {
     return dim3(divup(par.c, BLOCK_C),
@@ -94,6 +78,23 @@ inline int workgroups(const Config& cfg, const ConvParams& par)
     return (int)(g.x * g.y * g.z);
 }
 
+// Workgroups the fold leaves standing. Not the 2 per CU the selection gate calls "fills the
+// machine": LDS keeps 5 of these resident per CU, and folding to the gate's floor costs the
+// residency rather than the partials it saves -- measured -37% on n256 h32 w32 c128.
+constexpr int FOLD_MIN_WORKGROUPS_PER_CU = 8;
+
+// The grid actually launched: z folds to FOLD_MIN_WORKGROUPS_PER_CU per CU and the kernel
+// strides the rest, which keeps the reduce's one-slot-per-z traffic off the batch size.
+// Deliberately not what the gates read -- fold first and every config looks big enough.
+inline dim3 launch_grid_for(const Config& cfg, const ConvParams& par)
+{
+    dim3 grid        = grid_for(cfg, par);
+    const int planes = (int)(grid.x * grid.y);
+    const int target = maximum(1, FOLD_MIN_WORKGROUPS_PER_CU * cu_count() / maximum(1, planes));
+    grid.z           = (unsigned)minimum((int)grid.z, target);
+    return grid;
+}
+
 // Whether a shape can use a config at all, ignoring how well it fills the machine.
 inline bool tile_fits(const Config& cfg, const ConvParams& par)
 {
@@ -104,9 +105,10 @@ inline bool tile_fits(const Config& cfg, const ConvParams& par)
     // One stride for both axes: the operands are decimated by a single constant.
     if(par.stride_h != par.stride_w || par.stride_h != cfg.stride)
         return false;
-    // Route by channel alignment: the wide path's uint4 only addresses the tensor
-    // when a pixel is a whole number of them, and the narrow path owns the rest.
-    if((par.c % 8 == 0) == cfg.narrow_c)
+    // Channel alignment, for either staging path: a lane's access spans chan_vec channels
+    // of one pixel, so it stays inside the pixel exactly when the count divides C. The
+    // wide path's uint4 is the chan_vec == 8 case of the same test.
+    if(par.c % cfg.chan_vec != 0)
         return false;
     // A q tile wider than the image only idles lanes; a row chunk taller than the
     // image only costs workgroups.
@@ -148,24 +150,25 @@ __device__ inline BlockIndex xcd_paired_index(int C)
 
 // fp32 roundings on the longest path from a product to one dW element.
 //
-// The blocking leaves three levels: the mma chain one workgroup runs, the atomics into one
-// dW element, and the reduce over the replicas. Counting them the way
+// The blocking leaves two levels: the mma chain one workgroup runs over all the units folded
+// onto it, and the reduce's running sum over the partitions. Counting them the way
 // docs/algorithms/direct/direct-wgrad-tolerance.md derives puts the depth orders of
 // magnitude below the N*P*Q products the default tolerance would charge.
 inline size_t accumulation_depth(const Config& cfg, const ConvParams& par)
 {
-    const dim3 grid       = grid_for(cfg, par);
-    const size_t parts    = (size_t)grid.y * grid.z;
-    const size_t replicas = (size_t)split_replicas(grid, par.k * par.kh * par.kw, par.kh * par.kw);
+    const dim3 grid    = launch_grid_for(cfg, par);
+    const size_t parts = partition_count(grid);
+    const size_t units = divup((int)grid_for(cfg, par).z, (int)grid.z);
 
     // Every K step is charged a rounding: v_mfma_f32_4x4x4's exact block is not measured, the
     // way the 16x16's is. It is 3 against a chain in the hundreds, so measuring it would not
     // move the bound.
     constexpr size_t within_mfma = MFMA_K - 1;
-    // One mma per q tile per row of the chunk, each stepping srcC. Rows whose tap reads the
-    // zero plane add nothing and cannot round, so this is an upper bound.
-    const size_t chain = (size_t)cfg.q_tiles * std::min(cfg.rows_per_chunk, par.h);
-    return within_mfma + chain + (divup(parts, replicas) - 1) + (replicas - 1);
+    // One mma per q tile per row of the chunk, each stepping srcC, for every unit the
+    // workgroup folds. Rows whose tap reads the zero plane add nothing and cannot round, so
+    // this is an upper bound.
+    const size_t chain = (size_t)cfg.q_tiles * std::min(cfg.rows_per_chunk, par.h) * units;
+    return within_mfma + chain + (parts - 1);
 }
 
 // The largest grid any config that fits this shape can reach.
@@ -178,10 +181,10 @@ inline int most_workgroups(const ConvParams& par)
     return most;
 }
 
-template <Config cfg, DataType DT, bool SPLIT>
+template <Config cfg, DataType DT, bool PARTITIONED, DataType DW>
 __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __restrict__ input,
                                                         const ToType<DT>* __restrict__ delta,
-                                                        float* __restrict__ wgrad,
+                                                        ToType<DW>* __restrict__ wgrad,
                                                         int N,
                                                         int C,
                                                         int hi,
@@ -191,7 +194,11 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
                                                         int py,
                                                         int px)
 {
+    // Partials stay fp32 for the fold; only a store into the caller's dW narrows.
+    static_assert(!PARTITIONED || DW == DataType::fp32, "partials are fp32");
+
     using datatype_t      = ToType<DT>;
+    using dw_t            = ToType<DW>;
     using datatypex4_t    = std::conditional_t<DT == DataType::bf16, bf16x4_t, fp16x4_t>;
     using int16x4_t       = __attribute__((ext_vector_type(4))) short;
     using uint32x2_t      = __attribute__((ext_vector_type(2))) unsigned int;
@@ -263,20 +270,29 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
 
     constexpr int DEPTH = cfg.stage_depth;
 
-    // Narrow C: a uint4 would straddle two pixels unless C % 8 == 0, so this path
-    // moves one channel per lane, register-to-LDS, and needs no staging buffers.
-    constexpr bool NARROW             = cfg.narrow_c;
+    // Narrow C: a uint4 would straddle two pixels, so this path moves NVEC channels a lane
+    // register-to-LDS and needs no staging buffers. The LDS side still writes one element
+    // per row of main_in, consecutive channels being IN_STRIDE apart there.
+    constexpr bool NARROW = cfg.chan_vec < 8;
+    constexpr int NVEC    = NARROW ? cfg.chan_vec : 1;
+    using narrow_pack_t   = bunnies::packed_type<NVEC*(int)sizeof(datatype_t)>;
+    using narrow_elems_t  = std::array<datatype_t, NVEC>;
+
     constexpr int NARROW_IN_ELEMS     = S * COLS_PER_PHASE * BLOCK_C;
-    constexpr int NARROW_IN_PASSES    = NARROW ? divup(NARROW_IN_ELEMS, cfg.threads()) : 0;
+    constexpr int NARROW_IN_GROUPS    = NARROW_IN_ELEMS / NVEC;
+    constexpr int NARROW_IN_PASSES    = NARROW ? divup(NARROW_IN_GROUPS, cfg.threads()) : 0;
     constexpr int NARROW_DELTA_ELEMS  = BLOCK_Q * BLOCK_C;
-    constexpr int NARROW_DELTA_PASSES = NARROW ? divup(NARROW_DELTA_ELEMS, cfg.threads()) : 0;
+    constexpr int NARROW_DELTA_GROUPS = NARROW_DELTA_ELEMS / NVEC;
+    constexpr int NARROW_DELTA_PASSES = NARROW ? divup(NARROW_DELTA_GROUPS, cfg.threads()) : 0;
     constexpr int STAGE_IN_TOTAL      = NARROW ? 1 : DEPTH * STAGE_IN_ALLOC;
     constexpr int STAGE_DELTA_TOTAL   = NARROW ? 1 : DEPTH * STAGE_DELTA_ALLOC;
     constexpr int SINK_TOTAL          = NARROW ? 1 : WAVE_SIZE;
+    // A channel tile is a whole number of vectors, so no group straddles the tile either.
+    static_assert(BLOCK_C % cfg.chan_vec == 0, "a channel vector has to divide the tile");
 
-    // A register array is only addressable by a compile-time index, so the narrow
-    // path stages one row and waits on it, trading the prefetch for the coverage.
-    static_assert(!NARROW || DEPTH == 1, "the narrow path keeps its staged row in registers");
+    // A register array is only addressable by a compile-time index, so the narrow path
+    // dispatches its buffer on a static_for over DEPTH rather than indexing with buf. It
+    // never touches stage_in or stage_delta, which is why those stay at a dummy element.
 
     // Channel-major operand tiles, main_in[c][x] and main_delta[p % kh][c][x]. Neither
     // is double buffered: the second copy costs a workgroup of occupancy, measured -11%.
@@ -295,13 +311,15 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
     const BlockIndex bidx  = xcd_paired_index(C);
     const int block_c_base = bidx.c_block * BLOCK_C;
     const int block_q      = bidx.q_tile * BLOCK_Q;
-    const int block_n      = bidx.z % N;
-    const int chunk        = bidx.z / N;
 
-    const int y0 = chunk * cfg.rows_per_chunk;
-    const int y1 = std::min(hi, y0 + cfg.rows_per_chunk);
-    if(y0 >= y1)
-        return;
+    // The (image, row chunk) units this workgroup owns. z strides the grid rather than
+    // taking one apiece, so the reduce reads one slot per workgroup, not one per unit.
+    const int z_units = N * divup(hi, cfg.rows_per_chunk);
+
+    // Re-keyed per unit in the loop below, which the loaders read through their captures.
+    int block_n = 0;
+    int y0      = 0;
+    int y1      = 0;
 
     const int C8 = C / 8;
 
@@ -332,18 +350,16 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
 
     bunnies::reg_tile<mat_acc, RG, SG> acc{};
 
-    // One image per descriptor, based at this workgroup's own n. Buffer offsets are
-    // 32 bits and NUM_RECORDS is too, so spanning the whole tensor would cap N * H * W * C
-    // at 2 GB; rebasing moves the batch stride into the 64-bit base and leaves the
-    // offsets to cover a single image, which is what the loads below actually reach.
+    // One image per descriptor, rebased on each unit's own n. Buffer offsets are 32 bits
+    // and NUM_RECORDS is too, so spanning the whole tensor would cap N * H * W * C at 2 GB;
+    // rebasing moves the batch stride into the 64-bit base and leaves the offsets to cover
+    // a single image, which is what the loads below actually reach.
     auto input_elems = static_cast<int64_t>(hi) * wi * C;
     auto input_bytes = input_elems * sizeof(datatype_t);
-    auto input_rsrc =
-        arch::make_buffer(input + static_cast<int64_t>(block_n) * input_elems, input_elems);
     auto delta_elems = static_cast<int64_t>(ho) * wo * C;
     auto delta_bytes = delta_elems * sizeof(datatype_t);
-    auto delta_rsrc =
-        arch::make_buffer(delta + static_cast<int64_t>(block_n) * delta_elems, delta_elems);
+    auto input_rsrc  = arch::make_buffer(input, input_elems);
+    auto delta_rsrc  = arch::make_buffer(delta, delta_elems);
 
     // The narrow path has its own plan below and never issues these, so the WIDE_
     // counts fall to zero and it builds none of them.
@@ -424,18 +440,21 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
     int narrow_delta_lds[NARROW_DELTA_PASSES == 0 ? 1 : NARROW_DELTA_PASSES];
     if constexpr(NARROW)
     {
+        // A group is NVEC channels of one column. c_g and C are both multiples of NVEC, so a
+        // group is wholly inside the pixel or wholly outside: one range test still covers it.
+        constexpr int GROUPS_PER_COL = BLOCK_C / NVEC;
         for(int pass = 0; pass < NARROW_IN_PASSES; pass++)
         {
-            const int e   = tid + pass * cfg.threads();
-            const int col = e / BLOCK_C;
-            const int ch  = e - col * BLOCK_C;
+            const int g   = tid + pass * cfg.threads();
+            const int col = g / GROUPS_PER_COL;
+            const int ch  = (g - col * GROUPS_PER_COL) * NVEC;
             // Same column map as the wide staging fetch, so the phases land apart
             // exactly as the transpose would have left them.
             const int phase      = S == 1 ? 0 : col / COLS_PER_PHASE;
             const int u          = col - phase * COLS_PER_PHASE;
             const int global_col = (S * block_q - px) + S * u + phase;
             const int c_g        = block_c_base + ch;
-            const bool ok        = e < NARROW_IN_ELEMS && u < REAL_COLS && global_col >= 0 &&
+            const bool ok        = g < NARROW_IN_GROUPS && u < REAL_COLS && global_col >= 0 &&
                             global_col < wi && c_g < C;
             narrow_in_offsets[pass] =
                 ok ? sizeof(datatype_t) * (uint32_t)((size_t)global_col * C + c_g)
@@ -444,11 +463,11 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         }
         for(int pass = 0; pass < NARROW_DELTA_PASSES; pass++)
         {
-            const int e   = tid + pass * cfg.threads();
-            const int x   = e / BLOCK_C;
-            const int ch  = e - x * BLOCK_C;
+            const int g   = tid + pass * cfg.threads();
+            const int x   = g / GROUPS_PER_COL;
+            const int ch  = (g - x * GROUPS_PER_COL) * NVEC;
             const int c_g = block_c_base + ch;
-            const bool ok = e < NARROW_DELTA_ELEMS && block_q + x < wo && c_g < C;
+            const bool ok = g < NARROW_DELTA_GROUPS && block_q + x < wo && c_g < C;
             narrow_delta_offsets[pass] =
                 ok ? sizeof(datatype_t) * (uint32_t)((size_t)(block_q + x) * C + c_g)
                    : static_cast<uint32_t>(delta_bytes);
@@ -456,8 +475,8 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         }
     }
 
-    uint16_t in_regs[NARROW_IN_PASSES == 0 ? 1 : NARROW_IN_PASSES];
-    uint16_t delta_regs[NARROW_DELTA_PASSES == 0 ? 1 : NARROW_DELTA_PASSES];
+    narrow_pack_t in_regs[DEPTH][NARROW_IN_PASSES == 0 ? 1 : NARROW_IN_PASSES];
+    narrow_pack_t delta_regs[DEPTH][NARROW_DELTA_PASSES == 0 ? 1 : NARROW_DELTA_PASSES];
 
     // Every wave issues every pass, so vmcnt means the same thing in all of them; rows
     // and lanes past the tile fetch beyond NUM_RECORDS, which returns zero.
@@ -465,10 +484,17 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         const bool row_ok = y >= 0 && y < hi;
         if constexpr(NARROW)
         {
-            static_for<NARROW_IN_PASSES>([&]<int P>() {
-                uint32_t off = row_ok ? narrow_in_offsets[P] + y * input_row_stride
-                                      : static_cast<uint32_t>(input_bytes);
-                arch::buffer_load<sizeof(datatype_t)>::load(input_rsrc, &in_regs[P], off, 0);
+            // buf is workgroup-uniform, so this is one scalar compare ahead of the loads,
+            // which still issue a row early and stay in flight across sync_staged.
+            static_for<DEPTH>([&]<int B>() {
+                if(buf != B)
+                    return;
+                static_for<NARROW_IN_PASSES>([&]<int P>() {
+                    uint32_t off = row_ok ? narrow_in_offsets[P] + y * input_row_stride
+                                          : static_cast<uint32_t>(input_bytes);
+                    arch::buffer_load<NVEC * sizeof(datatype_t)>::load(
+                        input_rsrc, &in_regs[B][P], off, 0);
+                });
             });
         }
         else
@@ -487,10 +513,15 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         const bool row_ok = p >= 0 && p < ho;
         if constexpr(NARROW)
         {
-            static_for<NARROW_DELTA_PASSES>([&]<int P>() {
-                uint32_t off = row_ok ? narrow_delta_offsets[P] + p * delta_row_stride
-                                      : static_cast<uint32_t>(delta_bytes);
-                arch::buffer_load<sizeof(datatype_t)>::load(delta_rsrc, &delta_regs[P], off, 0);
+            static_for<DEPTH>([&]<int B>() {
+                if(buf != B)
+                    return;
+                static_for<NARROW_DELTA_PASSES>([&]<int P>() {
+                    uint32_t off = row_ok ? narrow_delta_offsets[P] + p * delta_row_stride
+                                          : static_cast<uint32_t>(delta_bytes);
+                    arch::buffer_load<NVEC * sizeof(datatype_t)>::load(
+                        delta_rsrc, &delta_regs[B][P], off, 0);
+                });
             });
         }
         else
@@ -546,11 +577,19 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         if constexpr(NARROW)
         {
             // Only the last pass can hold lanes past the tile, so only it is checked.
-            static_for<NARROW_IN_PASSES>([&]<int P>() {
-                if constexpr((P + 1) * cfg.threads() > NARROW_IN_ELEMS)
-                    if(tid + P * cfg.threads() >= NARROW_IN_ELEMS)
-                        return;
-                main_in[narrow_in_lds[P]] = __builtin_bit_cast(datatype_t, in_regs[P]);
+            static_for<DEPTH>([&]<int B>() {
+                if(buf != B)
+                    return;
+                static_for<NARROW_IN_PASSES>([&]<int P>() {
+                    if constexpr((P + 1) * cfg.threads() > NARROW_IN_GROUPS)
+                        if(tid + P * cfg.threads() >= NARROW_IN_GROUPS)
+                            return;
+                    // A vector's channels are consecutive rows of main_in, so they land
+                    // IN_STRIDE apart and this side stays one element per store.
+                    const auto v = __builtin_bit_cast(narrow_elems_t, in_regs[B][P]);
+                    static_for<NVEC>(
+                        [&]<int V>() { main_in[narrow_in_lds[P] + V * IN_STRIDE] = v[V]; });
+                });
             });
         }
         else
@@ -580,12 +619,18 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
     auto transpose_delta = [&](int buf, int slot) {
         if constexpr(NARROW)
         {
-            static_for<NARROW_DELTA_PASSES>([&]<int P>() {
-                if constexpr((P + 1) * cfg.threads() > NARROW_DELTA_ELEMS)
-                    if(tid + P * cfg.threads() >= NARROW_DELTA_ELEMS)
-                        return;
-                main_delta[slot * PLANE + narrow_delta_lds[P]] =
-                    __builtin_bit_cast(datatype_t, delta_regs[P]);
+            static_for<DEPTH>([&]<int B>() {
+                if(buf != B)
+                    return;
+                static_for<NARROW_DELTA_PASSES>([&]<int P>() {
+                    if constexpr((P + 1) * cfg.threads() > NARROW_DELTA_GROUPS)
+                        if(tid + P * cfg.threads() >= NARROW_DELTA_GROUPS)
+                            return;
+                    const auto v = __builtin_bit_cast(narrow_elems_t, delta_regs[B][P]);
+                    static_for<NVEC>([&]<int V>() {
+                        main_delta[slot * PLANE + narrow_delta_lds[P] + V * STRIDE] = v[V];
+                    });
+                });
             });
         }
         else
@@ -622,24 +667,6 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         __builtin_amdgcn_s_barrier();
     }
 
-    // Prologue: fill the ring with the rows the chunk starts out needing -- at stride 1
-    // the loop brings in the newest itself -- in waves of DEPTH, one staging buffer each.
-    constexpr int PRE       = DELTA_RING - (S == 1 ? 1 : 0);
-    constexpr int PRE_WAVES = divup(PRE, DEPTH);
-    static_for<PRE_WAVES>([&]<int WV>() {
-        constexpr int LO  = WV * DEPTH;
-        constexpr int CNT = std::min(DEPTH, PRE - LO);
-        for(int i = 0; i < CNT; i++)
-            load_delta_global(i, delta_row(y0) - DELTA_RING + 1 + LO + i);
-        static_for<CNT>([&]<int I>() {
-            wait_mem<(CNT - 1 - I) * DELTA_PASSES, 0>();
-            __builtin_amdgcn_s_barrier();
-            transpose_delta(I, ring_slot(delta_row(y0) - DELTA_RING + 1 + LO + I));
-            wait_lgkmcnt<0>();
-            __builtin_amdgcn_s_barrier();
-        });
-    });
-
     // Stage row y, or issue the same loads out of range when y is past the chunk: the
     // vmcnt wait is a compile-time count, so every row has to issue alike.
     auto stage_row = [&](int b, int y) {
@@ -651,129 +678,215 @@ __device__ void conv2d_depthwise_wgrad_hankel_nhwc_impl(const ToType<DT>* __rest
         load_delta_global(b, fresh ? delta_row(y) : ho);
     };
 
-    // Prime the pipeline: DEPTH - 1 rows are in flight before the first MFMA, so
-    // every row's loads get that many rows of work to hide behind.
-    for(int i = 0; i < DEPTH - 1; i++)
-        stage_row(i, y0 + i);
+    constexpr int PRE       = DELTA_RING - (S == 1 ? 1 : 0);
+    constexpr int PRE_WAVES = divup(PRE, DEPTH);
 
-    int buf = 0;
-    // The ring indices below are recomputed from y, not carried across the loop.
-    // Carrying them drops a signed modulo per row and measured 0.4% slower.
-    for(int y = y0; y < y1; y++)
+    // Every unit runs its rows into the same accumulators, so the workgroup stores one
+    // partial for all of them. The stride leaves them disjoint but not contiguous.
+    for(int unit = bidx.z; unit < z_units; unit += gridDim.z)
     {
-        stage_row((buf + DEPTH - 1) % DEPTH, y + DEPTH - 1);
+        block_n         = unit % N;
+        const int chunk = unit / N;
+        y0              = chunk * cfg.rows_per_chunk;
+        y1              = std::min(hi, y0 + cfg.rows_per_chunk);
+        input_rsrc =
+            arch::make_buffer(input + static_cast<int64_t>(block_n) * input_elems, input_elems);
+        delta_rsrc =
+            arch::make_buffer(delta + static_cast<int64_t>(block_n) * delta_elems, delta_elems);
 
-        sync_staged();
+        // The unit before left loads for rows past its chunk in flight, and its readers have
+        // to be done before these slots are refilled.
+        wait_mem<0, 0>();
         __builtin_amdgcn_s_barrier();
 
-        transpose_input(buf);
-        // Uniform across the workgroup, so the rows that bring no new delta row
-        // skip the transpose outright rather than masking it off.
-        if(S == 1 || (y + py) % S == 0)
-            transpose_delta(buf, ring_slot(delta_row(y)));
-
-        sync_transposed();
-        __builtin_amdgcn_s_barrier();
-
-        // Every operand read issues before the first MFMA consumes one, so the row pays
-        // one LDS latency rather than one per tile -- a third of the stall cycles.
-
-        // The r tap of group RGI pairs this row with delta row (y + py - r) / S, which
-        // exists only when S divides it; the other phases read the zero plane.
-        int d_slot[RG];
-        static_for<RG>([&]<int RGI>() {
-            const int num = y + py - (RGI * TAPS + lane_r);
-            d_slot[RGI]   = (S == 1 || num % S == 0) ? ring_slot(num / S) : ZERO_SLOT;
-        });
-
-        __attribute__((aligned(16))) uint32_t win[4 * WIN_READS];
-        bunnies::reg_tile<mat_b, RG, cfg.q_tiles> b;
-        static_for<WIN_READS>(
-            [&]<int J>() { arch::ds_load_b128::load(a_base + J * 8, &win[4 * J]); });
-        // Column c of the batched B operand carries channel c / TAPS, so the map
-        // turns the operand's own coordinate into the channel's row.
-        bunnies::load_tile<arch::ds_load_b64>(b, main_delta, [&](int rg, int t, int, int c) {
-            return d_slot[rg] * PLANE + (wave * CHAN_PER_WAVE + c / TAPS) * STRIDE + t * MFMA_K;
-        });
-        // Shift the window down to a residue the perms can reach, in place and
-        // ascending so each word is read before it is overwritten.
-        if constexpr(PRESHIFT)
-            static_for<WIN_WORDS>(
-                [&]<int J>() { win[J] = __builtin_amdgcn_perm(win[J + 1], win[J], pre_sel); });
-        static_for<SG>([&]<int SGI>() {
-            static_for<cfg.q_tiles>([&]<int T>() {
-                // Both halves of the A fragment are the window taken this lane's tap
-                // late, so each is one byte permute of an adjacent register pair.
-                constexpr int K = 2 * T + SGI * SG_WORDS;
-                uint32x2_t a    = {__builtin_amdgcn_perm(win[K + 1], win[K], res_sel),
-                                   __builtin_amdgcn_perm(win[K + 2], win[K + 1], res_sel)};
-                mat_a af{__builtin_bit_cast(datatypex4_t, a)};
-                // One A fragment feeds every r-tap group, so it is built once here
-                // rather than per accumulator.
-                static_for<RG>([&]<int RGI>() {
-                    arch::mma<>::wmma(
-                        acc.block(RGI, SGI), af, b.block(RGI, T), acc.block(RGI, SGI));
-                });
+        // Prologue: fill the ring with the rows the chunk starts out needing -- at stride 1
+        // the loop brings in the newest itself -- in waves of DEPTH, one staging buffer each.
+        static_for<PRE_WAVES>([&]<int WV>() {
+            constexpr int LO  = WV * DEPTH;
+            constexpr int CNT = std::min(DEPTH, PRE - LO);
+            for(int i = 0; i < CNT; i++)
+                load_delta_global(i, delta_row(y0) - DELTA_RING + 1 + LO + i);
+            static_for<CNT>([&]<int I>() {
+                wait_mem<(CNT - 1 - I) * DELTA_PASSES, 0>();
+                __builtin_amdgcn_s_barrier();
+                transpose_delta(I, ring_slot(delta_row(y0) - DELTA_RING + 1 + LO + I));
+                wait_lgkmcnt<0>();
+                __builtin_amdgcn_s_barrier();
             });
         });
 
-        buf = (buf + 1) % DEPTH;
+        // Prime the pipeline: DEPTH - 1 rows are in flight before the first MFMA, so
+        // every row's loads get that many rows of work to hide behind.
+        for(int i = 0; i < DEPTH - 1; i++)
+            stage_row(i, y0 + i);
+
+        int buf = 0;
+        // The ring indices below are recomputed from y, not carried across the loop.
+        // Carrying them drops a signed modulo per row and measured 0.4% slower.
+        for(int y = y0; y < y1; y++)
+        {
+            stage_row((buf + DEPTH - 1) % DEPTH, y + DEPTH - 1);
+
+            sync_staged();
+            __builtin_amdgcn_s_barrier();
+
+            transpose_input(buf);
+            // Uniform across the workgroup, so the rows that bring no new delta row
+            // skip the transpose outright rather than masking it off.
+            if(S == 1 || (y + py) % S == 0)
+                transpose_delta(buf, ring_slot(delta_row(y)));
+
+            sync_transposed();
+            __builtin_amdgcn_s_barrier();
+
+            // Every operand read issues before the first MFMA consumes one, so the row pays
+            // one LDS latency rather than one per tile -- a third of the stall cycles.
+
+            // The r tap of group RGI pairs this row with delta row (y + py - r) / S, which
+            // exists only when S divides it; the other phases read the zero plane.
+            int d_slot[RG];
+            static_for<RG>([&]<int RGI>() {
+                const int num = y + py - (RGI * TAPS + lane_r);
+                d_slot[RGI]   = (S == 1 || num % S == 0) ? ring_slot(num / S) : ZERO_SLOT;
+            });
+
+            __attribute__((aligned(16))) uint32_t win[4 * WIN_READS];
+            bunnies::reg_tile<mat_b, RG, cfg.q_tiles> b;
+            static_for<WIN_READS>(
+                [&]<int J>() { arch::ds_load_b128::load(a_base + J * 8, &win[4 * J]); });
+            // Column c of the batched B operand carries channel c / TAPS, so the map
+            // turns the operand's own coordinate into the channel's row.
+            bunnies::load_tile<arch::ds_load_b64>(b, main_delta, [&](int rg, int t, int, int c) {
+                return d_slot[rg] * PLANE + (wave * CHAN_PER_WAVE + c / TAPS) * STRIDE + t * MFMA_K;
+            });
+            // Shift the window down to a residue the perms can reach, in place and
+            // ascending so each word is read before it is overwritten.
+            if constexpr(PRESHIFT)
+                static_for<WIN_WORDS>(
+                    [&]<int J>() { win[J] = __builtin_amdgcn_perm(win[J + 1], win[J], pre_sel); });
+            static_for<SG>([&]<int SGI>() {
+                static_for<cfg.q_tiles>([&]<int T>() {
+                    // Both halves of the A fragment are the window taken this lane's tap
+                    // late, so each is one byte permute of an adjacent register pair.
+                    constexpr int K = 2 * T + SGI * SG_WORDS;
+                    uint32x2_t a    = {__builtin_amdgcn_perm(win[K + 1], win[K], res_sel),
+                                       __builtin_amdgcn_perm(win[K + 2], win[K + 1], res_sel)};
+                    mat_a af{__builtin_bit_cast(datatypex4_t, a)};
+                    // One A fragment feeds every r-tap group, so it is built once here
+                    // rather than per accumulator.
+                    static_for<RG>([&]<int RGI>() {
+                        arch::mma<>::wmma(
+                            acc.block(RGI, SGI), af, b.block(RGI, T), acc.block(RGI, SGI));
+                    });
+                });
+            });
+
+            buf = (buf + 1) % DEPTH;
+        }
     }
 
-    // Epilogue: each lane holds the gradient at one (r, s) tap of channel lane_chan,
-    // and exactly one lane owns each (c, r, s), so the atomics reduce across workgroups.
+    // Epilogue: exactly one lane of one workgroup owns each (partition, c, r, s), so every
+    // element below is stored once and the reduce, not the memory system, sums them.
     const int c_global = block_c_base + lane_chan;
     if(c_global >= C)
         return;
 
-    float* dst = wgrad;
-    if constexpr(SPLIT)
+    dw_t* dst = wgrad;
+    if constexpr(PARTITIONED)
     {
         const int partition = bidx.z * gridDim.y + bidx.q_tile;
-        dst += (size_t)(partition % SPLIT_REPLICAS) * C * cfg.kh * cfg.kw;
+        dst += (size_t)partition * C * cfg.kh * cfg.kw;
     }
 
-    float* dw = dst + (size_t)c_global * cfg.kh * cfg.kw;
+    // A tap's 16 lanes hold 16 consecutive channels, so channel-major partials put its store
+    // on one 64 B sector. Only a lone partition writes the caller's dW, which keeps [c][r][s].
+    const size_t tap_stride = PARTITIONED ? (size_t)C : 1;
+
+    dw_t* dw = dst + (PARTITIONED ? (size_t)c_global : (size_t)c_global * cfg.kh * cfg.kw);
     static_for<RG>([&]<int RGI>() {
         // The taps a group holds past the filter carry a delta row this row never
-        // paired with, so they are dropped rather than accumulated.
+        // paired with, so they are dropped rather than stored.
         const int r = RGI * TAPS + lane_tap;
         if(r >= cfg.kh)
             return;
         static_for<SG>([&]<int SGI>() {
             static_for<TAPS>([&]<int I>() {
                 if constexpr(SGI * TAPS + I < cfg.kw)
-                    atomicAdd(&dw[r * cfg.kw + SGI * TAPS + I], acc.block(RGI, SGI).data[I]);
+                    dw[(r * cfg.kw + SGI * TAPS + I) * tap_stride] =
+                        static_cast<dw_t>(acc.block(RGI, SGI).data[I]);
             });
         });
     });
 }
 
-// Fold the replicated partial gradients into the caller's dW. A template so the shard
-// TUs share one definition, and so REPLICAS unrolls the loads.
-template <int REPLICAS>
-__global__ void conv2d_depthwise_wgrad_hankel_reduce_cdna4(float* __restrict__ wgrad,
-                                                           const float* __restrict__ replicas,
-                                                           int dw_elems)
+// Fold the per-partition partials into the caller's dW, transposed back to [c][r][s].
+//
+// SLICES waves split the partition axis and meet in LDS, one element per lane: dW is too
+// small to fill the machine off the element axis alone, and folding the slices in a second
+// kernel instead costs more in launch than the bytes it saves.
+template <int SLICES, DataType DW>
+__global__ __launch_bounds__(SLICES* WAVE_SIZE) void conv2d_depthwise_wgrad_hankel_reduce_cdna4(
+    ToType<DW>* __restrict__ wgrad,
+    const float* __restrict__ partials,
+    int dw_elems,
+    int partitions,
+    int C,
+    int taps)
 {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if(i >= dw_elems)
-        return;
+    __shared__ float slice_sum[SLICES][WAVE_SIZE];
+
+    const int lane  = threadIdx.x % WAVE_SIZE;
+    const int slice = threadIdx.x / WAVE_SIZE;
+    const int i     = blockIdx.x * WAVE_SIZE + lane;
+
+    // Several partition reads in flight at once. One accumulator walked without unrolling
+    // puts a memory round trip between each add, which measured 10.3 us against 1.2 MB.
+    constexpr int U = 4;
+    float acc[U]    = {};
+    if(i < dw_elems)
+    {
+        int p = slice;
+        for(; p + (U - 1) * SLICES < partitions; p += U * SLICES)
+        {
+#pragma unroll
+            for(int u = 0; u < U; u++)
+                acc[u] += partials[(size_t)(p + u * SLICES) * dw_elems + i];
+        }
+        for(; p < partitions; p += SLICES)
+            acc[0] += partials[(size_t)p * dw_elems + i];
+    }
 
     float sum = 0.f;
 #pragma unroll
-    for(int r = 0; r < REPLICAS; r++)
-        sum += replicas[(size_t)r * dw_elems + i];
-    wgrad[i] = sum;
+    for(int u = 0; u < U; u++)
+        sum += acc[u];
+
+    slice_sum[slice][lane] = sum;
+    __syncthreads();
+
+    if(slice != 0 || i >= dw_elems)
+        return;
+#pragma unroll
+    for(int s = 1; s < SLICES; s++)
+        sum += slice_sum[s][lane];
+
+    // The reads ran in the partials' own order, so the transpose costs only this one store.
+    const int tap                             = i / C;
+    wgrad[(size_t)(i - tap * C) * taps + tap] = static_cast<ToType<DW>>(sum);
 }
+
+// Waves splitting the partition axis above, at the most a 1024-thread group can carry. The
+// fold reads partials the main kernel has just evicted from L2, so it is latency-exposed and
+// wants every wave it can get: 16 over 8 is worth 11.4% where the fold owns most of a run.
+constexpr int REDUCE_SLICES = 16;
 
 // Without the bound the compiler sizes registers for a 1024-thread group and caps
 // this kernel at 128 VGPRs, which spills the 9x9 and 11x11 accumulators to scratch.
-template <Config cfg, DataType DT, bool SPLIT>
+template <Config cfg, DataType DT, bool PARTITIONED, DataType DW>
 __global__ __launch_bounds__(cfg.threads()) void conv2d_depthwise_wgrad_hankel_nhwc_cdna4(
     const ToType<DT>* __restrict__ input,
     const ToType<DT>* __restrict__ delta,
-    float* __restrict__ wgrad,
+    ToType<DW>* __restrict__ wgrad,
     int N,
     int C,
     int hi,
@@ -788,7 +901,7 @@ __global__ __launch_bounds__(cfg.threads()) void conv2d_depthwise_wgrad_hankel_n
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds) &&
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
     {
-        conv2d_depthwise_wgrad_hankel_nhwc_impl<cfg, DT, SPLIT>(
+        conv2d_depthwise_wgrad_hankel_nhwc_impl<cfg, DT, PARTITIONED, DW>(
             input, delta, wgrad, N, C, hi, wi, ho, wo, py, px);
     }
 }
@@ -802,13 +915,12 @@ void launch_impl(const LaunchParams& lp,
                  void* workspace,
                  hipStream_t stream)
 {
-    const int dw_elems    = par.k * par.kh * par.kw;
-    const size_t dw_bytes = sizeof(float) * dw_elems;
-    const int replicas    = split_replicas(lp.grid, dw_elems, par.kh * par.kw);
+    const int dw_elems = par.k * par.kh * par.kw;
+    const size_t parts = partition_count(lp.grid);
 
-    auto typed_launch = [&]<DataType DT, bool SPLIT>(float* dst) {
+    auto typed_launch = [&]<DataType DT, bool PARTITIONED, DataType DW>(ToType<DW>* dst) {
         using dtype = ToType<DT>;
-        conv2d_depthwise_wgrad_hankel_nhwc_cdna4<cfg, DT, SPLIT>
+        conv2d_depthwise_wgrad_hankel_nhwc_cdna4<cfg, DT, PARTITIONED, DW>
             <<<lp.grid, lp.block_size, 0, stream>>>(static_cast<const dtype*>(in),
                                                     static_cast<const dtype*>(wei),
                                                     dst,
@@ -821,28 +933,37 @@ void launch_impl(const LaunchParams& lp,
                                                     par.pad_h,
                                                     par.pad_w);
     };
-    auto dispatch = [&]<DataType DT>() {
-        if(replicas > 1)
+    // No zeroing on either path: every element the reduce or the caller reads was stored
+    // rather than accumulated into, which is also what lets the cast to DW ride on that store.
+    auto dispatch = [&]<DataType DT, DataType DW>() {
+        if(parts > 1)
         {
             auto* partials = static_cast<float*>(workspace);
-            HIP_CHECK(hipMemsetAsync(partials, 0, replicas * dw_bytes, stream));
-            typed_launch.template operator()<DT, /*SPLIT=*/true>(partials);
+            typed_launch.template operator()<DT, /*PARTITIONED=*/true, DataType::fp32>(partials);
 
-            constexpr int RBLK = 64;
-            conv2d_depthwise_wgrad_hankel_reduce_cdna4<SPLIT_REPLICAS>
-                <<<divup(dw_elems, RBLK), RBLK, 0, stream>>>(
-                    static_cast<float*>(out), partials, dw_elems);
+            conv2d_depthwise_wgrad_hankel_reduce_cdna4<REDUCE_SLICES, DW>
+                <<<divup(dw_elems, WAVE_SIZE), REDUCE_SLICES * WAVE_SIZE, 0, stream>>>(
+                    static_cast<ToType<DW>*>(out),
+                    partials,
+                    dw_elems,
+                    (int)parts,
+                    par.c,
+                    par.kh * par.kw);
         }
         else
         {
-            HIP_CHECK(hipMemsetAsync(out, 0, dw_bytes, stream));
-            typed_launch.template operator()<DT, /*SPLIT=*/false>(static_cast<float*>(out));
+            typed_launch.template operator()<DT, /*PARTITIONED=*/false, DW>(
+                static_cast<ToType<DW>*>(out));
         }
     };
+    // is_applicable admits dW in fp32 or in the input's own type, nothing else.
+    const bool narrow_dw = par.weight_grad_type != DataType::fp32;
     if(par.input_type == DataType::bf16)
-        dispatch.template operator()<DataType::bf16>();
+        narrow_dw ? dispatch.template operator()<DataType::bf16, DataType::bf16>()
+                  : dispatch.template operator()<DataType::bf16, DataType::fp32>();
     else
-        dispatch.template operator()<DataType::fp16>();
+        narrow_dw ? dispatch.template operator()<DataType::fp16, DataType::fp16>()
+                  : dispatch.template operator()<DataType::fp16, DataType::fp32>();
 }
 
 class Depthwise_Wgrad_Hankel_ConvKernel : public DepthwiseConvKernel
@@ -869,7 +990,8 @@ public:
             return false;
         if(par.output_grad_type() != par.input_type)
             return false;
-        if(par.weight_grad_type != DataType::fp32)
+        // fp32 accumulation either way; a narrow dW is rounded once, at the final store.
+        if(par.weight_grad_type != DataType::fp32 && par.weight_grad_type != par.input_type)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
@@ -924,7 +1046,7 @@ public:
     LaunchParams get_launch_params(const ConvParams& par) const override
     {
         LaunchParams launch;
-        launch.grid       = grid_for(cfg_, par);
+        launch.grid       = launch_grid_for(cfg_, par);
         launch.block_size = dim3(cfg_.threads(), 1, 1);
         return launch;
     }
@@ -935,13 +1057,14 @@ public:
         get_mixed_precision_tolerance(par, accumulation_depth(cfg_, par), atol, rtol);
     }
 
+    // One slot per partition, so this grows with the grid; a lone partition stores straight
+    // into the caller's dW and needs none.
     size_t get_workspace_size(const ConvParams& par) const override
     {
-        const int dw_elems = par.k * par.kh * par.kw;
-        const int replicas = split_replicas(get_launch_params(par).grid, dw_elems, par.kh * par.kw);
-        if(replicas == 1)
+        const size_t parts = partition_count(get_launch_params(par).grid);
+        if(parts <= 1)
             return 0;
-        return (size_t)replicas * dw_elems * sizeof(float);
+        return parts * par.k * par.kh * par.kw * sizeof(float);
     }
 
 private:

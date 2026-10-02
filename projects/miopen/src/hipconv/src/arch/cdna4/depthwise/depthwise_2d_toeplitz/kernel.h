@@ -742,7 +742,6 @@ public:
     {
         if(!DepthwiseConvKernel::is_applicable(par))
             return false;
-        // 16-bit only: the base admits tf32 for the CDNA5 1D path, which this has none.
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
         if(par.direction != Direction::Fprop)

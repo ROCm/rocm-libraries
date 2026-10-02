@@ -14,6 +14,12 @@ hipconv_autoshard(ARCH         cdna4
                   KERNEL       direct/direct_l1/kernel.h
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
 hipconv_autoshard(ARCH         cdna4
+                  NAMESPACE    patch_embed
+                  KERNEL_CLASS PatchEmbed_ConvKernel
+                  CONFIG_TABLE direct/patch_embed/config_table.h
+                  KERNEL       direct/patch_embed/kernel.h
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
+hipconv_autoshard(ARCH         cdna4
                   NAMESPACE    direct_wgrad
                   KERNEL_CLASS DirectWgrad_ConvKernel
                   CONFIG_TABLE direct/direct_wgrad/config_table.h
