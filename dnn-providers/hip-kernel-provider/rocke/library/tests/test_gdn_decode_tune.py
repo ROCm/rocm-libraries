@@ -111,6 +111,37 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
     assert "consider DEFAULT_TILE = (4, 16, 8)" in output
 
 
+def test_main_reports_missing_gdn_default_and_continues(monkeypatch, capsys):
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
+    monkeypatch.setattr(
+        tune, "dispatch_gdn_decode_all", lambda request: (object(), object())
+    )
+    # Batch 1: the default failed correctness, so it never reached the rows.
+    rows = {
+        1: [(5.0, (4, 16, 8), "fast", 0.0)],
+        2: [(5.0, (2, 16, 8), "default", 0.0)],
+    }
+    monkeypatch.setattr(
+        tune, "sweep_registry_batch", lambda batch, results: rows[batch]
+    )
+    monkeypatch.setattr(
+        tune,
+        "dispatch_gdn_decode",
+        lambda request: SimpleNamespace(candidate=SimpleNamespace(spec_id="default")),
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["tune.py", "--batches", "1,2", "--geometries", "16/32"]
+    )
+
+    assert tune.main() == 1
+    output = capsys.readouterr().out
+    assert (
+        "dispatcher default 'default' is NOT in the correct-and-timeable set" in output
+    )
+    assert "=== Hk16/Hv32 batch 2" in output
+    assert "manual review: retain DEFAULT_TILE" in output
+
+
 def test_report_gdn_dispatcher_default_keeps_fastest_default(capsys):
     tune.report_gdn_dispatcher_default([(5.0, (2, 16, 8), "default", 0.0)], "default")
 

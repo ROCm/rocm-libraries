@@ -218,8 +218,11 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
     return rows
 
 
-def report_gdn_dispatcher_default(rows, auto_id: str) -> None:
-    """Print the shipped GDN default against the fastest measured candidate."""
+def report_gdn_dispatcher_default(rows, auto_id: str) -> bool:
+    """Print the shipped GDN default against the fastest measured candidate.
+
+    Return False when the default is not among the correct, timed rows.
+    """
     best_micros, best_tile, best_id, _ = rows[0]
     for rank, (micros, tile, spec_id, _) in enumerate(rows, start=1):
         if spec_id != auto_id:
@@ -237,8 +240,12 @@ def report_gdn_dispatcher_default(rows, auto_id: str) -> None:
             print("  manual review: retain DEFAULT_TILE")
         else:
             print(f"  manual review: consider DEFAULT_TILE = {best_tile}")
-        return
-    raise RuntimeError(f"dispatcher-selected GDN spec {auto_id!r} was not measured")
+        return True
+    print(
+        f"  dispatcher default {auto_id!r} is NOT in the correct-and-timeable "
+        "set for this cell"
+    )
+    return False
 
 
 def report_kda_work_keying(by_work) -> None:
@@ -360,7 +367,8 @@ def main() -> int:
             for micros, tile, spec_id, err in rows[: args.top]:
                 mark = " <- dispatcher default" if spec_id == auto_id else ""
                 print(f"  {micros:9.3f}us  {spec_id} tile={tile} err={err:.2e}{mark}")
-            report_gdn_dispatcher_default(rows, auto_id)
+            if not report_gdn_dispatcher_default(rows, auto_id):
+                failed = True
 
     if by_work:
         report_kda_work_keying(by_work)
