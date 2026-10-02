@@ -396,6 +396,7 @@ TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkCycleAcrossSiblingsIsNotFollo
 
     const auto result = discoverBundles(_tempDir);
     std::vector<std::string> suites;
+    suites.reserve(result.size());
     for(const auto& bundle : result)
     {
         suites.push_back(bundle.suiteName);
@@ -445,7 +446,8 @@ TEST_F(TestBundleDiscoveryFixture, UnlistableDirectoryIsSkipped)
             std::error_code error;
             fs::permissions(path, fs::perms::owner_all, error);
         }
-    } restore{locked};
+    };
+    const RestorePermissions restore{locked};
 
     std::error_code probeError;
     const fs::directory_iterator probe(locked, probeError);
