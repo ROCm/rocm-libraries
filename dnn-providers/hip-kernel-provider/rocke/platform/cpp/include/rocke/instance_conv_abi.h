@@ -20,7 +20,8 @@
  * byte-identity gate: the param names and order are part of the emitted IR
  * of every conv family.
  */
-#pragma once
+#ifndef ROCKE_INSTANCE_CONV_ABI_H
+#define ROCKE_INSTANCE_CONV_ABI_H
 
 #include <stdbool.h>
 
@@ -107,3 +108,5 @@ bool rocke_conv_emit_param_block(rocke_ir_builder_t* b,
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* ROCKE_INSTANCE_CONV_ABI_H */

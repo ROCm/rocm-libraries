@@ -1754,6 +1754,14 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
         return 2
 
     if args.compile_all:
+        directions = directions or args.compile_directions
+        if "wgrad" in directions:
+            print(
+                "error: --compile-all: direct conv caches fwd and dgrad kernels "
+                "only (no wgrad)",
+                file=sys.stderr,
+            )
+            return 2
         cache_dir = Path(args.cache_dir) if args.cache_dir else Path("./kernel_cache")
         rc = 0
         for dtype in args.compile_dtypes:
@@ -1763,7 +1771,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
                     cache=KernelCache(cache_dir, arch),
                     arch=arch,
                     target=ArchTarget.from_gfx(arch),
-                    directions=directions or ("fwd", "dgrad"),
+                    directions=directions,
                     jobs=os.cpu_count() if args.jobs == 0 else max(1, args.jobs),
                     limit=args.limit,
                     dtype=dtype,
@@ -1972,9 +1980,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--direction",
-        default="fwd",
+        default=None,
         choices=["fwd", "dgrad", "wgrad"],
-        help="convolution direction to benchmark: fwd (default), dgrad, wgrad",
+        help="convolution direction to benchmark: fwd (default), dgrad, wgrad. "
+        "With --compile-all: build only this direction (default: fwd and dgrad).",
     )
     parser.add_argument(
         "--top",
@@ -2113,8 +2122,8 @@ def main() -> int:
         default=None,
         dest="directions",
         help="comma-separated directions (fwd, dgrad) to build or run. "
-        "--compile-all defaults to both; --run-from-cache defaults to each "
-        "case's own direction.",
+        "--compile-all defaults to --direction if given, else both; "
+        "--run-from-cache defaults to each case's own direction.",
     )
     cache_grp.add_argument(
         "--limit",
@@ -2131,6 +2140,13 @@ def main() -> int:
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else DIRECT_DTYPES
     if args.dtype is None:
         args.dtype = "fp16"
+    # --direction likewise: fwd for shape flags, both cached directions for
+    # --compile-all unless one is named.
+    args.compile_directions = (
+        (args.direction,) if args.direction is not None else ("fwd", "dgrad")
+    )
+    if args.direction is None:
+        args.direction = "fwd"
 
     arch = args.arch
 

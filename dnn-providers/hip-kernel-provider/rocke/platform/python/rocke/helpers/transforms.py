@@ -1823,7 +1823,7 @@ class TensorDescriptor:
 class DynamicTensorDescriptor(TensorDescriptor):
     """A :class:`TensorDescriptor` whose base strides are runtime SSA Values.
 
-    Constructed via :meth:`TensorDescriptor.naive_dynamic`. The transform
+    Constructed via :meth:`DynamicTensorDescriptor.create`. The transform
     chain and ``offset()`` work identically to the static descriptor except
     the final stride-multiply in ``offset()`` uses runtime Values instead of
     ``b.const_i32(stride)``.

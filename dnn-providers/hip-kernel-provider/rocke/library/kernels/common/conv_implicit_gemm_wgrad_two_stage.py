@@ -74,6 +74,16 @@ from kernels.common.conv_wgrad_workspace_reduce import (
 )
 
 
+def wgrad_workspace_nbytes(problem, ws_replicas: int) -> int:
+    """Two-stage scratch bytes for ``problem`` at ``ws_replicas`` slabs per
+    group: ``groups * R * wg_M * wg_N * 4``. The spec-free form of
+    :func:`wgrad_two_stage_workspace_nbytes`, for hosts that launch a cached
+    binary and know its replica count but have no spec."""
+    if ws_replicas < 1:
+        raise ValueError(f"ws_replicas must be >= 1 (got {ws_replicas})")
+    return problem.groups * ws_replicas * _wg_M(problem) * _wg_N(problem) * 4
+
+
 def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
     """Return scratch bytes required for the two-stage path.
 
@@ -90,7 +100,7 @@ def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
     The caller must zero this buffer before each Stage 1 launch -- Stage 1
     accumulates into it rather than overwriting it.
     """
-    return spec.problem.groups * spec.ws_replicas * spec.wg_M * spec.wg_N * 4
+    return wgrad_workspace_nbytes(spec.problem, spec.ws_replicas)
 
 
 def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
@@ -136,15 +146,10 @@ def wgrad_stage1_launch_values(
     Mirrors :func:`_wgrad_stage1_signature`: the shared wgrad AOT arguments
     plus the workspace pair.
 
-    ``split_k`` is the degree to launch at. A fixed-degree spec defaults to its
-    own; a runtime-degree spec (``spec.split_k == 0``) must be given one > 1.
+    ``split_k`` is the degree to launch at (any value > 1 -- the kernel takes
+    it as a kernarg); it defaults to the spec's.
     """
     if split_k is None:
-        if spec.split_k == 0:
-            raise ValueError(
-                "a runtime-degree two-stage kernel (split_k=0) needs the launch "
-                "degree: pass split_k > 1"
-            )
         split_k = spec.split_k
     if split_k <= 1:
         raise ValueError(f"two-stage Stage 1 needs split_k > 1 (got {split_k})")
@@ -231,11 +236,10 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         ).split_k
         spec = dc_replace(spec, split_k=resolved)
 
-    if spec.split_k == 1 or spec.split_k < -1:
+    if spec.split_k <= 1:
         raise ValueError(
-            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1, "
-            f"0 (runtime degree, passed at launch) or -1 (auto-selection); "
-            f"got split_k={spec.split_k}"
+            f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1 "
+            f"or -1 (auto-selection); got split_k={spec.split_k}"
         )
 
     # Lazy imports: keep module import-time safe for static IR tests running

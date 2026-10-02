@@ -525,18 +525,17 @@ class WgradConvSpec:
     acc_epilogue: ConvAccumulatorEpilogue = field(
         default_factory=ConvAccumulatorEpilogue
     )
-    # Split-K: partition K_wg into this many equal slices along block_id_z.
+    # Split-K: partition K_wg into slices along block_id_z.
     # -1 = auto (resolved by build_implicit_gemm_conv_wgrad via the CK formula).
-    #  0 = runtime atomic: kernel accepts ``ks`` as an i32 argument; the caller
-    #      supplies the slice width at launch.  Only one kernel is compiled; any
-    #      split-K degree is achievable at runtime by varying grid-Z and ``ks``.
-    #      Caller must zero-init dW before every launch.
     #  1 = disabled (default, normal store).
-    # >1 = fixed atomic: the exact degree is baked into the kernel name/IR.
-    #      Caller must zero-init dW before launch.
-    # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
+    # >1 = the split-K kernel: partial sums are atomic-added into a caller-zeroed
+    #      dW (or, with two_stage, into the f32 scratch). The degree itself is
+    #      never compiled in -- it is a launch parameter (``ks_count`` / ``ks``)
+    #      and always > 1 -- so every value > 1 builds the same kernel; the
+    #      value only serves the host helpers as the default launch degree.
+    # ABI for >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
-    # Two-stage mode (requires a split: split_k > 1, or 0 for a runtime degree).
+    # Two-stage mode (requires a split: split_k > 1).
     # When True, Stage 1 f32-atomic-adds its partial sums into a scratch
     # buffer (ws_ptr) instead of 16-bit-atomic-adding into dW.  The caller
     # must zero the scratch first and launch a Stage 2 cast kernel
@@ -644,8 +643,7 @@ class WgradConvSpec:
     def wg_K_padded(self, split_k: Optional[int] = None) -> int:
         """K_wg rounded up to the nearest multiple of ``tile_k * split_k``.
 
-        When ``split_k=0`` (runtime) the caller must pass the concrete degree
-        to use for padding (e.g. the degree that will be used at launch time).
+        ``split_k`` is the launch degree; it defaults to the spec's.
         """
         sk = split_k if split_k is not None else self.split_k
         if sk <= 0:
@@ -678,9 +676,10 @@ class WgradConvSpec:
                 # N times. Only tagged when set explicitly, so a spec that
                 # leaves it None keeps its historical name and golden.
                 f"pad{self.lds_k_pad}": self.lds_k_pad is not None,
-                f"spk{self.split_k}": self.split_k > 1,
+                # The degree is a launch parameter, so the name records only
+                # that the kernel splits -- every degree > 1 is one binary.
+                "spk": self.split_k > 1,
                 "spkauto": self.split_k == -1,
-                "spkrt": self.split_k == 0,
                 # Gm changes the emitted code but nothing else in the name
                 # reflects it -- p.short() carries the true group count either
                 # way. Untagged, a Gm sweep would collide on one symbol and the
@@ -697,6 +696,10 @@ class WgradConvSpec:
                 # reads. Tracks the `twostage` flag above so the two move
                 # together.
                 f"wsr{self.ws_replicas}": self.two_stage and self.ws_replicas > 1,
+                # unroll_k hand-rolls a double-buffered K-loop -- a different
+                # body under the same name otherwise. Only tagged when set, so
+                # every other kernel keeps its name.
+                "unroll": self.unroll_k,
             },
         )
 
@@ -717,10 +720,10 @@ class WgradConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
-        if self.split_k < -1:
+        if self.split_k < -1 or self.split_k == 0:
             raise ValueError(
-                f"split_k must be -1 (auto), 0 (runtime atomic), 1 (disabled), "
-                f"or >1 (fixed); got {self.split_k}"
+                f"split_k must be -1 (auto), 1 (disabled), or >1 (split-K, "
+                f"degree chosen at launch); got {self.split_k}"
             )
         if self.two_stage and self.split_k == 1:
             raise ValueError(
@@ -737,17 +740,12 @@ class WgradConvSpec:
         _gm_ok, _gm_why = wgrad_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
-        # Two-stage is in effect whenever the reduction is split -- a fixed
-        # degree > 1 or the runtime degree (split_k == 0); the scratch slab
-        # index does not depend on the degree. Must match the builder's
+        # Two-stage is in effect whenever the reduction is split; the scratch
+        # slab index does not depend on the degree. Must match the builder's
         # `_is_two_stage` exactly, or a spec could pass the atomic gates below
         # and then build the other epilogue.
-        _effective_two_stage = self.two_stage and (
-            self.split_k == 0 or self.split_k > 1
-        )
-        _needs_atomic = (
-            self.split_k == 0 or self.split_k > 1
-        ) and not _effective_two_stage
+        _effective_two_stage = self.two_stage and self.split_k > 1
+        _needs_atomic = self.split_k > 1 and not _effective_two_stage
         if _needs_atomic:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
@@ -809,19 +807,6 @@ class WgradConvSpec:
                 "wgrad async_dma requires lds_k_outer=True: the direct "
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
-            )
-        if self.split_k == 0 and (self.async_dma or self.unroll_k):
-            # split_k == 0 means the split degree is a launch-time kernel
-            # argument, so the K-slice length is not known at build time. The
-            # async and unrolled k-loops both need a compile-time trip count to
-            # lay out their pipeline, and wg_K_padded() cannot supply one for a
-            # runtime degree. Reject here with the reason rather than let the
-            # builder raise a confusing ValueError deep in the k-loop, which the
-            # sweep drivers swallow into a silent skip.
-            raise ValueError(
-                "wgrad split_k=0 (runtime degree) is incompatible with "
-                "async_dma/unroll_k: those pipelines need a compile-time "
-                "iteration count. Use a fixed split_k >= 1."
             )
         if self.lds_k_outer:
             # The transpose read is a 16-bit-lane instruction in both regimes.
@@ -924,8 +909,7 @@ class WgradConvSpec:
         candidate ladder, so folding an fp32 dW into ``dtype`` would clamp the
         reported A/B widths to 4 while the kernel still loads 8 wide.
 
-        When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
-        the epilogue is ``default`` (direct scalar store), which does not support
+        When ``split_k != 1`` the epilogue is ``default`` (direct scalar store), which does not support
         vec_c > 1, so vec_c is forced to 1.
         """
 
@@ -1000,9 +984,6 @@ class WgradConvSpec:
 _LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64, "gfx1250": 32}
 _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
 
-# Cap on the K-iteration count of the Python-unrolled async_dma loop.
-# Mirrors ROCKE_MAX_UNROLLED_K_ITERS.
-_MAX_UNROLLED_K_ITERS = 128
 
 # Group-merge degrees the merged-tile index math is written for. Powers of two
 # keep the group split (`m // kpg`, `(n // cpg) % Gm`) and the diagonal test to
@@ -1127,8 +1108,8 @@ def wgrad_group_merge_available(
     # way to drop an off-diagonal group pair, so it would accumulate garbage
     # into a live dW element instead of skipping the store. Route split-K
     # through two-stage, whose scratch atomic carries the mask.
-    _effective_two_stage = spec.two_stage and (spec.split_k == 0 or spec.split_k > 1)
-    if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
+    _effective_two_stage = spec.two_stage and spec.split_k > 1
+    if spec.split_k > 1 and not _effective_two_stage:
         return False, (
             f"group_merge with split_k={spec.split_k} needs the two-stage path "
             f"(two_stage=True); the packed-atomic split-K epilogue cannot drop "
@@ -1194,8 +1175,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     sk = spec.split_k
-    if sk < -1:
-        return False, f"split_k must be -1 (auto), 0 (runtime), 1, or >1 (got {sk})"
+    if sk < -1 or sk == 0:
+        return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
     # Mirror of validate(): two_stage has nothing to reduce at split_k == 1.
     # Without this the public predicate blesses a spec that then raises inside
     # the builder's spec.validate() call.
@@ -1210,11 +1191,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"number of scratch slabs a group's K-slices spread over"
         )
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
-    # 0 = runtime atomic; validate constraints identically to >1 without a degree.
-    _is_atomic = sk == 0 or sk > 1
-    # Mirrors the builder's `_is_two_stage`: two-stage applies at a fixed
-    # degree > 1 and at the runtime degree (sk == 0). See the matching comment
-    # in WgradConvSpec.validate().
+    _is_atomic = sk > 1
+    # Mirrors the builder's `_is_two_stage`: two-stage applies whenever the
+    # reduction is split. See the matching comment in WgradConvSpec.validate().
     _effective_two_stage = spec.two_stage and _is_atomic
     # The two-stage scratch-atomic epilogue is MFMA-only. The packed *atomic*
     # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
@@ -1268,12 +1247,6 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "epilogue='cshuffle' is invalid (use epilogue='default')"
         )
 
-    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
-        return False, (
-            "wgrad split_k=0 (runtime degree) is incompatible with "
-            "async_dma/unroll_k: those pipelines need a compile-time iteration "
-            "count. Use a fixed split_k >= 1."
-        )
     if spec.lds_k_outer and spec.lds_k_pad is not None:
         # Mirror of the validate() gate: the K-outer row stride comes from
         # _KOUTER_PAD in the builder, so an explicit pad changes the kernel name
@@ -1353,17 +1326,6 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "pipeline='wavelet' is not implemented for wgrad (it would build the "
             "'mem' kernel); use pipeline='mem'"
         )
-
-    if spec.async_dma:
-        # async_dma is Python-unrolled; a deep reduction explodes compile time.
-        _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
-        _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
-        if _k_iters > _MAX_UNROLLED_K_ITERS:
-            return False, (
-                f"async_dma would unroll to {_k_iters} K iterations "
-                f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
-                f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
-            )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
@@ -1559,10 +1521,9 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
-    _is_split_k = spec.split_k > 1 or spec.split_k == 0
-    # Two-stage at a fixed or runtime degree: the scratch slab index is
-    # group * R + z % R and the group decode reads ks_count, so nothing in the
-    # body depends on knowing the degree at build time.
+    _is_split_k = spec.split_k > 1
+    # Two-stage: the scratch slab index is group * R + z % R and the group
+    # decode reads ks_count, so nothing in the body depends on the degree.
     _is_two_stage = _is_split_k and spec.two_stage
     # At group_merge == groups the merged problem has a single group, but the
     # kernel still has to decode the K-slice off z and the epilogue still has to
@@ -1712,12 +1673,10 @@ def build_implicit_gemm_conv_wgrad(
     c_wg_K = p_wg_K  # runtime Value (was b.const_i32(wg_K))
 
     # Grouped wgrad: the group index rides on ``block_id_z`` (grid-per-group,
-    # matching forward).  When split_k>1 the group and the K-slice SHARE the z
-    # axis: the grid launches z = groups*split_k and every CTA decodes
-    # ``group = block_id_z // split_k`` and ``slice = block_id_z % split_k``.
-    # split_k==0 (runtime): same scheme but split_k degree is runtime; the kernel
-    # receives ``ks_count`` (the degree) as an extra arg alongside ``ks`` (slice
-    # width) so both div and mod can be emitted.  Grid: z = groups * ks_count.
+    # matching forward).  The group and the K-slice SHARE the z axis: the grid
+    # launches z = groups * ks_count and every CTA decodes
+    # ``group = block_id_z // ks_count`` and ``slice = block_id_z % ks_count``,
+    # with the degree ``ks_count`` and slice width ``ks`` both kernargs.
     # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
     # byte-identical to the pre-grouped kernel.
     grouped = _grouped
@@ -2276,9 +2235,9 @@ def build_implicit_gemm_conv_wgrad(
         return new_accs
 
     # ---- K loop ----
-    # k_lo / k_hi select the slice this CTA processes:
-    #   split_k == 1: k_lo=0, k_hi=None → full [0, wg_K)
-    #   split_k >  1: k_lo=z*ks, k_hi=k_lo+ks (SGPR-pinned, scalar arith)
+    # k_lo / k_hi select the slice this CTA processes: k_lo = slice*ks,
+    # k_hi = k_lo + ks (SGPR-pinned, scalar arith); an unsplit launch passes
+    # ks_count = 1, which makes that the whole padded reduction.
     _k_upper = c_wg_K if k_hi is None else k_hi
 
     # Where a prefetch past the slice end is sent. The double-buffered loops

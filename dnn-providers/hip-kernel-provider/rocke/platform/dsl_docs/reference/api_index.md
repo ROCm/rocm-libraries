@@ -52,6 +52,8 @@ select_2d_config, select_3d_config, use_2d_kernel
 # Transforms (CK Tile coord-DAG)
 CoordVar, Indirect, PadDynamic, TensorDescriptor
 pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
+# (runtime-shape variants are imported from rocke.helpers.transforms:
+#  embed_dynamic, unmerge_magic_dynamic, DynamicTensorDescriptor)
 
 # Analysis / benchmark
 BenchmarkSummary, benchmark_manifest, summarize_runs

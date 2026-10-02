@@ -76,6 +76,7 @@ Emitted by `make_conv_manifest(...)`:
 | Field           | Notes                                                                |
 |-----------------|----------------------------------------------------------------------|
 | `conv_layout`   | `"implicit_gemm"`, `"direct_grouped_16c"`, `"direct_grouped_4c"`     |
+| `direction`     | `"fwd"` (default), `"wgrad"` or `"dgrad"`: which conv the kernel computes; selects the `args_signature` problem block (`conv_args_signature(direction=...)`) and how the runner binds A/B/D |
 | `conv`          | 13 ints, or 18 for `implicit_gemm_3d` (`ValueError` otherwise)       |
 | `groups/cpg/kpg`| grouping; dense conv uses `groups=1, cpg=C, kpg=K`                   |
 | `grid_explicit` | bypass automatic grid derivation; required for direct conv kernels   |

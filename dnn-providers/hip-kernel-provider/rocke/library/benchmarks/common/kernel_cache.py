@@ -46,15 +46,23 @@ def current_llvm_flavor() -> str:
 
 @functools.lru_cache(maxsize=None)
 def current_emitter_digest() -> str:
-    """SHA-1 over the emitter sources: the ``rocke`` and ``kernels`` packages.
+    """SHA-1 over the emitter: the ``rocke`` and ``kernels`` sources, plus the
+    C++ engine's build-id when the ``rocke_engine`` binding is loaded.
 
-    The C++ engine build-id would not do: it reads ``unknown`` whenever the
-    binding is not built, and it does not move when only the Python emitter
-    changes -- which is the engine the sweep compiles with. Hashing the
-    sources the IR comes from means any emitter change invalidates the cache.
+    The sweep lowers through the default backend -- the C++ engine when its
+    binding imports, the Python emitter otherwise -- so either may have
+    produced a cached binary. The sources cover the Python emitter (and the
+    kernel definitions both engines build from); the build-id covers a
+    rebuilt or stale ``.so`` whose sources here did not change. It reads
+    ``unknown`` without the binding, and is then left out.
+
+    This digest is only a staleness hint (see :meth:`KernelCache.stale_entries`):
+    whether a kernel is rebuilt is decided by its content key, the hash of
+    the LLVM IR the engine actually emitted.
     """
     import kernels
     import rocke
+    from rocke.helpers.manifest import engine_build_id
 
     h = hashlib.sha1()
     for pkg in (rocke, kernels):
@@ -66,6 +74,9 @@ def current_emitter_digest() -> str:
             h.update(b"\0")
             h.update(path.read_bytes())
             h.update(b"\0")
+    build_id = engine_build_id()
+    if build_id != "unknown":
+        h.update(b"engine:" + build_id.encode())
     return h.hexdigest()
 
 
@@ -167,6 +178,11 @@ class KernelIdentity:
     acc_epilogue: str = "none"
     split_k: int = 1
     two_stage: bool = False
+    # Two-stage scratch slabs per group (WgradConvSpec.ws_replicas). The host
+    # sizes the scratch and builds Stage 2 from it, so it has to come from the
+    # binary's identity rather than a default the two could drift apart on.
+    # 0 = no scratch (not two-stage).
+    ws_replicas: int = 0
     group_merge: int = 1
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
@@ -233,7 +249,12 @@ class KernelIdentity:
         Suitable as a filesystem-safe filename component. Deterministic
         across Python versions (sorted JSON keys, no randomization).
         """
-        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        fields = asdict(self)
+        # Left out at its "no scratch" value so identities that predate the
+        # field keep their hash (and their cache entries).
+        if not fields["ws_replicas"]:
+            del fields["ws_replicas"]
+        payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(payload.encode()).hexdigest()
 
     def short_label(self) -> str:
@@ -541,6 +562,35 @@ class KernelCache:
             if meta.get("emitter_digest") != digest
         )
 
+    @staticmethod
+    def _group_merge_fits(
+        identity: KernelIdentity, problem: object, gm: int
+    ) -> Tuple[bool, str]:
+        """Can a wgrad binary merging ``gm`` groups serve ``problem``?
+
+        Mirrors the shape rules of ``wgrad_group_merge_available``: merging is
+        depthwise only, ``gm`` must divide the group count, and the merged
+        GEMM (``kpg*Gm`` x ``[Z*]Y*X*cpg*Gm``) must fit one tile -- the
+        filter extent is a runtime value, so it is checked here, per problem.
+        """
+        cpg = int(getattr(problem, "cpg", 0))
+        kpg = int(getattr(problem, "kpg", 0))
+        groups = int(getattr(problem, "groups", 1))
+        if cpg != 1 or kpg != 1:
+            return False, "group-merged kernel needs depthwise (cpg=kpg=1)"
+        if groups % gm:
+            return False, f"group_merge {gm} does not divide groups {groups}"
+        spatial = int(getattr(problem, "Y", 1)) * int(getattr(problem, "X", 1))
+        if bool(getattr(problem, "is_3d", False)):
+            spatial *= int(getattr(problem, "Z", 1))
+        if kpg * gm > identity.tile_m:
+            return False, f"merged GEMM-M {kpg * gm} exceeds tile_m {identity.tile_m}"
+        if spatial * cpg * gm > identity.tile_n:
+            return False, (
+                f"merged GEMM-N {spatial * cpg * gm} exceeds tile_n {identity.tile_n}"
+            )
+        return True, "ok"
+
     def supports_problem(
         self, identity: KernelIdentity, problem: object
     ) -> Tuple[bool, str]:
@@ -553,9 +603,11 @@ class KernelCache:
         LLVM flavor is never offered. Then two classes of constraint:
 
         * **Vector alignment.** The load/store widths are baked into the ISA,
-          so the per-group channel counts have to stay divisible by them.
-          ``vector_size_b`` matters as well as ``a``/``c``: the B operand's
-          innermost extent is ``cpg`` too.
+          so each operand's contiguous per-group extent has to stay divisible
+          by its width. Which extent that is depends on the direction: fwd
+          loads X and W along ``cpg`` and stores Y along ``kpg``; wgrad and
+          dgrad load dY along ``kpg`` and run their B operand (X / W) and
+          output (dW / dX) along ``cpg``.
         * **Capability.** A kernel that unrolled a 3x3 filter, or that baked
           ``cpg``/``kpg`` into its MFMA chain, simply cannot run another
           geometry. The identity records those, so a mismatch is a hard no
@@ -572,12 +624,24 @@ class KernelCache:
 
         cpg = int(getattr(problem, "cpg", 0))
         kpg = int(getattr(problem, "kpg", 0))
-        # Direct conv has no vector-width fields (they are 0); its load widths
-        # follow the baked cpg/kpg, which are checked exactly below.
-        for field, extent, name in (
-            ("vector_size_a", cpg, "cpg"),
-            ("vector_size_b", cpg, "cpg"),
-            ("vector_size_c", kpg, "kpg"),
+        # The contiguous extent of A / B / D. fwd: X (cpg), W (cpg), Y (kpg).
+        # wgrad: dY (kpg), X (cpg), dW (cpg). dgrad: dY (kpg), W (cpg),
+        # dX (cpg). Direct conv has no vector-width fields (they are 0); its
+        # load widths follow the baked cpg/kpg, which are checked exactly below.
+        if identity.direction in ("wgrad", "dgrad"):
+            extents = ((kpg, "kpg"), (cpg, "cpg"), (cpg, "cpg"))
+        else:
+            extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
+        gm = max(1, int(identity.group_merge))
+        if gm > 1:
+            # A group-merged wgrad kernel (depthwise only) loads dY and X along
+            # the Gm merged channels; dW stays per group.
+            ok, why = self._group_merge_fits(identity, problem, gm)
+            if not ok:
+                return False, why
+            extents = ((kpg * gm, "kpg*Gm"), (cpg * gm, "cpg*Gm"), (cpg, "cpg"))
+        for field, (extent, name) in zip(
+            ("vector_size_a", "vector_size_b", "vector_size_c"), extents
         ):
             vec = getattr(identity, field)
             if vec and extent and extent % vec != 0:
@@ -606,7 +670,7 @@ class KernelCache:
         if (
             identity.direction == "wgrad"
             and not identity.is_direct
-            and identity.split_k != 1
+            and identity.split_k > 1
             and not identity.two_stage
             and hasattr(problem, "Y")
         ):

@@ -256,6 +256,8 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
         iter_args[i].init = ctx->acc_inits[i];
     }
     pipe.wait_vmcnt = true;
+    /* The accumulators only ever see a zero tile past the extent. */
+    pipe.mask_tail_state = false;
     pipe.sync_after_wait = true;
     pipe.sync_before_issue = true;
     pipe.overlap_vmcnt = true;

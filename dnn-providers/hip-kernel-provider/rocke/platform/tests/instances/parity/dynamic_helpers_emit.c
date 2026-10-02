@@ -103,7 +103,8 @@ static void pingpong(rocke_ir_builder_t* b,
                      bool with_zero_fill,
                      bool wait_vmcnt,
                      bool overlap_vmcnt,
-                     const char* schedule_name)
+                     const char* schedule_name,
+                     bool mask)
 {
     const int shape[1] = {LDS_ELEMS};
     rocke_schedule_policy_t sched;
@@ -144,6 +145,7 @@ static void pingpong(rocke_ir_builder_t* b,
     pipe.sync_after_wait = true;
     pipe.sync_before_issue = true;
     pipe.overlap_vmcnt = overlap_vmcnt;
+    pipe.mask_tail_state = mask;
 
     rocke_value_t* results[2] = {NULL, NULL};
     if(!rocke_software_pipeline_run_ping_pong_dynamic(&pipe,
@@ -170,17 +172,27 @@ static void pingpong(rocke_ir_builder_t* b,
 
 static void build_pingpong_default(rocke_ir_builder_t* b)
 {
-    pingpong(b, false, false, false, false, NULL);
+    pingpong(b, false, false, false, false, NULL, false);
 }
 
 static void build_pingpong_split_k(rocke_ir_builder_t* b)
 {
-    pingpong(b, true, true, true, true, NULL);
+    pingpong(b, true, true, true, true, NULL, false);
+}
+
+static void build_pingpong_mask(rocke_ir_builder_t* b)
+{
+    pingpong(b, true, false, true, false, NULL, true);
+}
+
+static void build_pingpong_mask_split_k(rocke_ir_builder_t* b)
+{
+    pingpong(b, true, true, true, true, NULL, true);
 }
 
 static void build_pingpong_schedule(rocke_ir_builder_t* b)
 {
-    pingpong(b, true, false, true, false, "interwave");
+    pingpong(b, true, false, true, false, "interwave", false);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -332,6 +344,8 @@ static const build_fn_t CONFIGS[] = {
     build_pingpong_schedule,
     build_unmerge_embed,
     build_pad_dynamic,
+    build_pingpong_mask,
+    build_pingpong_mask_split_k,
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

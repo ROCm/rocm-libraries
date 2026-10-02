@@ -50,7 +50,9 @@ def _ptr(b, name, elem, *, readonly=False):
 # ---------------------------------------------------------------------------
 
 
-def _pingpong(*, with_lo, with_zero_fill, wait_vmcnt, overlap_vmcnt, schedule):
+def _pingpong(
+    *, with_lo, with_zero_fill, wait_vmcnt, overlap_vmcnt, schedule, mask=False
+):
     """Ping-pong over a runtime K extent.
 
     issue_load stages one f16 per thread from X[k + tid] into both halves of
@@ -105,6 +107,7 @@ def _pingpong(*, with_lo, with_zero_fill, wait_vmcnt, overlap_vmcnt, schedule):
             block_k=BLOCK_K,
             k_lo=k_lo,
             k_zero_fill=k_zero,
+            mask_tail_state=mask,
             buffers=[(a0, b0), (a1, b1)],
             iter_args=[("acc", acc0), ("cnt", cnt0)],
             issue_load_fn=issue,
@@ -240,6 +243,25 @@ CONFIGS = [
     build_unmerge_embed,
     # 4: DynamicTensorDescriptor + all-Value embed_dynamic + pad_dynamic.
     build_pad_dynamic,
+    # 5: mask_tail_state without zero-fill: the in-range compare is emitted for
+    #    the Phase B select alone (the counter must not see the stray tile).
+    _pingpong(
+        with_lo=True,
+        with_zero_fill=False,
+        wait_vmcnt=True,
+        overlap_vmcnt=False,
+        schedule=None,
+        mask=True,
+    ),
+    # 6: mask_tail_state with zero-fill: one compare feeds both selects.
+    _pingpong(
+        with_lo=True,
+        with_zero_fill=True,
+        wait_vmcnt=True,
+        overlap_vmcnt=True,
+        schedule=None,
+        mask=True,
+    ),
 ]
 
 

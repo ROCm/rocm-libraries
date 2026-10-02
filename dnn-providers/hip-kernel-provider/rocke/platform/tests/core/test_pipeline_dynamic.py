@@ -85,6 +85,7 @@ def _build(
     schedule=None,
     pipe=None,
     n_state=1,
+    mask=False,
 ):
     b = IRBuilder("pp_dyn_test")
     b.kernel.attrs["max_workgroup_size"] = 256
@@ -109,6 +110,7 @@ def _build(
         block_k=BLOCK_K,
         k_lo=k_lo,
         k_zero_fill=k_zero,
+        mask_tail_state=mask,
         buffers=bufs,
         iter_args=[(f"s{i}", v) for i, v in enumerate(inits)],
         issue_load_fn=rec.issue,
@@ -298,6 +300,37 @@ class TestZeroFill:
         # Compute B keeps the unredirected k1 offset.
         assert ctx["rec"].computes[1][0] is k1
 
+    @pytest.mark.parametrize("with_zero_fill", [False, True])
+    def test_mask_tail_state_gates_phase_b(self, with_zero_fill):
+        ctx = _build(with_zero_fill=with_zero_fill, mask=True, n_state=2)
+        body = _body(ctx)
+        k1 = _iv_adds(ctx)[0].results[0]
+        cmps = [op for op in body if op.name == "arith.cmp"]
+        # One compare, shared by the zero-fill select when there is one.
+        assert len(cmps) == 1
+        assert cmps[0].operands[0] is k1
+        assert cmps[0].operands[1] is ctx["k_extent"]
+        cond = cmps[0].results[0]
+        # Phase B's new state is committed only when tile k+1 exists; the
+        # yield carries select(k1 < K, phase-B state, phase-A state).
+        comp_a, comp_b = ctx["rec"].computes
+        yield_op = body[-1]
+        assert yield_op.name == "scf.yield"
+        for i, v in enumerate(yield_op.operands):
+            sel = v.op
+            assert sel.name == "arith.select"
+            c, new, old = sel.operands
+            assert c is cond
+            assert new.op.name == "arith.smax" and new.op.operands[1] is k1
+            assert old.op.name == "arith.smax"
+            assert old.op.operands[1] is not k1
+        assert comp_b[2] is yield_op.operands[0].op.operands[1].op
+
+    def test_no_mask_yields_phase_b_state_directly(self):
+        ctx = _build(mask=False)
+        yield_op = _body(ctx)[-1]
+        assert yield_op.operands[0].op is ctx["rec"].computes[1][2]
+
     def test_select_emitted_before_first_barrier(self):
         ctx = _build(with_zero_fill=True)
         names = [op.name for op in _body(ctx)]
@@ -407,6 +440,11 @@ class TestErrors:
     def test_one_buffer_pair_rejected(self):
         msg = self._call(buffers=[(None, None)], block_k=BLOCK_K)
         assert "2 buffer pairs" in msg
+
+    def test_three_buffer_pairs_rejected(self):
+        # Only the 2-buffer rotation exists; a third pair must not be ignored.
+        msg = self._call(buffers=[(None, None)] * 3, block_k=BLOCK_K)
+        assert "exactly 2 buffer pairs" in msg
 
     def test_no_buffers_rejected(self):
         msg = self._call(buffers=[], block_k=BLOCK_K)

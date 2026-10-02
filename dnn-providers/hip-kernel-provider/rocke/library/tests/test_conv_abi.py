@@ -164,13 +164,13 @@ def test_fwd_abi_is_pipeline_independent(label, pipeline, extra):
         (
             "wgrad-split-k",
             _P2D,
-            {"split_k": 0, "epilogue": "cshuffle", "vector_size_c": 2},
+            {"split_k": 2, "epilogue": "cshuffle", "vector_size_c": 2},
             {},
         ),
         (
             "wgrad-split-k-grouped",
             _P2D_GROUPED,
-            {"split_k": 0, "epilogue": "cshuffle", "vector_size_c": 2},
+            {"split_k": 2, "epilogue": "cshuffle", "vector_size_c": 2},
             {},
         ),
     ],
@@ -1122,7 +1122,7 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
 
 
 def test_cache_rejects_packed_atomic_wgrad_on_odd_dw_row(tmp_path):
-    """A runtime split-K wgrad binary with a 16-bit dW uses the packed atomic.
+    """A split-K wgrad binary with a 16-bit dW uses the packed atomic.
 
     That epilogue needs an even dW row (``wg_N = Y*X*cpg``); on an odd one it
     misaddresses without an error, so the cache must not offer the binary.
@@ -1150,7 +1150,7 @@ def test_cache_rejects_packed_atomic_wgrad_on_odd_dw_row(tmp_path):
         vector_size_a=1,
         vector_size_b=1,
         vector_size_c=2,  # the packed atomic needs a partner element
-        split_k=0,
+        split_k=2,
     )
     cache = KernelCache(tmp_path, _ARCH)
     shape = dict(N=2, Hi=16, Wi=16, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1)
@@ -1253,3 +1253,182 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     monkeypatch.setattr(ks, "current_emitter_digest", lambda: "newer-sources")
     assert run() == (1, 3)  # one kernel's code changed
     assert cache.meta(jobs[0].identity)["blob"] != before
+
+
+@pytest.mark.parametrize("two_stage", [False, True])
+def test_wgrad_split_degree_is_not_compiled_in(two_stage):
+    """Every split_k > 1 builds the same wgrad kernel, name included.
+
+    The degree is a launch parameter (ks / ks_count kernargs), so a degree in
+    the IR or the symbol would split one binary into one per degree.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+    )
+    from rocke.helpers.compile import lower_kernel_for_comgr
+
+    problem = ConvProblem(
+        N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+    )
+
+    def ir(split_k):
+        spec = WgradConvSpec(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="default" if two_stage else "cshuffle",
+            wave_size=64,
+            split_k=split_k,
+            two_stage=two_stage,
+        )
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch=_ARCH)
+        return lower_kernel_for_comgr(kernel, arch=_ARCH, backend="python").llvm_text
+
+    base = ir(2)
+    assert "_spk" in base
+    for degree in (4, 8, 64):
+        assert ir(degree) == base, f"split_k={degree} emitted a different kernel"
+
+
+@pytest.mark.parametrize(
+    "direction, ok_vecs, bad_vecs",
+    [
+        # fwd: A=X (cpg), B=W (cpg), D=Y (kpg)
+        ("fwd", (8, 8, 4), (4, 4, 8)),
+        # wgrad: A=dY (kpg), B=X (cpg), D=dW (cpg)
+        ("wgrad", (4, 8, 8), (8, 8, 8)),
+        # dgrad: A=dY (kpg), B=W (cpg), D=dX (cpg)
+        ("dgrad", (4, 8, 8), (8, 8, 8)),
+    ],
+)
+def test_cache_vector_extents_follow_direction(tmp_path, direction, ok_vecs, bad_vecs):
+    """Each operand's width is checked against its own contiguous extent.
+
+    cpg=64, kpg=4: a backward kernel loading dY 8 wide needs kpg % 8 == 0,
+    which the fwd layout (A along cpg) would have waved through.
+    """
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    cache = KernelCache(tmp_path, _ARCH)
+    problem = ConvProblem(
+        N=2, Hi=16, Wi=16, C=64, K=4, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+    )
+
+    def ident(vecs):
+        a, b, c = vecs
+        return KernelIdentity(
+            arch=_ARCH,
+            direction=direction,
+            algorithm="implicit_gemm",
+            dtype_a="fp16",
+            dtype_b="fp16",
+            dtype_d="fp16",
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            vector_size_a=a,
+            vector_size_b=b,
+            vector_size_c=c,
+        )
+
+    ok, why = cache.supports_problem(ident(ok_vecs), problem)
+    assert ok, why
+    ok, why = cache.supports_problem(ident(bad_vecs), problem)
+    assert not ok and "divisible" in why
+
+
+def test_aot_grid_capability_axes(monkeypatch):
+    """wgrad group-merged (depthwise, two-stage) kernels are in the AOT grid,
+    built from probes with the matching capabilities; pointwise is not."""
+    from rocke.core.arch import ArchTarget
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    jobs = ks.enumerate_jobs(
+        arch=_ARCH, dtype="fp16", target=target, directions=("fwd", "wgrad", "dgrad")
+    )
+    assert not any(j.identity.is_pointwise for j in jobs)
+    merged = [j for j in jobs if j.identity.group_merge > 1]
+    assert merged and all(j.direction == "wgrad" for j in merged)
+    for j in merged:
+        assert j.identity.grouped and j.identity.two_stage
+        p = ks._probe_problem("wgrad", j.caps)
+        assert p.cpg == p.kpg == 1 and p.groups % j.identity.group_merge == 0
+
+
+def test_cache_group_merge_needs_depthwise_that_fits(tmp_path):
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    ident = KernelIdentity(
+        arch=_ARCH,
+        direction="wgrad",
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_m=32,
+        tile_n=64,
+        tile_k=32,
+        warp_m=1,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="default",
+        wave_size=64,
+        vector_size_a=0,
+        vector_size_b=0,
+        vector_size_c=0,
+        split_k=2,
+        two_stage=True,
+        grouped=True,
+        group_merge=4,
+    )
+    cache = KernelCache(tmp_path, _ARCH)
+    shape = dict(N=2, Hi=16, Wi=16, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1)
+    dw3 = ConvProblem(C=32, K=32, Y=3, X=3, groups=32, **shape)  # 9*4 <= 64
+    assert cache.supports_problem(ident, dw3)[0]
+    dw5 = ConvProblem(C=32, K=32, Y=5, X=5, groups=32, **shape)  # 25*4 > 64
+    assert not cache.supports_problem(ident, dw5)[0]
+    odd = ConvProblem(C=30, K=30, Y=3, X=3, groups=30, **shape)  # 4 does not divide 30
+    assert not cache.supports_problem(ident, odd)[0]
+    wide = ConvProblem(C=64, K=64, Y=3, X=3, groups=32, **shape)  # cpg = 2
+    assert not cache.supports_problem(ident, wide)[0]
+
+
+def test_describe_jobs_breaks_the_grid_down(monkeypatch):
+    from rocke.core.arch import ArchTarget
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    jobs = ks.enumerate_jobs(
+        arch=_ARCH,
+        dtype="fp16",
+        target=ArchTarget.from_gfx(_ARCH),
+        directions=("fwd", "wgrad", "dgrad"),
+    )
+    lines = []
+    ks.describe_jobs(jobs, log=lines.append)
+    text = "\n".join(lines)
+    for direction in ("fwd", "wgrad", "dgrad"):
+        n = sum(j.direction == direction for j in jobs)
+        assert f"  {direction}: {n} kernels" in lines
+    assert "k-loop:" in text and "split-K:" in text and "stride x dilation:" in text

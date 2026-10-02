@@ -24,13 +24,18 @@
 extern "C" {
 #endif
 
-/* The SoftwarePipeline fields the dynamic ping-pong reads. */
+/* The SoftwarePipeline fields the dynamic ping-pong reads, plus its
+ * mask_tail_state argument. */
 typedef struct rocke_software_pipeline
 {
     bool wait_vmcnt;
     bool sync_after_wait;
     bool sync_before_issue;
     bool overlap_vmcnt;
+    /* run_ping_pong_dynamic's mask_tail_state argument: commit Phase B's state
+     * only when k + block_k < k_extent (one select per state value). Callers
+     * must set it explicitly, like the fields above. */
+    bool mask_tail_state;
 } rocke_software_pipeline_t;
 
 /* One LDS buffer set (A and B tiles). */
@@ -56,6 +61,10 @@ typedef void (*rocke_pipeline_compute_fn)(rocke_ir_builder_t* b,
                                           void* user);
 
 /* Double-buffered ping-pong over a runtime reduction extent.
+ *
+ * pipe->mask_tail_state: with an odd tile count Phase B computes an
+ *   out-of-range (zero) tile; set it when the state depends on more than the
+ *   tile data (e.g. a counter of offsets) to discard that phase's update.
  *
  * k_extent: i32 value, the reduction extent in elements (a slice end under
  *   split-K). block_k: compile-time tile width.

@@ -114,12 +114,14 @@ extern "C" bool
                                           for_op.iter_vars + for_op.num_iter_vars);
         rocke_value_t* k1 = rocke_b_add(b, for_op.iv, c_bk);
         rocke_value_t* k2 = rocke_b_add(b, for_op.iv, c_2bk);
+        /* Whether tile k+1 exists: picks the zero-fill prefetch and gates Phase
+         * B's state. Emitted once, only when one of them needs it. */
+        rocke_value_t* k1_in = NULL;
+        if(k_zero_fill != NULL || pipe->mask_tail_state)
+            k1_in = rocke_b_cmp_lt(b, k1, k_extent);
         rocke_value_t* k1_load = k1;
         if(k_zero_fill != NULL)
-        {
-            rocke_value_t* in_range = rocke_b_cmp_lt(b, k1, k_extent);
-            k1_load = rocke_b_select(b, in_range, k1, k_zero_fill);
-        }
+            k1_load = rocke_b_select(b, k1_in, k1, k_zero_fill);
         /* Phase A: compute tile k out of buf0 while tile k+1 streams into buf1. */
         ping_pong_phase(pipe,
                         b,
@@ -133,8 +135,14 @@ extern "C" bool
                         user,
                         schedule);
         /* Phase B: the buffers swap roles. */
+        std::vector<rocke_value_t*> state_a(state);
         ping_pong_phase(
             pipe, b, k1, k2, buf1, buf0, state, issue_load_fn, compute_fn, user, schedule);
+        if(pipe->mask_tail_state)
+        {
+            for(size_t i = 0; i < state.size(); ++i)
+                state[i] = rocke_b_select(b, k1_in, state[i], state_a[i]);
+        }
         rocke_b_scf_yield(b, state.data(), (int)state.size());
     }
     rocke_b_region_leave(b);

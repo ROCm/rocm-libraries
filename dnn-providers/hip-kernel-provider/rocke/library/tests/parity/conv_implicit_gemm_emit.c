@@ -22,7 +22,7 @@
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
-static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_implicit_gemm_conv_spec_default();
     spec->tile_m = 64;
@@ -165,9 +165,33 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->problem.groups = 32;
         *arch = "gfx950";
         return 0;
+    case 17:
+        /* Pointwise + cshuffle: the pointwise d_addr closure on the cshuffle
+         * store (idx 5 covers it on the direct store). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
+}
+
+/* The default epilogue stores one element per lane, so the validator rejects
+ * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
+ * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
+ * and the gate only compares two rejections. Mirrors _spec() in
+ * conv_implicit_gemm_emit.py. */
+static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    if(make_cfg_raw(idx, spec, arch) != 0)
+        return -1;
+    if(strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
+    {
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 1;
+    }
+    return 0;
 }
 
 int main(int argc, char** argv)

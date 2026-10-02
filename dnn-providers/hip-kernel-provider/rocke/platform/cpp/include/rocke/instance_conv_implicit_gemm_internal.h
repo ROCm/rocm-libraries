@@ -667,14 +667,21 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx);
 
 /* _emit_direct_epilogue(b, spec, accs[n], grid, d_rsrc): MFMA per-lane scalar
- * fp16 store via DirectEpilogue + the D descriptor addr_fn. */
+ * fp16 store via DirectEpilogue + the D descriptor addr_fn. D_desc,
+ * k_out_group_base (NULL when ungrouped) and the bounds are the kernel's
+ * runtime values, exactly as for the cshuffle epilogue. */
 void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_implicit_gemm_conv_spec_t* spec,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
-                                     rocke_value_t* ir_c_K_pw);
+                                     rocke_value_t* ir_c_K_pw,
+                                     rocke_value_t* always_valid_d,
+                                     const rocke_tensor_descriptor_t* D_desc,
+                                     rocke_value_t* k_out_group_base,
+                                     rocke_value_t* bound_m,
+                                     rocke_value_t* bound_n);
 
 /* _emit_direct_epilogue_wmma(b, spec, op, accs[n], warp_m_idx, warp_n_idx, lane,
  * block_m_off, block_n_off, d_rsrc, c0, ir_c_K_pw): WMMA per-lane fp16 store. */
@@ -705,6 +712,7 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
                                        rocke_value_t* ir_c_K_pw,
+                                       rocke_value_t* always_valid_d,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,

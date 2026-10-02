@@ -33,12 +33,14 @@
  *   build_implicit_gemm_conv_wgrad(spec)   rocke_build_implicit_gemm_conv_wgrad
  *   (+ convenience: build -> lower .ll)    rocke_conv_implicit_gemm_wgrad_lower_to_llvm
  *
- * Split-K: when split_k > 1 the kernel partitions K_wg into `split_k` equal
- * slices along the Z grid axis and atomic-adds each CTA's partial f32
+ * Split-K: when split_k > 1 the kernel partitions K_wg into slices along the
+ * Z grid axis and atomic-adds each CTA's partial f32
  * accumulator directly into dW.  Supported output dtypes: fp32 (scalar atomic),
  * bf16/fp16 (packed <2 x dtype> atomic, gfx940+).  split_k == -1 triggers
  * automatic selection via the CK formula.  split_k == 1 disables split-K (the
- * default: normal store).
+ * default: normal store).  The degree is never compiled in: the slice count
+ * and width are the `ks_count` / `ks` kernargs, so every split_k > 1 builds
+ * the same kernel and the degree is chosen at launch.
  *
  * ConvProblem is reused verbatim from the already-ported value-type helper
  * (helper_rocke.instances.common.conv_implicit_gemm.h); this header includes it.
@@ -83,7 +85,7 @@ extern "C" {
  * split_k:
  *   -1 = auto (resolved at build time via CK formula)
  *    1 = disabled (default, normal store)
- *   >1 = fixed split-K degree
+ *   >1 = split-K (atomic epilogue); the degree is a launch parameter
  *
  * Caller contract when split_k > 1:
  *   1. Zero-initialise the dW buffer before EVERY launch:
@@ -91,7 +93,9 @@ extern "C" {
  *      The kernel only issues atomic-adds, never a direct store, so any
  *      non-zero initial content accumulates into the result, producing
  *      silently wrong gradients with no runtime error.
- *   2. Launch with grid (ceil(wg_N/tile_n), ceil(wg_M/tile_m), split_k).
+ *   2. Launch with grid (ceil(wg_N/tile_n), ceil(wg_M/tile_m),
+ *      groups * ks_count), passing the degree ks_count (> 1) and the slice
+ *      width ks as kernargs.
  *
  * When split_k == 1 the kernel writes dW normally (no atomics, no pre-zeroing
  * required).
@@ -155,7 +159,7 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * initial port; the default identity epilogue is always used.  Add when
      * needed. */
 
-    /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
+    /* split_k: -1 = auto, 1 = off, >1 = split-K (degree chosen at launch). */
     int split_k; /* default 1 */
 
     /* two_stage: when true and split_k > 1, Stage 1 f32-atomic-adds its
@@ -216,17 +220,12 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
 /* Returns the workspace buffer size in bytes required for the two-stage
  * wgrad path.  Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).
  * Returns 0 when two_stage=false or there is no split (split_k == 1, or the
- * unresolved auto sentinel -1); the runtime degree (0) sizes like any other.
+ * unresolved auto sentinel -1); the size does not depend on the degree.
  * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
-
-/* Max K iterations the Python-unrolled loops (pipeline="basic" and async_dma)
- * may unroll to. Build-practicality bound (code size / compile time), not a
- * hardware limit. Mirrors _MAX_UNROLLED_K_ITERS in conv_implicit_gemm_wgrad.py. */
-#define ROCKE_MAX_UNROLLED_K_ITERS 128
 
 /* spec.wg_K_padded(): wg_K rounded up to tile_k * split_k. */
 int rocke_wgrad_conv_spec_wg_K_padded(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

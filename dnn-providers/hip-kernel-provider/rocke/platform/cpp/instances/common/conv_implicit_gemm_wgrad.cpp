@@ -135,13 +135,7 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
      *   f32-atomic-adds into ws_replicas shared slabs, so the order in which a
      *   group's slices land in a slab is scheduler-dependent and f32 addition
      *   is not associative. Stage 2's fold over the replicas is ordered, which
-     *   does nothing for partial sums that were already reordered.
-     * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
-     *   argument and the epilogue is atomic (packed into dW, or f32 into the
-     *   two-stage scratch). Treating 0 as "<= 1" here would tell a host that
-     *   an atomic kernel produces reproducible dW. */
-    if(s->split_k == 0)
-        return false;
+     *   does nothing for partial sums that were already reordered. */
     return s->split_k <= 1;
 }
 
@@ -149,9 +143,9 @@ size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spe
 {
     if(!s->two_stage)
         return 0;
-    /* Two-stage needs a split: a fixed degree > 1 or the runtime degree (0).
-     * The scratch does not depend on which, so 0 sizes like any degree. */
-    if(s->split_k == 1 || s->split_k < 0)
+    /* Two-stage needs a split (split_k > 1); the scratch does not depend on
+     * the degree. */
+    if(s->split_k <= 1)
         return 0;
     int wg_M = rocke_wgrad_conv_spec_wg_M(s);
     int wg_N = rocke_wgrad_conv_spec_wg_N(s);
@@ -190,7 +184,9 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
-     *     flags={"async": async_dma, "spk{N}": split_k>1, "spkauto": split_k==-1},
+     *     flags={"async": async_dma, "kouter": lds_k_outer, "pad{N}": ...,
+     *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
+     *            "wsr{N}": ..., "unroll": unroll_k},
      *   )
      */
     if(s == NULL || out == NULL)
@@ -218,11 +214,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, pad{N}, spk{N}/spkauto/spkrt, twostage, wsr{N} */
-    char spk_flag[32] = {0};
+    /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll */
     char pad_flag[32] = {0};
-    const char* flag_names[6];
-    int flag_on[6];
+    const char* flag_names[7];
+    int flag_on[7];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -245,22 +240,17 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         n_flags++;
     }
 
+    /* The split degree is a launch parameter, so the name records only that
+     * the kernel splits: every degree > 1 is one binary. Mirrors Python. */
     if(s->split_k > 1)
     {
-        snprintf(spk_flag, sizeof(spk_flag), "spk%d", s->split_k);
-        flag_names[n_flags] = spk_flag;
+        flag_names[n_flags] = "spk";
         flag_on[n_flags] = 1;
         n_flags++;
     }
     else if(s->split_k == -1)
     {
         flag_names[n_flags] = "spkauto";
-        flag_on[n_flags] = 1;
-        n_flags++;
-    }
-    else if(s->split_k == 0)
-    {
-        flag_names[n_flags] = "spkrt";
         flag_on[n_flags] = 1;
         n_flags++;
     }
@@ -292,6 +282,13 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         flag_on[n_flags] = 1;
         n_flags++;
     }
+
+    /* unroll_k hand-rolls a double-buffered K-loop -- a different body under
+     * the same name otherwise. Only tagged when set, so every other kernel
+     * keeps its name. Mirrors Python. */
+    flag_names[n_flags] = "unroll";
+    flag_on[n_flags] = s->unroll_k ? 1 : 0;
+    n_flags++;
 
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
@@ -361,13 +358,10 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     }
 
     int sk = s->split_k;
-    if(sk < -1)
+    if(sk < -1 || sk == 0)
     {
         if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "split_k must be -1 (auto), 0 (runtime), 1, or >1 (got %d)",
-                     sk);
+            snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
         return false;
     }
     /* two_stage=true requires split_k > 1 (or -1 for auto); mirrors Python validate(). */
@@ -396,14 +390,14 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* split_k > 1 or split_k == 0 (runtime atomic) requires a MFMA arch
+    /* split_k > 1 (atomic) requires a MFMA arch
      * (ctx->atom != NULL at build time).
      *
      * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching
      * Python which uses family == "wmma") instead of the arch string, so
      * gfx10* and any future or unknown arch prefix cannot fall through.  This
      * is not reachable on today's supported targets but would be more robust. */
-    if(sk > 1 || sk == 0)
+    if(sk > 1)
     {
         /* Quick arch check: gfx11xx / gfx12xx are RDNA.
          * Note: gfx10* and any unknown prefix are not rejected here — they would
@@ -429,7 +423,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
          * The local per-group computation is deliberate: the shared
          * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
          * and is used for workspace sizing, so it is not interchangeable here. */
-        const bool effective_two_stage_gate = s->two_stage && (sk > 1 || sk == 0);
+        const bool effective_two_stage_gate = s->two_stage && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
@@ -498,12 +492,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
      * can use, since WMMA rejects cshuffle.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
-    if(sk > 1 || sk == 0)
+    if(sk > 1)
     {
         /* Mirrors the builder's is_two_stage = is_split_k && two_stage: a
-         * two-stage spec at a fixed degree > 1 or at the runtime degree
-         * (sk == 0) takes the f32 scratch epilogue, not the packed atomic. */
-        bool effective_two_stage_v = s->two_stage && (sk > 1 || sk == 0);
+         * two-stage spec takes the f32 scratch epilogue, not the packed atomic. */
+        bool effective_two_stage_v = s->two_stage;
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
@@ -529,20 +522,6 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * K_wg = N*Ho*Wo, which is stride-K in dY (NHWK) and stride-C in X (NHWC).
      * Emitting it produces numerically wrong dW.  Mirrors Python
      * is_valid_wgrad_spec / WgradConvSpec.validate(). */
-    /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
-     * length is unknown at build time; the async and unrolled k-loops both need
-     * a compile-time trip count. Mirrors the Python validator. */
-    if(s->split_k == 0 && (s->async_dma || s->unroll_k))
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "wgrad split_k=0 (runtime degree) is incompatible with "
-                     "async_dma/unroll_k: those pipelines need a "
-                     "compile-time iteration count. Use a fixed split_k >= 1.");
-        return false;
-    }
-
     /* The K-outer row stride comes from ROCKE_WGRAD_KOUTER_PAD in the builder,
      * so an explicit pad changes the kernel name and the LDS budget charged
      * here without changing a single emitted op. Reject rather than ignore.
@@ -622,29 +601,6 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      "pipeline='wavelet' is not implemented for wgrad (it would build "
                      "the 'mem' kernel); use pipeline='mem'");
         return false;
-    }
-
-    /* async_dma is Python-unrolled; a deep reduction explodes compile time.
-     * Mirrors Python is_valid_wgrad_spec. */
-    if(s->async_dma)
-    {
-        const int spk = (s->split_k > 1) ? s->split_k : 1;
-        const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
-        const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
-        if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
-        {
-            if(reason && reason_cap)
-                snprintf(reason,
-                         reason_cap,
-                         "async_dma would unroll to %d K iterations "
-                         "(slice_k=%d, tile_k=%d), over the %d limit; "
-                         "raise split_k or tile_k",
-                         k_iters,
-                         slice_k,
-                         s->tile_k,
-                         ROCKE_MAX_UNROLLED_K_ITERS);
-            return false;
-        }
     }
 
     /* lds_k_outer: ds_read_b64_tr_b16 is a gfx950 wave64 16-bit transpose read.
@@ -2042,11 +1998,11 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* Geometry constants -- K-loop bound is wg_K (or split-K slice size).
      *
      * Creation order must mirror Python (build_implicit_gemm_conv_wgrad, after bind):
-     *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1/0: unused 0)
+     *   c0        = b.const_i32(0)         -- always
      *   c_block_k = b.const_i32(block_k)   -- always
-     *   c_wg_K    = b.const_i32(wg_K)      -- always (used as loop bound when split_k=1)
-     *   [split_k>1 only] c_ks, k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
-     *   [split_k==0 only] c_ks=ks_param,   k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
+     *   c_wg_K    = p_wg_K kernarg         -- always
+     *   c_ks = ks_param, slice = z % ks_count, k_lo = to_sgpr(slice * c_ks),
+     *   k_hi = to_sgpr(k_lo + c_ks) -- always; the degree is a kernarg
      */
     /* c0: always const(0). For split_k=1 this is also k_lo. */
     rocke_value_t* c0_node = rocke_b_const_i32(b, 0);
@@ -2432,9 +2388,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
 
     bool effective_two_stage = spec->two_stage;
 
-    bool is_split_k = (split_k > 1 || split_k == 0);
+    bool is_split_k = split_k > 1;
 
-    /* split_k atomic (>1 or ==0) supported for fp32, fp16, bf16 output dtypes */
+    /* split_k atomic (>1) supported for fp32, fp16, bf16 output dtypes */
     if(is_split_k)
     {
         const char* dt = spec->dtype_d ? spec->dtype_d : "fp16";
@@ -2473,7 +2429,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    /* split_k>1 or split_k==0: dW is read+write (atomic); split_k=1: writeonly.
+    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly.
      * Caller MUST zero-init dW before launch for atomic paths -- the kernel only
      * issues atomic-adds.  See the header contract note for details. */
     d_opts.writeonly = !is_split_k;

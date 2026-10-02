@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import itertools
 import json
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
@@ -417,13 +419,96 @@ def _job(identity: KernelIdentity, caps: DirectCaps, knobs: dict) -> BuildJob:
     )
 
 
+def _caps_jobs(
+    arch: str,
+    wave_size: int,
+    variant: str,
+    direction: str,
+    caps: DirectCaps,
+    dtype: str,
+) -> Tuple[int, List[Tuple[str, BuildJob]]]:
+    """Walk one (variant, capability) cell of the grid.
+
+    Returns the raw candidate count and the valid ``(key, job)`` pairs in
+    generator order; duplicates are resolved by the caller's ordered merge.
+    The MFMA dgrad entries pull in their weight-transform helpers.
+    """
+    out: List[Tuple[str, BuildJob]] = []
+    n_raw = 0
+    probe = probe_problem(caps, dtype)
+    for knobs in _knob_grid(variant):
+        n_raw += 1
+        if variant == "direct_grouped_dgrad_mfma" and _mfma_knobs_reason(probe, knobs):
+            continue
+        spec = make_spec(variant, probe, knobs)
+        if not validate_spec(variant, spec, arch)[0]:
+            continue
+        cell = [
+            _job(
+                _identity(
+                    arch, wave_size, variant, f"direct_{direction}", caps, knobs, dtype
+                ),
+                caps,
+                knobs,
+            )
+        ]
+        if variant == "direct_grouped_dgrad_mfma":
+            cell.append(
+                _job(
+                    _helper_identity(arch, wave_size, _TRANSPOSE, caps, {}, dtype),
+                    caps,
+                    {},
+                )
+            )
+            if _uses_coalesced_weights(knobs):
+                reorg = {"fold_k32": knobs["fold_k32"]}
+                cell.append(
+                    _job(
+                        _helper_identity(
+                            arch, wave_size, _REORGANIZE, caps, reorg, dtype
+                        ),
+                        caps,
+                        reorg,
+                    )
+                )
+        out.extend((job.identity.stable_hash(), job) for job in cell)
+    return n_raw, out
+
+
+def _caps_worker(payload):
+    return _caps_jobs(*payload)
+
+
+def count_direct_jobs(directions: Sequence[str]) -> int:
+    """Raw candidate count :func:`enumerate_direct_jobs` walks (the progress
+    denominator): capabilities times tuning knobs, before validation."""
+    return sum(
+        len(caps_list) * sum(1 for _ in _knob_grid(variant))
+        for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
+        if direction in directions
+    )
+
+
 def enumerate_direct_jobs(
-    *, arch: str, target, directions: Sequence[str], dtype: str = DIRECT_DTYPE
+    *,
+    arch: str,
+    target,
+    directions: Sequence[str],
+    dtype: str = DIRECT_DTYPE,
+    jobs: int = 1,
+    log=None,
+    log_every_s: float = 5.0,
 ) -> List[BuildJob]:
     """Every direct kernel worth caching for ``arch``, pre-validated.
 
     ``directions`` takes the benchmark's names, ``fwd`` and ``dgrad``. The MFMA
     dgrad entries pull in their weight-transform helpers.
+
+    The grid is walked one (variant, capability) cell at a time; with
+    ``jobs > 1`` the cells run in a process pool. Cells are merged in order,
+    so the result (including its order) does not depend on ``jobs``. With
+    ``log`` set a progress line is emitted at most every ``log_every_s``
+    seconds, as for the implicit-GEMM enumeration.
     """
     for d in directions:
         if d not in ("fwd", "dgrad"):
@@ -431,61 +516,76 @@ def enumerate_direct_jobs(
     if dtype not in DIRECT_DTYPES:
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     wave_size = target.wave_size
-    seen: Dict[str, BuildJob] = {}
+    jobs = max(1, int(jobs))
+    payloads = [
+        (arch, wave_size, variant, direction, caps, dtype)
+        for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
+        if direction in directions
+        for caps in caps_list
+    ]
 
-    def add(job: BuildJob) -> None:
-        seen.setdefault(job.identity.stable_hash(), job)
+    total = 0
+    if log is not None:
+        total = count_direct_jobs(directions)
+        log(f"  {total} candidates to check with {jobs} process(es)")
 
-    for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items():
-        if direction not in directions:
-            continue
-        for caps in caps_list:
-            probe = probe_problem(caps, dtype)
-            for knobs in _knob_grid(variant):
-                if variant == "direct_grouped_dgrad_mfma" and _mfma_knobs_reason(
-                    probe, knobs
-                ):
-                    continue
-                spec = make_spec(variant, probe, knobs)
-                if not validate_spec(variant, spec, arch)[0]:
-                    continue
-                add(
-                    _job(
-                        _identity(
-                            arch,
-                            wave_size,
-                            variant,
-                            f"direct_{direction}",
-                            caps,
-                            knobs,
-                            dtype,
-                        ),
-                        caps,
-                        knobs,
-                    )
-                )
-                if variant == "direct_grouped_dgrad_mfma":
-                    add(
-                        _job(
-                            _helper_identity(
-                                arch, wave_size, _TRANSPOSE, caps, {}, dtype
-                            ),
-                            caps,
-                            {},
-                        )
-                    )
-                    if _uses_coalesced_weights(knobs):
-                        reorg = {"fold_k32": knobs["fold_k32"]}
-                        add(
-                            _job(
-                                _helper_identity(
-                                    arch, wave_size, _REORGANIZE, caps, reorg, dtype
-                                ),
-                                caps,
-                                reorg,
-                            )
-                        )
-    return list(seen.values())
+    n_raw = n_valid = 0
+    started = last_log = time.perf_counter()
+    results: List[Optional[List[Tuple[str, BuildJob]]]] = [None] * len(payloads)
+
+    def _done(idx: int, cell_raw: int, cell_out) -> None:
+        nonlocal n_raw, n_valid, last_log
+        results[idx] = cell_out
+        n_raw += cell_raw
+        n_valid += len(cell_out)
+        if log is None:
+            return
+        now = time.perf_counter()
+        if now - last_log >= log_every_s:
+            last_log = now
+            pct = 100.0 * n_raw / total if total else 0.0
+            log(
+                f"  enumerating: {n_raw}/{total} candidates checked "
+                f"({pct:.1f}%), ~{n_valid} valid ({now - started:.0f}s)"
+            )
+
+    if jobs <= 1:
+        for idx, payload in enumerate(payloads):
+            _done(idx, *_caps_jobs(*payload))
+    else:
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
+            futures = {
+                pool.submit(_caps_worker, payload): idx
+                for idx, payload in enumerate(payloads)
+            }
+            for fut in as_completed(futures):
+                _done(futures[fut], *fut.result())
+
+    seen = set()
+    per_direction: Dict[str, List[BuildJob]] = {d: [] for d in directions}
+    for payload, cell_out in zip(payloads, results):
+        for key, job in cell_out:
+            if key not in seen:
+                seen.add(key)
+                per_direction[payload[3]].append(job)
+    # Round-robin across directions, as the implicit-GEMM enumeration does, so
+    # a --limit smoke build covers every requested direction.
+    out: List[BuildJob] = []
+    streams = [iter(per_direction[d]) for d in directions]
+    while streams:
+        still_running = []
+        for stream in streams:
+            job = next(stream, None)
+            if job is not None:
+                out.append(job)
+                still_running.append(stream)
+        streams = still_running
+    if log is not None:
+        log(
+            f"  enumerated {n_raw} candidates -> {len(out)} unique valid "
+            f"({time.perf_counter() - started:.0f}s)"
+        )
+    return out
 
 
 def build_direct_job(job: BuildJob, arch: str, dtype: str):
@@ -518,10 +618,19 @@ def compile_all_direct(
 ) -> int:
     """Populate ``cache`` with every direct kernel in :data:`DIRECT_CAPABILITIES`
     for operand dtype ``dtype``."""
+    log(
+        f"AOT compile-all: enumerating direct variants for {arch}/{dtype} "
+        f"({', '.join(directions)})"
+    )
     return compile_jobs(
         cache=cache,
         all_jobs=enumerate_direct_jobs(
-            arch=arch, target=target, directions=directions, dtype=dtype
+            arch=arch,
+            target=target,
+            directions=directions,
+            dtype=dtype,
+            jobs=jobs,
+            log=log,
         ),
         build=build_direct_job,
         arch=arch,

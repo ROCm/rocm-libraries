@@ -16,6 +16,7 @@ from kernels.common.conv_implicit_gemm import (
 from _emit_common import run_emit
 
 import inspect as _inspect
+from dataclasses import replace
 
 # The filter-window dimensions are spelled R/S in some trees and Y/X in others
 # (same dimensions: filter height/width). Build against whichever this tree's
@@ -32,7 +33,21 @@ def _cp(*, fy: int, fx: int, **kw):
 
 
 def _spec(idx: int):
-    """Return (spec, arch) for config index `idx`."""
+    """Return (spec, arch) for config index `idx`.
+
+    The default epilogue stores one element per lane, so the validator rejects
+    it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
+    leave vector_size_c unset therefore get vector_size_c=1 -- otherwise they
+    do not build and the gate only compares two rejections. Mirrored in
+    make_cfg() of conv_implicit_gemm_emit.c.
+    """
+    spec, arch = _spec_raw(idx)
+    if spec.epilogue == "default" and spec.vector_size_c is None:
+        spec = replace(spec, vector_size_c=1)
+    return spec, arch
+
+
+def _spec_raw(idx: int):
     if idx == 0:
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
@@ -326,6 +341,26 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
+            ),
+            "gfx950",
+        )
+    if idx == 17:
+        # Pointwise + cshuffle: the pointwise d_addr closure on the cshuffle
+        # store (idx 5 covers it on the direct store).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=1, fx=1)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
             ),
             "gfx950",
         )

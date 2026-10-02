@@ -319,6 +319,7 @@ def _run_one(
     group_merge: int = 1,
     tile_m: "int | None" = None,
     tile_n: "int | None" = None,
+    unroll_k: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -348,10 +349,12 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
-    if spec is not None and (group_merge > 1 or tile_m or tile_n):
+    if spec is not None and (group_merge > 1 or tile_m or tile_n or unroll_k):
         from dataclasses import replace as _dc_replace
 
         _over = {}
+        if unroll_k:
+            _over["unroll_k"] = True
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -1942,19 +1945,11 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_two_stage_exempts_runtime_degree(self):
-        # split_k == 0 is the runtime-degree encoding. With two_stage the
-        # builder takes the f32 scratch epilogue there too (the slab index does
-        # not depend on the degree), so the packed-atomic cshuffle requirement
-        # does not apply -- and is_valid_wgrad_spec and validate() must agree.
-        ok, why = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
-        self.assertTrue(ok, f"split_k=0 + two_stage takes the scratch path: {why}")
-
-    def test_runtime_degree_without_two_stage_is_atomic(self):
-        # The other half of the contract: without two_stage, split_k == 0 is
-        # the packed atomic and still needs cshuffle for a 16-bit dW.
-        ok, _ = self._agree(self._spec(split_k=0, two_stage=False, epilogue="default"))
-        self.assertFalse(ok, "split_k=0 without two_stage is atomic")
+    def test_split_k_zero_rejected(self):
+        # The split degree is always a launch parameter; there is no separate
+        # "runtime degree" encoding, so 0 is not a valid spec value.
+        ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
+        self.assertFalse(ok, "split_k=0 is not a valid wgrad spec value")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
@@ -2116,6 +2111,66 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
             f"validator should charge the K-outer shape ({k_outer_bytes}), "
             f"not the M-outer one ({m_outer_bytes}); got: {why}",
         )
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
+    """async_dma / unroll_k at split_k > 1 with an odd tile count per slice.
+
+    Both double-buffered K-loops compute two tiles per step, so with an odd
+    count the last step's second tile lies past the slice end. Under split-K
+    that tile is the *next* slice's first, and only the k_zero_fill redirect
+    keeps it out of this slice's partial sum -- a bug there double-counts
+    one tile per slice and shows up only in dW, never in the parity gate.
+    """
+
+    # wg_K = N*Ho*Wo; tile_k = 64.
+    # 640 = 2 slices x 5 full tiles; 600 = 2 slices of 5 tiles, the last one
+    # partial (the zero tail inside the slice as well as past it).
+    _CASES = (
+        _Shape(
+            "odd5_N10H8W8C64K64", N=10, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "odd5_part_N6H10W10C64K64",
+            N=6,
+            Hi=10,
+            Wi=10,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        ran = 0
+        for shape in self._CASES:
+            for dtype in _DTYPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        split_k=2,
+                        **knobs,
+                    )
+                    if why.startswith("skip"):
+                        continue
+                    ran += 1
+                    self.assertTrue(ok, f"{shape.id} {dtype} {knobs}: {why}")
+        if ran == 0:
+            self.skipTest(f"no {knobs} split-K wgrad config builds on {GPU_ARCH}")
+
+    def test_async_dma_odd_slice(self):
+        self._sweep(async_dma=True, lds_k_outer=True)
+
+    def test_unroll_k_odd_slice(self):
+        self._sweep(unroll_k=True)
 
 
 def _assert_case_ran(test, ok: bool, why: str) -> None:

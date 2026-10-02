@@ -298,7 +298,14 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
+            flags={
+                "async": self.async_dma,
+                "noalc": self.cshuffle_no_alias,
+                # unroll_k hand-rolls a double-buffered K-loop: a different body
+                # that would otherwise share the plain kernel's name. Only
+                # tagged when set, so every other kernel keeps its name.
+                "unroll": self.unroll_k,
+            },
         )
 
     def validate(self) -> None:
@@ -1741,6 +1748,10 @@ def _build_implicit_gemm_conv_impl(
             b,
             k_extent=p_K_gemm,
             block_k=block_k,
+            # The kernel's own c0, not the helper's default fresh const 0: the
+            # C++ k-loop driver passes ctx->c0, and the builder does not dedupe
+            # constants, so the two engines must name the same value.
+            k_lo=c0,
             buffers=bufs,
             iter_args=accs,
             issue_load_fn=issue_load_dyn,

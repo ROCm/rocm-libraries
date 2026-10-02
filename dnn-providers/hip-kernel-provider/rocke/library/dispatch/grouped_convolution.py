@@ -1818,7 +1818,12 @@ def launch_values_for(
         # or exceed the clamp, while the kernel and _wgrad_grid both use the
         # resolver's value -- ks_count has to match the z extent it decodes.
         split_k, two_stage, _requested = _resolve_wgrad_split_k(spec, p)
-        if two_stage != (ws_ptr is not None):
+        # Both workspace fields or neither: a two-stage launch missing only
+        # ws_bytes would otherwise encode a zero-byte workspace, and Stage 1's
+        # bounded stores would be silently dropped.
+        has_ws_ptr = ws_ptr is not None
+        has_ws_bytes = ws_bytes is not None
+        if has_ws_ptr != has_ws_bytes or two_stage != has_ws_ptr:
             raise ValueError(
                 "wgrad resolved to the "
                 + ("two-stage" if two_stage else "single-stage")

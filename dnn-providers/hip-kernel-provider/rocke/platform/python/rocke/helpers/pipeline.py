@@ -317,6 +317,7 @@ class SoftwarePipeline:
         block_k: int,
         k_lo: Any = None,
         k_zero_fill: Any = None,
+        mask_tail_state: bool = False,
         buffers: Sequence[BufferPair],
         iter_args: Sequence[Tuple[str, Any]],
         issue_load_fn: Callable[[Any, BufferPair], None],
@@ -357,6 +358,15 @@ class SoftwarePipeline:
         ``k_extent``. That is one scalar select per iteration, and the barrier
         sequence stays uniform.
 
+        The zero tile keeps a purely data-dependent state (an accumulator)
+        unchanged, but not a state that also depends on the offset itself (a
+        counter, a running index): Phase B's compute still runs on that
+        out-of-range tile. ``mask_tail_state=True`` commits Phase B's state
+        only when ``k + block_k < k_extent`` -- one select per state value per
+        iteration, after the compute and its barriers, so control flow stays
+        uniform. The conv kernels leave it off: their accumulators only ever
+        see a zero tile there, and the selects would cost every iteration.
+
         ``k_lo`` is the first tile offset; it defaults to 0.  Split-K passes
         the slice base here so the loop walks ``[k_lo, k_extent)`` -- the
         reduction is sliced by offsetting both ends, not by rebasing the
@@ -371,9 +381,10 @@ class SoftwarePipeline:
         Only the 2-buffer rotation is supported; for single-buffer or
         4-buffer modes use the compile-time variant.
         """
-        if len(buffers) < 2:
+        if len(buffers) != 2:
             raise ValueError(
-                f"run_ping_pong_dynamic needs 2 buffer pairs, got {len(buffers)}"
+                f"run_ping_pong_dynamic needs exactly 2 buffer pairs, "
+                f"got {len(buffers)}"
             )
         if block_k <= 0:
             raise ValueError(f"block_k must be positive, got {block_k}")
@@ -398,11 +409,14 @@ class SoftwarePipeline:
             state = list(loop_vars)
             k1 = b.add(k, c_bk)
             k2 = b.add(k, c_2bk)
-            k1_load = (
-                k1
-                if k_zero_fill is None
-                else b.select(b.cmp_lt(k1, k_extent), k1, k_zero_fill)
+            # Whether tile k+1 exists: picks the zero-fill prefetch and gates
+            # Phase B's state. Emitted once, only when one of them needs it.
+            k1_in = (
+                b.cmp_lt(k1, k_extent)
+                if k_zero_fill is not None or mask_tail_state
+                else None
             )
+            k1_load = k1 if k_zero_fill is None else b.select(k1_in, k1, k_zero_fill)
             # Phase A: compute tile k out of buf0 while tile k+1 streams
             # into buf1.
             state = self._ping_pong_phase(
@@ -417,7 +431,7 @@ class SoftwarePipeline:
                 schedule=schedule,
             )
             # Phase B: the buffers swap roles.
-            state = self._ping_pong_phase(
+            state_b = self._ping_pong_phase(
                 b,
                 k_cur=k1,
                 k_next=k2,
@@ -428,7 +442,11 @@ class SoftwarePipeline:
                 compute_fn=compute_fn,
                 schedule=schedule,
             )
-            b.scf_yield(*state)
+            if mask_tail_state:
+                state_b = [
+                    b.select(k1_in, new, old) for new, old in zip(state_b, state)
+                ]
+            b.scf_yield(*state_b)
 
         # The final phase left a prefetch in flight and (with overlap_vmcnt)
         # only an LDS-scoped barrier behind it. Drain both before the

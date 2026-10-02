@@ -21,7 +21,6 @@
  *     .kernel_name() / .validate()             rocke_direct_conv_4c_kernel_name / _validate
  *   is_valid_spec_16c(spec, arch)              rocke_direct_conv_16c_is_valid_spec()
  *   is_valid_spec_4c(spec, arch)               rocke_direct_conv_4c_is_valid_spec()
- *   (C-port-only 6-entry manifest ABI)         rocke_direct_conv_signature()
  *
  * The reason strings + the kernel name are formatted byte-identically to Python
  * (kernel_name_join, the ValueError messages) so a sweep driver sees the same
@@ -652,126 +651,9 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
 #undef CK_DCONV4C_REJECT
 }
 
-/* ===================================================================== *
- *  SIGNATURE (manifest) -- the 6-entry ABI shared by both kernels:
- *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
- *    D_bytes:i32.
- * ===================================================================== */
-
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count)
-{
-    rocke_status_t st;
-
-    if(arena == NULL || out == NULL || out_cap < 6)
-    {
-        return ROCKE_ERR_VALUE;
-    }
-
-    st = rocke_sig_param(arena, "A", "f16", NULL, &out[0]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "B", "f16", NULL, &out[1]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "D", "f16", NULL, &out[2]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-
-    if(out_count != NULL)
-    {
-        *out_count = 6;
-    }
-    return ROCKE_OK;
-}
-
-rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
-                                                     const char* dtype,
-                                                     struct rocke_sig_entry* out,
-                                                     size_t out_cap,
-                                                     size_t* out_count)
-{
-    rocke_status_t st;
-    /* Resolve dtype: "fp16" -> "f16", "bf16" -> "bf16", NULL -> "f16". */
-    const char* dt;
-
-    if(arena == NULL || out == NULL || out_cap < 6)
-    {
-        return ROCKE_ERR_VALUE;
-    }
-    if(dtype == NULL || strcmp(dtype, "fp16") == 0 || strcmp(dtype, "f16") == 0)
-    {
-        dt = "f16";
-    }
-    else if(strcmp(dtype, "bf16") == 0)
-    {
-        dt = "bf16";
-    }
-    else
-    {
-        return ROCKE_ERR_VALUE; /* unsupported dtype */
-    }
-
-    st = rocke_sig_param(arena, "A", dt, NULL, &out[0]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "B", dt, NULL, &out[1]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "D", dt, NULL, &out[2]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-
-    if(out_count != NULL)
-    {
-        *out_count = 6;
-    }
-    return ROCKE_OK;
-}
+/* The launch signature is not built here: every direct kernel takes the AOT
+ * argument list of rocke_conv_direct_arg_names() (conv_abi.cpp), which hosts
+ * pack from directly. */
 
 /* ===================================================================== *
  *  DirectConv8cSpec  (cpg = kpg = 8)

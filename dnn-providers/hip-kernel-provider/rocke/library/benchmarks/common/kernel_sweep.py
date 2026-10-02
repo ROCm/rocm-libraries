@@ -14,6 +14,51 @@ kernels can run it, and benchmarks those. Nothing is compiled.
 The split exists because AOT kernels are shape-generic: the expensive step
 (compilation) no longer depends on the problem, so it can be done once and
 amortised over every shape the cache is later asked about.
+
+What the implicit-GEMM cache sweeps
+-----------------------------------
+One binary per point of the grid below that passes its direction's spec
+validator (``--compile-all`` prints the per-direction breakdown of what
+survived). Values are the ``CACHE_*`` constants of this module; the dtype is
+fp16 or bf16 (one cache pass per dtype, A/B/D all of that dtype).
+
+Shared tile geometry, every direction::
+
+    tile_m, tile_n   16, 32, 64, 128, 256
+    tile_k           16, 32, 64
+    warp_m, warp_n   1, 2, 4, 8   (warp_m * warp_tile must divide tile_m, same for n)
+    warp_tile_m/n    16, 32       (square; warp_tile_k = the widest MMA atom
+                                   for the dtype, which must divide tile_k)
+    epilogue         default, cshuffle
+    pipeline         mem, compv3, compv4, wavelet (wavelet: gfx1250 WMMA only;
+                     "basic" is never cached -- it emits mem's code)
+
+Per direction, on top of that:
+
+* **fwd** -- vector widths: a = b in {1, 2, 4, 8} (X and W run along cpg),
+  c in {1, 2, 4, 8} (Y along kpg). K loop: plain, ``unroll_k`` (double-
+  buffered 2x loop), and ``async_dma`` (direct-to-LDS; built once per
+  geometry, under pipeline "mem", since it ignores the pipeline). grouped:
+  no / yes.
+* **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
+  {1, 2, 4, 8} (X and dW along cpg). pipeline "wavelet" is not cached (wgrad
+  builds it as mem). Only the split-K kernel is cached (``split_k`` > 1,
+  recorded as 2; the degree is a kernarg and the benchmark sweeps it at
+  launch), as atomic or two-stage (f32 scratch + Stage-2 reduce,
+  ``ws_replicas`` = 8). grouped: no / yes. Plus group-merged depthwise kernels
+  (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
+  served only to depthwise problems whose merged GEMM fits the tile.
+* **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
+  {1, 2, 4, 8} (W and dX along cpg). stride and dilation are baked into the
+  tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
+  in {1, 2}; up to 64 sub-GEMMs. grouped: no / yes.
+
+Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
+needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
+``waves_per_eu``, accumulator epilogues, ``cshuffle_no_alias``, the wgrad
+non-split (``split_k`` = 1) kernel, the pointwise fast path (1x1 problems run
+the general kernels) and 3-D convolution. The direct-conv cache sweeps its own
+grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
 """
 
 from __future__ import annotations
@@ -93,19 +138,23 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 CACHE_GROUPED: Tuple[bool, ...] = (False, True)
 CACHE_DGRAD_STRIDES: Tuple[int, ...] = (1, 2)
 CACHE_DGRAD_DILATIONS: Tuple[int, ...] = (1, 2)
+# wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
+# one workgroup. The degree is baked in and the binary serves depthwise
+# problems only (groups divisible by Gm, Y*X*Gm within the tile). Mirrors
+# _GROUP_MERGE_DEGREES of the wgrad instance.
+CACHE_WGRAD_GROUP_MERGES: Tuple[int, ...] = (2, 4, 8, 16, 32, 64)
 
 # ---- wgrad split-K axis ---------------------------------------------------
-# split_k=0 is the "runtime atomic" mode: the split degree is passed as a
-# kernarg (``ks_count``), so one compiled binary handles any degree > 1 at
-# launch time.  This is identical to fixed-degree binaries (split_k=2/4/8)
-# at the ISA level -- the only difference between those was the value baked
-# into a compile-time constant that is now a kernarg.
+# The split degree is never compiled in: it is passed as kernargs
+# (``ks_count`` / ``ks``), so the one split-K binary -- any spec split_k > 1
+# builds the same kernel -- handles every degree > 1 at launch time. The cache
+# records it as split_k=2 ("splits"); the benchmark sweeps the real degrees.
 #
 # split_k=1 (direct store, no atomics) is a structurally different kernel
 # (different epilogue, dW is writeonly, vec_c can be > 1) so it remains a
 # separate set of binaries and is NOT included here.  Enumerate split_k=1
 # separately if you need it; the wgrad benchmark's JIT sweep still covers it.
-CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (0,)
+CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (2,)
 
 # Private aliases for internal use -- the generators below refer to these.
 _TILE_MN = CACHE_TILE_MN
@@ -116,6 +165,7 @@ _VECS = CACHE_VECS
 _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
+_WGRAD_GROUP_MERGES = CACHE_WGRAD_GROUP_MERGES
 _DGRAD_STRIDES = CACHE_DGRAD_STRIDES
 _DGRAD_DILATIONS = CACHE_DGRAD_DILATIONS
 _WGRAD_SPLIT_KS = CACHE_WGRAD_SPLIT_KS
@@ -198,11 +248,24 @@ def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
     """Two-stage variants for a split-K degree.
 
-    Two-stage applies whenever the reduction is split -- a fixed degree > 1 or
-    the runtime degree (0). It is what reaches problems the packed 16-bit
-    atomic cannot address (an odd dW row, e.g. a 3-channel stem conv).
+    Two-stage applies whenever the reduction is split (split_k > 1). It is
+    what reaches problems the packed 16-bit atomic cannot address (an odd dW
+    row, e.g. a 3-channel stem conv).
     """
-    return (False, True) if split_k == 0 or split_k > 1 else (False,)
+    return (False, True) if split_k > 1 else (False,)
+
+
+def _layout_caps() -> List[dict]:
+    """The grouped capability variants fwd and wgrad build."""
+    return [dict(grouped=g) for g in _GROUPED]
+
+
+def _dgrad_caps() -> List[dict]:
+    """dgrad's capability variants: grouped x stride x dilation."""
+    return [
+        dict(grouped=g, stride=s, dilation=d)
+        for s, d, g in itertools.product(_DGRAD_STRIDES, _DGRAD_DILATIONS, _GROUPED)
+    ]
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -251,10 +314,13 @@ def _fwd_jobs(
     ):
         if not _aot_pipeline("fwd", pipeline):
             continue
+        # fwd's A (X) and B (W) are both contiguous along cpg, so they share
+        # one width; D (Y) runs along kpg.
         for vec_ab, vec_c in itertools.product(_VECS, _VECS):
-            for (unroll_k, async_dma), grouped in itertools.product(
-                _fwd_k_loops(pipeline), _GROUPED
+            for (unroll_k, async_dma), caps in itertools.product(
+                _fwd_k_loops(pipeline), _layout_caps()
             ):
+                grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
                     tile_n=tile_n,
@@ -283,12 +349,12 @@ def _fwd_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
-                        **_async_chunks(cfg, (da, db, dd), dict(grouped=grouped)),
+                        **_async_chunks(cfg, (da, db, dd), caps),
                         **cfg,
                     ),
                     direction="fwd",
                     spec_kwargs=cfg,
-                    caps=dict(grouped=grouped),
+                    caps=caps,
                 )
 
 
@@ -335,6 +401,8 @@ def _wgrad_jobs(
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
+    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+
     da, db, dd = _dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
@@ -352,10 +420,13 @@ def _wgrad_jobs(
     ):
         if not _aot_pipeline("wgrad", pipeline):
             continue
-        for vec_ab, vec_c, split_k in itertools.product(_VECS, _VECS, split_ks):
-            for two_stage, grouped in itertools.product(
-                _wgrad_two_stages(split_k), _GROUPED
+        # wgrad's B (X) and D (dW) are both contiguous along cpg, so they
+        # share one width; A (dY) runs along kpg.
+        for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
+            for two_stage, caps in itertools.product(
+                _wgrad_two_stages(split_k), _layout_caps()
             ):
+                grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
                     tile_n=tile_n,
@@ -368,12 +439,16 @@ def _wgrad_jobs(
                     pipeline=pipeline,
                     epilogue=epilogue,
                     wave_size=wave_size,
-                    vector_size_a=vec_ab,
-                    vector_size_b=vec_ab,
-                    vector_size_c=vec_c,
+                    vector_size_a=vec_a,
+                    vector_size_b=vec_bc,
+                    vector_size_c=vec_bc,
                     split_k=split_k,
                     two_stage=two_stage,
                 )
+                if two_stage:
+                    # Pinned in the spec and the identity alike, so the host
+                    # sizes the scratch and Stage 2 from what was compiled.
+                    cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
                 yield BuildJob(
                     identity=KernelIdentity(
                         arch=arch,
@@ -388,8 +463,53 @@ def _wgrad_jobs(
                     ),
                     direction="wgrad",
                     spec_kwargs=cfg,
-                    caps=dict(grouped=grouped),
+                    caps=caps,
                 )
+        # Group-merged depthwise kernels. Merged split-K must take the
+        # two-stage path (the packed atomic cannot drop off-diagonal pairs).
+        # The vector widths are left to the builder: it derives them from the
+        # Gm-wide merged channel run -- exactly Gm for every problem the binary
+        # serves (cpg = kpg = 1) -- while an explicit width is validated
+        # against the per-group run of 1 and could only be 1.
+        for gm, split_k in itertools.product(_WGRAD_GROUP_MERGES, split_ks):
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                split_k=split_k,
+                two_stage=split_k > 1,
+                group_merge=gm,
+            )
+            if split_k > 1:
+                cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="wgrad",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=True,
+                    # 0 = derived by the builder (from the Gm merged run).
+                    vector_size_a=0,
+                    vector_size_b=0,
+                    vector_size_c=0,
+                    **cfg,
+                ),
+                direction="wgrad",
+                spec_kwargs=cfg,
+                caps=dict(grouped=True, group_merge=gm),
+            )
 
 
 def _dgrad_jobs(
@@ -422,9 +542,14 @@ def _dgrad_jobs(
             continue
         # dgrad folds the stride and dilation into its tilde decomposition,
         # so those are capabilities here, not launch parameters.
-        for vec_ab, vec_c, stride, dilation, grouped in itertools.product(
-            _VECS, _VECS, _DGRAD_STRIDES, _DGRAD_DILATIONS, _GROUPED
-        ):
+        # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
+        # they share one width; A (dY) runs along kpg.
+        for vec_a, vec_bc, caps in itertools.product(_VECS, _VECS, _dgrad_caps()):
+            grouped, stride, dilation = (
+                caps["grouped"],
+                caps["stride"],
+                caps["dilation"],
+            )
             cfg = dict(
                 tile_m=tile_m,
                 tile_n=tile_n,
@@ -437,9 +562,9 @@ def _dgrad_jobs(
                 pipeline=pipeline,
                 epilogue=epilogue,
                 wave_size=wave_size,
-                vector_size_a=vec_ab,
-                vector_size_b=vec_ab,
-                vector_size_c=vec_c,
+                vector_size_a=vec_a,
+                vector_size_b=vec_bc,
+                vector_size_c=vec_bc,
                 max_sub_gemms=max_sub_gemms,
             )
             yield BuildJob(
@@ -460,7 +585,7 @@ def _dgrad_jobs(
                 ),
                 direction="dgrad",
                 spec_kwargs=cfg,
-                caps=dict(grouped=grouped, stride=stride, dilation=dilation),
+                caps=caps,
             )
 
 
@@ -524,16 +649,19 @@ def count_jobs(
     da, db, _ = _dtype_triple(dtype)
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     vecs = len(_VECS) * len(_VECS)
-    groups = len(_GROUPED)
+    layouts = len(_layout_caps())
+    merged = len(split_ks) * len(_WGRAD_GROUP_MERGES)
+    dgrad_caps = len(_dgrad_caps())
     total = 0
     for geo in _geometries(target, mma_family, da, db):
         pipeline = geo[6]
         if "fwd" in directions and _aot_pipeline("fwd", pipeline):
-            total += vecs * len(_fwd_k_loops(pipeline)) * groups
+            total += vecs * len(_fwd_k_loops(pipeline)) * layouts
         if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
-            total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * groups
+            total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
+            total += merged
         if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):
-            total += vecs * len(_DGRAD_STRIDES) * len(_DGRAD_DILATIONS) * groups
+            total += vecs * dgrad_caps
     return total
 
 
@@ -802,12 +930,17 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     dilation = int(caps.get("dilation", 1))
     # Keep the dilated filter inside the image so Ho/Wo stay positive.
     extent = 16 + 2 * (dilation - 1)
+    channels = 64
+    if caps.get("group_merge", 1) > 1:
+        # Merging is depthwise only: cpg = kpg = 1, and 64 groups divide by
+        # every merge degree.
+        groups, channels = 64, 1
     return ConvProblem(
         N=1,
         Hi=extent,
         Wi=extent,
-        C=64 * groups,
-        K=64 * groups,
+        C=channels * groups,
+        K=channels * groups,
         Y=3,
         X=3,
         sH=stride,
@@ -966,6 +1099,58 @@ def compile_all(
     )
 
 
+# (label, how to read it off an identity) for describe_jobs. Axes that take a
+# single value within a direction are not printed.
+_BREAKDOWN_AXES = (
+    ("variant", lambda i: i.algorithm),
+    ("pipeline", lambda i: i.pipeline),
+    ("epilogue", lambda i: i.epilogue),
+    (
+        "k-loop",
+        lambda i: "async_dma" if i.async_dma else "unroll_k" if i.unroll_k else "plain",
+    ),
+    ("grouped", lambda i: "yes" if i.grouped else "no"),
+    (
+        "split-K",
+        lambda i: ("two-stage" if i.two_stage else "atomic") if i.split_k > 1 else "no",
+    ),
+    ("group_merge", lambda i: i.group_merge),
+    ("stride x dilation", lambda i: f"{i.stride_h}x{i.dilation_h}"),
+    ("filter", lambda i: f"{i.filter_h}x{i.filter_w}"),
+    ("pad", lambda i: i.pad_h),
+    ("cpg/kpg", lambda i: f"{i.cpg}/{i.kpg}"),
+    ("atom", lambda i: f"{i.warp_tile_m}x{i.warp_tile_n}x{i.warp_tile_k}"),
+    ("vec a/b/c", lambda i: f"{i.vector_size_a}/{i.vector_size_b}/{i.vector_size_c}"),
+)
+
+
+def describe_jobs(jobs: Sequence[BuildJob], log=print) -> None:
+    """Log what a job list covers: per direction, the kernel count and how it
+    splits along every swept axis (axes with a single value are omitted)."""
+    by_direction: Dict[str, List[KernelIdentity]] = {}
+    for job in jobs:
+        by_direction.setdefault(job.identity.direction, []).append(job.identity)
+    for direction, idents in by_direction.items():
+        tiles = {(i.tile_m, i.tile_n, i.tile_k) for i in idents}
+        warps = {(i.warp_m, i.warp_n) for i in idents}
+        log(f"  {direction}: {len(idents)} kernels")
+        if tiles != {(0, 0, 0)}:
+            log(
+                f"    geometry: {len(tiles)} block tiles (MxNxK) x "
+                f"{len(warps)} warp layouts"
+            )
+        for label, get in _BREAKDOWN_AXES:
+            counts: Dict[object, int] = {}
+            for ident in idents:
+                key = get(ident)
+                counts[key] = counts.get(key, 0) + 1
+            if len(counts) > 1:
+                log(
+                    f"    {label}: "
+                    + ", ".join(f"{k} {n}" for k, n in sorted(counts.items()))
+                )
+
+
 def compile_jobs(
     *,
     cache: KernelCache,
@@ -1014,13 +1199,18 @@ def compile_jobs(
 
     pending = [j for j in all_jobs if not _up_to_date(j)]
     up_to_date = len(all_jobs) - len(pending)
-    if limit is not None:
+    to_check = f"{len(pending)} to check"
+    if limit is not None and len(pending) > limit:
+        # The limit counts this call's work only -- each dtype gets its own
+        # --limit -- and up-to-date entries never count against it.
+        to_check = f"{limit} of {len(pending)} out-of-date to check (--limit {limit})"
         pending = pending[:limit]
 
+    describe_jobs(all_jobs, log)
     log(
         f"AOT compile-all: {len(all_jobs)} variants for {arch}/{dtype} "
         f"({', '.join(directions)}); {up_to_date} up to date, "
-        f"{len(pending)} to check with {jobs} job(s)"
+        f"{to_check} with {jobs} job(s)"
     )
     if not pending:
         log("AOT compile-all done: nothing to do")
@@ -1099,12 +1289,28 @@ def compile_jobs(
         # One pool for both steps: a binary is compiled as soon as the first
         # job emitting it is done, so a few slow-to-emit kernels never hold
         # the compile workers idle.
+        #
+        # Emits are fed through a bounded window rather than submitted up
+        # front: the executor's queue is FIFO, so a compile submitted behind
+        # hundreds of thousands of queued emits would not start until every
+        # emit ran (and submitting them all takes seconds by itself). With
+        # the window a compile waits behind at most ~2*jobs emits.
+        window = 2 * jobs
+        emit_iter = iter(emit_payloads)
         with ProcessPoolExecutor(max_workers=jobs) as pool:
-            futures = {pool.submit(_emit_worker, p): "emit" for p in emit_payloads}
+            futures: Dict = {}
 
             def submit_compile(payload) -> None:
                 futures[pool.submit(_compile_worker, payload)] = "compile"
 
+            def refill() -> None:
+                while len(futures) < window:
+                    payload = next(emit_iter, None)
+                    if payload is None:
+                        return
+                    futures[pool.submit(_emit_worker, payload)] = "emit"
+
+            refill()
             while futures:
                 # The timeout keeps the progress line coming while only a few
                 # slow kernels are left and nothing finishes for minutes.
@@ -1118,6 +1324,7 @@ def compile_jobs(
                         on_emitted(fut.result(), submit_compile)
                     else:
                         on_compiled(fut.result())
+                refill()
 
     _progress(force=True)
     log(

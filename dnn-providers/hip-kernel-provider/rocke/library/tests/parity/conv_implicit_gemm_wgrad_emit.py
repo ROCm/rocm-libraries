@@ -29,7 +29,7 @@
 #   16 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
 #   17 -- gfx1250 wave32 WMMA 16x16x32 K-outer (ds_load_tr16_b128 transpose reads)
 #   18 -- unroll_k double-buffered loop under split-K=4 (odd-tail prefetch guard), gfx950
-#   19 -- runtime split-K degree (split_k=0) + two_stage, odd wg_N (C=3), fp16, gfx950
+#   19 -- split-K (degree at launch) + two_stage, odd wg_N (C=3), fp16, gfx950
 #   (no grouped or bf16 case: the C++ engine does not build grouped wgrad, and
 #    its tile loader has no elem_dtype, so bf16 operands load as half)
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
@@ -508,7 +508,7 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
-                split_k=0,
+                split_k=2,
                 two_stage=True,
             ),
             "gfx950",

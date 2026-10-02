@@ -24,8 +24,8 @@
  *   B[total_k, KH, KW, 1]  naive
  *   D[N, Ho, Wo, total_k]  naive
  *
- * Unroll threshold: n_iters * KH * KW <= 20000 (one W-pos per thread).
- * Above the threshold: scf_for_iter over n_groups = ceil(n_iters / KH) groups.
+ * The H rows stream through scf_for_iter over KH-row periods; the trip count
+ * follows the runtime height (AOT), so there is no build-time-unrolled form.
  *
  * Phase functions: rocke_build_direct_depthwise_spatial (full kernel build),
  *                  rocke_build_direct_depthwise_spatial_new (init b + build).
@@ -55,12 +55,6 @@
  *  Internal helpers
  * ===================================================================== */
 
-static int sp_ho(const rocke_direct_conv_problem_t* p)
-{
-    int s = p->stride > 0 ? p->stride : 1;
-    return (p->H + 2 * p->PAD - p->KH) / s + 1;
-}
-
 static int sp_wo(const rocke_direct_conv_problem_t* p)
 {
     int s = p->stride > 0 ? p->stride : 1;
@@ -76,9 +70,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     rocke_ir_builder_t* bld = b;
     const rocke_direct_conv_problem_t* p;
     int WAVE, BLOCK_WAVES, THREADS, n_w, BLOCK_W;
-    int Ho, Wo, c_stride_dw;
-    int n_iters;
-    int _use_unroll;
+    int Wo, c_stride_dw;
     int total_c, total_k;
     int is_bf16;
 
@@ -148,7 +140,6 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     n_w = rocke_direct_depthwise_spatial_n_w_per_wave(spec);
     BLOCK_W = rocke_direct_depthwise_spatial_block_w(spec);
     c_stride_dw = p->stride > 0 ? p->stride : 1;
-    Ho = sp_ho(p);
     Wo = sp_wo(p);
     total_c = rocke_direct_conv_problem_total_c(p);
     /* AOT: the output extents and the channel count live in kernargs now;
@@ -157,12 +148,6 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     (void)total_c;
     total_k = rocke_direct_conv_problem_total_k(p);
 
-    n_iters = p->H + p->KH - 1;
-    /* AOT: the row count follows the runtime height, so only the
-     * grouped-period scf.for form is usable; the build-time-unrolled variant
-     * would bake Hi into the trip count. */
-    _use_unroll = 0;
-    (void)n_iters;
     is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
@@ -283,98 +268,9 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ================================================================== *
      *  H-streaming loop
      * ================================================================== */
-    if(_use_unroll)
-    {
-        /* ---- static unroll path ---- */
-        /* acc[slot]: KH f32 circular accumulators (one W-pos per thread) */
-        rocke_value_t* acc[ROCKE_DCONV_DW_MAX_KH];
-        int y, slot, r_const, s_const;
-
-        for(slot = 0; slot < p->KH; ++slot)
-            acc[slot] = zero_f32;
-
-        for(y = 0; y < n_iters; ++y)
-        {
-            rocke_value_t* y_i = rocke_b_const_i32(bld, y);
-            int p_flush_val = y - (p->KH - 1);
-            int P_FLUSH = ((p_flush_val % p->KH) + p->KH) % p->KH;
-
-            /* FMA: for s_const: load A; for r_const: fma */
-            for(s_const = 0; s_const < p->KW; ++s_const)
-            {
-                rocke_value_t* a_off = NULL;
-                rocke_value_t* valid = NULL;
-                rocke_value_t* ok;
-                rocke_value_t* safe_off;
-                rocke_value_t* a_h;
-                rocke_value_t* a_f32;
-                const char* on[5];
-                rocke_value_t* ov[5];
-
-                on[0] = "n";
-                ov[0] = n;
-                on[1] = "y_iter";
-                ov[1] = y_i;
-                on[2] = "wo";
-                ov[2] = q_out;
-                on[3] = "s_off";
-                ov[3] = rocke_b_const_i32(bld, s_const);
-                on[4] = "c";
-                ov[4] = ch;
-                rocke_transforms_descriptor_offset(bld, a_desc, on, ov, 5, &a_off, &valid);
-
-                ok = rocke_b_land(bld, valid, q_ok);
-                safe_off
-                    = rocke_b_select(bld, ok, rocke_b_mul(bld, a_off, c_half_bytes), oob_sentinel);
-                a_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, a_rsrc, safe_off, c0)
-                              : rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
-                a_f32 = rocke_b_select(bld, ok, rocke_b_cast_to_f32(bld, a_h), zero_f32);
-
-                for(r_const = 0; r_const < p->KH; ++r_const)
-                {
-                    int p_idx = (((y - r_const) % p->KH) + p->KH) % p->KH;
-                    acc[p_idx] = rocke_b_fma(bld, weights_f32[r_const][s_const], a_f32, acc[p_idx]);
-                }
-            }
-
-            /* Flush: stride-aligned, in [0,H) and ho_row < Ho */
-            if(0 <= p_flush_val && p_flush_val < p->H && p_flush_val % c_stride_dw == 0)
-            {
-                int ho_row = p_flush_val / c_stride_dw;
-                if(ho_row < Ho)
-                {
-                    rocke_value_t* d_off = NULL;
-                    rocke_value_t* d_valid = NULL;
-                    rocke_value_t* safe_d;
-                    const char* dn[4];
-                    rocke_value_t* dv[4];
-
-                    dn[0] = "n";
-                    dv[0] = n;
-                    dn[1] = "h";
-                    dv[1] = rocke_b_const_i32(bld, ho_row);
-                    dn[2] = "w";
-                    dv[2] = q_out;
-                    dn[3] = "k";
-                    dv[3] = ch;
-                    rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
-
-                    safe_d = rocke_b_select(
-                        bld, q_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-                    if(is_bf16)
-                        rocke_b_buffer_store_bf16(
-                            bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_bf16(bld, acc[P_FLUSH]));
-                    else
-                        rocke_b_buffer_store_f16(
-                            bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc[P_FLUSH]));
-                }
-            }
-
-            /* Unconditional reset */
-            acc[P_FLUSH] = zero_f32;
-        }
-    }
-    else
+    /* AOT: the row count follows the runtime height, so the rows stream
+     * through an scf.for over KH-row periods; a build-time unroll would
+     * bake Hi into the trip count. */
     {
         /* ---- scf_for_iter group loop path ---- */
         int KH = p->KH;

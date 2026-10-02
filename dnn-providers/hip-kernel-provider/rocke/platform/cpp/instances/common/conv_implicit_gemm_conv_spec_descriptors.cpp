@@ -380,7 +380,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),
-     *     flags={"async": self.async_dma}) */
+     *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
+     *            "unroll": self.unroll_k}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -388,8 +389,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     const char* parts[6];
-    const char* flag_names[2];
-    int flag_on[2];
+    const char* flag_names[3];
+    int flag_on[3];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -428,8 +429,11 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     flag_on[0] = s->async_dma ? 1 : 0;
     flag_names[1] = "noalc";
     flag_on[1] = s->cshuffle_no_alias ? 1 : 0;
+    /* unroll_k: a different K-loop body under the same name otherwise. */
+    flag_names[2] = "unroll";
+    flag_on[2] = s->unroll_k ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 2, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
