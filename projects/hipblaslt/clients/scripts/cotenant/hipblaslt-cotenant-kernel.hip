@@ -3,29 +3,30 @@
 
 #include "cotenant.hpp"
 
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
 
+// Parse argv[i] as an integer in [lo, hi], or return def when absent.
+static long parse_arg(int argc, char** argv, int i, long def, long lo, long hi, const char* error)
+{
+    if(argc <= i)
+        return def;
+    char*      end = nullptr;
+    const long v   = std::strtol(argv[i], &end, 10);
+    if(end == argv[i] || *end != '\0' || v < lo || v > hi)
+        throw std::runtime_error(std::string("hipblaslt-cotenant-kernel: ERROR ") + error);
+    return v;
+}
+
 int main(int argc, char** argv)
 try
 {
-    int n_cus = (argc > 1) ? std::atoi(argv[1]) : 1;
-    if(n_cus < 1)
-    {
-        std::fprintf(
-            stderr, "hipblaslt-cotenant-kernel: ERROR requested %d CUs; must be >= 1\n", n_cus);
-        return 1;
-    }
-    char*      end           = nullptr;
-    const long max_occupancy = (argc > 2) ? std::strtol(argv[2], &end, 10) : 1;
-    if(max_occupancy < 1 || max_occupancy > 64 || (end && *end != '\0'))
-    {
-        std::fprintf(
-            stderr,
-            "hipblaslt-cotenant-kernel: ERROR max occupancy must be an integer in [1, 64]\n");
-        return 1;
-    }
+    const int n_cus
+        = parse_arg(argc, argv, 1, 1, 1, INT_MAX, "workgroup count must be an integer >= 1");
+    const int max_occupancy
+        = parse_arg(argc, argv, 2, 1, 1, 64, "max occupancy must be an integer in [1, 64]");
 
     hipblaslt_cotenant::check(hipSetDevice(0));
     const char* hvd = std::getenv("HIP_VISIBLE_DEVICES");

@@ -9,7 +9,12 @@
 #include <cstdint>
 #include <string>
 
-// Process-wide CLI knobs without going through the YAML-backed Arguments struct.
+// Process-wide CLI knobs that hipblaslt-bench reads directly instead of through
+// the YAML-backed Arguments struct.
+//
+// cotenant_cus is the workgroup count of a busy kernel kept resident on a separate
+// stream during timed runs (0 disables it); cotenant_max_occupancy caps its
+// workgroups per CU through LDS reservation.
 //
 // sm_count_target maps to HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET and
 // streamk_tile_scheduling_mode maps to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT

@@ -53,8 +53,12 @@ namespace hipblaslt_cotenant
     }
 
     template <bool Stoppable>
-    inline void launch(
-        int n_cus, int max_occupancy, hipStream_t stream, int* ready, const int* stop = nullptr)
+    inline void launch(int         n_cus,
+                       int         max_occupancy,
+                       hipStream_t stream,
+                       int*        ready,
+                       const int*  stop    = nullptr,
+                       bool        verbose = true)
     {
         int dev = 0;
         check(hipGetDevice(&dev));
@@ -90,21 +94,22 @@ namespace hipblaslt_cotenant
         if(blocks_per_cu < 1 || blocks_per_cu > max_occupancy)
             throw std::runtime_error("cotenant: reported occupancy is outside the requested cap");
 
-        std::fprintf(stderr,
-                     "cotenant: device=%d (%s) grid=%d block=256 max_occupancy=%d "
-                     "max_blocks_per_cu=%d lds_reserved=%d/%d\n",
-                     dev,
-                     prop.gcnArchName,
-                     n_cus,
-                     max_occupancy,
-                     blocks_per_cu,
-                     reserve,
-                     lds_per_cu);
+        if(verbose)
+            std::fprintf(stderr,
+                         "cotenant: device=%d (%s) grid=%d block=256 max_occupancy=%d "
+                         "max_blocks_per_cu=%d lds_reserved=%d/%d\n",
+                         dev,
+                         prop.gcnArchName,
+                         n_cus,
+                         max_occupancy,
+                         blocks_per_cu,
+                         reserve,
+                         lds_per_cu);
         busy_spin<Stoppable><<<dim3(n_cus), dim3(256), reserve, stream>>>(ready, stop);
         check(hipGetLastError());
     }
 
-    inline void wait_ready(int* ready, int count, double timeout_seconds = 0)
+    inline void wait_ready(int* ready, int count, double timeout_seconds = 0, bool verbose = true)
     {
         const auto start = std::chrono::steady_clock::now();
         while(__atomic_load_n(ready, __ATOMIC_ACQUIRE) < count)
@@ -115,8 +120,11 @@ namespace hipblaslt_cotenant
                 throw std::runtime_error("cotenant: timed out waiting for workgroup residency");
             std::this_thread::sleep_for(std::chrono::microseconds(200));
         }
-        std::fprintf(stderr, "cotenant: READY %d/%d workgroups resident\n", count, count);
-        std::fflush(stderr);
+        if(verbose)
+        {
+            std::fprintf(stderr, "cotenant: READY %d/%d workgroups resident\n", count, count);
+            std::fflush(stderr);
+        }
     }
 
     class Scoped
@@ -170,9 +178,13 @@ namespace hipblaslt_cotenant
                 check(hipHostGetDevicePointer(
                     reinterpret_cast<void**>(&device_control), control_, 0));
                 check(hipMalloc(reinterpret_cast<void**>(&stop_), sizeof(int)));
-                check(hipMemset(stop_, 0, sizeof(int)));
-                launch<true>(n_cus, max_occupancy, stream_, device_control, stop_);
-                wait_ready(control_, n_cus, 30);
+                check(hipMemsetAsync(stop_, 0, sizeof(int), stream_));
+                // Log only the first scope; the configuration is process-wide.
+                static bool logged  = false;
+                const bool  verbose = !logged;
+                launch<true>(n_cus, max_occupancy, stream_, device_control, stop_, verbose);
+                wait_ready(control_, n_cus, 30, verbose);
+                logged = true;
             }
             catch(...)
             {
