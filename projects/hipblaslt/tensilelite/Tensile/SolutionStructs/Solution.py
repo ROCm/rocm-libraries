@@ -310,25 +310,23 @@ def _validateStreamKClusterShape(cs, ck):
 
 
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
-  """Validate the gfx1250 StreamK cluster cooperative-load (multicast) path.
+  """Validate the gfx1250 persistent DataParallel multicast path.
 
-  The cluster co-locates ClusterDim = [Cs, Ck] StreamK workgroups: the Cs
+  The cluster co-locates ClusterDim = [Cs, Ck] workgroups: the Cs
   M-adjacent peers share the same B over full K and the Ck N-adjacent peers
   share the same A, so each operand is TDM-multicast across the peers that reuse
-  it. Sizes that are not a cluster multiple need no build-time check: the launch
-  rounds the grid up, the padded boundary peers s_endpgm before the -3 cluster
-  barrier, and the broadcast masks are trimmed to the peers actually present.
+  it. Each cluster walks whole Cs x Ck tile blocks, so sizes that are not a
+  cluster multiple need no build-time check: a peer past the tile edge aliases
+  the edge tile, keeps issuing its multicast loads, and skips the store.
 
-  The path is auto-derived from StreamK=3 + ClusterDim != [1, 1] +
-  StreamKForceDPOnly=1, so the checks below reject an unusable cluster rather
-  than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
-  cluster (cluster reduction), which develop never constrained.
+  DataParallel with a non-unit ClusterDim selects this path. The legacy
+  StreamK=3 + StreamKForceDPOnly=1 spelling normalizes to the same policy.
+  These checks leave StreamK's existing clustered reduction path unchanged.
   """
   if not streamKCluster(state):
     return True
 
-  # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
-  # the mask derivation relies on are SK3-specific.
+  # Cluster peers must advance together through the static grid's tile blocks.
   if not hasStaticAssignment(state):
     reject(state, printRejectionReason,
            "Persistent spatial clustering requires WorkAssignment=StaticGrid")
@@ -345,7 +343,21 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   # SGPR budget alongside the cluster coords; require the default (no remap).
   if state["PersistentXCCMapping"] != 0:
     reject(state, printRejectionReason,
-           "Persistent spatial clustering requires StreamKXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
+           "Persistent spatial clustering requires PersistentXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
+    return False
+
+  # The cluster-block walk fixes each peer's tile from its hardware position; a
+  # space-filling remap would separate the multicast partners.
+  if state.get("SpaceFillingAlgo"):
+    reject(state, printRejectionReason,
+           "Persistent spatial clustering does not support SpaceFillingAlgo")
+    return False
+
+  # The ReuseAcrossPersistent reuse copy issues B loads with no cluster wait ahead
+  # of them, so a peer could multicast into LDS its partner is still reading.
+  if state.get("ReuseAcrossPersistent", 0):
+    reject(state, printRejectionReason,
+           "Persistent spatial clustering does not support ReuseAcrossPersistent")
     return False
 
   # Cluster shape: Cs = ClusterDim[0] M-axis peers sharing B, Ck = ClusterDim[1]
@@ -1294,8 +1306,8 @@ class Solution(collections.abc.Mapping):
     # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K
-    # -- except on the DP-only SK3 cluster, where every WG owns one whole tile, so the
-    # peers stay the spatial tile neighbours the ClusterLoad component broadcasts between.
+    # -- except on the DataParallel cluster, whose peers walk whole Cs x Ck tile blocks
+    # together, so they stay the spatial tile neighbours ClusterLoad broadcasts between.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
                                   and (not isPersistent(state) or streamKCluster(state)))
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
