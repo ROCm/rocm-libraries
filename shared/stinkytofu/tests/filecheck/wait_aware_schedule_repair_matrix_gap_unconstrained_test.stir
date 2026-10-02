@@ -1,0 +1,49 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --WaitAwareScheduleRepairPass --print-output
+#
+# Two kinds of producer carry no release distance and must stay unconstrained.
+#
+# The ds_load before the first matrix instruction has nothing ahead of it to
+# measure from, so buildMatrixToDsGaps leaves it at kNoGapConstraint. The
+# buffer_load is an async producer on a different counter, and the rule is
+# scoped to DS, so it is unconstrained too.
+#
+# What that looks like depends on kPreferMemProducerFirst. With it on, both would
+# be pulled up ahead of the scalars, while the DS load that does have a matrix
+# instruction ahead of it would be held back to its recorded distance. As
+# shipped, with memory-first off, the budget is filled in original order, so
+# nothing is pulled up and the only movement is the single slot that crosses the
+# anchor. Either way the point is the same: the rule adds no constraint of its
+# own to these two producers.
+#
+# CHECK-LABEL: @wait_aware_schedule_repair_matrix_gap_unconstrained
+# No matrix instruction precedes this load, so nothing holds it back.
+# CHECK: ds_load_b128
+# CHECK-SAME: offset = 0
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_mov_b32
+# CHECK-NEXT: s_mov_b32
+# The constrained DS load keeps the distance of two it had in the input.
+# CHECK-NEXT: ds_load_b128
+# CHECK-SAME: offset = 32
+# On another counter, so the rule never looks at it.
+# CHECK-NEXT: buffer_load_b128
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# The one slot that moves past the anchor.
+# CHECK-NEXT: s_mov_b32
+
+st.func @wait_aware_schedule_repair_matrix_gap_unconstrained() {
+^entry:
+  v[100:103] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  s60 = "st.s_mov_b32"(60) { issueCycles = 1, latencyCycles = 2 }
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+
+  s61 = "st.s_mov_b32"(61) { issueCycles = 1, latencyCycles = 2 }
+  s62 = "st.s_mov_b32"(62) { issueCycles = 1, latencyCycles = 2 }
+  v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[60:63] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 1, latencyCycles = 56, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  s63 = "st.s_mov_b32"(63) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

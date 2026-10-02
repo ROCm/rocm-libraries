@@ -2,26 +2,30 @@
 #
 # Carry stops drifting where an anchor actually needs it.
 #
-# The two v_add results are deferred out of their own windows, because each window
-# spends its budget on its own mandatory DS producers. They drift forward until
-# the last WMMA, which reads v[500:507] and so depends on both of them. That
-# dependency cannot be satisfied after the anchor, so the whole accumulated carry
-# is flushed immediately in front of it rather than moving on.
+# The two v_add results are deferred out of their own windows and accumulate,
+# because neither of the windows they pass through has budget to place them. A
+# window gives up one slot of its own work, so a window holding a single
+# instruction has no budgeted pick left at all: it places its mandatory DS
+# producers and forwards everything else untouched.
+#
+# The carry drifts forward until the last WMMA, which reads v[500:507] and so
+# depends on both v_adds. That dependency cannot be satisfied after the anchor,
+# so the whole accumulated carry is flushed immediately in front of it rather
+# than moving on.
 #
 # CHECK-LABEL: @wait_aware_schedule_repair_dependency_flush
 # CHECK: v_wmma_f32_16x16x32_bf16
+# The first window places its three loads and defers the v_add behind it.
 # CHECK-NEXT: ds_load_b128
 # CHECK-NEXT: ds_load_b128
 # CHECK-NEXT: ds_load_b128
 # CHECK-NEXT: s_wait_dscnt
 # CHECK-NEXT: v_wmma_f32_16x16x32_bf16
-# CHECK-NEXT: ds_load_b128
-# CHECK-NEXT: ds_load_b128
-# CHECK-NEXT: ds_load_b128
+# The second window holds one instruction, so it has no budgeted pick: its own
+# v_add joins the carry instead of being placed, and the window ends up empty.
 # CHECK-NEXT: s_wait_dscnt
 # CHECK-NEXT: v_wmma_f32_16x16x32_bf16
-# CHECK-NEXT: ds_load_b128
-# CHECK-NEXT: ds_load_b128
+# The load is placed because memory producers never cross an anchor.
 # CHECK-NEXT: ds_load_b128
 # Both deferred v_adds are flushed here: the anchor reads what they write.
 # CHECK-NEXT: v500 = "st.v_add_f32"
@@ -39,19 +43,14 @@ st.func @wait_aware_schedule_repair_dependency_flush() {
   v[104:107] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
   v[108:111] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
   v500 = "st.v_add_f32"(v600, v601) { issueCycles = 1, latencyCycles = 5 }
-  "st.s_wait_dscnt"(6) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 6, dscnt = -1, kmcnt = -1 } }
+  "st.s_wait_dscnt"(3) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 3, dscnt = -1, kmcnt = -1 } }
   v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[208:215], v[400:407], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
 
-  v[112:115] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[116:119] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[120:123] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 80, gds = false }, mod.memtoken = { tokens = [0] } }
   v501 = "st.v_add_f32"(v602, v603) { issueCycles = 1, latencyCycles = 5 }
-  "st.s_wait_dscnt"(3) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 3, dscnt = -1, kmcnt = -1 } }
+  "st.s_wait_dscnt"(1) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 1, dscnt = -1, kmcnt = -1 } }
   v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
 
-  v[124:127] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 96, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[128:131] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 112, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[132:135] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 128, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[112:115] = "st.ds_load_b128"(v50, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
   "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
   v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[500:507], v[400:407], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
 }

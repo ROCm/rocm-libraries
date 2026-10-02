@@ -148,7 +148,7 @@ std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstructio
     if (instructions.empty()) return {};
 
     RegionDAG dag = buildRegisterDependencyDAG(instructions);
-    addCounterOrderEdges(dag, instructions, anchors);
+    addSyntheticOrderEdges(dag, instructions, anchors);
 
     WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
     std::vector<StinkyInstruction*> scheduled = scheduleWithWaitAnchoredReadyQueue(dag, queue);

@@ -24,6 +24,8 @@
 
 #include <cassert>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -62,8 +64,45 @@ inline bool counterApplies(waitcnt::CounterKind kind, const waitcnt::WaitCountSp
     }
 }
 
+/// For each instruction \p shouldPin accepts, look forward for the next
+/// instruction \p isBarrier accepts and add an edge between them. The edge
+/// forces the first instruction to be scheduled before the second.
+///
+/// Both of the orderings this pass adds by itself, on top of the ones it gets
+/// from register dependencies, are built out of this one step.
+///
+/// Two useful things follow from only ever looking forward. Edges always run
+/// from a lower index to a higher one, so they can never form a cycle. And an
+/// instruction with no barrier after it gets no edge at all, which is right:
+/// there is nothing left for it to stay ahead of.
+///
+/// The predicates take a pointer instead of a reference because one of them
+/// looks the instruction up in a \ref WaitAnchorMap, which is keyed on pointers.
+///
+/// On cost: when both predicates accept the same instructions, each forward scan
+/// stops at the next accepted one, so no two scans cover the same ground and the
+/// total work is linear. When they accept different instructions, several scans
+/// can cross the same stretch, so keep the pinned set small.
+template <typename PinPred, typename BarrierPred>
+inline void addEdgesToFirstFollowing(RegionDAG& dag,
+                                     const std::vector<StinkyInstruction*>& instructions,
+                                     PinPred shouldPin, BarrierPred isBarrier) {
+    for (unsigned i = 0; i < instructions.size(); ++i) {
+        if (!shouldPin(instructions[i])) continue;
+        for (unsigned j = i + 1; j < instructions.size(); ++j) {
+            if (!isBarrier(instructions[j])) continue;
+            addEdgeById(&dag.nodes[i], &dag.nodes[j], dag.graph);
+            break;
+        }
+    }
+}
+
 /// Preserve the meaning of final wait immediates by ordering each counter's
 /// producers and wait anchors in their original sequence.
+///
+/// Every event of a counter is both pinned and a barrier for that counter, so
+/// the edges chain each event to the next one and the whole chain stays in input
+/// order.
 inline void addCounterOrderEdges(RegionDAG& dag,
                                  const std::vector<StinkyInstruction*>& instructions,
                                  const WaitAnchorMap& anchors) {
@@ -72,25 +111,81 @@ inline void addCounterOrderEdges(RegionDAG& dag,
 
     for (int ck = 0; ck < CK_Count; ++ck) {
         const auto kind = static_cast<CounterKind>(ck);
-        std::vector<unsigned> events;
-        events.reserve(instructions.size());
-
-        for (unsigned i = 0; i < instructions.size(); ++i) {
-            StinkyInstruction* inst = instructions[i];
-            if (waitcnt::classifyMemOp(*inst) == kind) {
-                events.push_back(i);
-                continue;
-            }
-
+        auto isCounterEvent = [&](StinkyInstruction* inst) {
+            if (waitcnt::classifyMemOp(*inst) == kind) return true;
             auto anchor = anchors.find(inst);
-            if (anchor != anchors.end() && counterApplies(kind, anchor->second.spec))
-                events.push_back(i);
-        }
-
-        for (size_t i = 1; i < events.size(); ++i) {
-            addEdgeById(&dag.nodes[events[i - 1]], &dag.nodes[events[i]], dag.graph);
-        }
+            return anchor != anchors.end() && counterApplies(kind, anchor->second.spec);
+        };
+        addEdgesToFirstFollowing(dag, instructions, isCounterEvent, isCounterEvent);
     }
+}
+
+/// Hints whose only value is the lead time they get: no waitcnt counter and no
+/// destination register, so nothing else in the DAG orders them.
+///
+/// The null check matters here. StinkyInstruction::is() dereferences its
+/// descriptor unchecked, which is why hasSideEffect() tests the pointer first.
+/// Any predicate used in \ref kPinRules has to do the same.
+inline bool isPrefetchHint(const StinkyInstruction& inst) {
+    if (inst.getHwInstDesc() == nullptr) return false;
+    return isGlobalPrefetch(inst);
+}
+
+/// Build-time toggle for holding prefetch hints ahead of the next matrix
+/// instruction. Set to false to let them float like any other work.
+constexpr bool kPinPrefetchToAnchor = true;
+
+/// One class of work that must not drift past a later instruction.
+///
+/// \p shouldPin selects what to hold in place and \p isBarrier what it must stay
+/// ahead of, so a rule reads as "keep every X ahead of the next Y".
+struct PinRule {
+    bool enabled;
+    bool (*shouldPin)(const StinkyInstruction&);
+    bool (*isBarrier)(const StinkyInstruction&);
+};
+
+/// Work this pass pins, applied in table order.
+///
+/// Adding a class of pinned work is an entry here plus its predicates. Nothing
+/// else changes: the edge building is shared, and the selection policy needs no
+/// knowledge of any individual rule.
+///
+/// Prefetch hints are pinned to the next matrix instruction because a prefetch
+/// is not a segment boundary, carries no counter and writes no register, so
+/// without an edge the shortening budget is free to defer it and it slides past
+/// one anchor after another, losing the lead time it exists for.
+///
+/// An edge is what makes this work, rather than a preference inside the
+/// selection policy. A merely preferred prefetch still loses to the anchor
+/// whenever its address operands are not ready yet. As a predecessor of the
+/// anchor it instead blocks it, and the existing dependency-path step then pulls
+/// the address chain in to unblock it.
+inline constexpr PinRule kPinRules[] = {
+    {kPinPrefetchToAnchor, isPrefetchHint, isMatrixInstruction},
+};
+
+/// Hold each rule's pinned work ahead of the barrier that follows it.
+inline void addPinEdges(RegionDAG& dag, const std::vector<StinkyInstruction*>& instructions) {
+    for (const PinRule& rule : kPinRules) {
+        if (!rule.enabled) continue;
+        addEdgesToFirstFollowing(
+            dag, instructions, [&](StinkyInstruction* inst) { return rule.shouldPin(*inst); },
+            [&](StinkyInstruction* inst) { return rule.isBarrier(*inst); });
+    }
+}
+
+/// All ordering this pass adds that register dependencies did not give it.
+///
+/// The two rules stay separate because they answer different questions. Counter
+/// order is a correctness constraint: it keeps a wait immediate counting the
+/// operations it was computed for. Pinning is a performance constraint: it keeps
+/// work whose value is its position from being deferred away from it.
+inline void addSyntheticOrderEdges(RegionDAG& dag,
+                                   const std::vector<StinkyInstruction*>& instructions,
+                                   const WaitAnchorMap& anchors) {
+    addCounterOrderEdges(dag, instructions, anchors);
+    addPinEdges(dag, instructions);
 }
 
 struct CompareDAGNodeByOriginalOrder {
@@ -109,7 +204,36 @@ using OrderedReadyNodeSet = std::set<DAGNode*, CompareDAGNodeByOriginalOrder>;
 /// cost is that work carried in from an earlier window has a lower original ID,
 /// so placing it after those loads moves it further from its original position.
 /// Set to false to fill the budget in strict original order.
-constexpr bool kPreferMemProducerFirst = true;
+constexpr bool kPreferMemProducerFirst = false;
+
+/// Build-time toggle for preserving the distance a DS load sits behind the
+/// matrix instruction preceding it.
+///
+/// The scheduler that runs before the repair leaves a deliberate gap between a
+/// matrix instruction and the DS loads that follow it. Selecting a load as early
+/// as the window allows would close that gap, so each load is held back until the
+/// schedule has moved at least as far past the matrix instruction as it had in
+/// the input. This is a lower bound: a load may end up further away, never
+/// nearer. Set to false to let loads issue as early as the window allows.
+constexpr bool kPreserveMatrixToDsGap = true;
+
+/// Whether the gap rule can actually hold a load back, which is the condition
+/// for running any of its machinery.
+///
+/// The rule only ever acts inside the budgeted step, and that step is the only
+/// thing that pulls a load forward — but only while memory-first is on. With
+/// memory-first off the budget is filled in strict original order, so by the
+/// time a load is the lowest-ID candidate, every lower-ID instruction of its
+/// interval has already been emitted. That count is exactly the load's release
+/// distance, so the distance is always already satisfied and the rule can never
+/// block anything. Verified: with memory-first off, toggling the rule leaves the
+/// filecheck suite passing and real kernel output byte-identical at every slot
+/// count from 1 to 8.
+///
+/// So this is dead-code elimination, not a policy decision. If a new selection
+/// path is ever added that can pull a load forward on its own, that path breaks
+/// the reasoning above and belongs in this condition.
+constexpr bool kGapRuleActive = kPreserveMatrixToDsGap && kPreferMemProducerFirst;
 
 /// Selection policy for shortening the window that ends at a matrix anchor.
 ///
@@ -130,7 +254,11 @@ class WaitAnchoredPickPolicy {
                            unsigned slotsToMovePastAnchor)
         : waitAnchors_(waitAnchors),
           regionDAG_(regionDAG),
-          slotsToMovePastAnchor_(slotsToMovePastAnchor) {}
+          slotsToMovePastAnchor_(slotsToMovePastAnchor) {
+        // Every reader of dsReleaseDistance_ tests this same toggle before
+        // indexing it, so leaving the vector empty here is safe.
+        if constexpr (kGapRuleActive) buildDsReleaseDistances();
+    }
 
     /// Return a policy-selected node, or nullptr to request stable baseline order.
     DAGNode* select(const OrderedReadyNodeSet& wmmaQueue,
@@ -157,11 +285,20 @@ class WaitAnchoredPickPolicy {
     }
 
     /// Update policy state after the queue commits a selected node.
+    ///
+    /// sinceLastMatrix_ is maintained here rather than in the per-window
+    /// handlers because it spans windows: it must keep advancing while no window
+    /// is active, so that a load in the next window still measures its distance
+    /// from the matrix instruction that actually precedes it.
     void onPicked(DAGNode& node, bool isWmma) {
-        if (isWmma)
+        if (isWmma) {
+            sinceLastMatrix_ = 0;
             onWmmaPicked(node);
-        else
+        } else {
+            reportShortGapIfAny(node);
+            ++sinceLastMatrix_;
             onOtherPicked();
+        }
     }
 
    private:
@@ -188,12 +325,66 @@ class WaitAnchoredPickPolicy {
         }
     };
 
+    /// Marks a node the gap rule says nothing about.
+    static constexpr unsigned kNoGapConstraint = std::numeric_limits<unsigned>::max();
+
     const WaitAnchorMap& waitAnchors_;
     RegionDAG& regionDAG_;
     const unsigned slotsToMovePastAnchor_;
     WindowState window_;
     /// Non-WMMA work deferred past the previous anchor and not yet picked.
     unsigned pendingCarry_ = 0;
+    /// Per DS load, how far past the preceding matrix instruction the schedule
+    /// must be before it may be selected. kNoGapConstraint for everything else.
+    std::vector<unsigned> dsReleaseDistance_;
+    /// Instructions emitted since the last matrix instruction was selected.
+    unsigned sinceLastMatrix_ = 0;
+
+    /// Give every DS load in one matrix interval the input distance of the
+    /// *first* load in that interval, so the whole run is gated on one release
+    /// point. Distances are a difference of DAG IDs, which are dense and follow
+    /// input order.
+    ///
+    /// Per-load distances would be wrong: they reconstruct the input's internal
+    /// spacing between loads and so drive ordinary work between loads the
+    /// scheduler had placed back to back.
+    void buildDsReleaseDistances() {
+        dsReleaseDistance_.assign(regionDAG_.nodes.size(), kNoGapConstraint);
+
+        std::optional<unsigned> lastMatrixId;
+        std::optional<unsigned> intervalDistance;
+        for (unsigned id = 0; id < regionDAG_.nodes.size(); ++id) {
+            const DAGNode& node = regionDAG_.nodes[id];
+            if (isMatrixInstruction(*node.inst)) {
+                lastMatrixId = id;
+                intervalDistance.reset();
+                continue;
+            }
+            if (!lastMatrixId.has_value()) continue;
+            if (waitcnt::classifyMemOp(*node.inst) != waitcnt::CK_DS) continue;
+            if (!intervalDistance.has_value()) intervalDistance = id - *lastMatrixId - 1;
+            dsReleaseDistance_[id] = *intervalDistance;
+        }
+    }
+
+    /// Report a DS load committed closer to its matrix instruction than the
+    /// input had it. Legal, so this is a diagnostic rather than an assert: only
+    /// the spacing is lost. Reporting at the commit point also covers the
+    /// mandatory-producer step, which takes a load whatever its release distance.
+    void reportShortGapIfAny(const DAGNode& node) const {
+        if (matrixGapSatisfied(node)) return;
+        PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onPicked] gap shortened for dagId="
+                             << node.id << " required=" << dsReleaseDistance_[node.id]
+                             << " actual=" << sinceLastMatrix_ << '\n');
+    }
+
+    /// Test whether the schedule has moved far enough past the last matrix
+    /// instruction for this node to be selected.
+    bool matrixGapSatisfied(const DAGNode& node) const {
+        if constexpr (!kGapRuleActive) return true;
+        const unsigned required = dsReleaseDistance_[node.id];
+        return required == kNoGapConstraint || sinceLastMatrix_ >= required;
+    }
 
     /// Account for a non-WMMA pick within the active window.
     void onOtherPicked() {
@@ -220,7 +411,8 @@ class WaitAnchoredPickPolicy {
         }
 
         PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onWmmaPicked] picked WMMA dagId="
-                             << node.id << " pendingCarry=" << pendingCarry_ << '\n');
+                             << node.id << " pendingCarry=" << pendingCarry_
+                             << " sinceLastMatrix reset\n");
 
         DAGNode* nextWmma = findNextWmmaInOriginalOrder(node.id);
         if (nextWmma == nullptr) return;
@@ -299,12 +491,26 @@ class WaitAnchoredPickPolicy {
         return false;
     }
 
-    /// Find the earliest ready memory producer that belongs before the anchor.
-    DAGNode* findReadyMemProducerBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
+    /// Find the earliest ready node that belongs before the anchor and matches.
+    template <typename Predicate>
+    DAGNode* findReadyBeforeAnchor(const OrderedReadyNodeSet& otherQueue, Predicate match) const {
         for (DAGNode* node : otherQueue) {
-            if (node->id < window_.anchor->id && isMemProducer(*node)) return node;
+            if (node->id < window_.anchor->id && match(*node)) return node;
         }
         return nullptr;
+    }
+
+    /// Find the earliest ready memory producer that belongs before the anchor.
+    DAGNode* findReadyMemProducerBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
+        return findReadyBeforeAnchor(otherQueue,
+                                     [](const DAGNode& node) { return isMemProducer(node); });
+    }
+
+    /// Same, restricted to producers the gap rule has already released.
+    DAGNode* findReadyReleasedMemProducer(const OrderedReadyNodeSet& otherQueue) const {
+        return findReadyBeforeAnchor(otherQueue, [this](const DAGNode& node) {
+            return isMemProducer(node) && matrixGapSatisfied(node);
+        });
     }
 
     /// Find ready dependency work needed to make the anchor ready.
@@ -319,13 +525,25 @@ class WaitAnchoredPickPolicy {
     DAGNode* findReadyOtherBeforeAnchor(const OrderedReadyNodeSet& otherQueue) const {
         if (!window_.active()) return nullptr;
         if constexpr (kPreferMemProducerFirst) {
-            if (DAGNode* node = findReadyMemProducerBeforeAnchor(otherQueue)) return node;
+            if (DAGNode* node = findReadyReleasedMemProducer(otherQueue)) return node;
         }
+
+        DAGNode* gapBlocked = nullptr;
         for (DAGNode* node : otherQueue) {
             // This includes carried-over work from the previous WMMA window.
-            if (node->id < window_.anchor->id) return node;
+            if (node->id >= window_.anchor->id) continue;
+            if (!matrixGapSatisfied(*node)) {
+                if (gapBlocked == nullptr) gapBlocked = node;
+                continue;
+            }
+            return node;
         }
-        return nullptr;
+
+        // Taking a load before its gap is filled, rather than stalling. Believed
+        // unreachable: the work that forms a gap sits between the load and the
+        // matrix instruction, so it has lower IDs and is selected first. Kept
+        // because the queue must always make progress if it is ever wrong.
+        return gapBlocked;
     }
 
     /// Find the next WMMA in original DAG order.
