@@ -38,12 +38,12 @@ What this file implements *now*:
   - epilogue `default` (vectorised direct global stores) and
     `cshuffle` (LDS-staged C with the wide-store distribution)
   - layout RCR (row(A), col(B), row(C)) — the production layout
+  - persistent kernels (`persistent` + `persistent_ctas`): a fixed,
+    occupancy-sized grid whose CTAs grid-stride over the output-tile
+    strip, mirroring CK Tile's `UsePersistentKernel` universal GEMM
 
 What is left out for now (called out explicitly):
   - bf16/fp8 input dtypes (no atom yet; mechanical extension)
-  - persistent kernels (the dispatcher allows both; `persistent=False`
-    is what every preselected_fp16_rcr_compute entry uses for the
-    standard variant)
   - padding (`pad_m/n/k`) — the standard configs in default_config.json
     use `pad_*=false`; the dispatcher tries pad-on variants in the
     preselect set; we accept those as input but emit the same body
@@ -65,6 +65,7 @@ from ...core.ir import (
     Type,
     Value,
 )
+from ...core.tdm import build_tdm_descriptor_2d, encode_tdm_padding, tdm_padding_for_tile
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
@@ -142,6 +143,9 @@ class TraitSpec:
       ``"amdgpu-waves-per-eu"`` on the kernel attribute list. Default
       ``None`` keeps the LLVM backend's heuristic choice; set to 2
       (or a ``(min, max)`` tuple) when targeting two workgroups per CU.
+
+    * ``persistent`` / ``persistent_ctas``: CK Tile's
+      ``UsePersistentKernel``. See :func:`universal_gemm_grid`.
     """
 
     pipeline: Pipeline = "compv4"
@@ -150,7 +154,27 @@ class TraitSpec:
     pad_m: bool = False
     pad_n: bool = False
     pad_k: bool = False
+    # Persistent (grid-stride) tile loop, the DSL counterpart of CK Tile's
+    # ``TileGemmUniversalTraits::UsePersistentKernel``. The launch grid stops
+    # tracking the problem: instead of one CTA per output tile
+    # (``ceil(N/tile_n) x ceil(M/tile_m)``) the host launches exactly
+    # ``persistent_ctas`` CTAs and each one walks the flattened tile strip
+    # ``tile_idx = block_id_x; tile_idx < M_tiles*N_tiles;
+    # tile_idx += persistent_ctas`` -- the same ``block_id += grid_size``
+    # stride CK Tile's persistent ``operator()`` uses. Sizing the grid to the
+    # device (``#CU * blocks_per_CU``, the CK Tile ``MaxOccupancyGridSize``
+    # formula) means the CTAs reach the MFMA steady state once and stay there,
+    # instead of paying a fresh prologue + LDS fill per tile behind the
+    # hardware dispatcher. It also removes the tail wave: a grid of
+    # ``1.3 * #CU`` tiles otherwise runs one full wave and then a
+    # 30%-occupied one.
+    #
+    # ``persistent_ctas`` is a codegen constant, not a kernel argument, so the
+    # stride folds into an ``s_add_i32`` immediate; the host launcher and the
+    # spec must therefore agree, which :func:`universal_gemm_grid` enforces by
+    # being the only place a grid is computed.
     persistent: bool = False
+    persistent_ctas: int = 0
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -187,6 +211,25 @@ class TraitSpec:
     # at typical tile sizes) but hides the global-load latency that
     # otherwise serialises every K-tile.
     dtl_prefetch: bool = False
+    # TDM (Tensor Data Mover): the third global->LDS mechanism, beside the
+    # VGPR-staged path and ``direct_to_lds``. One wave-uniform descriptor per
+    # operand per K-tile replaces the DTL path's per-lane row/col chunk math
+    # and its ``passes_a + passes_b`` instructions, and the mover inserts the
+    # LDS row padding itself rather than the store side computing a padded
+    # stride. Completion rides the TENSOR counter (``s_wait_tensorcnt``), which
+    # ticks exactly twice per K-tile (A and B) regardless of tile shape.
+    # gfx1250 only, and mutually exclusive with ``direct_to_lds``.
+    tdm: bool = False
+    # Size of the TDM LDS ring, counted in buffers. Depth 1 is the unpipelined
+    # issue/wait/compute form and depth 2 ping-pongs, both of which drain
+    # TENSORcnt to zero every K-tile because nothing else is outstanding at the
+    # wait. Depth >= 3 keeps ``depth - 2`` further fills in flight *across* that
+    # wait, which is the whole point of the extra stages; see
+    # ``_emit_kloop_tdm_ring``. Each stage costs another full A/B LDS region, so
+    # this buys latency hiding with occupancy: on gfx1250 the 320 KiB cap still
+    # admits depth 4 at the widest tile, but any ring past half the cap gives up
+    # the second co-resident workgroup. Only meaningful when ``tdm`` is set.
+    tdm_depth: int = 1
     # MoE active-tile early-exit. When True (only honored in
     # ``batched=True`` mode), the kernel takes two extra args
     # (``SortedTokenIds: ptr<i32>``, ``slot_size: i32``) and at CTA
@@ -315,7 +358,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
             f"{tr.pipeline}_{tr.scheduler}_{tr.epilogue}",
             flags={
                 "pad": any([tr.pad_m, tr.pad_n, tr.pad_k]),
-                "pers": tr.persistent,
+                f"pers{tr.persistent_ctas}": tr.persistent,
                 "bat": self.batched,
                 "preb": tr.preshuffle_b,
                 "dtl": tr.direct_to_lds,
@@ -431,7 +474,14 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     from ...core.arch import ArchTarget
 
     t = spec.tile
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
+    # Row stride carries ``lds_k_pad`` wherever the emitter applies it (see
+    # ``_lds_pad`` in :func:`build_universal_gemm`): always on the VGPR-staged
+    # path, and on direct-to-LDS only for gfx1250's per-lane async instruction.
+    # The gfx9 ``buffer_load_lds`` family writes wave-contiguous bytes and
+    # stays unpadded.
+    lds_pad = 0 if (spec.trait.direct_to_lds and arch != "gfx1250") else spec.trait.lds_k_pad
+    lds_k = t.tile_k + lds_pad
+    ab_single = ((t.tile_m * lds_k) + (t.tile_n * lds_k)) * 2
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
     db = (
@@ -440,8 +490,70 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
         and not spec.trait.direct_to_lds
         and db_fits_2wg
     )
-    two_buf = bool(spec.trait.dtl_prefetch) or db
+    two_buf = bool(spec.trait.dtl_prefetch) or db or _tdm_pipelined(spec.trait)
     return ab_single, db, two_buf
+
+
+def _tdm_pipelined(trait: "TraitSpec") -> bool:
+    """Whether the TDM path ping-pongs two LDS buffers.
+
+    ``tdm_depth`` counts buffers, so depth 1 is the unpipelined
+    issue/wait/compute form and depth 2 overlaps the next tile's transfer with
+    the current tile's WMMAs. Depth 1 measures far below the DTL path because
+    nothing hides the copy, so depth 2 is the one worth sweeping.
+    """
+    return bool(trait.tdm) and trait.tdm_depth >= 2
+
+
+# The deepest TDM ring the K-loop will emit. Not a hardware bound --
+# ``s_wait_tensorcnt`` takes a u16 count -- but every stage costs a whole extra
+# A/B LDS region, so depth 5 already overflows gfx1250's 320 KiB at the 256-wide
+# tiles that win on every shape swept so far, and at narrower tiles the fills it
+# adds are past the point where more of them in flight changes the wait.
+_TDM_MAX_DEPTH = 4
+
+
+def _tdm_ring_depth(trait: "TraitSpec") -> int:
+    """Ring size when TDM needs the generalized modular ring, else 0.
+
+    Depths 1 and 2 keep their original emission and so return 0 here: the deep
+    ring is a separate K-loop branch precisely so that it cannot reshape the
+    depth-2 form both tuned shapes currently ship. Only depth >= 3 needs a
+    runtime ring index, because only there is the write slot neither the slot
+    being read nor the single other half of a ping-pong.
+    """
+    return trait.tdm_depth if (bool(trait.tdm) and trait.tdm_depth >= 3) else 0
+
+
+def _ab_lds_buffers(spec: UniversalGemmSpec, arch: str) -> int:
+    """How many A/B LDS buffers the emitter allocates for ``spec``.
+
+    Shared by :func:`is_valid_spec` and :func:`build_universal_gemm` for the
+    same reason :func:`_ab_lds_plan` is shared: a gate that charges a different
+    number of buffers than the emitter spends either rejects specs that build
+    fine or admits ones that overflow LDS. The TDM ring term is Python-only,
+    which matches the C++ engine's standing lack of any TDM path.
+    """
+    _, _, two_buf = _ab_lds_plan(spec, arch)
+    return _tdm_ring_depth(spec.trait) or (2 if two_buf else 1)
+
+
+_ELEM_BYTES = {"f16": 2, "fp16": 2, "bf16": 2, "fp8": 1, "bf8": 1, "f32": 4, "fp32": 4}
+
+# Direct-to-LDS copies a fixed 16 B (4 dwords) per lane per pass, i.e. 8 halves
+# at the 2-byte operand width the path supports. ``is_valid_spec`` and the
+# chunk/pass arithmetic in :func:`build_universal_gemm` must agree on this or
+# the gate admits tiles the emitter addresses out of bounds.
+_DTL_DWORDS_PER_LANE = 4
+_DTL_ELEMS_PER_LANE = _DTL_DWORDS_PER_LANE * 2
+
+
+def _dtype_bytes(dtype: str) -> int:
+    """Storage width of an operand dtype, in bytes."""
+    try:
+        return _ELEM_BYTES[dtype]
+    except KeyError:
+        raise ValueError(f"unknown operand dtype {dtype!r}") from None
 
 
 def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -496,13 +608,24 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
+    # TDM emits ``tensor_load_to_lds`` / ``s_wait_tensorcnt``, which exist only
+    # on targets with the mover. Gate it here, ahead of the per-family checks,
+    # so an MFMA target cannot admit the knob and hand the lowerer an opcode it
+    # has no instruction for.
+    if spec.trait.tdm and not target.memory.has_tdm:
+        return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
+
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
-    # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
-    # interleave, cshuffle LDS-staged C, DTLA, preshuffle) encode MFMA-shaped
-    # assumptions and are gated off until ported. CDNA MFMA keeps the full
-    # matrix.
+    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline.
+    # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
+    # scatter is driven by the op's ``c_layout()`` map so nothing MFMA-shaped
+    # leaks in, which means the emitter is already arch-neutral -- what the
+    # other WMMA targets still lack is coverage, so they stay gated. The
+    # richer pipelines (compv3 / compv4 scheduler interleave) and preshuffle
+    # encode MFMA-shaped assumptions and are gated off until ported. gfx1250
+    # additionally supports its native async direct-to-LDS instruction,
+    # including double-buffered prefetch. CDNA MFMA keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -517,20 +640,69 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
-        if spec.trait.epilogue != "default":
+        if spec.trait.epilogue != "default" and arch != "gfx1250":
             return False, (
-                f"WMMA path supports only the 'default' epilogue "
-                f"(got {spec.trait.epilogue!r}) on {arch}"
+                f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
+                f"only on gfx1250, not {arch}"
             )
+        # ``lds_swizzle`` is rejected for the whole family, not just the load
+        # paths that structurally cannot express it (direct-to-LDS and TDM, both
+        # of which used to reject it separately below). It XORs the *global*
+        # column so the LDS destination can stay wave-contiguous, a gfx9-shaped
+        # assumption that does not carry over to WMMA's ds_read geometry: on the
+        # VGPR-staged path it emits, runs fast, and returns wrong results, so
+        # sweeps rank it as a winner while it is incorrect. Bit-exact and worth
+        # ~+3% on CDNA MFMA, hence the family scope rather than a global gate.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
-            (spec.trait.direct_to_lds, "direct_to_lds"),
-            (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
+            (spec.trait.lds_swizzle, "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
+        if spec.trait.dtl_prefetch:
+            if arch != "gfx1250":
+                return False, f"WMMA path does not support dtl_prefetch on {arch}"
+            if not spec.trait.direct_to_lds:
+                return False, "dtl_prefetch requires direct_to_lds=True"
+        if spec.trait.direct_to_lds:
+            if arch != "gfx1250":
+                return False, f"WMMA path does not support direct_to_lds on {arch}"
+            # ``lds_k_pad`` IS supported here: gfx1250's
+            # ``global_load_async_to_lds`` is per-lane addressed, so a padded
+            # LDS row stride costs nothing (see the _lds_pad comment below).
+            # (``lds_swizzle`` is rejected for the whole family above.)
+        if spec.trait.tdm:
+            if spec.trait.direct_to_lds:
+                return False, "tdm and direct_to_lds are alternative load paths"
+            # pad_m/pad_n/pad_k are not consulted: OOB is handled by clipping
+            # the descriptor's tensor extents, so the mover simply copies less
+            # rather than the VGPR path's predicated masking.
+            # ``pad_interval`` is a 3-bit log2 of a dword count, so one tile row
+            # must be a power-of-two dword count in [2, 256].
+            row_bytes = t.tile_k * _dtype_bytes(spec.data.dtype_a)
+            if spec.trait.lds_k_pad:
+                try:
+                    encode_tdm_padding(
+                        row_bytes, spec.trait.lds_k_pad * _dtype_bytes(spec.data.dtype_a)
+                    )
+                except ValueError as exc:
+                    return False, f"tdm cannot encode lds_k_pad: {exc}"
+            elif row_bytes % 4 or row_bytes < 8:
+                return False, f"tdm needs a dword-multiple tile row (got {row_bytes}B)"
+            # Depth counts LDS buffers: 1 is unpipelined, 2 ping-pongs, and 3+
+            # take the modular ring in ``_emit_kloop_tdm_ring``. Each stage
+            # costs another A/B region, which the LDS budget below charges via
+            # ``_ab_lds_buffers`` -- so a ring too deep for the tile is rejected
+            # there rather than here.
+            if not 1 <= spec.trait.tdm_depth <= _TDM_MAX_DEPTH:
+                return False, (
+                    f"tdm_depth must be in 1..{_TDM_MAX_DEPTH} "
+                    f"(got {spec.trait.tdm_depth})"
+                )
+    if spec.trait.tdm_depth != 1 and not spec.trait.tdm:
+        return False, "tdm_depth is only meaningful with tdm=True"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -547,16 +719,23 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"block_size {spec.block_size} != warp_m*warp_n*wave_size = {expected_bs}"
         )
 
-    # LDS budget. The cap is the target's per-WG LDS capacity (160 KiB on
-    # gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3). Our current emitter does
-    # NOT alias AB and cshuffle staging (CK does; a separate optimisation
-    # we have not yet wired up), so the actual usage is additive:
+    # LDS budget. The cap is the target's per-WG LDS capacity (320 KiB on
+    # gfx1250, 160 KiB on gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3).
     #   compv4 single AB:   tile_m*tile_k*2 + tile_n*tile_k*2
     #   compv4 double AB:   2 * single AB
     #   cshuffle staging:   tile_m*tile_n*2   (f16)
-    #   total:              double_buffer_AB + (cshuffle ? C : 0)
-    # When we land the AB/C aliasing in the cshuffle emitter, swap the
-    # `+` for a `max`.
+    # The cshuffle C staging tile is *aliased* onto the A/B pool: the smem-pool
+    # packer in :mod:`rocke.core.lower_llvm` sorts allocations by live-interval
+    # start, so A lands at pool offset 0 and the C tile -- whose live range
+    # begins after the last A/B read -- reuses that same offset. Peak usage is
+    # therefore ``max(AB, C)``, not ``AB + C``, and this gate has to model that
+    # or it spuriously rejects specs the emitter builds fine (a 256x256 C tile
+    # is 128 KiB, which double-counted on top of AB overflows every cap we
+    # have). ``cshuffle_no_alias`` opts out -- it marks the C tile exclusive so
+    # the packer gives it its own byte range -- and there usage is additive.
+    # ``persistent`` is additive too: the grid-stride tile loop encloses both
+    # the K-loop and the epilogue, and the packer treats every allocation used
+    # inside one ``scf.for`` as live for the whole loop, so A/B and C interfere.
     # AB is double-buffered (2x LDS) only when the emitter actually
     # ping-pongs two halves: ``dtl_prefetch`` (DTLA ping-pong) or the
     # compv4 software-pipelined double buffer, which the emitter enables
@@ -566,10 +745,25 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # the emitter avoids both spurious rejections (over-reserving 2x AB
     # for a single-buffered compv4+cshuffle) and under-reserving. Both
     # sites share :func:`_ab_lds_plan` to stay in lock-step.
-    ab_single, _, _ab_dbl = _ab_lds_plan(spec, arch)
-    ab_bytes = ab_single * (2 if _ab_dbl else 1)
+    # ``_ab_lds_buffers`` is 1 or 2 for every path the C++ engine can express,
+    # and ``tdm_depth`` for a deep TDM ring.
+    #
+    # Note that on gfx1250 the 320 KiB cap is *not* what binds a deep ring:
+    # four A/B regions of a 256x256x64 pad-8 tile are 288 KiB and pass here.
+    # What binds is occupancy — past half the cap a workgroup can no longer be
+    # co-resident with a second one, which is the ``db_fits_2wg`` threshold
+    # ``_ab_lds_plan`` applies to the compv4 double buffer. A deep ring is
+    # deliberately *not* held to that threshold: trading the second workgroup
+    # for in-flight fills is the experiment, and the tuned TDM configs already
+    # run at one wave per EU. So this gate only refuses rings that cannot be
+    # allocated at all, and ranking the occupancy trade is left to the sweep.
+    ab_single, _, _ = _ab_lds_plan(spec, arch)
+    ab_bytes = ab_single * _ab_lds_buffers(spec, arch)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
-    bytes_lds = ab_bytes + c_bytes
+    if c_bytes and not (spec.trait.cshuffle_no_alias or spec.trait.persistent):
+        bytes_lds = max(ab_bytes, c_bytes)
+    else:
+        bytes_lds = ab_bytes + c_bytes
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap "
@@ -591,6 +785,31 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if a_total < threads or b_total < threads:
         return False, "block too small for one element/thread/phase"
 
+    # Direct-to-LDS is coarser than one element per lane: every lane issues a
+    # fixed ``_DTL_ELEMS_PER_LANE``-element copy, and the pass loop in
+    # ``build_universal_gemm`` is unpredicated -- it walks
+    # ``chunk_idx = tid + p * block_size`` for ``ceil(chunks / block_size)``
+    # passes with no bound check. A tile that does not cover a whole number of
+    # passes therefore leaves lanes with ``chunk_idx >= chunks``, which address
+    # past both the global tile and the LDS buffer (hipError 700, which poisons
+    # the context and aborts a sweep). The one-element/thread rule above is
+    # ``_DTL_ELEMS_PER_LANE``x too weak to catch it.
+    if spec.trait.direct_to_lds:
+        if t.tile_k % _DTL_ELEMS_PER_LANE:
+            return False, (
+                f"direct_to_lds needs tile_k % {_DTL_ELEMS_PER_LANE} == 0 "
+                f"(got {t.tile_k})"
+            )
+        for total, label in ((a_total, "A"), (b_total, "B")):
+            chunks = total // _DTL_ELEMS_PER_LANE
+            if chunks < threads or chunks % threads:
+                return False, (
+                    f"direct_to_lds needs the {label} tile to fill whole "
+                    f"{threads}-lane passes: {total} elements / "
+                    f"{_DTL_ELEMS_PER_LANE} per lane = {chunks} chunks, which "
+                    f"is not a positive multiple of block_size {threads}"
+                )
+
     # Split-K (over the production body): the K-slice each CTA processes
     # is ``ks = K // split_k`` and must itself be a whole number of
     # K-tiles. We can only validate the K-slice divisibility at build
@@ -606,7 +825,62 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if sk > 1 and family != "mma":
         return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
 
+    # Persistent (grid-stride) tile loop. The three exclusions below are all
+    # the same shape of problem: the flag in question resolves something from
+    # ``blockIdx`` once at CTA entry, which is exactly what the persistent
+    # kernel makes per-tile instead of per-CTA.
+    if spec.trait.persistent:
+        if spec.trait.persistent_ctas <= 0:
+            return False, (
+                "persistent needs persistent_ctas > 0 (the grid-stride step "
+                "is a codegen constant, so the CTA count must be explicit)"
+            )
+        if spec.trait.pipeline == "wsp3":
+            return False, "persistent is not wired for the wsp3 pipeline"
+        if spec.trait.split_k > 1:
+            # CK Tile folds the k-batch into the work index
+            # (``k_batch = block_id / num_tiles``); here the K-slice bounds are
+            # hoisted out of the tile loop from ``block_id_z``, so the two
+            # cannot compose until the slice is recomputed per tile.
+            return False, "persistent does not compose with split_k > 1"
+        if spec.trait.active_tile_skip:
+            # The MoE gate loads its bucket head from ``block_m_off`` before
+            # the tile loop exists, so an inactive tile would gate the whole
+            # CTA rather than one tile.
+            return False, "persistent does not compose with active_tile_skip"
+
     return True, "ok"
+
+
+def universal_gemm_grid(
+    spec: UniversalGemmSpec,
+    m: int,
+    n: int,
+    *,
+    batch: int = 1,
+) -> Tuple[int, int, int]:
+    """Launch grid for ``spec`` on an ``(m, n)`` problem.
+
+    The single place a universal-GEMM grid is computed, because the
+    persistent variant only works if the host's CTA count is exactly the
+    ``persistent_ctas`` the kernel's grid-stride step was compiled with.
+
+    * non-persistent: ``(ceil(n/tile_n), ceil(m/tile_m), z)`` -- one CTA per
+      output tile, ``block_id_x`` the N-tile and ``block_id_y`` the M-tile.
+    * persistent: ``(persistent_ctas, 1, z)`` -- a device-sized grid whose
+      CTAs stride over the whole tile strip (CK Tile's
+      ``MaxOccupancyGridSize`` in place of ``GridSize``).
+
+    ``z`` is the batch count for a batched spec and the split-K factor
+    otherwise; both collapse to 1 for the plain GEMM.
+    """
+    from ...helpers.spec import ceil_div_grid
+
+    z = batch if spec.batched else spec.trait.split_k
+    if spec.trait.persistent:
+        return (spec.trait.persistent_ctas, 1, z)
+    t = spec.tile
+    return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (z, 1))
 
 
 # ---------------------------------------------------------------------
@@ -1062,7 +1336,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # ``trait.chiplet_swizzle=True`` we instead flatten the 2D grid
     # into a linear WGID and run it through the chiplet-aware
     # super-tile remap so consecutive workgroups land on the same XCD.
-    if spec.trait.chiplet_swizzle:
+    #
+    # ``trait.persistent`` moves the whole assignment inside a grid-stride
+    # loop, so the origin is recomputed per tile rather than once per CTA;
+    # it is emitted at the dispatch site at the end of this function.
+    _persistent = spec.trait.persistent
+    if _persistent:
+        block_m_off = None
+        block_n_off = None
+    elif spec.trait.chiplet_swizzle:
         from ...helpers.grid import chiplet_aware_super_tile_dynamic
 
         # Compute M_tiles / N_tiles at runtime from the dynamic M/N args.
@@ -1107,8 +1389,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # each LDS buffer; the ``parity`` (0 or 1) selects which half is the
     # current write target / read source, and the K-loop alternates so
     # next-iter DTLA writes go to the buffer the MFMAs aren't reading.
-    _prefetch = bool(spec.trait.dtl_prefetch)
-    if _prefetch and not spec.trait.direct_to_lds:
+    # TDM at depth >= 2 reuses the same ping-pong: the load phase already takes
+    # a parity, and only the drain differs (TENSORcnt instead of ASYNCcnt).
+    _prefetch = bool(spec.trait.dtl_prefetch) or _tdm_pipelined(spec.trait)
+    if spec.trait.dtl_prefetch and not spec.trait.direct_to_lds:
         raise ValueError("dtl_prefetch requires direct_to_lds=True")
     # compv4 (non-DTL) double-buffers the AB LDS so the next K-tile's
     # global->LDS copy overlaps the current K-tile's MFMA/ds_read work
@@ -1131,19 +1415,39 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # AB LDS double-buffer plan, shared with the validity gate via
     # :func:`_ab_lds_plan` so the reserved/used budget stays in lock-step.
     _, _db, _two_buf = _ab_lds_plan(spec, arch)
-    # depth-N prefetch ring needs (depth+1) AB buffers (only in the unrolled
-    # fixed-K path); otherwise the usual 2 (ping-pong) or 1 (single-buffer).
-    if _pf_depth > 1 and _unroll_k > 0:
+    # Ring size, and it must stay equal to what ``_ab_lds_buffers`` charged the
+    # validity gate. A deep TDM ring (``tdm_depth >= 3``) takes precedence over
+    # the env-gated unrolled experiment below: it is a spec-level request whose
+    # LDS the gate has already budgeted, whereas the experiment is invisible to
+    # the gate. Otherwise, the experiment's (depth+1) ring in the unrolled
+    # fixed-K path, else the usual 2 (ping-pong) or 1 (single-buffer).
+    _tdm_ring = _tdm_ring_depth(spec.trait)
+    if _tdm_ring:
+        _nbuf = _tdm_ring
+    elif _pf_depth > 1 and _unroll_k > 0:
         _nbuf = _pf_depth + 1
     else:
         _nbuf = 2 if _two_buf else 1
     _A_LDS_M = _nbuf * block_m
     _B_LDS_N = _nbuf * block_n
-    # LDS K-padding (non-DTL only): widen each row's stride to break the
-    # bank-conflict alias. The logical column range stays [0, block_k); only
-    # the row stride grows, so the read GEP (alloc shape[1]) and the
-    # store_vec TensorView (with_strides below) both pick up the padded stride.
-    _lds_pad = spec.trait.lds_k_pad if not spec.trait.direct_to_lds else 0
+    # LDS K-padding: widen each row's stride to break the bank-conflict alias.
+    # The logical column range stays [0, block_k); only the row stride grows,
+    # so the read GEP (alloc shape[1]) and the store_vec TensorView
+    # (with_strides below) both pick up the padded stride.
+    #
+    # Available on the VGPR-staged path and on the gfx1250 direct-to-LDS path:
+    # ``global_load_async_to_lds`` gives every lane its own LDS address, which
+    # lowers to a typed GEP into this allocation, so the padded stride is
+    # applied for free. NOT available on the gfx9 ``buffer_load_lds`` family,
+    # which is wave-level and writes ``wave_size * BYTES_PER_LANE``
+    # *contiguous* bytes from a single wave-uniform base -- there is nowhere to
+    # insert a per-row gap, so that path stays unpadded.
+    _dtl_lane_addressed = arch == "gfx1250"
+    _lds_pad = (
+        0
+        if (spec.trait.direct_to_lds and not _dtl_lane_addressed)
+        else spec.trait.lds_k_pad
+    )
     _lds_k = block_k + _lds_pad
     A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, _lds_k], name_hint="A_smem")
     B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, _lds_k], name_hint="B_smem")
@@ -1215,23 +1519,27 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     a_lds_view = TensorView(base=A_smem, desc=_a_lds_desc, addr_space="lds")
     b_lds_view = TensorView(base=B_smem, desc=_b_lds_desc, addr_space="lds")
 
-    # DirectToLDS (DTLA/DTLB) plumbing. We issue
+    # DirectToLDS (DTLA/DTLB) plumbing. gfx9 issues
     # ``async_buffer_load_lds_addr`` directly because
     # :class:`AsyncTileLoader` assumes a tile shape where the row dimension
     # wraps at ``halves_per_chunk`` — that's an attention-specific layout
     # and does not match a [block_m, block_k] GEMM tile with block_k >>
     # halves_per_chunk.
     #
-    # The intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
-    # starting at the wave-uniform ``lds_dst``. For our tile we lay
+    # That intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
+    # starting at the wave-uniform ``lds_dst``. gfx1250 instead gives each lane
+    # an explicit global source and LDS destination through
+    # ``global_load_async_to_lds``. For our tile we lay
     # ``block_size`` lanes across the tile such that each lane covers one
     # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
     # remaining chunks_total / block_size iterations.
     if spec.trait.direct_to_lds:
         from ...core.ir import I64 as _I64
 
-        _DTL_DWORDS = 4  # 16 bytes/lane
-        _DTL_HALVES = _DTL_DWORDS * 2  # 8 elements (bf16 halves) per lane chunk
+        # Shared with the ``is_valid_spec`` gate that rejects tiles which do
+        # not fill whole passes; the loops below are unpredicated.
+        _DTL_DWORDS = _DTL_DWORDS_PER_LANE  # 16 bytes/lane
+        _DTL_HALVES = _DTL_ELEMS_PER_LANE  # 8 elements (bf16 halves) per chunk
         _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
         if (block_k % _DTL_HALVES) != 0:
             raise ValueError(
@@ -1257,6 +1565,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _dtl_c_halves_per_chunk = b.const_i32(_DTL_HALVES)
         _dtl_c_block_size = b.const_i32(spec.block_size)
 
+    # TDM plumbing. Unlike DTL there is no per-lane chunk decomposition: one
+    # descriptor moves the whole [block_m, block_k] (resp. [block_n, block_k])
+    # tile, so all that is precomputed here are the two LDS bases, the static
+    # padding encoding, and the per-operand row-count constants.
+    if spec.trait.tdm:
+        from ...core.ir import I64 as _I64
+
+        _tdm_elem_bytes = _dtype_bytes(spec.data.dtype_a)
+        _tdm_pad_enable, _tdm_pad_interval, _tdm_pad_amount = tdm_padding_for_tile(
+            _tdm_elem_bytes, block_k, spec.trait.lds_k_pad
+        )
+        _tdm_a_lds_base = b.smem_addr_of(A_smem)
+        _tdm_b_lds_base = b.smem_addr_of(B_smem)
+        # One LDS buffer is block_{m,n} padded rows; the ring shifts by this
+        # many bytes per parity step.
+        _tdm_a_buf_bytes = block_m * _lds_k * _tdm_elem_bytes
+        _tdm_b_buf_bytes = block_n * _lds_k * _tdm_elem_bytes
+        _tdm_waves = t.warp_m * t.warp_n * t.warp_k
+        _tdm_wave_id = (
+            b.readfirstlane(b.div(tid, c_wave)) if _tdm_waves > 1 else b.const_i32(0)
+        )
+
     def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value, lds_parity=0) -> None:
         """Coalesced global -> LDS copy for one K tile.
 
@@ -1272,6 +1602,68 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         an i32 :class:`Value` for runtime parity. Ignored when prefetch
         is off.
         """
+        if spec.trait.tdm:
+            # One descriptor per operand. The tile origin rides in the global
+            # address; the tensor extents are what remains of the tensor from
+            # that origin, clamped at zero so the mover clips a partial tile
+            # instead of running off the end.
+            zero = b.const_i32(0)
+            _parity_is_value = isinstance(lds_parity, Value)
+            if _parity_is_value:
+                a_lds = b.smem_ptr_add(
+                    _tdm_a_lds_base,
+                    b.zext(b.mul(lds_parity, b.const_i32(_tdm_a_buf_bytes)), _I64),
+                )
+                b_lds = b.smem_ptr_add(
+                    _tdm_b_lds_base,
+                    b.zext(b.mul(lds_parity, b.const_i32(_tdm_b_buf_bytes)), _I64),
+                )
+            elif lds_parity:
+                a_lds = b.smem_ptr_add(
+                    _tdm_a_lds_base,
+                    b.zext(b.const_i32(lds_parity * _tdm_a_buf_bytes), _I64),
+                )
+                b_lds = b.smem_ptr_add(
+                    _tdm_b_lds_base,
+                    b.zext(b.const_i32(lds_parity * _tdm_b_buf_bytes), _I64),
+                )
+            else:
+                a_lds, b_lds = _tdm_a_lds_base, _tdm_b_lds_base
+
+            k_remaining = b.smax(b.sub(K, k_off), zero)
+
+            def _issue(ptr, row_off, rows, lds_base, batch_off):
+                origin = b.add(batch_off, b.add(b.mul(row_off, K), k_off))
+                groups = build_tdm_descriptor_2d(
+                    b,
+                    global_addr=b.global_addr_of(ptr, origin),
+                    lds_addr=lds_base,
+                    elem_bytes=_tdm_elem_bytes,
+                    tensor_dim0=k_remaining,
+                    tensor_dim1=b.const_i32(rows),
+                    tile_dim0=block_k,
+                    tile_dim1=rows,
+                    dim0_stride=K,
+                    dim1_stride=1,
+                    pad_enable=_tdm_pad_enable,
+                    pad_interval=_tdm_pad_interval,
+                    pad_amount=_tdm_pad_amount,
+                )
+                b.tensor_load_to_lds(*groups, cachepolicy=0)
+
+            # ``tensor_load_to_lds`` is a wave-level instruction that moves the
+            # whole tile, so letting every wave issue it copies the tile once
+            # per wave. One wave owns each operand; the rest reach the LDS
+            # contents through the barrier in the drain.
+            if _tdm_waves > 1:
+                with b.scf_if(b.cmp_eq(_tdm_wave_id, zero)):
+                    _issue(A, block_m_off, block_m, a_lds, batch_off_a)
+                with b.scf_if(b.cmp_eq(_tdm_wave_id, b.const_i32(1))):
+                    _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+            else:
+                _issue(A, block_m_off, block_m, a_lds, batch_off_a)
+                _issue(Bp, block_n_off, block_n, b_lds, batch_off_b)
+            return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves
             # from global -> LDS via the hardware DTLA/DTLB intrinsic.
@@ -1325,6 +1717,37 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             else:
                 a_lds_wave_base = a_lds_par_base
                 b_lds_wave_base = b_lds_par_base
+
+            def _gfx1250_async_load(src, off_elems, smem, lds_row, col, cpol):
+                def _load() -> None:
+                    b.global_load_async_to_lds(
+                        src,
+                        off_elems,
+                        smem,
+                        [lds_row, col],
+                        width_bytes=_DTL_BYTES_PER_LANE,
+                        coherency=cpol,
+                    )
+
+                if not spec.trait.pad_k:
+                    _load()
+                    return
+                # The copy is unpredicated, so a chunk past K would read the next
+                # row's head (or past the buffer on the last row). Zero its LDS
+                # slot instead. A chunk is all-in or all-out only when K is a
+                # multiple of _DTL_HALVES, which the 16 B async copy needs anyway.
+                valid = b.cmp_lt(b.add(k_off, col), K)
+                with b.scf_if_else(valid) as (then_ctx, else_ctx):
+                    with then_ctx:
+                        _load()
+                    with else_ctx:
+                        b.smem_store_vN(
+                            smem,
+                            [lds_row, col],
+                            b.zero_vec(storage_dtype, _DTL_HALVES),
+                            _DTL_HALVES,
+                        )
+
             for p in range(_dtl_a_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
                 pass_lds_a = (
@@ -1349,15 +1772,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.add(k_off, _swz_col(col, row)),
                     ),
                 )
-                off_bytes = b.mul(off_elems, c2)
-                b.async_buffer_load_lds_addr(
-                    _dtl_a_rsrc,
-                    pass_lds_a,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_a,
-                )
+                if arch == "gfx1250":
+                    if _prefetch and _parity_is_value:
+                        lds_row = b.add(
+                            row, b.mul(lds_parity, b.const_i32(block_m))
+                        )
+                    elif _prefetch and lds_parity:
+                        lds_row = b.add(row, b.const_i32(lds_parity * block_m))
+                    else:
+                        lds_row = row
+                    _gfx1250_async_load(
+                        A, off_elems, A_smem, lds_row, col, spec.trait.dtl_cache_a
+                    )
+                else:
+                    off_bytes = b.mul(off_elems, c2)
+                    b.async_buffer_load_lds_addr(
+                        _dtl_a_rsrc,
+                        pass_lds_a,
+                        off_bytes,
+                        _dtl_zero_soff,
+                        _DTL_DWORDS,
+                        coherency=spec.trait.dtl_cache_a,
+                    )
             for p in range(_dtl_b_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + b_parity_bytes_static
                 pass_lds_b = (
@@ -1378,18 +1814,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.add(k_off, _swz_col(col, row)),
                     ),
                 )
-                off_bytes = b.mul(off_elems, c2)
-                b.async_buffer_load_lds_addr(
-                    _dtl_b_rsrc,
-                    pass_lds_b,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_b,
-                )
-            # The following ``b.sync()`` (in the caller) lowers to
-            # ``s_waitcnt vmcnt(0) lgkmcnt(0) ; s_barrier``, which drains
-            # the in-flight DTLA writes before any wave reads LDS.
+                if arch == "gfx1250":
+                    if _prefetch and _parity_is_value:
+                        lds_row = b.add(
+                            row, b.mul(lds_parity, b.const_i32(block_n))
+                        )
+                    elif _prefetch and lds_parity:
+                        lds_row = b.add(row, b.const_i32(lds_parity * block_n))
+                    else:
+                        lds_row = row
+                    _gfx1250_async_load(
+                        Bp, off_elems, B_smem, lds_row, col, spec.trait.dtl_cache_b
+                    )
+                else:
+                    off_bytes = b.mul(off_elems, c2)
+                    b.async_buffer_load_lds_addr(
+                        _dtl_b_rsrc,
+                        pass_lds_b,
+                        off_bytes,
+                        _dtl_zero_soff,
+                        _DTL_DWORDS,
+                        coherency=spec.trait.dtl_cache_b,
+                    )
             return
 
         a_global_tile = make_tile_window(
@@ -1626,6 +2072,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         A_src: Value,
         B_src: Value,
         iter_vars: Sequence[Value],
+        lds_parity=0,
     ) -> List[Value]:
         """One K-tile of WMMA atoms, fully MMA-contract driven.
 
@@ -1641,12 +2088,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+        _parity_is_value = isinstance(lds_parity, Value)
+        if _prefetch and _parity_is_value:
+            a_par_row_v = b.mul(lds_parity, b.const_i32(block_m))
+            b_par_row_v = b.mul(lds_parity, b.const_i32(block_n))
+            a_par_row_static = 0
+            b_par_row_static = 0
+        else:
+            a_par_row_v = None
+            b_par_row_v = None
+            a_par_row_static = lds_parity * block_m if _prefetch else 0
+            b_par_row_static = lds_parity * block_n if _prefetch else 0
         new_accs: List[Value] = list(iter_vars)
         for kk in range(k_atoms):
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
             a_rows = []
             for mi in range(mfmas_m):
-                atom_row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+                atom_row = b.add(
+                    warp_m_off,
+                    b.const_i32(mi * t.warp_tile_m + a_par_row_static),
+                )
+                if a_par_row_v is not None:
+                    atom_row = b.add(atom_row, a_par_row_v)
                 a_rows.append(
                     _emit_frag_smem_load(
                         A_src,
@@ -1659,7 +2122,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
             b_cols = []
             for ni in range(mfmas_n):
-                atom_row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
+                atom_row = b.add(
+                    warp_n_off,
+                    b.const_i32(ni * t.warp_tile_n + b_par_row_static),
+                )
+                if b_par_row_v is not None:
+                    atom_row = b.add(atom_row, b_par_row_v)
                 b_cols.append(
                     _emit_frag_smem_load(
                         B_src,
@@ -1722,7 +2190,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         runtime i32 Value.
         """
         if op.family == "wmma":
-            return _emit_wmma_phase(A_src, B_src, iter_vars)
+            return _emit_wmma_phase(A_src, B_src, iter_vars, lds_parity)
         _mp_is_val = isinstance(lds_parity, Value)
         if _prefetch or _db:
             if _mp_is_val:
@@ -1938,6 +2406,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # end ``k_hi``. Computed lazily so the non-split path's SSA is unchanged.
     _k_upper = K if k_hi is None else k_hi
 
+    def _sync_after_load() -> None:
+        if spec.trait.tdm:
+            # TENSORcnt ticks once per descriptor, so a full drain is 0
+            # regardless of tile shape (unlike ASYNCcnt, which counts
+            # instructions and would need passes_a + passes_b).
+            b.s_wait_tensorcnt(0)
+            b.sync_lds_only()
+        elif spec.trait.direct_to_lds and arch == "gfx1250":
+            b.s_wait_asynccnt(0)
+            b.sync_lds_only()
+        else:
+            b.sync()
+
     def _emit_kloop_simple() -> None:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
@@ -1947,7 +2428,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # instead routes through ``_emit_kloop_db``; the scheduler
             # hints in ``emit_mfma_phase`` carry the in-tile interleave.
             emit_load_phase(A_smem, B_smem, k0)
-            b.sync()
+            _sync_after_load()
 
             new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
 
@@ -1956,6 +2437,109 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         nonlocal _for_results
         _for_results = for_op.results
 
+    def _emit_kloop_tdm_ring() -> None:
+        """TDM K-loop over a ``tdm_depth``-buffer LDS ring with a partial wait.
+
+        The generalization of :func:`_emit_kloop_prefetch`'s ping-pong to a ring
+        of ``D = tdm_depth >= 3`` buffers. Body order and barrier count are
+        unchanged; what changes is that ``D - 1`` fills are in flight rather than
+        one, so the per-tile wait can retire only the oldest and leave the rest
+        streaming. That partial wait is the lever — the extra buffers merely make
+        it legal::
+
+            prologue:  issue tiles 0 .. D-2      -> ring slots 0 .. D-2
+            for tile i in [0, trip):
+                s_wait_tensorcnt(D-2 sets)       ; the oldest fill has landed
+                LDS barrier                      ; and is visible workgroup-wide
+                issue tile i+D-1                 -> ring slot (i+D-1) % D
+                WMMA tile i                      <- ring slot i % D
+
+        Three invariants carry the correctness argument.
+
+        *The wait count is a constant.* At tile ``i`` the prologue and the body
+        have together issued ``(D-1) + i`` descriptor sets, of which tiles
+        ``0..i-1`` are already consumed, so permitting ``D-2`` to remain
+        outstanding retires exactly through tile ``i``. TENSORcnt retires in
+        order, which is what makes a count sound where a drain was needed
+        before. The figure is independent of ``i``, so there is no tail peel.
+
+        *Every iteration issues, including past the end.* The look-ahead origin
+        is clamped to the last in-bounds tile, so a fill is always a real
+        transfer and therefore always ticks TENSORcnt. Running off the end into
+        a clipped zero-extent descriptor would instead make that tick depend on
+        hardware behaviour, and a wait one set too shallow reads LDS before the
+        fill lands and returns quietly wrong results rather than hanging. The
+        redundant re-fill lands in a slot that no iteration goes on to read.
+
+        *One barrier still suffices.* The slot written at tile ``i`` is
+        ``(i+D-1) % D``, which is ``(i-1) % D`` — the slot read at tile ``i-1``,
+        and the barrier at the top of tile ``i`` is what separates the two. It is
+        never the slot being read now, since ``D-1`` is not a multiple of ``D``.
+        """
+        nonlocal _for_results
+        D = spec.trait.tdm_depth
+        # Descriptor sets per tile *per issuing wave*. Above one wave, wave 0
+        # issues A and wave 1 issues B (see ``emit_load_phase``), so each issuing
+        # wave sees one descriptor per tile rather than two, and waiting on two
+        # per tile would wait a whole tile too shallow. Waves that issue nothing
+        # hold an empty counter and reach the data through the barrier, so the
+        # issuing waves' count is the one that governs.
+        per_tile = 1 if _tdm_waves > 1 else 2
+        allowed = (D - 2) * per_tile
+        ahead_k = (D - 1) * block_k
+        # Origin of the loop's last tile, block_k-aligned from k_lo. A ragged K
+        # makes ``_k_upper - block_k`` misaligned, which would load the last
+        # tile from the wrong K offset.
+        last_origin = b.add(
+            k_lo,
+            b.mul(
+                b.div(b.sub(b.sub(_k_upper, k_lo), b.const_i32(1)), c_block_k),
+                c_block_k,
+            ),
+        )
+
+        # Prologue: fill ring slots 0 .. D-2. Static parities, so these LDS
+        # offsets fold to constants.
+        for j in range(D - 1):
+            emit_load_phase(
+                A_smem,
+                B_smem,
+                b.smin(b.add(k_lo, b.const_i32(j * block_k)), last_origin),
+                lds_parity=j,
+            )
+
+        c_ring = b.const_i32(D)
+        c_ahead = b.const_i32(D - 1)
+        c_one = b.const_i32(1)
+        loop_args = [("ring", c0)] + list(accs)
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, loop_args, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            ring = iter_vars[0]
+            acc_iter = iter_vars[1:]
+            b.s_wait_tensorcnt(allowed)
+            b.sync_lds_only()
+            emit_load_phase(
+                A_smem,
+                B_smem,
+                b.smin(b.add(k0, b.const_i32(ahead_k)), last_origin),
+                lds_parity=b.mod(b.add(ring, c_ahead), c_ring),
+            )
+            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=ring)
+            b.scf_yield(b.mod(b.add(ring, c_one), c_ring), *new_accs)
+        # The per-tile wait is partial by construction, so the loop ends with
+        # the final iterations' look-ahead fills still in flight -- mover writes
+        # aimed at ring slots inside the A/B pool. Nothing downstream waits on
+        # TENSORcnt: the epilogue's barriers drain LDS and VMEM but not the
+        # mover, and under ``cshuffle`` the smem packer aliases the C staging
+        # tile onto those same bytes (IR liveness sees A/B die at the loop's
+        # last read, which is not when the hardware write lands). Draining here
+        # keeps the ring self-contained, so a late fill can reach neither the
+        # staged C tile nor, under a persistent tile loop, the next tile's
+        # prologue fills. The fills being waited on are the clamped redundant
+        # re-fills no iteration reads, so this costs no real transfer.
+        b.s_wait_tensorcnt(0)
+        _for_results = for_op.results[1:]
+
     def _emit_kloop_prefetch() -> None:
         """Software-pipelined K-loop with DTLA ping-pong.
 
@@ -1963,28 +2547,51 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
           prologue:        DTLA load tile 0 -> half 0
           for k in [0, K-block_k) step block_k:
               parity = (k / block_k) & 1   ; next_parity = parity ^ 1
+              drain architecture-specific async loads ; LDS barrier
               DTLA load tile k+block_k -> half (parity ^ 1)
-              s_waitcnt vmcnt(loads_in_flight_for_next_tile) ; barrier
               MFMA from half parity
               ; no end-barrier — half (parity ^ 1) has its own LDS region
           epilogue:        ; last tile already loaded into the final parity
-              s_waitcnt vmcnt(0) ; barrier
+              drain architecture-specific async loads ; LDS barrier
               MFMA from final parity
 
-        The post-issue ``s_waitcnt vmcnt(N)`` keeps N loads (= next
-        tile's count) in flight while the current tile drains, so the
-        loop's MFMA work overlaps the next tile's HBM transfers.
+        Issuing the next tile after the current tile's drain but before its
+        MFMAs overlaps the next tile's HBM transfer with current-tile compute.
+        gfx1250 tracks these transfers with ASYNCcnt; gfx9 uses VMEM waitcnt.
         """
-        loads_per_tile = _dtl_a_passes + _dtl_b_passes
+        def _drain_prefetch_and_sync() -> None:
+            if spec.trait.tdm:
+                # Only the current tile's two descriptors are outstanding at
+                # this point -- the next tile is issued after the drain -- so a
+                # full TENSORcnt drain still leaves the copy overlapped with
+                # the previous iteration's WMMAs.
+                b.s_wait_tensorcnt(0)
+                b.sync_lds_only()
+            elif arch == "gfx1250":
+                b.s_wait_asynccnt(0)
+                b.sync_lds_only()
+            else:
+                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+                b.s_barrier_bare()
+
+        loads_per_tile = 2 if spec.trait.tdm else (_dtl_a_passes + _dtl_b_passes)
         # vmcnt is 6 bits on gfx950 (max 63). If next-tile loads exceed
         # that, we'd saturate and the prefetch buys nothing extra.
-        if loads_per_tile > 63:
+        if arch != "gfx1250" and loads_per_tile > 63:
             # Fall back to the non-prefetched path; the constant would
             # have to be encoded as 63 either way.
             _emit_kloop_simple()
             return
 
         nonlocal _for_results
+
+        # A deep TDM ring is its own loop shape. It is a separate branch rather
+        # than a generalization of the code below so that depths 1 and 2 -- the
+        # form both tuned shapes currently ship -- keep emitting exactly what
+        # they did before this knob existed.
+        if _tdm_ring:
+            _emit_kloop_tdm_ring()
+            return
 
         # Fully-unrolled fixed-K variant (ROCKE_EXP_UNROLL_K): no scf.for
         # backedge; Python-unroll the K-tiles with static (compile-time) parity
@@ -2002,14 +2609,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 emit_load_phase(
                     A_smem, B_smem, b.const_i32(j * tk), lds_parity=j % nbuf
                 )
-            # Steady state: per tile i, drain (vmcnt(0): buffer_load_lds is
-            # out-of-order, so a partial drain would be incorrect), barrier,
+            # Steady state: per tile i, fully drain the architecture's async
+            # counter (completion may be out of order), synchronize LDS,
             # issue tile i+D's load, then MFMA tile i from ring i%nbuf. With the
             # mandatory full drain, depth>1 keeps no extra loads usefully in
             # flight -- the empirical confirmation of the wsp3 finding.
             for i in range(trip):
-                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-                b.s_barrier_bare()
+                _drain_prefetch_and_sync()
                 nj = i + D
                 if nj < trip:
                     emit_load_phase(
@@ -2037,31 +2643,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             acc_iter = iter_vars[1:]
             next_parity = b.sub(c1_i32, parity)  # 1 - parity (0/1 only)
             k_next = b.add(k0, c_block_k)
-            # Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier
-            # per K-tile (vs the prior WAR+RAW two-barrier form, which halved
-            # the available MFMA-shadow time at 1 WG/CU). The single barrier
-            # serves both hazards because we issue the next-tile write AFTER it:
-            #   * vmcnt(0)  -> the current tile's DTL loads (issued last iter
-            #                  into half(parity)) have landed: RAW-safe to read.
-            #   * lgkmcnt(0)-> the previous iter's ds_reads of half(next_parity)
-            #                  have drained: WAR-safe to overwrite that half.
-            #   * s_barrier -> WG rendezvous so the freshly-loaded current half
-            #                  is visible to every wave before any MFMA reads it.
+            # One drain + LDS synchronization per K-tile serves both hazards:
+            #   * ASYNCcnt/VMEM drain -> current tile has landed (RAW-safe).
+            #   * LDS drain           -> prior reads of next_parity completed
+            #                            (WAR-safe to overwrite).
+            #   * barrier             -> current half is visible to every wave.
             # The async next-tile load is issued AFTER the barrier (cannot race
             # the just-drained reads -> no second barrier needed) but BEFORE the
             # MFMAs (its HBM transfer overlaps the matrix work). The prior
             # structure issued that write BEFORE draining, which both raced and
             # forced the extra barrier this collapses away.
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
+            _drain_prefetch_and_sync()
             emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
             new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
         # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
         final_parity = for_op.results[0]
-        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-        b.s_barrier_bare()
+        _drain_prefetch_and_sync()
         epi_accs = emit_mfma_phase(
             A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
         )
@@ -2097,7 +2696,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_epilogue_cshuffle(
                 b,
                 spec,
-                A_smem,
+                op,
                 _for_results,
                 warp_m_idx,
                 warp_n_idx,
@@ -2132,7 +2731,69 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 fused_epilogue=fused_ep,
             )
 
-    if do_work_cond is None:
+    def _emit_persistent_tile_loop() -> None:
+        """CK Tile's persistent ``operator()``: grid-stride over output tiles.
+
+        The launch grid is ``(persistent_ctas, 1, batch)`` (see
+        :func:`universal_gemm_grid`) rather than one CTA per tile, so a CTA
+        owns a strided subset of the flattened ``M_tiles x N_tiles`` strip::
+
+            for tile_idx in range(block_id_x, num_tiles, persistent_ctas):
+
+        which is the DSL spelling of CK Tile's ``block_id += grid_size``
+        (``universal_gemm_kernel.hpp``, the ``PersistentKernel`` overload).
+        The tile decode matches CK's ``GetOutputTileIndex`` and the launcher's
+        X-fastest order: ``iM = tile_idx / N_tiles``, ``iN = tile_idx %
+        N_tiles``, so a persistent kernel walks tiles in the same sequence the
+        non-persistent one is dispatched in.
+        """
+        nonlocal block_m_off, block_n_off
+
+        n_pid_m = b.div(b.add(M, b.const_i32(block_m - 1)), c_block_m)
+        n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        num_tiles = b.mul(n_pid_m, n_pid_n)
+        loop = b.scf_for(
+            b.block_id_x(),
+            num_tiles,
+            b.const_i32(spec.trait.persistent_ctas),
+            iv_name="tile_idx",
+        )
+        with loop as tile_idx:
+            # The induction variable is CTA-uniform, so pin it (and everything
+            # derived from it) in SGPRs exactly as the non-persistent path
+            # pins the blockIdx-derived origins.
+            ti = b.to_sgpr_u32(tile_idx)
+            if spec.trait.chiplet_swizzle:
+                from ...helpers.grid import chiplet_aware_super_tile_dynamic
+
+                swz = chiplet_aware_super_tile_dynamic(
+                    b,
+                    ti,
+                    num_pid_m=n_pid_m,
+                    num_pid_n=n_pid_n,
+                    wgm=spec.trait.chiplet_wgm,
+                    num_xcds=spec.trait.chiplet_num_xcds,
+                    chunk_size=spec.trait.chiplet_chunk_size,
+                )
+                block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
+                block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
+            else:
+                block_m_off = b.to_sgpr_u32(b.mul(b.div(ti, n_pid_n), c_block_m))
+                block_n_off = b.to_sgpr_u32(b.mul(b.mod(ti, n_pid_n), c_block_n))
+            # Inter-tile LDS guard, the counterpart of CK Tile's
+            # ``s_waitcnt_barrier()`` at the top of its persistent while-body.
+            # A CTA reuses one A/B staging region (and, under the cshuffle
+            # epilogue, the C tile aliased onto it) for every tile it owns.
+            # Neither the K-loop's final ds_read nor the epilogue's last LDS
+            # read is followed by a barrier, so without this the next tile's
+            # global->LDS writes would race a lagging wave still reading the
+            # previous tile's data.
+            b.sync()
+            emit_compute_and_epilogue()
+
+    if _persistent:
+        _emit_persistent_tile_loop()
+    elif do_work_cond is None:
         emit_compute_and_epilogue()
     else:
         with b.scf_if(do_work_cond):
@@ -2257,6 +2918,47 @@ def _emit_mfma_acc_scatter(
                 per_cell(c_m, c_n, acc_h, i)
 
 
+def _emit_wmma_acc_scatter(
+    b: IRBuilder,
+    spec: UniversalGemmSpec,
+    op,
+    lane: Value,
+    accs: Sequence[Value],
+    m_base_off: Value,
+    n_base_off: Value,
+    c_per_lane: int,
+    storage_dtype: Type,
+    per_cell,
+) -> None:
+    """WMMA sibling of :func:`_emit_mfma_acc_scatter`.
+
+    The wave32 accumulator distributes a warp tile across lanes differently
+    from MFMA, so each slot's ``(row, col)`` comes from the op's ``c_layout()``
+    map instead of lane math. Sharing the traversal keeps the default (global
+    store) and cshuffle (LDS staging) epilogues on one copy of it; the caller's
+    ``per_cell(c_m, c_n, acc_h, i)`` owns the write, and the base offsets say
+    whether the coordinates are block-absolute or warp-relative.
+    """
+    t = spec.tile
+    c_map = op.c_layout()
+    flat = 0
+    for mi in range(t.mfmas_per_warp_m):
+        atom_m = b.add(m_base_off, b.const_i32(mi * t.warp_tile_m))
+        for ni in range(t.mfmas_per_warp_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n = b.add(n_base_off, b.const_i32(ni * t.warp_tile_n))
+            acc_h = b.vec_cast_f32_to(acc, storage_dtype)
+            for i in range(c_per_lane):
+                row_in_atom, col_in_atom = c_map.coord(b, lane, i)
+                per_cell(
+                    b.add(atom_m, row_in_atom),
+                    b.add(atom_n, col_in_atom),
+                    acc_h,
+                    i,
+                )
+
+
 def _emit_epilogue_default(
     b: IRBuilder,
     spec: UniversalGemmSpec,
@@ -2334,45 +3036,10 @@ def _emit_epilogue_default(
         with b.scf_if(in_bounds):
             b.global_store(C, c_off, h, align=2)
 
-    # ---- WMMA (RDNA) accumulator scatter: fully MMA-contract driven. ----
-    # The WMMA accumulator distributes the M x N tile across wave32 lanes
-    # differently from MFMA, so we ask the op's accumulator layout map for the
-    # (row, col) of every per-lane slot rather than hard-coding the lane math.
-    # One slot -> one f16 store. (The supported WMMA subset is the single
-    # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
-    if op.family == "wmma":
-        c_map = op.c_layout()
-        block_warp_m_off = b.add(block_m_off, warp_m_off)
-        block_warp_n_off = b.add(block_n_off, warp_n_off)
-        flat = 0
-        for mi in range(mfmas_m):
-            atom_m = b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m))
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                atom_n = b.add(block_warp_n_off, b.const_i32(ni * t.warp_tile_n))
-                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
-                for i in range(c_per_lane):
-                    row_in_atom, col_in_atom = c_map.coord(b, lane, i)
-                    c_m = b.add(atom_m, row_in_atom)
-                    c_n = b.add(atom_n, col_in_atom)
-                    c_off = b.add(b.mul(c_m, N), c_n)
-                    if batch_off_c is not None:
-                        c_off = b.add(batch_off_c, c_off)
-                    h = b.vec_extract(acc_h, i)
-                    if fused_epilogue is not None:
-                        h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
-                    _store_masked(c_m, c_n, c_off, h)
-        return
-
-    # Compile-time invariants that do not depend on (mi, ni, i).
-    # Hoisting them avoids re-emitting the same add chain per
-    # accumulator slot; the IR's constant folder collapses them
-    # downstream, but building them once keeps the IR small and the
-    # lowered LLVM readable. The accumulator -> (row, col) scatter (16x16
-    # and 32x32 layouts, with the per-mi base hoist + the single-constant
-    # per-slot ramp) lives in :func:`_emit_mfma_acc_scatter` so the default
-    # and cshuffle epilogues share one copy of the MFMA output-layout math.
+    # Compile-time invariants that do not depend on (mi, ni, i). Hoisting them
+    # avoids re-emitting the same add chain per accumulator slot; the IR's
+    # constant folder collapses them downstream, but building them once keeps
+    # the IR small and the lowered LLVM readable.
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
@@ -2384,6 +3051,24 @@ def _emit_epilogue_default(
         if fused_epilogue is not None:
             h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
         _store_masked(c_m, c_n, c_off, h)
+
+    # One slot -> one store on WMMA: a lane's slots share a column, so they
+    # cannot coalesce here. ``epilogue="cshuffle"`` is the way out -- it stages
+    # the tile through LDS and re-reads it row-major to recover a wide store.
+    if op.family == "wmma":
+        _emit_wmma_acc_scatter(
+            b,
+            spec,
+            op,
+            lane,
+            accs,
+            block_warp_m_off,
+            block_warp_n_off,
+            c_per_lane,
+            storage_dtype,
+            _store_cell,
+        )
+        return
 
     _emit_mfma_acc_scatter(
         b,
@@ -2492,7 +3177,7 @@ def _emit_epilogue_split_k(
 def _emit_epilogue_cshuffle(
     b: IRBuilder,
     spec: UniversalGemmSpec,
-    _smem_unused: Value,  # placeholder for future reuse
+    op,
     accs: Sequence[Value],
     warp_m_idx: Value,
     warp_n_idx: Value,
@@ -2530,6 +3215,14 @@ def _emit_epilogue_cshuffle(
     The MFMA->LDS index math matches what we used in the default
     epilogue (which keeps the implementation honest: same lane->output
     mapping, just an extra LDS pass).
+
+    Only step 1+2 is ISA-dependent, routing through
+    :func:`_emit_mfma_acc_scatter` or :func:`_emit_wmma_acc_scatter`; steps 3
+    and 4 read the staging tile row-major and are shared. That is where the
+    win on WMMA comes from: its wave32 accumulator holds a lane's
+    ``c_per_lane`` slots in one *column* (``N`` elements apart in C), so a
+    direct store costs one scalar store per slot, while the LDS round-trip
+    recovers contiguous ``store_vec``-wide stores.
     """
     t = spec.tile
     storage_dtype = _storage_dtype(spec)
@@ -2595,23 +3288,37 @@ def _emit_epilogue_cshuffle(
         h = b.vec_extract(acc_h, i)
         b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 
-    # Same MFMA accumulator -> (row, col) layout as the default epilogue, but
-    # the base offsets are warp-relative (the block offset is applied at the
-    # wide global store in step 4) and each cell writes to the LDS staging
-    # tile instead of global. The shared scatter keeps the 16x16 / 32x32 row
-    # math + hoisting in one place.
-    _emit_mfma_acc_scatter(
-        b,
-        spec,
-        lane,
-        accs,
-        warp_m_off,
-        warp_n_off,
-        c_per_lane,
-        storage_dtype,
-        _smem_cell,
-        n_base_first=True,
-    )
+    # Same accumulator -> (row, col) scatter the default epilogue uses, but the
+    # base offsets are warp-relative (the block offset is applied at the wide
+    # global store in step 4) and each cell writes the LDS staging tile instead
+    # of global. That tile covers the whole block tile, so the write needs no
+    # bounds check.
+    if op.family == "wmma":
+        _emit_wmma_acc_scatter(
+            b,
+            spec,
+            op,
+            lane,
+            accs,
+            warp_m_off,
+            warp_n_off,
+            c_per_lane,
+            storage_dtype,
+            _smem_cell,
+        )
+    else:
+        _emit_mfma_acc_scatter(
+            b,
+            spec,
+            lane,
+            accs,
+            warp_m_off,
+            warp_n_off,
+            c_per_lane,
+            storage_dtype,
+            _smem_cell,
+            n_base_first=True,
+        )
 
     # ---- step 3: barrier. ----
     b.sync()
@@ -2647,6 +3354,42 @@ def _emit_epilogue_cshuffle(
         col_v = b.mod(vec_idx, c_tile_n_div_vec)
         col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
         return row, col_v, col
+
+    # EXPERIMENT (ROCKE_CSHUFFLE_STORE_BATCH): the LDS->global hand-off is a
+    # pure copy, so issuing a group of LDS reads before their global stores
+    # lets them pipeline instead of paying one full LDS round trip per store.
+    # Only the unguarded/unfused vector path can batch: the guarded paths need
+    # their per-element control flow inline. batch == 1 reproduces the
+    # load-use pairing verbatim, so every other config stays byte-identical.
+    import os
+
+    _batch = int(os.environ.get("ROCKE_CSHUFFLE_STORE_BATCH", "1"))
+    if (
+        _batch > 1
+        and store_vec > 1
+        and not pad_m
+        and not pad_n
+        and fused_epilogue is None
+    ):
+        for start in range(0, vecs_per_thread, _batch):
+            group = range(start, min(start + _batch, vecs_per_thread))
+            offs = []
+            for e in group:
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                row, _col_v, col = _vec_rc(vec_idx)
+                c_off = b.add(
+                    b.mul(b.add(block_m_off, row), N), b.add(block_n_off, col)
+                )
+                if batch_off_c is not None:
+                    c_off = b.add(batch_off_c, c_off)
+                offs.append((row, col, c_off))
+            hvs = [
+                _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
+                for row, col, _ in offs
+            ]
+            for (_, _, c_off), hv in zip(offs, hvs):
+                b.global_store_vN(C, c_off, hv, store_vec)
+        return
 
     for e in range(vecs_per_thread):
         vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
@@ -2761,6 +3504,9 @@ def all_dispatcher_configs(
     epilogue: Sequence[Epilogue] = ("default", "cshuffle"),
     pad: Sequence[bool] = (False,),
     persistent: Sequence[bool] = (False,),
+    # Only consulted for the ``persistent=True`` entries; a persistent spec
+    # with no CTA count is rejected by ``is_valid_spec`` and never yielded.
+    persistent_ctas: int = 0,
     wave_size: int = 64,
     name_prefix: str = "rocke_universal",
     arch: str = "gfx950",
@@ -2805,6 +3551,9 @@ def all_dispatcher_configs(
                                                             pad_n=p,
                                                             pad_k=p,
                                                             persistent=pers,
+                                                            persistent_ctas=(
+                                                                persistent_ctas
+                                                            ),
                                                         ),
                                                         wave_size=wave_size,
                                                     )

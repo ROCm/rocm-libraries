@@ -34,6 +34,7 @@
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/tdm.h"
 
 /* File-local integer formatter (used for arena-stable acc names). Defined at
  * the bottom of this TU; forward-declared here so the driver can call it. */
@@ -1171,8 +1172,16 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.batch_off_c = ctx.c0;
     }
 
-    /* ---- per-CTA tile origins (SGPR-pinned) -- */
-    if(spec->trait.chiplet_swizzle)
+    /* ---- per-CTA tile origins (SGPR-pinned) --
+     * trait.persistent moves the whole assignment inside a grid-stride loop, so
+     * the origin is recomputed per tile rather than once per CTA; it is emitted
+     * at the dispatch site at the end of this function. */
+    if(spec->trait.persistent)
+    {
+        ctx.block_m_off = NULL;
+        ctx.block_n_off = NULL;
+    }
+    else if(spec->trait.chiplet_swizzle)
     {
         rocke_value_t* n_pid_m = rocke_b_div(
             b, rocke_b_add(b, ctx.M, rocke_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
@@ -1205,9 +1214,11 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_x(b), ctx.c_block_n));
     }
 
-    /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    ctx.prefetch = spec->trait.dtl_prefetch;
-    if(ctx.prefetch && !spec->trait.direct_to_lds)
+    /* ---- AB LDS double-buffer plan (_ab_lds_plan) --
+     * TDM at depth >= 2 reuses the DTL ping-pong: the load phase already takes
+     * a parity, and only the drain differs (TENSORcnt instead of ASYNCcnt). */
+    ctx.prefetch = spec->trait.dtl_prefetch || rocke_gemm_tdm_pipelined(&spec->trait);
+    if(spec->trait.dtl_prefetch && !spec->trait.direct_to_lds)
     {
         /* "dtl_prefetch requires direct_to_lds=True" -- ValueError path. */
         return NULL;
@@ -1216,11 +1227,12 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure host
          * arithmetic, ported inline to mirror gemm_universal.py:_ab_lds_plan:
          *
-         *   ab_single   = (tile_m*tile_k + tile_n*tile_k) * 2
+         *   lds_k       = tile_k + (lds_k_pad unless gfx9 direct_to_lds)
+         *   ab_single   = (tile_m*lds_k + tile_n*lds_k) * 2
          *   db_fits_2wg = (2*ab_single)*2 <= lds_capacity_bytes
          *   db          = compv4 && epilogue!=cshuffle && !direct_to_lds
          *                 && db_fits_2wg
-         *   two_buf     = dtl_prefetch || db
+         *   two_buf     = dtl_prefetch || db || _tdm_pipelined(trait)
          *
          * The previous parity stub omitted the db_fits_2wg LDS-capacity gate,
          * so wide compv4/default tiles whose doubled AB LDS overflows the
@@ -1228,7 +1240,12 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
          * smem [512x64] + a fully-unrolled prefetch prologue that Python never
          * emits. Apply the same arithmetic the validity gate and the load-path
          * helper (instance_gemm_build_load.c) use. */
-        long ab_single = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k) * 2;
+        const int plan_pad
+            = (spec->trait.direct_to_lds && (arch == NULL || strcmp(arch, "gfx1250") != 0))
+                  ? 0
+                  : spec->trait.lds_k_pad;
+        const long plan_lds_k = (long)t->tile_k + plan_pad;
+        long ab_single = ((long)t->tile_m * plan_lds_k + (long)t->tile_n * plan_lds_k) * 2;
         bool db_fits_2wg = false;
         bool db = false;
         bool two_buf = false;
@@ -1240,13 +1257,29 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
              && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
              && !spec->trait.direct_to_lds && db_fits_2wg;
-        two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                  || rocke_gemm_tdm_pipelined(&spec->trait);
         ctx.db = db;
         ctx.two_buf = two_buf;
     }
-    ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
-    ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
-    ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
+    /* Ring size; must equal what the validity gate's _ab_lds_buffers charged.
+     * A deep TDM ring (tdm_depth >= 3) allocates one buffer per stage. */
+    ctx.tdm_ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    {
+        const int nbuf = ctx.tdm_ring ? ctx.tdm_ring : (ctx.two_buf ? 2 : 1);
+        ctx.A_LDS_M = nbuf * ctx.block_m;
+        ctx.B_LDS_N = nbuf * ctx.block_n;
+    }
+    /* Padding applies on the VGPR-staged path and on gfx1250 direct-to-LDS
+     * (per-lane addressed, so the padded stride is free). The gfx9
+     * buffer_load_lds family writes wave-contiguous bytes from one
+     * wave-uniform base and has nowhere to put a per-row gap. */
+    {
+        const int dtl_lane_addressed = (arch != NULL && strcmp(arch, "gfx1250") == 0);
+        ctx.lds_pad = (spec->trait.direct_to_lds && !dtl_lane_addressed)
+                          ? 0
+                          : spec->trait.lds_k_pad;
+    }
     ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
         int a_shape[2] = {ctx.A_LDS_M, ctx.lds_k};
@@ -1371,8 +1404,11 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.dtl = spec->trait.direct_to_lds;
     if(ctx.dtl)
     {
-        ctx.dtl_dwords = 4;
-        ctx.dtl_halves = ctx.dtl_dwords * 2;
+        /* Shared with the rocke_gemm_universal_is_valid_spec gate that rejects
+         * tiles which do not fill whole passes; the loops below are
+         * unpredicated. */
+        ctx.dtl_dwords = ROCKE_GEMM_DTL_DWORDS_PER_LANE;
+        ctx.dtl_halves = ROCKE_GEMM_DTL_ELEMS_PER_LANE;
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
         if((ctx.block_k % ctx.dtl_halves) != 0)
         {
@@ -1397,6 +1433,39 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
     }
 
+    /* ---- TDM plumbing --
+     * Unlike DTL there is no per-lane chunk decomposition: one descriptor moves
+     * the whole [block_m, block_k] (resp. [block_n, block_k]) tile, so all that
+     * is precomputed here are the two LDS bases, the static padding encoding,
+     * and the per-ring-step byte strides. */
+    if(spec->trait.tdm)
+    {
+        char why[ROCKE_ERR_MSG_CAP];
+        why[0] = '\0';
+        ctx.tdm_elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
+        if(rocke_tdm_padding_for_tile(ctx.tdm_elem_bytes,
+                                      ctx.block_k,
+                                      spec->trait.lds_k_pad,
+                                      &ctx.tdm_pad_enable,
+                                      &ctx.tdm_pad_interval,
+                                      &ctx.tdm_pad_amount,
+                                      why,
+                                      sizeof(why))
+           != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", why);
+            return NULL;
+        }
+        ctx.tdm_a_lds_base = rocke_b_smem_addr_of(b, ctx.A_smem);
+        ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
+        ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_b_buf_bytes = ctx.block_n * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_waves = t->warp_m * t->warp_n * t->warp_k;
+        ctx.tdm_wave_id = (ctx.tdm_waves > 1)
+                              ? rocke_b_readfirstlane(b, rocke_b_div(b, ctx.tid, ctx.c_wave))
+                              : rocke_b_const_i32(b, 0);
+    }
+
     /* ---- active-tile gate (batched && active_tile_skip) -- */
     ctx.do_work_cond = NULL;
     if(spec->batched && spec->trait.active_tile_skip)
@@ -1411,8 +1480,67 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     /* ---- K-loop result accumulators init -- */
     ctx.num_for_results = 0;
 
-    /* ---- dispatch: emit_compute_and_epilogue, optionally under the gate -- */
-    if(ctx.do_work_cond == NULL)
+    /* ---- dispatch: the persistent tile loop, or emit_compute_and_epilogue
+     * directly / under the active-tile gate --
+     *
+     * Persistent mirrors CK Tile's PersistentKernel operator(): the grid is
+     * (persistent_ctas, 1, batch) rather than one CTA per tile, and each CTA
+     * grid-strides the flattened M_tiles x N_tiles strip. The tile decode
+     * matches CK's GetOutputTileIndex and the launcher's X-fastest order:
+     * iM = tile_idx / N_tiles, iN = tile_idx % N_tiles. */
+    if(spec->trait.persistent)
+    {
+        rocke_value_t* n_pid_m = rocke_b_div(
+            b, rocke_b_add(b, ctx.M, rocke_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
+        rocke_value_t* n_pid_n = rocke_b_div(
+            b, rocke_b_add(b, ctx.N, rocke_b_const_i32(b, ctx.block_n - 1)), ctx.c_block_n);
+        rocke_value_t* num_tiles = rocke_b_mul(b, n_pid_m, n_pid_n);
+        /* Python evaluates the scf_for arguments left to right, so the
+         * blockIdx read is emitted before the step constant. C's argument
+         * evaluation order is unspecified; pin it with temporaries. */
+        rocke_value_t* tile_lo = rocke_b_block_id_x(b);
+        rocke_value_t* tile_step = rocke_b_const_i32(b, spec->trait.persistent_ctas);
+        rocke_for_t loop = rocke_b_scf_for(b, tile_lo, num_tiles, tile_step, "tile_idx");
+        rocke_b_region_enter(b, loop.body);
+        {
+            /* The induction variable is CTA-uniform, so pin it (and everything
+             * derived from it) in SGPRs exactly as the non-persistent path pins
+             * the blockIdx-derived origins. */
+            rocke_value_t* ti = rocke_b_to_sgpr_u32(b, loop.iv);
+            if(spec->trait.chiplet_swizzle)
+            {
+                rocke_super_tile_swizzle_result_t swz
+                    = rocke_chiplet_aware_super_tile_dynamic(b,
+                                                             ti,
+                                                             n_pid_m,
+                                                             n_pid_n,
+                                                             spec->trait.chiplet_wgm,
+                                                             spec->trait.chiplet_num_xcds,
+                                                             spec->trait.chiplet_chunk_size);
+                ctx.block_m_off
+                    = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.row, ctx.c_block_m));
+                ctx.block_n_off
+                    = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.col, ctx.c_block_n));
+            }
+            else
+            {
+                ctx.block_m_off = rocke_b_to_sgpr_u32(
+                    b, rocke_b_mul(b, rocke_b_div(b, ti, n_pid_n), ctx.c_block_m));
+                ctx.block_n_off = rocke_b_to_sgpr_u32(
+                    b, rocke_b_mul(b, rocke_b_mod(b, ti, n_pid_n), ctx.c_block_n));
+            }
+            /* Inter-tile LDS guard, the counterpart of CK Tile's
+             * s_waitcnt_barrier() at the top of its persistent while-body. A CTA
+             * reuses one A/B staging region (and, under the cshuffle epilogue,
+             * the C tile aliased onto it) for every tile it owns, and neither
+             * the K-loop's final ds_read nor the epilogue's last LDS read is
+             * followed by a barrier. */
+            rocke_b_sync(b);
+            rocke_gemm_emit_compute_and_epilogue(&ctx);
+        }
+        rocke_b_region_leave(b);
+    }
+    else if(ctx.do_work_cond == NULL)
     {
         rocke_gemm_emit_compute_and_epilogue(&ctx);
     }

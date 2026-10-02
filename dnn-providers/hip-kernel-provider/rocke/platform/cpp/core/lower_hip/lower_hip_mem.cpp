@@ -793,6 +793,25 @@ static rocke_status_t _op_memref_cooperative_global_store(rocke_h_lowerer_t* lw,
 
 /* ========================= global pointer arith ========================= */
 
+/* Python _op_tile_global_addr_of */
+static rocke_status_t _op_tile_global_addr_of(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 2 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.global_addr_of: bad operand/result count");
+    }
+    rocke_h_emitf(lw,
+                  "int64_t %s = (int64_t)(&%s[%s]);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]));
+    return lw->status;
+}
+
 /* Python _op_tile_global_ptr_add */
 static rocke_status_t _op_tile_global_ptr_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -1504,6 +1523,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},
+           {ROCKE_OP_TILE_GLOBAL_ADDR_OF, _op_tile_global_addr_of},
            {ROCKE_OP_TILE_BUFFER_RSRC, _op_tile_buffer_rsrc},
            /* buffer load/store */
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},

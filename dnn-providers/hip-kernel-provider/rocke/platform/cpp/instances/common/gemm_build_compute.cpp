@@ -10,6 +10,7 @@
  *   - _emit_kloop_db             (rocke_gemm_emit_kloop_db)
  *   - _emit_kloop_simple         (rocke_gemm_emit_kloop_simple)
  *   - _emit_kloop_prefetch       (rocke_gemm_emit_kloop_prefetch)
+ *   - _emit_kloop_tdm_ring       (rocke_gemm_emit_kloop_tdm_ring)
  *
  * These map to the Python closures of the same names (gemm_universal.py
  * ~1466-1782). Every other closure/helper is a peer TU reached via
@@ -71,7 +72,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
 
     if(ctx->is_wmma)
     {
-        rocke_gemm_emit_wmma_phase(ctx, A_src, B_src, iter_vars, num_iter_vars, out_accs);
+        rocke_gemm_emit_wmma_phase(
+            ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs);
         return;
     }
 
@@ -325,7 +327,23 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
         /* Single-buffer load-then-compute pipeline. parity is compile-time 0
          * (Python passes no lds_parity -> default 0). */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, for_op.iv, 0, NULL);
-        rocke_b_sync(b);
+        if(ctx->spec->trait.tdm)
+        {
+            /* TENSORcnt ticks once per descriptor, so a full drain is 0
+             * regardless of tile shape (unlike ASYNCcnt, which counts
+             * instructions and would need passes_a + passes_b). */
+            rocke_b_s_wait_tensorcnt(b, 0);
+            rocke_b_sync_lds_only(b);
+        }
+        else if(ctx->dtl && strcmp(ctx->arch, "gfx1250") == 0)
+        {
+            rocke_b_s_wait_asynccnt(b, 0);
+            rocke_b_sync_lds_only(b);
+        }
+        else
+        {
+            rocke_b_sync(b);
+        }
 
         rocke_gemm_emit_mfma_phase(ctx,
                                    ctx->A_smem,
@@ -350,6 +368,140 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
  *  _emit_kloop_prefetch: DTLA ping-pong software-pipelined K-loop. Falls
  *  back to _simple when loads_per_tile > 63 (vmcnt is 6 bits on gfx950).
  * ===================================================================== */
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
+{
+    if(ctx->spec->trait.tdm)
+    {
+        /* Only the current tile's two descriptors are outstanding at this
+         * point -- the next tile is issued after the drain -- so a full
+         * TENSORcnt drain still leaves the copy overlapped with the previous
+         * iteration's WMMAs. */
+        rocke_b_s_wait_tensorcnt(ctx->b, 0);
+        rocke_b_sync_lds_only(ctx->b);
+    }
+    else if(strcmp(ctx->arch, "gfx1250") == 0)
+    {
+        rocke_b_s_wait_asynccnt(ctx->b, 0);
+        rocke_b_sync_lds_only(ctx->b);
+    }
+    else
+    {
+        rocke_b_s_waitcnt(ctx->b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+        rocke_b_s_barrier_bare(ctx->b);
+    }
+}
+
+/* ===================================================================== *
+ *  _emit_kloop_tdm_ring: TDM K-loop over a D = tdm_depth >= 3 buffer LDS
+ *  ring with a partial wait.
+ *
+ *      prologue:  issue tiles 0 .. D-2      -> ring slots 0 .. D-2
+ *      for tile i in [0, trip):
+ *          s_wait_tensorcnt(D-2 sets)       ; the oldest fill has landed
+ *          LDS barrier                      ; and is visible workgroup-wide
+ *          issue tile i+D-1                 -> ring slot (i+D-1) % D
+ *          WMMA tile i                      <- ring slot i % D
+ *
+ *  The wait count is a constant because TENSORcnt retires in order. The
+ *  look-ahead origin is clamped to the last in-bounds tile so every fill is a
+ *  real transfer that ticks TENSORcnt; the redundant re-fill lands in a slot no
+ *  iteration reads. The slot written at tile i is the slot read at tile i-1,
+ *  which the barrier at the top of tile i separates.
+ * ===================================================================== */
+void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int D = ctx->spec->trait.tdm_depth;
+    /* Descriptor sets per tile *per issuing wave*. Above one wave, wave 0
+     * issues A and wave 1 issues B, so each issuing wave sees one descriptor
+     * per tile rather than two; waiting on two would wait a tile too shallow. */
+    const int per_tile = (ctx->tdm_waves > 1) ? 1 : 2;
+    const int allowed = (D - 2) * per_tile;
+    const int ahead_k = (D - 1) * ctx->block_k;
+    /* Origin of the loop's last tile, block_k-aligned from k_lo. A ragged K
+     * makes k_upper - block_k misaligned, which would load the last tile from
+     * the wrong K offset. */
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
+    rocke_value_t* last_tile
+        = rocke_b_div(b, rocke_b_sub(b, k_span, c_one_k), ctx->c_block_k);
+    rocke_value_t* last_origin
+        = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
+    rocke_value_t* c_ring;
+    rocke_value_t* c_ahead;
+    rocke_value_t* c_one;
+    rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
+    rocke_for_t for_op;
+    int i;
+
+    /* Prologue: fill ring slots 0 .. D-2. Static parities, so these LDS
+     * offsets fold to constants. */
+    for(int j = 0; j < D - 1; ++j)
+    {
+        rocke_value_t* k_off = rocke_b_smin(
+            b, rocke_b_add(b, ctx->k_lo, rocke_b_const_i32(b, j * ctx->block_k)), last_origin);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_off, j, NULL);
+    }
+
+    c_ring = rocke_b_const_i32(b, D);
+    c_ahead = rocke_b_const_i32(b, D - 1);
+    c_one = rocke_b_const_i32(b, 1);
+    loop_args[0].name = "ring";
+    loop_args[0].init = ctx->c0;
+    for(i = 0; i < ctx->num_accs; ++i)
+    {
+        loop_args[1 + i].name = ctx->acc_names[i];
+        loop_args[1 + i].init = ctx->acc_inits[i];
+    }
+
+    for_op = rocke_b_scf_for_iter(b,
+                                  ctx->k_lo,
+                                  ctx->k_upper,
+                                  ctx->c_block_k,
+                                  loop_args,
+                                  1 + ctx->num_accs,
+                                  "k0",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* ring = for_op.iter_vars[0];
+        rocke_value_t* const* acc_iter = &for_op.iter_vars[1];
+        int num_acc_iter = for_op.num_iter_vars - 1;
+        rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* k_ahead;
+        rocke_value_t* slot_ahead;
+
+        rocke_b_s_wait_tensorcnt(b, allowed);
+        rocke_b_sync_lds_only(b);
+        k_ahead = rocke_b_smin(
+            b, rocke_b_add(b, for_op.iv, rocke_b_const_i32(b, ahead_k)), last_origin);
+        slot_ahead = rocke_b_mod(b, rocke_b_add(b, ring, c_ahead), c_ring);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_ahead, 0, slot_ahead);
+        rocke_gemm_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, ring, new_accs);
+
+        yield_vals[0] = rocke_b_mod(b, rocke_b_add(b, ring, c_one), c_ring);
+        for(i = 0; i < num_acc_iter; ++i)
+            yield_vals[1 + i] = new_accs[i];
+        rocke_b_scf_yield(b, yield_vals, 1 + num_acc_iter);
+    }
+    rocke_b_region_leave(b);
+
+    /* The per-tile wait is partial, so the loop ends with the final
+     * look-ahead fills still in flight -- mover writes aimed at ring slots in
+     * the A/B pool, which the cshuffle C tile may alias and a persistent tile
+     * loop's next prologue reuses. Nothing downstream waits on TENSORcnt, so
+     * drain here to keep the ring self-contained. */
+    rocke_b_s_wait_tensorcnt(b, 0);
+
+    for(i = 0; i < for_op.op->num_results - 1; ++i)
+        ctx->for_results[i] = for_op.op->results[1 + i];
+    ctx->num_for_results = for_op.op->num_results - 1;
+}
+
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -361,10 +513,19 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
     rocke_for_t for_op;
     int i;
 
-    loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
-    if(loads_per_tile > 63)
+    loads_per_tile = ctx->spec->trait.tdm ? 2 : (ctx->dtl_a_passes + ctx->dtl_b_passes);
+    if(strcmp(ctx->arch, "gfx1250") != 0 && loads_per_tile > 63)
     {
         rocke_gemm_emit_kloop_simple(ctx);
+        return;
+    }
+
+    /* A deep TDM ring is its own loop shape. It is a separate branch rather
+     * than a generalization of the code below so that depths 1 and 2 keep
+     * emitting exactly what they did before the ring existed. */
+    if(ctx->tdm_ring)
+    {
+        rocke_gemm_emit_kloop_tdm_ring(ctx);
         return;
     }
 
@@ -403,9 +564,8 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier. */
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        /* Drain the current tile and rendezvous before reusing the other half. */
+        rocke_gemm_drain_prefetch_and_sync(ctx);
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
@@ -424,8 +584,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         int num_tail = for_op.op->num_results - 1;
         rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
 
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        rocke_gemm_drain_prefetch_and_sync(ctx);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 

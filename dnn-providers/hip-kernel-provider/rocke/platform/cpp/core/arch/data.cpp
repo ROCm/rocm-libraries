@@ -1858,7 +1858,7 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
  *
  * Field order of rocke_arch_target_t:
  *   gfx, family, target_family, wave_size, lds_capacity_bytes, vmcnt_bits,
- *   mma{ops,num_ops}, memory{has_async_lds,has_ds_read_tr,buffer_load_max_dwords},
+ *   mma{ops,num_ops}, memory{has_async_lds,has_ds_read_tr,buffer_load_max_dwords,has_tdm},
  *   limits{max_threads_per_block,vgprs,agprs,sgprs}
  */
 
@@ -1872,7 +1872,7 @@ static const rocke_arch_target_t k_target_gfx90a = {
     65536,
     4,
     {k_mma_gfx90a, K_NUM(k_mma_gfx90a)},
-    {false, false, 4},
+    {false, false, 4, false},
     {1024, 512, 256, 102},
 };
 
@@ -1884,7 +1884,7 @@ static const rocke_arch_target_t k_target_gfx942 = {
     65536,
     4,
     {k_mma_gfx942, K_NUM(k_mma_gfx942)},
-    {true, false, 4},
+    {true, false, 4, false},
     {1024, 512, 256, 102},
 };
 
@@ -1896,7 +1896,7 @@ static const rocke_arch_target_t k_target_gfx950 = {
     163840,
     6,
     {k_mma_gfx950, K_NUM(k_mma_gfx950)},
-    {true, true, 4},
+    {true, true, 4, false},
     {1024, 512, 256, 102},
 };
 
@@ -1908,7 +1908,7 @@ static const rocke_arch_target_t k_target_gfx1151 = {
     65536,
     6,
     {k_mma_gfx1151, K_NUM(k_mma_gfx1151)},
-    {false, false, 4},
+    {false, false, 4, false},
     {1024, 256, 0, 106},
 };
 
@@ -1920,7 +1920,7 @@ static const rocke_arch_target_t k_target_gfx1201 = {
     65536,
     6,
     {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
-    {false, false, 4},
+    {false, false, 4, false},
     {1024, 256, 0, 106},
 };
 
@@ -1929,11 +1929,11 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     "cdna",
     "gfx12_cdna",
     32,
-    163840,
+    327680,
     6,
     {k_mma_gfx1250, K_NUM(k_mma_gfx1250)},
-    {false, false, 4},
-    {1024, 256, 0, 106},
+    {false, false, 4, true},
+    {1024, 1024, 0, 106},
 };
 
 static const rocke_arch_target_t k_target_gfx11_generic = {
@@ -1944,7 +1944,7 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
     65536,
     6,
     {k_mma_gfx11_generic, K_NUM(k_mma_gfx11_generic)},
-    {false, false, 4},
+    {false, false, 4, false},
     {1024, 256, 0, 106},
 };
 

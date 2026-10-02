@@ -62,7 +62,7 @@ class TestGemmSupportPredicates(unittest.TestCase):
         self.assertIn("WMMA path supports only the 'mem' pipeline", why)
         ok, why = gemm_config_supported(replace(q, epilogue="cshuffle"))
         self.assertFalse(ok)
-        self.assertIn("WMMA path supports only the 'default' epilogue", why)
+        self.assertIn("only on gfx1250", why)
 
     def test_request_shape_support_respects_padding_flags(self):
         result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))

@@ -164,11 +164,11 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* block_n_off; /* col tile base                             */
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    bool prefetch; /* _prefetch = trait.dtl_prefetch            */
+    bool prefetch; /* _prefetch = dtl_prefetch || _tdm_pipelined */
     bool db; /* _db   (compv4 software-pipelined DB)       */
     bool two_buf; /* _two_buf = prefetch || db                 */
-    int A_LDS_M; /* _A_LDS_M = (two_buf?2:1)*block_m          */
-    int B_LDS_N; /* _B_LDS_N = (two_buf?2:1)*block_n          */
+    int A_LDS_M; /* _A_LDS_M = _nbuf * block_m                */
+    int B_LDS_N; /* _B_LDS_N = _nbuf * block_n                */
     int lds_pad; /* _lds_pad (non-DTL lds_k_pad else 0)       */
     int lds_k; /* _lds_k = block_k + lds_pad                */
     rocke_value_t* A_smem; /* smem_alloc A_smem                         */
@@ -229,6 +229,19 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* dtl_c_halves_per_chunk; /* const_i32(dtl_halves)        */
     rocke_value_t* dtl_c_block_size; /* const_i32(block_size)        */
 
+    /* ---- TDM plumbing (tdm only) -- */
+    int tdm_ring; /* _tdm_ring = _tdm_ring_depth(trait)        */
+    int tdm_elem_bytes; /* _dtype_bytes(dtype_a)                     */
+    int tdm_pad_enable; /* tdm_padding_for_tile(...)                 */
+    int tdm_pad_interval;
+    int tdm_pad_amount;
+    rocke_value_t* tdm_a_lds_base; /* smem_addr_of(A_smem)              */
+    rocke_value_t* tdm_b_lds_base; /* smem_addr_of(B_smem)              */
+    int tdm_a_buf_bytes; /* block_m * lds_k * elem_bytes              */
+    int tdm_b_buf_bytes; /* block_n * lds_k * elem_bytes              */
+    int tdm_waves; /* warp_m * warp_n * warp_k                  */
+    rocke_value_t* tdm_wave_id; /* readfirstlane(tid / wave) or const 0 */
+
     /* ---- active-tile gate (batched && active_tile_skip) -- */
     rocke_value_t* do_work_cond; /* NULL when the gate is off        */
 
@@ -281,6 +294,17 @@ rocke_value_t* rocke_gemm_emit_mfma(rocke_ir_builder_t* b,
 /* _emit_zero_acc(b, spec): zero_vec_f32 sized from spec geometry (MFMA-only). */
 rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
                                         const rocke_gemm_universal_spec_t* spec);
+
+/* _dtype_bytes(dtype): storage width of an operand dtype in bytes; 0 for an
+ * unknown dtype (Python raises ValueError). */
+int rocke_gemm_dtype_bytes(const char* dtype);
+
+/* _tdm_pipelined(trait): whether the TDM path ping-pongs (tdm && depth >= 2). */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait);
+
+/* _tdm_ring_depth(trait): the ring size when TDM needs the modular ring
+ * (tdm && depth >= 3), else 0. Depths 1 and 2 keep their original emission. */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait);
 
 /* _choose_load_vec(spec) -> width. Thin adapter over rocke_choose_load_vec. */
 int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec);
@@ -345,6 +369,8 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* B_src,
                                 rocke_value_t* const* iter_vars,
                                 int num_iter_vars,
+                                int parity_imm,
+                                rocke_value_t* parity_v,
                                 rocke_value_t** out_accs);
 
 /* emit_mfma_phase(ctx, A_src, B_src, iter_vars[n], parity_imm, parity_v,
@@ -374,6 +400,10 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx);
 /* _emit_kloop_prefetch(ctx): DTLA ping-pong software-pipelined K-loop (falls
  * back to _simple when loads_per_tile > 63). */
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx);
+
+/* _emit_kloop_tdm_ring(ctx): TDM K-loop over a tdm_depth-buffer LDS ring
+ * (depth >= 3) with a partial s_wait_tensorcnt. */
+void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx);
 
 /* _emit_epilogue(ctx): dispatch to the cshuffle or default epilogue using
  * ctx->for_results and the captured warp/lane/offset Values. */
@@ -409,6 +439,22 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       rocke_gemm_per_cell_fn per_cell,
                                       void* user,
                                       bool n_base_first);
+
+/* _emit_wmma_acc_scatter(...): the WMMA sibling of the walk above. Each slot's
+ * (row, col) comes from the op's c_layout() map instead of lane math; the
+ * default and cshuffle epilogues share it through the same per_cell callback. */
+void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
+                                      const rocke_gemm_universal_spec_t* spec,
+                                      const rocke_mmaop_t* op,
+                                      rocke_value_t* lane,
+                                      rocke_value_t* const* accs,
+                                      int num_accs,
+                                      rocke_value_t* m_base_off,
+                                      rocke_value_t* n_base_off,
+                                      int c_per_lane,
+                                      const rocke_type_t* storage_dtype,
+                                      rocke_gemm_per_cell_fn per_cell,
+                                      void* user);
 
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
  * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
@@ -449,10 +495,12 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                                       rocke_value_t* Cf32,
                                       int c_per_lane);
 
-/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. */
+/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. `op` selects the
+ * accumulator -> LDS scatter: the MFMA acc scatter, or (family == "wmma") the
+ * op's c_layout() map. Steps 3/4 (barrier + wide global stores) are shared. */
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
-                                       rocke_value_t* smem_unused,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        rocke_value_t* warp_m_idx,

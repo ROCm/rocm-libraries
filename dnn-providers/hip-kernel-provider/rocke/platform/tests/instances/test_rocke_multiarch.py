@@ -433,6 +433,73 @@ class TestUnifiedGfx1151Gemm(unittest.TestCase):
         self.assertIn("wave_size", why)
 
 
+class TestWmmaCshuffleBlastRadius(unittest.TestCase):
+    """Pin who the shared GEMM validator admits once WMMA accepts cshuffle.
+
+    ``gemm_universal.is_valid_spec`` gates the whole GEMM family group, not
+    just :func:`build_universal_gemm` -- multi-D, multi-ABD, flatmm, grouped,
+    batched and the MoE expert GEMMs all route their base spec through it. So
+    dropping the WMMA ``epilogue != "default"`` rejection widened what every
+    one of them accepts on a wave32 target. The families that delegate
+    emission to the universal body inherit the ``c_layout()``-driven
+    accumulator scatter.
+    """
+
+    def _wmma_base(self, epilogue="cshuffle"):
+        from rocke.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+        )
+
+        return UniversalGemmSpec(
+            name="ugemm1250_md",
+            tile=TileSpec(
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            trait=TraitSpec(
+                pipeline="mem",
+                scheduler="intrawave",
+                epilogue=epilogue,
+                pad_m=True,
+                pad_n=True,
+                pad_k=True,
+            ),
+            data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+            wave_size=32,
+        )
+
+    def test_multi_d_wmma_cshuffle_emits_through_universal_body(self):
+        # multi-D *requires* cshuffle, so before the lift it could not target
+        # WMMA at all. It delegates to build_universal_gemm, so admitting it
+        # has to yield real wave32 WMMA and no stray MFMA lane math.
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_multi_d import (
+            GemmMultiDSpec,
+            build_gemm_multi_d,
+            is_valid_spec,
+        )
+
+        spec = GemmMultiDSpec(base=self._wmma_base(), d_operands=(("D0", "add"),))
+        ok, why = is_valid_spec(spec, arch="gfx1250")
+        self.assertTrue(ok, why)
+
+        ir = lower_kernel_to_llvm(
+            build_gemm_multi_d(spec, arch="gfx1250"), arch="gfx1250"
+        )
+        self.assertIn("wmma.f32.16x16x32.f16", ir)
+        self.assertNotIn("mfma", ir)
+
+
 class TestGemmPolicy(unittest.TestCase):
     def _spec(self, wtm, wtn, wtk, dt="fp16"):
         from rocke.instances.common.gemm_universal import (

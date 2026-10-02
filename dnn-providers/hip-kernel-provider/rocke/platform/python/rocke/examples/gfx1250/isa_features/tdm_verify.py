@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from rocke.core.ir import I32, IRBuilder, KernelDef
+from rocke.core.ir import BF16, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.tdm import build_tdm_descriptor_2d, tdm_padding_for_tile
 
 try:
     from .common import Reporter, make_parser, record_compile_check
@@ -39,6 +40,42 @@ def build_kernel() -> KernelDef:
     return builder.kernel
 
 
+def build_descriptor_kernel() -> KernelDef:
+    """Load one padded ``128x32`` bf16 tile of a row-major ``MxK`` tensor.
+
+    Exercises the real descriptor path: a runtime global address, a runtime
+    LDS address, runtime tensor extents, and hardware row padding.
+    """
+    builder = IRBuilder("gfx1250_tdm_descriptor_2d")
+    builder.kernel.attrs["max_workgroup_size"] = 256
+    block_m, block_k, pad = 128, 32, 8
+    a_ptr = builder.param(
+        "A", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
+    )
+    k_dim = builder.param("K", I32)
+    smem = builder.smem_alloc(BF16, [block_m, block_k + pad], name_hint="A_smem")
+    pad_enable, pad_interval, pad_amount = tdm_padding_for_tile(2, block_k, pad)
+    groups = build_tdm_descriptor_2d(
+        builder,
+        global_addr=builder.global_addr_of(a_ptr, builder.const_i32(0)),
+        lds_addr=builder.smem_addr_of(smem),
+        elem_bytes=2,
+        tensor_dim0=k_dim,
+        tensor_dim1=builder.const_i32(block_m),
+        tile_dim0=block_k,
+        tile_dim1=block_m,
+        dim0_stride=1,
+        dim1_stride=4096,
+        pad_enable=pad_enable,
+        pad_interval=pad_interval,
+        pad_amount=pad_amount,
+    )
+    builder.tensor_load_to_lds(*groups, cachepolicy=0)
+    builder.s_wait_tensorcnt(0)
+    builder.ret()
+    return builder.kernel
+
+
 def main(argv: list[str] | None = None) -> int:
     args = make_parser(__doc__).parse_args(argv)
     reporter = Reporter(args.arch)
@@ -59,9 +96,19 @@ def main(argv: list[str] | None = None) -> int:
             r"\bs_wait_tensorcnt\b",
         ),
     )
-    reporter.skipped(
-        "tdm.functional",
-        "ROCKE does not expose construction of a valid D# memory/LDS descriptor",
+    record_compile_check(
+        reporter,
+        "tdm.descriptor_2d",
+        build_descriptor_kernel(),
+        arch=args.arch,
+        llvm_required=(
+            "call void @llvm.amdgcn.tensor.load.to.lds(<4 x i32>",
+            "ptrtoint ptr addrspace(1)",
+        ),
+        isa_required=(
+            r"\btensor_load_to_lds\b",
+            r"\bs_wait_tensorcnt\b",
+        ),
     )
     return reporter.finish()
 

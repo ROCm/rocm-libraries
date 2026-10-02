@@ -12,10 +12,23 @@ from ....runtime.hip_module import Runtime
 from .utils import as_u8_buffer, nbytes, require_numpy
 
 
+def _float32_to_bf16(np, values):
+    """Encode float32 values as native-endian BF16 bit patterns."""
+    bits = np.ascontiguousarray(values, dtype=np.float32).view(np.uint32)
+    rounding_bias = np.uint32(0x7FFF) + ((bits >> 16) & np.uint32(1))
+    return ((bits + rounding_bias) >> 16).astype(np.uint16)
+
+
+def _bf16_to_float32(np, values):
+    """Decode native-endian BF16 bit patterns into float32 values."""
+    bits = np.ascontiguousarray(values, dtype=np.uint16).astype(np.uint32) << 16
+    return bits.view(np.float32)
+
+
 def _gemm_is_bf16(manifest: dict) -> bool:
     """Whether the GEMM operands are bf16, per the ``A`` ptr type.
 
-    The manifest ``kind`` is ``gemm_fp16`` for every GEMM, so the element
+    Legacy manifests use ``gemm_fp16`` for both dtypes, so their element
     type is carried by ``args_signature`` (``ptr<bf16, global>`` vs
     ``ptr<f16, global>``, emitted by ``helpers.manifest.gemm_args_signature``).
     Both are 2 bytes wide, so only the interpretation differs.
@@ -34,27 +47,37 @@ def run_gemm_manifest_problem(
         M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
     else:
         M, N, K = shape
-    is_bf16 = _gemm_is_bf16(manifest)
+    dtype = (
+        "bf16"
+        if _gemm_is_bf16(manifest)
+        else str(
+            manifest.get("dtype") or manifest.get("kind", "").removeprefix("gemm_")
+        )
+    )
+    if dtype not in ("fp16", "bf16"):
+        raise ValueError(f"unsupported GEMM manifest dtype {dtype!r}")
     rng = np.random.default_rng(0xC0FFEE)
-    A_f32 = None  # float32 inputs for bf16 reference, set when is_bf16
-    B_f32 = None
-    if is_bf16:
-        # Small integers (-5..5) are exactly representable in bf16; their fp32
-        # lower 16 bits are zero so truncation == RNE for the inputs.
-        A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
-        B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
-        # Encode as bf16 raw bytes stored behind a float16 view for device transfer.
-        A = (A_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
-        B = (B_f32.view(np.uint32) >> 16).astype(np.uint16).view(np.float16)
+    A_values = rng.integers(-5, 6, size=(M, K), dtype=np.int16)
+    B_values = rng.integers(-5, 6, size=(N, K), dtype=np.int16)
+    if dtype == "bf16":
+        A = _float32_to_bf16(np, A_values)
+        B = _float32_to_bf16(np, B_values)
+        C = np.empty((M, N), dtype=np.uint16)
     else:
-        A = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float16)
-        B = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float16)
-    C = np.empty((M, N), dtype=np.float16)
-    gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
-    gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
-    if manifest.get("grid_order") == "MN":
-        gx, gy = gy, gx
-    grid = (gx, gy, 1)
+        A = A_values.astype(np.float16)
+        B = B_values.astype(np.float16)
+        C = np.empty((M, N), dtype=np.float16)
+    if "grid_explicit" in manifest:
+        # A grid the tile shape cannot imply -- a persistent kernel, whose CTA
+        # count is a property of the device, not the problem.
+        gx, gy, gz = (int(x) for x in manifest["grid_explicit"])
+    else:
+        gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
+        gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
+        if manifest.get("grid_order") == "MN":
+            gx, gy = gy, gx
+        gz = 1
+    grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
     flop = 2.0 * M * N * K
     bytes_xfer = 2.0 * (M * K + N * K + M * N)
@@ -76,21 +99,20 @@ def run_gemm_manifest_problem(
         if not verify:
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
-        if is_bf16:
-            from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
-
-            # Reference: fp32 accumulation (exact for small-integer inputs),
-            # then round-to-nearest-even to bf16 matching the kernel's fptrunc.
-            ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)
-            ref_f32 = _f32_from_bf16(np, ref_u16)
-            # Decode raw output bytes as bf16, not fp16.
-            out_f32 = _f32_from_bf16(np, C.view(np.uint16))
+        if dtype == "bf16":
+            A_f32 = _bf16_to_float32(np, A)
+            B_f32 = _bf16_to_float32(np, B)
+            C_f32 = _bf16_to_float32(np, C)
+            ref_f32 = _bf16_to_float32(np, _float32_to_bf16(np, A_f32 @ B_f32.T))
         else:
-            ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-            ref_f32 = ref.astype(np.float32)
-            out_f32 = C.astype(np.float32)
+            C_f32 = C.astype(np.float32)
+            ref_f32 = (
+                (A.astype(np.float32) @ B.astype(np.float32).T)
+                .astype(np.float16)
+                .astype(np.float32)
+            )
         tol = 1e-2
-        err = np.abs(out_f32 - ref_f32)
+        err = np.abs(C_f32 - ref_f32)
         bad = err > tol + tol * np.abs(ref_f32)
         return float(err.max()), int(np.count_nonzero(bad)), C.size
 

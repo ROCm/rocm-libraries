@@ -680,6 +680,19 @@ rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem)
 }
 
 rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr || !index)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_addr_of: NULL operand");
+    ops[0] = ptr;
+    ops[1] = index;
+    return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_ADDR_OF, ops, 2, rocke_i64(), NULL, "gaddr");
+}
+
+rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off)
 {
     rocke_value_t* ops[2];

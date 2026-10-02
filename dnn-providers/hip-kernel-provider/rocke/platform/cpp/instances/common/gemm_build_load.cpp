@@ -38,6 +38,50 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/tdm.h" /* rocke_tdm_build_descriptor_2d */
+
+/* _ELEM_BYTES / _dtype_bytes. */
+int rocke_gemm_dtype_bytes(const char* dtype)
+{
+    static const struct
+    {
+        const char* name;
+        int bytes;
+    } k_elem_bytes[] = {{"f16", 2},
+                        {"fp16", 2},
+                        {"bf16", 2},
+                        {"fp8", 1},
+                        {"bf8", 1},
+                        {"f32", 4},
+                        {"fp32", 4}};
+    if(dtype == NULL)
+    {
+        return 0;
+    }
+    for(size_t i = 0; i < sizeof(k_elem_bytes) / sizeof(k_elem_bytes[0]); ++i)
+    {
+        if(strcmp(dtype, k_elem_bytes[i].name) == 0)
+        {
+            return k_elem_bytes[i].bytes;
+        }
+    }
+    return 0;
+}
+
+/* _tdm_pipelined: depth 1 is the unpipelined issue/wait/compute form; depth 2+
+ * overlaps the next tile's transfer with the current tile's WMMAs. */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait)
+{
+    return trait->tdm && trait->tdm_depth >= 2;
+}
+
+/* _tdm_ring_depth: only depth >= 3 needs a runtime ring index, because only
+ * there is the write slot neither the slot being read nor the single other half
+ * of a ping-pong. */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait)
+{
+    return (trait->tdm && trait->tdm_depth >= 3) ? trait->tdm_depth : 0;
+}
 
 /* The driver populates the param + environment fields then calls this; declared
  * here (not in the shared header, to keep that surface frozen) and referenced by
@@ -206,8 +250,17 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     }
     ctx->A_LDS_M = ctx->two_buf ? 2 * ctx->block_m : ctx->block_m;
     ctx->B_LDS_N = ctx->two_buf ? 2 * ctx->block_n : ctx->block_n;
-    /* _lds_pad = trait.lds_k_pad if not direct_to_lds else 0; _lds_k = block_k + pad */
-    ctx->lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
+    /* _lds_pad: padding applies on the VGPR-staged path and on gfx1250
+     * direct-to-LDS (per-lane addressed, so the padded stride is free); the
+     * gfx9 buffer_load_lds family is wave-contiguous and stays unpadded.
+     * _lds_k = block_k + pad */
+    {
+        const int dtl_lane_addressed =
+            (ctx->arch != NULL && strcmp(ctx->arch, "gfx1250") == 0);
+        ctx->lds_pad = (spec->trait.direct_to_lds && !dtl_lane_addressed)
+                           ? 0
+                           : spec->trait.lds_k_pad;
+    }
     ctx->lds_k = ctx->block_k + ctx->lds_pad;
     {
         int a_shape[2] = {ctx->A_LDS_M, ctx->lds_k};
@@ -306,8 +359,11 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     ctx->dtl = spec->trait.direct_to_lds;
     if(ctx->dtl)
     {
-        ctx->dtl_dwords = 4; /* _DTL_DWORDS         */
-        ctx->dtl_halves = ctx->dtl_dwords * 2; /* _DTL_HALVES         */
+        /* Shared with the rocke_gemm_universal_is_valid_spec gate that rejects
+         * tiles which do not fill whole passes; the loops below are
+         * unpredicated. */
+        ctx->dtl_dwords = ROCKE_GEMM_DTL_DWORDS_PER_LANE; /* _DTL_DWORDS         */
+        ctx->dtl_halves = ROCKE_GEMM_DTL_ELEMS_PER_LANE; /* _DTL_HALVES         */
         ctx->dtl_bytes_per_lane = ctx->dtl_dwords * 4; /* _DTL_BYTES_PER_LANE */
         if((ctx->block_k % ctx->dtl_halves) != 0)
         {
@@ -371,6 +427,75 @@ rocke_value_t*
         rocke_b_shl(b, rocke_b_mod(b, rocke_b_lshr(b, row, ctx->c_swr), ctx->c_swmod), ctx->c_swl));
 }
 
+/* _issue: one TDM descriptor moving a [rows, block_k] tile of `ptr` whose
+ * first row is `row_off` into LDS at `lds_base`. */
+static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* row_off,
+                                 int rows,
+                                 rocke_value_t* lds_base,
+                                 rocke_value_t* batch_off,
+                                 rocke_value_t* k_off,
+                                 rocke_value_t* k_remaining)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* origin
+        = rocke_b_add(b, batch_off, rocke_b_add(b, rocke_b_mul(b, row_off, ctx->K), k_off));
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+    memset(&args, 0, sizeof(args));
+    args.global_addr = rocke_b_global_addr_of(b, ptr, origin);
+    args.lds_addr = lds_base;
+    args.elem_bytes = ctx->tdm_elem_bytes;
+    args.tensor_dim0 = k_remaining;
+    args.tensor_dim1 = rocke_b_const_i32(b, rows);
+    args.tile_dim0 = ctx->block_k;
+    args.tile_dim1 = rows;
+    args.dim0_stride_value = ctx->K;
+    args.dim1_stride = 1;
+    args.pad_enable = ctx->tdm_pad_enable;
+    args.pad_interval = ctx->tdm_pad_interval;
+    args.pad_amount = ctx->tdm_pad_amount;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    {
+        return;
+    }
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+}
+
+/* gfx1250 direct-to-LDS copy of one chunk. Under pad_k a chunk past K would
+ * read the next row's head (or past the buffer on the last row), so its LDS
+ * slot is zeroed instead. A chunk is all-in or all-out only when K is a
+ * multiple of dtl_halves, which the 16 B async copy needs anyway. */
+static void rocke_gemm_gfx1250_async_load(rocke_gemm_build_ctx_t* ctx,
+                                          rocke_value_t* src,
+                                          rocke_value_t* off_elems,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* lds_row,
+                                          rocke_value_t* col,
+                                          rocke_value_t* k_off,
+                                          int cpol)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* lds_indices[2] = {lds_row, col};
+    if(!ctx->spec->trait.pad_k)
+    {
+        rocke_b_global_load_async_to_lds(
+            b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
+        return;
+    }
+    rocke_value_t* valid = rocke_b_cmp_lt(b, rocke_b_add(b, k_off, col), ctx->K);
+    rocke_if_else_t ife = rocke_b_scf_if_else(b, valid);
+    rocke_b_region_enter(b, ife.then_region);
+    rocke_b_global_load_async_to_lds(
+        b, src, off_elems, smem, lds_indices, 2, ctx->dtl_bytes_per_lane, cpol, 0);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, ife.else_region);
+    rocke_value_t* zero = rocke_b_zero_vec(b, ctx->storage_dtype, ctx->dtl_halves);
+    rocke_b_smem_store_vN(b, smem, lds_indices, 2, zero, ctx->dtl_halves);
+    rocke_b_region_leave(b);
+}
+
 /* ===================================================================== *
  *  emit_load_phase -- one K-tile's coalesced global->LDS copy.
  *
@@ -391,6 +516,101 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     const rocke_type_t* I64 = rocke_i64();
     (void)A_dst; /* Python emit_load_phase's A_dst/B_dst args are unused in body. */
     (void)B_dst;
+
+    /* ----------------------- TDM path ----------------------- *
+     * One descriptor per operand. The tile origin rides in the global address;
+     * the tensor extents are what remains of the tensor from that origin,
+     * clamped at zero so the mover clips a partial tile instead of running off
+     * the end. */
+    if(spec->trait.tdm)
+    {
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* a_lds;
+        rocke_value_t* b_lds;
+        rocke_value_t* k_remaining;
+        if(parity_v != NULL)
+        {
+            a_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_a_lds_base,
+                rocke_b_zext(
+                    b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_a_buf_bytes)), I64));
+            b_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_b_lds_base,
+                rocke_b_zext(
+                    b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_b_buf_bytes)), I64));
+        }
+        else if(parity_imm)
+        {
+            a_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_a_lds_base,
+                rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_a_buf_bytes), I64));
+            b_lds = rocke_b_smem_ptr_add(
+                b,
+                ctx->tdm_b_lds_base,
+                rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_b_buf_bytes), I64));
+        }
+        else
+        {
+            a_lds = ctx->tdm_a_lds_base;
+            b_lds = ctx->tdm_b_lds_base;
+        }
+
+        k_remaining = rocke_b_smax(b, rocke_b_sub(b, ctx->K, k_off), zero);
+
+        /* tensor_load_to_lds is a wave-level instruction that moves the whole
+         * tile, so letting every wave issue it copies the tile once per wave.
+         * One wave owns each operand; the rest reach the LDS contents through
+         * the barrier in the drain. */
+        if(ctx->tdm_waves > 1)
+        {
+            rocke_if_t a_gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, zero));
+            rocke_b_region_enter(b, a_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+            rocke_if_t b_gate
+                = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, rocke_b_const_i32(b, 1)));
+            rocke_b_region_enter(b, b_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+        }
+        else
+        {
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+        }
+        return;
+    }
 
     /* ----------------------- DirectToLDS path ----------------------- */
     if(spec->trait.direct_to_lds)
@@ -463,14 +683,38 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* a_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
             rocke_value_t* off_elems
                 = rocke_b_add(b, ctx->batch_off_a, rocke_b_add(b, a_row_term, a_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_a_rsrc,
-                                               pass_lds_a,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_a);
+            if(strcmp(ctx->arch, "gfx1250") == 0)
+            {
+                rocke_value_t* lds_row = row;
+                if(ctx->prefetch && parity_is_value)
+                {
+                    lds_row = rocke_b_add(
+                        b, row, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_m)));
+                }
+                else if(ctx->prefetch && parity_imm)
+                {
+                    lds_row = rocke_b_add(b, row, rocke_b_const_i32(b, parity_imm * ctx->block_m));
+                }
+                rocke_gemm_gfx1250_async_load(ctx,
+                                              ctx->A,
+                                              off_elems,
+                                              ctx->A_smem,
+                                              lds_row,
+                                              col,
+                                              k_off,
+                                              spec->trait.dtl_cache_a);
+            }
+            else
+            {
+                rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+                rocke_b_async_buffer_load_lds_addr(b,
+                                                   ctx->dtl_a_rsrc,
+                                                   pass_lds_a,
+                                                   off_bytes,
+                                                   ctx->dtl_zero_soff,
+                                                   ctx->dtl_dwords,
+                                                   spec->trait.dtl_cache_a);
+            }
         }
         for(int p = 0; p < ctx->dtl_b_passes; ++p)
         {
@@ -493,14 +737,38 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* b_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
             rocke_value_t* off_elems
                 = rocke_b_add(b, ctx->batch_off_b, rocke_b_add(b, b_row_term, b_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_b_rsrc,
-                                               pass_lds_b,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_b);
+            if(strcmp(ctx->arch, "gfx1250") == 0)
+            {
+                rocke_value_t* lds_row = row;
+                if(ctx->prefetch && parity_is_value)
+                {
+                    lds_row = rocke_b_add(
+                        b, row, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_n)));
+                }
+                else if(ctx->prefetch && parity_imm)
+                {
+                    lds_row = rocke_b_add(b, row, rocke_b_const_i32(b, parity_imm * ctx->block_n));
+                }
+                rocke_gemm_gfx1250_async_load(ctx,
+                                              ctx->Bp,
+                                              off_elems,
+                                              ctx->B_smem,
+                                              lds_row,
+                                              col,
+                                              k_off,
+                                              spec->trait.dtl_cache_b);
+            }
+            else
+            {
+                rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+                rocke_b_async_buffer_load_lds_addr(b,
+                                                   ctx->dtl_b_rsrc,
+                                                   pass_lds_b,
+                                                   off_bytes,
+                                                   ctx->dtl_zero_soff,
+                                                   ctx->dtl_dwords,
+                                                   spec->trait.dtl_cache_b);
+            }
         }
         return;
     }
@@ -769,6 +1037,8 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* B_src,
                                 rocke_value_t* const* iter_vars,
                                 int num_iter_vars,
+                                int parity_imm,
+                                rocke_value_t* parity_v,
                                 rocke_value_t** out_accs)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -791,6 +1061,25 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
         = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, ctx->mfmas_m * t->warp_tile_m));
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, ctx->mfmas_n * t->warp_tile_n));
+    bool parity_is_value = parity_v != NULL;
+    rocke_value_t* a_par_row_v;
+    rocke_value_t* b_par_row_v;
+    int a_par_row_static;
+    int b_par_row_static;
+    if(ctx->prefetch && parity_is_value)
+    {
+        a_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_m));
+        b_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_n));
+        a_par_row_static = 0;
+        b_par_row_static = 0;
+    }
+    else
+    {
+        a_par_row_v = NULL;
+        b_par_row_v = NULL;
+        a_par_row_static = ctx->prefetch ? parity_imm * ctx->block_m : 0;
+        b_par_row_static = ctx->prefetch ? parity_imm * ctx->block_n : 0;
+    }
 
     /* new_accs = list(iter_vars) */
     for(int i = 0; i < ctx->num_accs; ++i)
@@ -805,15 +1094,19 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * t->warp_tile_k);
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m + a_par_row_static));
+            if(a_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, a_par_row_v);
             a_rows[mi] = rocke_gemm_emit_frag_smem_load(
                 ctx, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
         }
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n + b_par_row_static));
+            if(b_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, b_par_row_v);
             b_cols[ni] = rocke_gemm_emit_frag_smem_load(
                 ctx, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
         }

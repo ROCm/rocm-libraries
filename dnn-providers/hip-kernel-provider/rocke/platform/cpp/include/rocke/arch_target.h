@@ -178,6 +178,7 @@ typedef struct rocke_memory_caps
     bool has_async_lds;
     bool has_ds_read_tr;
     int buffer_load_max_dwords;
+    bool has_tdm;
 } rocke_memory_caps_t;
 
 typedef struct rocke_resource_limits

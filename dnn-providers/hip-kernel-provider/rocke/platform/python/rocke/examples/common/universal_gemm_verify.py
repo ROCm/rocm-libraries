@@ -34,6 +34,7 @@ from rocke.instances.common.gemm_universal import (
     TraitSpec,
     UniversalGemmSpec,
     build_universal_gemm,
+    universal_gemm_grid,
 )
 from rocke.instances import GemmPipelinePolicy
 
@@ -74,9 +75,15 @@ def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
         block_n=tile.tile_n,
         block_k=tile.tile_k,
         threads_per_block=spec.block_size,
+        dtype=dtype,
         default_shape=shape,
         atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{dtype}"],
         args_signature=gemm_args_signature(dtype=dtype),
+        extra=(
+            {"grid_explicit": list(universal_gemm_grid(spec, shape[0], shape[1]))}
+            if spec.trait.persistent
+            else None
+        ),
     )
 
 
@@ -95,10 +102,50 @@ def main() -> int:
     p.add_argument("--pipeline", default="mem")
     p.add_argument("--epilogue", default="default")
     p.add_argument(
+        "--direct-to-lds",
+        action="store_true",
+        help="stage A/B with the architecture's direct global-to-LDS instruction",
+    )
+    p.add_argument(
+        "--dtl-prefetch",
+        action="store_true",
+        help="double-buffer direct-to-LDS and prefetch the next K tile",
+    )
+    p.add_argument(
+        "--tdm",
+        action="store_true",
+        help="stage A/B with the gfx1250 tensor data mover instead of "
+        "direct-to-LDS (one descriptor per operand per K tile)",
+    )
+    p.add_argument(
+        "--tdm-depth",
+        type=int,
+        default=1,
+        choices=(1, 2, 3, 4),
+        help="TDM LDS buffers: 1 issues and waits per tile, 2 ping-pongs so "
+        "the next tile's transfer overlaps the current tile's WMMAs, and 3+ "
+        "runs a deeper ring with a partial wait",
+    )
+    p.add_argument(
+        "--lds-k-pad",
+        type=int,
+        default=0,
+        help="pad each A/B LDS row by this many elements (0 = unpadded). "
+        "Ignored by direct-to-LDS off gfx1250.",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
         "elide the step-0 reuse barrier (lower small-tile latency, more LDS).",
+    )
+    p.add_argument(
+        "--persistent-ctas",
+        type=int,
+        default=0,
+        help="launch this many CTAs and grid-stride the output tiles from "
+        "each one (CK Tile's persistent kernel) instead of one CTA per tile. "
+        "0 (default) keeps the problem-sized grid.",
     )
     p.add_argument("--output-dir", default=None)
     p.add_argument("--no-verify", action="store_true")
@@ -141,6 +188,13 @@ def main() -> int:
         pad_n=True,
         pad_k=True,
         cshuffle_no_alias=args.cshuffle_no_alias,
+        direct_to_lds=args.direct_to_lds,
+        dtl_prefetch=args.dtl_prefetch,
+        tdm=args.tdm,
+        tdm_depth=args.tdm_depth,
+        lds_k_pad=args.lds_k_pad,
+        persistent=args.persistent_ctas > 0,
+        persistent_ctas=args.persistent_ctas,
     )
     data = DataSpec(
         dtype_a=args.dtype,

@@ -34,7 +34,7 @@ _ARTIFACT = SimpleNamespace(
     kernel_name="ugemm_stub", hsaco_bytes=4096, timings={"total": 1.0}
 )
 _TILE = SimpleNamespace(tile_m=64, tile_n=64, tile_k=32)
-_SPEC = SimpleNamespace(block_size=256)
+_SPEC = SimpleNamespace(block_size=256, trait=SimpleNamespace(persistent=False))
 
 # The bf16 atom the harness resolves per arch, plus the MMA family its wave
 # size implies (wave64 -> mfma, wave32 -> wmma). K width differs by target, so
@@ -97,11 +97,11 @@ class TestUniversalGemmVerifyManifest(unittest.TestCase):
                 self.assertTrue(_gemm_is_bf16(_manifest("bf16", arch=arch)))
                 self.assertFalse(_gemm_is_bf16(_manifest("fp16", arch=arch)))
 
-    def test_kind_is_gemm_fp16_for_both_dtypes(self):
-        # Pins why args_signature has to carry the dtype: ``kind`` cannot.
+    def test_kind_matches_dtype(self):
+        # New manifests carry the dtype in both kind and pointer signature.
         for dtype in ("fp16", "bf16"):
             with self.subTest(dtype=dtype):
-                self.assertEqual(_manifest(dtype)["kind"], "gemm_fp16")
+                self.assertEqual(_manifest(dtype)["kind"], f"gemm_{dtype}")
 
     def test_bf16_atom_matches_arch_catalog(self):
         # Two claims: the catalog still resolves the atom this table records,
