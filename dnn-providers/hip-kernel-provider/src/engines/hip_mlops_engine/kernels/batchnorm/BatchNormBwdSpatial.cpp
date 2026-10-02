@@ -75,7 +75,7 @@ __forceinline__ __host__ __device__ ComputeReadVecType
                               ComputeType const& alpha,
                               ComputeType const& beta)
 {
-    auto constexpr size = hip_kernel_provider::mapped_vector_info<ComputeReadVecType>::size;
+    auto constexpr size = hip_kernel_provider::MappedVectorInfo<ComputeReadVecType>::size;
     if constexpr(size == 4)
     {
         ComputeReadVecType out;
@@ -335,12 +335,12 @@ struct BatchNormBwdSpatialImpl<1>
     static constexpr unsigned int read_size = hip_plugin_config::layout_channel_last ? 1 : 4;
     static constexpr unsigned int write_size = hip_plugin_config::layout_channel_last ? 1 : 2;
 
-    using InputReadVecType = typename mapped_vector_type<InputType, read_size>::type;
-    using OutputReadVecType = typename mapped_vector_type<OutputType, read_size>::type;
-    using ComputeReadVecType = typename mapped_vector_type<ComputeType, read_size>::type;
-    using InputWriteVecType = typename mapped_vector_type<InputType, write_size>::type;
-    using OutputWriteVecType = typename mapped_vector_type<OutputType, write_size>::type;
-    using ComputeWriteVecType = typename mapped_vector_type<ComputeType, write_size>::type;
+    using InputReadVecType = typename MappedVectorType<InputType, read_size>::type;
+    using OutputReadVecType = typename MappedVectorType<OutputType, read_size>::type;
+    using ComputeReadVecType = typename MappedVectorType<ComputeType, read_size>::type;
+    using InputWriteVecType = typename MappedVectorType<InputType, write_size>::type;
+    using OutputWriteVecType = typename MappedVectorType<OutputType, write_size>::type;
+    using ComputeWriteVecType = typename MappedVectorType<ComputeType, write_size>::type;
 
     static constexpr unsigned int read_block = 1;
     static constexpr unsigned int grprd

@@ -80,9 +80,9 @@ protected:
             .Times(1);
 
         auto mockProgram = std::make_unique<MockCompiledProgram>();
-        EXPECT_CALL(*mockProgram, getKernel("LayernormBwd"))
+        EXPECT_CALL(*mockProgram, getKernel("layernormBwd"))
             .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
-        EXPECT_CALL(*mockProgram, getKernel("LayernormBwdScaleBias"))
+        EXPECT_CALL(*mockProgram, getKernel("layernormBwdScaleBias"))
             .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernelScaleBias))));
 
         EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))

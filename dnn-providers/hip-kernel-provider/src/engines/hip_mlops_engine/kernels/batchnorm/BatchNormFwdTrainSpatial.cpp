@@ -290,7 +290,7 @@ struct BatchNormFwdTrainSpatialImpl<1>
         if constexpr(!hip_plugin_config::layout_channel_last
                      && hip_plugin_bn_config::spatial_size >= 4096)
         {
-            using InputVecType4 = typename mapped_vector_type<InputType, 4>::type;
+            using InputVecType4 = typename MappedVectorType<InputType, 4>::type;
             InputVecType4 read4;
 
             static_unroll_count<unsigned int, 0, less4, grpread, 2>{[&](unsigned int k) {

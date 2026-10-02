@@ -255,7 +255,7 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
     addSpatialOptions(options, _params, spatialDims);
 
     _compiledProgram = kernelCompiler.compile("ResampleBwd.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("ResampleBwd");
+    _runnableKernel = _compiledProgram->getKernel("resampleBwd");
     _runnableKernel->setBlockSize(static_cast<unsigned int>(BLOCK_SIZE), 1, 1);
     _runnableKernel->setGridSize(static_cast<unsigned int>(gridSize), 1, 1);
 }

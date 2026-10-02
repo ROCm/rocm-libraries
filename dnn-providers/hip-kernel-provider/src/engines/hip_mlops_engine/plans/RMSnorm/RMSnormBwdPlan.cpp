@@ -185,8 +185,8 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
 
     // Compile kernels and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("RMSNormBwd.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdData"));
-    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdScaleBias"));
+    _runnableKernels.push_back(_compiledProgram->getKernel("rmsNormBwdData"));
+    _runnableKernels.push_back(_compiledProgram->getKernel("rmsNormBwdScaleBias"));
     for(auto& kernel : _runnableKernels)
     {
         kernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);

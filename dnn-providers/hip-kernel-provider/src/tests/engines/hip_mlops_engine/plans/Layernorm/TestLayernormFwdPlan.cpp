@@ -170,7 +170,7 @@ TEST(TestLayernormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
-    EXPECT_CALL(*mockProgram, getKernel("LayernormFwd"))
+    EXPECT_CALL(*mockProgram, getKernel("layernormFwd"))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
     EXPECT_CALL(mockCompiler, compile("LayernormFwd.cpp", ::testing::_))

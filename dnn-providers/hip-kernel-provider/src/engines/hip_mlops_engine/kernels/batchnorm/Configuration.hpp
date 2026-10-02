@@ -186,15 +186,15 @@ struct proto_config
     using compute_type = float;
 
     using input_vec_type =
-        typename hip_kernel_provider::mapped_vector_type<input_type, VecSize>::type;
+        typename hip_kernel_provider::MappedVectorType<input_type, VecSize>::type;
     using output_vec_type =
-        typename hip_kernel_provider::mapped_vector_type<output_type, VecSize>::type;
+        typename hip_kernel_provider::MappedVectorType<output_type, VecSize>::type;
     using scale_bias_vec_type =
-        typename hip_kernel_provider::mapped_vector_type<scale_bias_type, VecSize>::type;
+        typename hip_kernel_provider::MappedVectorType<scale_bias_type, VecSize>::type;
     using mean_inv_variance_vec_type =
-        typename hip_kernel_provider::mapped_vector_type<mean_inv_variance_type, VecSize>::type;
+        typename hip_kernel_provider::MappedVectorType<mean_inv_variance_type, VecSize>::type;
     using compute_vec_type =
-        typename hip_kernel_provider::mapped_vector_type<compute_type, VecSize>::type;
+        typename hip_kernel_provider::MappedVectorType<compute_type, VecSize>::type;
 
     using input_channel_vec_type = typename std::
         conditional<HipKernelConfig::layout_channel_last, input_vec_type, input_type>::type;

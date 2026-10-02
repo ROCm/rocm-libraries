@@ -24,6 +24,8 @@ constexpr int MODE_AVGPOOL_INCLUDE_PADDING = 3;
 constexpr int PAD_NEG_INF = 1;
 constexpr int PAD_ZERO = 2;
 
+namespace
+{
 __device__ __forceinline__ int64_t
     inputOffset(int64_t n, int64_t c, int64_t d, int64_t h, int64_t w)
 {
@@ -84,14 +86,16 @@ __device__ __forceinline__ IndexType flattenSpatialIndex(int64_t d, int64_t h, i
                                       + h * HIP_PLUGIN_RESAMPLE_X_W + w);
     }
 }
+} // anonymous namespace
 
-extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
+extern "C" __global__ void resampleFwd(const InputType* __restrict__ x,
                                        OutputType* __restrict__ y,
                                        IndexType* __restrict__ index)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
-                  "ResampleFwd currently supports float compute type only");
+    static_assert(std::is_same_v<ComputeType, float>,
+                  "resampleFwd currently supports float compute type only");
 
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
     const uint64_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if(gid >= OUTPUT_ELEMENT_COUNT)
     {
@@ -99,9 +103,9 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
     }
 
     uint64_t remaining = gid;
-    const int64_t outW = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_Y_W);
+    const auto outW = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_Y_W);
     remaining /= HIP_PLUGIN_RESAMPLE_Y_W;
-    const int64_t outH = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_Y_H);
+    const auto outH = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_Y_H);
     remaining /= HIP_PLUGIN_RESAMPLE_Y_H;
 
     int64_t outD = 0;
@@ -111,13 +115,13 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
         remaining /= HIP_PLUGIN_RESAMPLE_Y_D;
     }
 
-    const int64_t c = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_C);
+    const auto c = static_cast<int64_t>(remaining % HIP_PLUGIN_RESAMPLE_C);
     remaining /= HIP_PLUGIN_RESAMPLE_C;
-    const int64_t n = static_cast<int64_t>(remaining);
+    const auto n = static_cast<int64_t>(remaining);
 
     float result = RESAMPLE_MODE == MODE_MAXPOOL ? -3.402823466e+38F : 0.0F;
     int64_t validCount = 0;
-    IndexType selectedIndex = static_cast<IndexType>(-1);
+    auto selectedIndex = static_cast<IndexType>(-1);
 
     for(int64_t kd = 0; kd < HIP_PLUGIN_RESAMPLE_WINDOW_D; ++kd)
     {
@@ -139,7 +143,7 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
                 const bool valid = validD && validH && validW;
 
                 float candidate = 0.0F;
-                IndexType candidateIndex = static_cast<IndexType>(-1);
+                auto candidateIndex = static_cast<IndexType>(-1);
                 if(valid)
                 {
                     const int64_t xOffset = inputOffset(n, c, inD, inH, inW);

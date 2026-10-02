@@ -75,8 +75,8 @@ __forceinline__ __device__ __host__ void _accumulate_mad8(T1& a, T2 const& b, T3
 template <typename TAccum, typename T>
 __forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, T const& c)
 {
-    constexpr auto TaccumSize = mapped_vector_info<TAccum>::size;
-    constexpr auto TSize = mapped_vector_info<T>::size;
+    constexpr auto TaccumSize = MappedVectorInfo<TAccum>::size;
+    constexpr auto TSize = MappedVectorInfo<T>::size;
 
     if constexpr(TSize == TaccumSize)
     {
@@ -103,8 +103,8 @@ __forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, 
 template <typename TAccum, typename T>
 __forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
 {
-    constexpr auto TaccumSize = mapped_vector_info<TAccum>::size;
-    constexpr auto TSize = mapped_vector_info<T>::size;
+    constexpr auto TaccumSize = MappedVectorInfo<TAccum>::size;
+    constexpr auto TSize = MappedVectorInfo<T>::size;
 
     if constexpr(TaccumSize == 1 && TSize == 8)
     {
