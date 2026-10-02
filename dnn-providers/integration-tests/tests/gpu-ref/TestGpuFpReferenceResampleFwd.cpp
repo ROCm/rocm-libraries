@@ -5,6 +5,7 @@
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::utilities::resample;
 using namespace hipdnn_gpu_ref;
 using namespace gpu_resample_ref_test;
 using namespace gpu_resample_fwd_ref_test;
@@ -18,13 +19,19 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsTensorDims)
     Tensor<float> y4D({2, 4, 4, 4});
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(
-        x4D, y4D, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD));
+        x4D, y4D, {0, 0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD));
 
     Tensor<float> x5D({2, 4, 8, 8, 8});
     Tensor<float> y5D({2, 4, 4, 4, 4});
 
-    EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(
-        x5D, y5D, {0, 0, 0}, {2, 2, 2}, {2, 2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD));
+    EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
+                                                           y5D,
+                                                           {0, 0, 0},
+                                                           {0, 0, 0},
+                                                           {2, 2, 2},
+                                                           {2, 2, 2},
+                                                           ResampleMode::MAXPOOL,
+                                                           PaddingMode::ZERO_PAD));
 }
 
 TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsChannelLastLayout)
@@ -34,13 +41,14 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsChannelLastLayout)
     Tensor<float> y4D({2, 4, 4, 4}, TensorLayout::NHWC);
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(
-        x4D, y4D, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::NEG_INF_PAD));
+        x4D, y4D, {0, 0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::NEG_INF_PAD));
 
     Tensor<float> x5D({2, 4, 8, 8, 8}, TensorLayout::NDHWC);
     Tensor<float> y5D({2, 4, 4, 4, 4}, TensorLayout::NDHWC);
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
+                                                           {0, 0, 0},
                                                            {0, 0, 0},
                                                            {2, 2, 2},
                                                            {2, 2, 2},
@@ -55,8 +63,15 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsWithIndex)
     Tensor<float> y4D({2, 4, 4, 4});
     Tensor<int32_t> index4D({2, 4, 4, 4});
 
-    EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(
-        x4D, y4D, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index4D));
+    EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x4D,
+                                                           y4D,
+                                                           {0, 0},
+                                                           {0, 0},
+                                                           {2, 2},
+                                                           {2, 2},
+                                                           ResampleMode::MAXPOOL,
+                                                           PaddingMode::ZERO_PAD,
+                                                           &index4D));
 
     Tensor<float> x5D({2, 4, 8, 8, 8});
     Tensor<float> y5D({2, 4, 4, 4, 4});
@@ -64,6 +79,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsWithIndex)
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
+                                                           {0, 0, 0},
                                                            {0, 0, 0},
                                                            {2, 2, 2},
                                                            {2, 2, 2},
@@ -81,6 +97,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsWithPadding)
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x4D,
                                                            y4D,
                                                            {1, 1},
+                                                           {1, 1},
                                                            {2, 2},
                                                            {3, 3},
                                                            ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -92,6 +109,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsWithPadding)
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
                                                            {1, 1, 1},
+                                                           {1, 1, 1},
                                                            {2, 2, 2},
                                                            {3, 3, 3},
                                                            ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -102,22 +120,24 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsAsymmetricPadding)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> x4D({2, 4, 8, 6});
-    Tensor<float> y4D({2, 4, 4, 5});
+    Tensor<float> y4D({2, 4, 4, 6});
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x4D,
                                                            y4D,
                                                            {1, 0},
+                                                           {0, 1},
                                                            {2, 1},
                                                            {3, 2},
                                                            ResampleMode::AVGPOOL_EXCLUDE_PADDING,
                                                            PaddingMode::ZERO_PAD));
 
     Tensor<float> x5D({2, 3, 6, 8, 10});
-    Tensor<float> y5D({2, 3, 5, 4, 3});
+    Tensor<float> y5D({2, 3, 7, 4, 3});
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
                                                            {0, 1, 2},
+                                                           {2, 1, 0},
                                                            {1, 2, 3},
                                                            {2, 3, 4},
                                                            ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -133,6 +153,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsGlobalWindow)
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x4D,
                                                            y4D,
                                                            {0, 0},
+                                                           {0, 0},
                                                            {1, 1},
                                                            {8, 8},
                                                            ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -143,6 +164,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsGlobalWindow)
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
+                                                           {0, 0, 0},
                                                            {0, 0, 0},
                                                            {1, 1, 1},
                                                            {8, 8, 8},
@@ -159,6 +181,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsUnitWindowUnitStride)
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x4D,
                                                            y4D,
                                                            {0, 0},
+                                                           {0, 0},
                                                            {1, 1},
                                                            {1, 1},
                                                            ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -169,6 +192,7 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsUnitWindowUnitStride)
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
+                                                           {0, 0, 0},
                                                            {0, 0, 0},
                                                            {1, 1, 1},
                                                            {1, 1, 1},
@@ -186,7 +210,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnInputRankTooSmall)
 
     EXPECT_THROW(
         GpuFpReferenceResample::forward<float>(
-            x, y, {0}, {2}, {2}, ResampleMode::AVGPOOL_INCLUDE_PADDING, PaddingMode::ZERO_PAD),
+            x, y, {0}, {0}, {2}, {2}, ResampleMode::AVGPOOL_INCLUDE_PADDING, PaddingMode::ZERO_PAD),
         std::runtime_error);
 }
 
@@ -198,6 +222,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnInputRankTooLarge)
 
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0, 0, 0},
                                                         {0, 0, 0, 0},
                                                         {2, 2, 2, 2},
                                                         {2, 2, 2, 2},
@@ -212,9 +237,10 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnOutputRankMismatch)
     Tensor<float> x({2, 4, 8, 8});
     Tensor<float> y({2, 4, 4, 4, 4});
 
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0, 0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnBatchDimMismatch)
@@ -225,6 +251,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnBatchDimMismatch)
 
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0},
                                                         {0, 0},
                                                         {2, 2},
                                                         {2, 2},
@@ -242,6 +269,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnChannelDimMismatch)
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
                                                         {0, 0},
+                                                        {0, 0},
                                                         {2, 2},
                                                         {2, 2},
                                                         ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -257,7 +285,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIOTensorNeitherChannelFirstNorChan
 
     EXPECT_THROW(
         GpuFpReferenceResample::forward<float>(
-            x4D, y4D, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+            x4D, y4D, {0, 0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
         std::invalid_argument);
 
     Tensor<float> x({2, 4, 8, 8, 8});
@@ -265,6 +293,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIOTensorNeitherChannelFirstNorChan
 
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0, 0},
                                                         {0, 0, 0},
                                                         {2, 2, 2},
                                                         {2, 2, 2},
@@ -281,7 +310,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIOTensorLayoutsInconsistent)
 
     EXPECT_THROW(
         GpuFpReferenceResample::forward<float>(
-            x4D, y4D, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+            x4D, y4D, {0, 0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
         std::invalid_argument);
 
     Tensor<float> x5D({2, 4, 8, 8, 8}, TensorLayout::NDHWC);
@@ -289,6 +318,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIOTensorLayoutsInconsistent)
 
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                         y5D,
+                                                        {0, 0, 0},
                                                         {0, 0, 0},
                                                         {2, 2, 2},
                                                         {2, 2, 2},
@@ -303,15 +333,18 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnSpatialParamRankMismatch4D)
     Tensor<float> x({2, 4, 8, 8});
     Tensor<float> y({2, 4, 4, 4});
 
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0, 0}, {2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0, 0}, {2, 2}, {2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0, 0}, {0, 0}, {2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0, 0}, {0, 0}, {2, 2}, {2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnSpatialParamRankMismatch5D)
@@ -320,18 +353,33 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnSpatialParamRankMismatch5D)
     Tensor<float> x({2, 4, 8, 8, 8});
     Tensor<float> y({2, 4, 4, 4, 4});
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2, 2}, {2, 2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-        std::runtime_error);
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0, 0}, {2, 2}, {2, 2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-        std::runtime_error);
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0, 0}, {2, 2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-        std::runtime_error);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0, 0},
+                                                        {2, 2, 2},
+                                                        {2, 2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD),
+                 std::runtime_error);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0, 0},
+                                                        {0, 0, 0},
+                                                        {2, 2},
+                                                        {2, 2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD),
+                 std::runtime_error);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0, 0},
+                                                        {0, 0, 0},
+                                                        {2, 2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD),
+                 std::runtime_error);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnEmptySpatialParams)
@@ -343,6 +391,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnEmptySpatialParams)
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
                                                         {},
+                                                        {0, 0},
                                                         {2, 2},
                                                         {2, 2},
                                                         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -351,6 +400,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnEmptySpatialParams)
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
                                                         {0, 0},
+                                                        {0, 0},
                                                         {},
                                                         {2, 2},
                                                         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -358,6 +408,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnEmptySpatialParams)
                  std::runtime_error);
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0},
                                                         {0, 0},
                                                         {2, 2},
                                                         {},
@@ -372,14 +423,17 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnInvalidSpatialParams)
     Tensor<float> x({2, 4, 8, 8});
     Tensor<float> y({2, 4, 4, 4});
 
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0, -1}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
-    EXPECT_THROW(GpuFpReferenceResample::forward<float>(
-                     x, y, {0, 0}, {-2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
-                 std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0, -1}, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
+    EXPECT_THROW(
+        GpuFpReferenceResample::forward<float>(
+            x, y, {0, 0}, {0, 0}, {-2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD),
+        std::runtime_error);
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0},
                                                         {0, 0},
                                                         {0, 2},
                                                         {2, 2},
@@ -389,6 +443,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnInvalidSpatialParams)
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
                                                         {0, 0},
+                                                        {0, 0},
                                                         {2, 2},
                                                         {2, 0},
                                                         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -396,6 +451,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnInvalidSpatialParams)
                  std::runtime_error);
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0},
                                                         {0, 0},
                                                         {2, 2},
                                                         {2, -2},
@@ -410,10 +466,15 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnUnsupportedResampleMode)
     Tensor<float> x({2, 4, 8, 8});
     Tensor<float> y({2, 4, 4, 4});
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2}, {2, 2}, static_cast<ResampleMode>(100), PaddingMode::ZERO_PAD),
-        std::runtime_error);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        static_cast<ResampleMode>(100),
+                                                        PaddingMode::ZERO_PAD),
+                 std::runtime_error);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnUnsupportedPaddingMode)
@@ -422,10 +483,15 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnUnsupportedPaddingMode)
     Tensor<float> x({2, 4, 8, 8});
     Tensor<float> y({2, 4, 4, 4});
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, static_cast<PaddingMode>(100)),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        static_cast<PaddingMode>(100)),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorRankMismatch)
@@ -435,10 +501,16 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorRankMismatch)
     Tensor<float> y({2, 4, 4, 4});
     Tensor<int32_t> index({2, 4, 4});
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD,
+                                                        &index),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorShapeMismatch)
@@ -448,10 +520,16 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorShapeMismatch)
     Tensor<float> y({2, 4, 4, 4});
     Tensor<int32_t> index({2, 4, 5, 4});
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD,
+                                                        &index),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorLayoutMismatch)
@@ -461,10 +539,16 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorLayoutMismatch)
     Tensor<float> y({2, 4, 4, 4});
     Tensor<int32_t> index({2, 4, 4, 4}, TensorLayout::NHWC);
 
-    EXPECT_THROW(
-        GpuFpReferenceResample::forward<float>(
-            x, y, {0, 0}, {2, 2}, {2, 2}, ResampleMode::MAXPOOL, PaddingMode::ZERO_PAD, &index),
-        std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::ZERO_PAD,
+                                                        &index),
+                 std::invalid_argument);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorInputForAvgPool)
@@ -476,6 +560,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorInputForAvgPool)
 
     EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
                                                         y,
+                                                        {0, 0},
                                                         {0, 0},
                                                         {2, 2},
                                                         {2, 2},
@@ -511,6 +596,7 @@ TEST(TestGpuResampleFwdRefMixedType, FloatInputHalfOutput)
         xTensor,
         yGpu,
         {0, 0},
+        {0, 0},
         {2, 2},
         {2, 2},
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -543,6 +629,7 @@ TEST(TestGpuResampleFwdRefMixedType, HalfInputFloatOutput)
 
     GpuFpReferenceResample::forward<half, float, float, int32_t>(xTensor,
                                                                  yGpu,
+                                                                 {0, 0},
                                                                  {0, 0},
                                                                  {2, 2},
                                                                  {2, 2},
@@ -579,6 +666,7 @@ TEST(TestGpuResampleFwdRefMixedType, HalfInputHalfOutput)
     GpuFpReferenceResample::forward<half, half, float, int32_t>(xTensor,
                                                                 yGpu,
                                                                 {0, 0},
+                                                                {0, 0},
                                                                 {2, 2},
                                                                 {2, 2},
                                                                 ResampleMode::MAXPOOL,
@@ -613,6 +701,7 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputFloatOutput)
         xTensor,
         yGpu,
         {0, 0},
+        {0, 0},
         {2, 2},
         {2, 2},
         ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -644,6 +733,7 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputHalfOutput)
     GpuFpReferenceResample::forward<bfloat16, half, float, int32_t>(
         xTensor,
         yGpu,
+        {0, 0},
         {0, 0},
         {2, 2},
         {2, 2},
@@ -678,6 +768,7 @@ TEST(TestGpuResampleFwdRefMixedType, DoubleInputDoubleOutput)
     GpuFpReferenceResample::forward<double, double, double, int32_t>(xTensor,
                                                                      yGpu,
                                                                      {0, 0},
+                                                                     {0, 0},
                                                                      {2, 2},
                                                                      {2, 2},
                                                                      ResampleMode::MAXPOOL,
@@ -695,10 +786,10 @@ TEST(TestGpuResampleFwdRefOptionalArgs, MaxPoolWithIndex)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> xTensor({2, 3, 4, 5, 6});
-    Tensor<float> yCpu({2, 3, 3, 2, 3});
-    Tensor<float> yGpu({2, 3, 3, 2, 3});
-    Tensor<int32_t> indexCpu({2, 3, 3, 2, 3});
-    Tensor<int32_t> indexGpu({2, 3, 3, 2, 3});
+    Tensor<float> yCpu({2, 3, 3, 3, 3});
+    Tensor<float> yGpu({2, 3, 3, 3, 3});
+    Tensor<int32_t> indexCpu({2, 3, 3, 3, 3});
+    Tensor<int32_t> indexGpu({2, 3, 3, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
     xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
@@ -714,6 +805,7 @@ TEST(TestGpuResampleFwdRefOptionalArgs, MaxPoolWithIndex)
     GpuFpReferenceResample::forward<float, float, float, int32_t>(xTensor,
                                                                   yGpu,
                                                                   {1, 2, 1},
+                                                                  {0, 1, 0},
                                                                   {1, 2, 2},
                                                                   {3, 4, 3},
                                                                   ResampleMode::MAXPOOL,
@@ -745,6 +837,7 @@ TEST(TestGpuResampleFwdRefOptionalArgs, AverageExcludePadding)
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
                                                          {2, 2},
+                                                         {0, 0},
                                                          {2, 2},
                                                          {4, 4},
                                                          ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -758,8 +851,8 @@ TEST(TestGpuResampleFwdRefOptionalArgs, AvgPoolIncludePadding)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> xTensor({2, 3, 6, 6});
-    Tensor<float> yCpu({2, 3, 3, 3});
-    Tensor<float> yGpu({2, 3, 3, 3});
+    Tensor<float> yCpu({2, 3, 4, 3});
+    Tensor<float> yGpu({2, 3, 4, 3});
 
     const unsigned int seed = getGlobalTestSeed();
     xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
@@ -774,6 +867,7 @@ TEST(TestGpuResampleFwdRefOptionalArgs, AvgPoolIncludePadding)
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
                                                          {2, 2},
+                                                         {2, 0},
                                                          {2, 2},
                                                          {4, 4},
                                                          ResampleMode::AVGPOOL_INCLUDE_PADDING,
@@ -788,8 +882,8 @@ TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef4D)
 {
     SKIP_IF_NO_DEVICES();
     Tensor<float> xTensor({2, 4, 9, 7}, TensorLayout::NHWC);
-    Tensor<float> yCpu({2, 4, 4, 6}, TensorLayout::NHWC);
-    Tensor<float> yGpu({2, 4, 4, 6}, TensorLayout::NHWC);
+    Tensor<float> yCpu({2, 4, 5, 7}, TensorLayout::NHWC);
+    Tensor<float> yGpu({2, 4, 5, 7}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
     xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
@@ -803,6 +897,7 @@ TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef4D)
                                                             PaddingMode::ZERO_PAD);
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
+                                                         {1, 1},
                                                          {1, 1},
                                                          {2, 1},
                                                          {3, 3},
@@ -835,6 +930,7 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex4D)
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
                                                          {0, 0},
+                                                         {0, 0},
                                                          {2, 2},
                                                          {2, 2},
                                                          ResampleMode::MAXPOOL,
@@ -864,6 +960,7 @@ TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef5D)
                                                             PaddingMode::NEG_INF_PAD);
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
+                                                         {1, 1, 1},
                                                          {1, 1, 1},
                                                          {2, 2, 2},
                                                          {3, 3, 3},
@@ -895,6 +992,7 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex5D)
                                                             &indexCpu);
     GpuFpReferenceResample::forward<float, float, float>(xTensor,
                                                          yGpu,
+                                                         {0, 0, 0},
                                                          {0, 0, 0},
                                                          {2, 2, 2},
                                                          {2, 2, 2},
