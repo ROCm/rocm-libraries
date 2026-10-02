@@ -118,3 +118,31 @@ comgr's own on-disk cache (`~/.cache/comgr`) keeps its default: hipBLASLt never
 sets `AMD_COMGR_CACHE`. That cache holds the results of comgr actions for every
 comgr user in the process, such as hipRTC, and comgr reads its setting once per
 process.
+
+### Source bundle format
+
+A source bundle is a generated solution stored as a directory.
+`source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
+one by directory convention:
+
+| Path | Contents |
+| --- | --- |
+| `library/TensileLibrary.dat.zlib`, `.dat` or `.yaml` | The one-solution library entry; exactly one of them, decoded when compressed |
+| `sources/*.s` | The main kernel assembly; at least one |
+| `sources/Kernels.cpp` | The helper kernels, when the solution needs helpers |
+| Other files in `sources/` | Headers that the helper source includes |
+| `manifest.json` | A JavaScript Object Notation (JSON) provenance record that hipBLASLt does not read |
+
+Artifact paths must be relative and stay inside the bundle, including through
+symbolic links, and `sources/` may hold only regular files. The reader bounds
+the file count (1024), each file (64 MiB), the decoded library (64 MiB) and the
+sources in total (256 MiB).
+
+The JIT tests use gfx950 source bundles committed in `clients/tests/jit/data`.
+Their manifests record the kernel-argument and persistent-loop argument layout
+versions of the generator that wrote them, and the `jit-bundle-freshness` test
+fails when those differ from the ones in
+`tensilelite/Tensile/Common/GlobalParameters.py`, when the code-object version
+differs from the builder's, or when a bundle no longer reads or builds.
+[Their README](clients/tests/jit/data/README.md) gives the commands that
+regenerate them.

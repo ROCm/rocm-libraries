@@ -1,7 +1,9 @@
 # Validate the JIT implementation
 
-The JIT tests check the Jit stages and the comgr code-object builder. The JIT
-headers are not installed. The tests include them from `library/src/amd_detail`.
+The JIT tests check the Jit stages, the comgr code-object builder and the source
+bundle reader. The JIT headers are not installed. The tests include them from
+`library/src/amd_detail`. They build the gfx950 source bundles committed in
+[`data`](data/README.md), so they need neither Python nor a generator.
 
 ## Build and run from a checkout
 
@@ -22,16 +24,22 @@ load and launch code on device 0, which must be a gfx950. Each test writes under
 `clients/tests/jit/scratch` in the build directory, which CTest empties before
 the tests run. The CTest tests are:
 
-- `jit-cpu`: `jit-component` and `jit-code-object`.
+- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
+  `jit-bundle-freshness`.
 - `jit-gpu`: `jit-code-object-gpu`.
+
+A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness`, because
+the committed library entries are MsgPack.
 
 ## What each test checks
 
 | CTest test | Behavior under test |
 | --- | --- |
+| `jit-source-bundle` | The source bundle reader: relative paths, symbolic links that escape the bundle, size limits and library formats |
 | `jit-component` | Jit over fake stages, without a GPU: missing components rejected, the generator's units reaching the builder, count limiting, excluded kernels, the stage of each failure, publish and load ordering, scratch lifetime, and concurrent generation |
-| `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, concurrent builds, and the status and log of each kind of failed build, without a GPU |
+| `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, concurrent builds, and the status and log of each kind of failed build, without a GPU; with `--bundle`, the same for the committed split-K bundle |
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |
+| `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
 
 ## Jit component test
 
