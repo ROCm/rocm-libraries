@@ -321,6 +321,11 @@ namespace
             buffer = nullptr;
             status = rocsparse_status_memory_error;
         }
+        if(status == rocsparse_status_success
+           && hipMemset(d_ptr_C.ptr, 0xFF, d_ptr_C.n * sizeof(rocsparse_int)) != hipSuccess)
+        {
+            status = rocsparse_status_internal_error;
+        }
         if(status == rocsparse_status_success)
         {
             status = rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host);
