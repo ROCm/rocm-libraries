@@ -119,7 +119,7 @@ the strategy's biggest holes live (see
   on gfx942 using a conservative triangle-inequality error budget. Required
   executions fail when hardware or qualification is missing. The first cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
-  Provider builds enable `ROCKE_INSTALL_SDPA_REFERENCE` by default. Run
+  Provider builds enable `ROCKE_INSTALL_TEST_SDPA_REFERENCE` by default. Run
   `dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc`
   from the repository root before configuring. TheRock already performs this
   DVC download during source preparation. CMake extracts the archive, validates
@@ -130,17 +130,20 @@ the strategy's biggest holes live (see
   this in the test component and splits it into the matching architecture artifact,
   while the Python harness and trusted locks remain in the generic test artifact.
   Missing or corrupt data fails configuration. For builds that intentionally
-  omit this GPU lane, use `-DROCKE_INSTALL_SDPA_REFERENCE=OFF`.
+  omit this GPU lane, use `-DROCKE_INSTALL_TEST_SDPA_REFERENCE=OFF`. This also
+  ignores explicit or cached bundle-directory overrides; host checks remain installed.
   In rocm-libraries superbuild mode (`ROCM_LIBS_SUPERBUILD=ON`), this option
   defaults to OFF because the superbuild runs build-tree tests rather than the
   installed reference suite. To package the references in a superbuild, fetch
-  the bundle and explicitly pass `-DROCKE_INSTALL_SDPA_REFERENCE=ON`.
+  the bundle and explicitly pass `-DROCKE_INSTALL_TEST_SDPA_REFERENCE=ON`.
   Existing build directories retain their cached option value.
-  `-DROCKE_SDPA_REFERENCE_BUNDLE=<qualified-bundle>` remains an explicit local
-  override for gfx942. Target-specific overrides use
-  `-DROCKE_SDPA_REFERENCE_BUNDLE_gfx942=<qualified-bundle>`; runtime pytest overrides
-  use `ROCKE_SDPA_REFERENCE_BUNDLE_GFX942`. Standalone platform builds do not enable
-  archive staging by default.
+  To install an unpacked local bundle, pass
+  `-DROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_gfx942=<qualified-bundle>`.
+  To select a bundle for a pytest run without installing it, set the environment
+  variable `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_GFX942`. Normal installed CI leaves
+  that override unset and finds the packaged bundle automatically. CTest sets
+  `ROCKE_TEST_REQUIRE_SDPA_GPU=1` to enforce required execution. Standalone
+  platform builds do not enable archive staging by default.
   For source verification, run
   `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
@@ -160,13 +163,13 @@ the strategy's biggest holes live (see
   owns its directory under `reference_bundles/`, so future convolution references
   can use `reference_bundles/conv/<arch>.tar.gz` and be updated independently.
   Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
-  explicit bundle-path overrides are unchanged. Installed bundles
+  the runtime override can select another directory. Installed bundles
   live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
   root. The `engines/test_arch_content` spelling is required by TheRock's artifact
   manifest and the hipkernelprovider kpack splitting handler. `arch_content` is
   reserved for runtime content and must not be used for these test references.
-  `ROCKE_SDPA_REFERENCE_ARCHITECTURES` selects the enrolled bundles to install;
-  unknown architectures fail configuration. Only gfx942 is currently enrolled.
+  When reference installation is enabled, every architecture in the registry is
+  installed; TheRock splits the payloads by target. Only gfx942 is currently enrolled.
   Adding another architecture requires its adapter, independently qualified lock
   and bundle, and a registry entry; adding an empty registry entry is insufficient.
   Qualification accepts `--arch` and freezes the shared worker and architecture
@@ -421,3 +424,9 @@ behavior* is correct (G6), or that any arch beyond the enumerated configs works.
 file paths, counts, and CTest target names live in
 [`platform/tests/README.md`](platform/tests/README.md) and the CMake files —
 reference them, don't copy them here.*
+
+## Pinned-reference documentation
+
+- [SDPA implementation and usage](docs/sdpa-reference.md)
+- [GPU attention coverage and gaps](docs/gpu-attention-coverage.md)
+- [Reference methodology and extension strategy](docs/gpu-ci-pinned-rocke-reference-plan.md)

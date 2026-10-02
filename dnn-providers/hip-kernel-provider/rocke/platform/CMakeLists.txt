@@ -94,8 +94,6 @@ option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadat
 option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
 option(ROCKE_INSTALL_PLATFORM_PYTEST "Install the full rocKE platform pytest CTest entry" ON)
 option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocKE CTest metadata" ON)
-set(ROCKE_SDPA_REFERENCE_BUNDLE "" CACHE PATH
-    "Qualified gfx942 SDPA reference bundle to install with the GPU tests")
 if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "" CACHE STRING
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
@@ -107,8 +105,8 @@ set(_ROCKE_SDPA_DEFAULT OFF)
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR AND NOT ROCM_LIBS_SUPERBUILD)
   set(_ROCKE_SDPA_DEFAULT ON)
 endif()
-option(ROCKE_INSTALL_SDPA_REFERENCE
-       "Install pinned SDPA GPU tests from DVC data" ${_ROCKE_SDPA_DEFAULT})
+option(ROCKE_INSTALL_TEST_SDPA_REFERENCE
+       "Install pinned SDPA test references and register their GPU tests" ${_ROCKE_SDPA_DEFAULT})
 
 # Where rocKE's installed CTest metadata and standalone Python smoke script land:
 #  * Provider mode: append CTest entries to the provider's installed
@@ -326,30 +324,18 @@ if(ROCKE_INSTALL_TESTS)
         string(JSON _arch GET "${_ROCKE_SDPA_REGISTRY}" ${_index})
         list(APPEND _ROCKE_SDPA_ARCHITECTURES "${_arch}")
       endforeach()
-      set(ROCKE_SDPA_REFERENCE_ARCHITECTURES "${_ROCKE_SDPA_ARCHITECTURES}" CACHE STRING
-          "Enrolled SDPA reference architectures to install")
-      if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT ROCKE_SDPA_REFERENCE_ARCHITECTURES)
-        message(FATAL_ERROR "Select an enrolled SDPA architecture or disable ROCKE_INSTALL_SDPA_REFERENCE")
-      endif()
-      foreach(_arch IN LISTS ROCKE_SDPA_REFERENCE_ARCHITECTURES)
-        if(NOT _arch IN_LIST _ROCKE_SDPA_ARCHITECTURES)
-          message(FATAL_ERROR "SDPA reference architecture is not enrolled: ${_arch}")
-        endif()
-        set(ROCKE_SDPA_REFERENCE_BUNDLE_${_arch} "" CACHE PATH
-            "Optional qualified SDPA bundle directory for ${_arch}")
-        set(_bundle "${ROCKE_SDPA_REFERENCE_BUNDLE_${_arch}}")
-        # Preserve the original local override for its original target.
-        if(_arch STREQUAL "gfx942" AND ROCKE_SDPA_REFERENCE_BUNDLE AND NOT _bundle)
-          set(_bundle "${ROCKE_SDPA_REFERENCE_BUNDLE}")
-        endif()
+      foreach(_arch IN LISTS _ROCKE_SDPA_ARCHITECTURES)
+        set(ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_${_arch} "" CACHE PATH
+            "Optional extracted SDPA test reference directory to install for ${_arch}")
+        set(_bundle "${ROCKE_TEST_SDPA_REFERENCE_INSTALL_SOURCE_${_arch}}")
         set(_lock "${_ROCKE_LIBRARY_DIR}/tests/sdpa_reference/architectures/${_arch}/baseline_lock.json")
-        if(ROCKE_INSTALL_SDPA_REFERENCE AND NOT _bundle)
+        if(ROCKE_INSTALL_TEST_SDPA_REFERENCE AND NOT _bundle)
           set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/sdpa/${_arch}.tar.gz")
           if(NOT EXISTS "${_archive}")
             message(FATAL_ERROR
                     "SDPA reference archive missing. Run dvc pull for "
                     "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/${_arch}.tar.gz.dvc "
-                    "or configure with ROCKE_INSTALL_SDPA_REFERENCE=OFF.")
+                    "or configure with ROCKE_INSTALL_TEST_SDPA_REFERENCE=OFF.")
           endif()
           find_package(Python3 COMPONENTS Interpreter REQUIRED)
           file(SHA256 "${_archive}" _archive_sha256)
@@ -363,7 +349,7 @@ if(ROCKE_INSTALL_TESTS)
             message(FATAL_ERROR "SDPA reference staging failed for ${_arch}: ${_error}")
           endif()
         endif()
-        if(_bundle)
+        if(ROCKE_INSTALL_TEST_SDPA_REFERENCE AND _bundle)
           find_package(Python3 COMPONENTS Interpreter REQUIRED)
           execute_process(
             COMMAND "${Python3_EXECUTABLE}" -I
@@ -514,7 +500,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_sdpa_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;sdpa\\;gpu\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_REQUIRE_SDPA_GPU=1\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_SDPA_GPU=1\"\n"
              "  TIMEOUT 1800)\n")
     endif()
 
