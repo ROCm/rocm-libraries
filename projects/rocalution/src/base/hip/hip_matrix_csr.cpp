@@ -10263,13 +10263,15 @@ namespace rocalution
         DISCARD_HIP_ERROR(hipMalloc(&rocprim_buffer, rocprim_size));
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                  rocprim_size,
-                                                  int_csr_row_ptr,
-                                                  int_csr_row_ptr,
-                                                  0,
-                                                  nrow + 1,
-                                                  rocprim::plus<PtrType>()));
+        DISCARD_HIP_ERROR(
+            rocprim::exclusive_scan(rocprim_buffer,
+                                    rocprim_size,
+                                    int_csr_row_ptr,
+                                    int_csr_row_ptr,
+                                    0,
+                                    nrow + 1,
+                                    rocprim::plus<PtrType>(),
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         DISCARD_HIP_ERROR(
@@ -10388,7 +10390,11 @@ namespace rocalution
             allocate_hip(nrow + 1, &csr_row_ptr);
 
             // Determine maximum number of nnz per row of the merged matrix
-            kernel_csr_combined_row_nnz<<<(nrow - 1) / 256 + 1, 256>>>(
+            kernel_csr_combined_row_nnz<<<(nrow - 1) / 256 + 1,
+                                          256,
+                                          0,
+                                          HIPSTREAM(
+                                              _get_backend_descriptor()->HIP_stream_current)>>>(
                 nrow, this->mat_.row_offset, cast_ext->mat_.row_offset, csr_row_ptr);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
