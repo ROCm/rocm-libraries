@@ -25,6 +25,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
@@ -953,6 +954,100 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
     GraphSpec spec;
     spec.oLayout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Decline reasons. hipDNN tells the caller only "No engine configurations available for
+// the graph", so the engine's INFO line is the one place the cause shows.
+// ---------------------------------------------------------------------------
+
+constexpr std::string_view DECLINE_PREFIX = "hipkernel:Gfx950AttentionDense declined the graph: ";
+
+/// The reason the engine logged for declining @p spec, or empty when it logged none.
+std::string declineReason(const GraphSpec& spec)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(DECLINE_PREFIX);
+        if(log.severity == HIPDNN_SEV_INFO && at != std::string::npos)
+        {
+            return log.message.substr(at + DECLINE_PREFIX.size());
+        }
+    }
+    return {};
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, NamesTheOperandAndItsStridesWhenQIsNotBshd)
+{
+    GraphSpec spec;
+    spec.qLayout = StrideLayout::BHSD;
+    const auto reason = declineReason(spec);
+    EXPECT_NE(reason.find("Q (uid 1): dims [2, 4, 256, 128], strides [131072, 32768, 128, 1] "
+                          "is not dense BSHD"),
+              std::string::npos)
+        << reason;
+    EXPECT_NE(reason.find("strides [131072, 128, 512, 1]"), std::string::npos) << reason;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, NamesTheOutputWhenOnlyOIsNotBshd)
+{
+    GraphSpec spec;
+    spec.oLayout = StrideLayout::BHSD;
+    const auto reason = declineReason(spec);
+    EXPECT_NE(reason.find("O (uid 4): dims [2, 4, 256, 128], strides [131072, 32768, 128, 1] "
+                          "is not dense BSHD"),
+              std::string::npos)
+        << reason;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, NamesTheCauseOfEachOtherDecline)
+{
+    struct Case
+    {
+        const char* name;
+        GraphSpec spec;
+        const char* expected;
+    };
+    std::vector<Case> cases;
+
+    GraphSpec twoNodes;
+    twoNodes.twoNodes = true;
+    cases.push_back({"two nodes", twoNodes, "not a single SDPA-forward node (2 node(s))"});
+
+    GraphSpec fp32;
+    fp32.dataType = data_objects::DataType::FLOAT;
+    cases.push_back({"fp32", fp32, "data type FLOAT is not supported"});
+
+    GraphSpec d256;
+    d256.headSize = 256;
+    d256.headSizeV = 256;
+    cases.push_back({"D256", d256, "head size 256 is not supported"});
+
+    GraphSpec sinks;
+    sinks.sinkTokenUid = EXTRA_UID;
+    cases.push_back({"sinks", sinks, "attention sinks"});
+
+    GraphSpec noScale;
+    noScale.attnScaleValue = std::nullopt;
+    cases.push_back({"no scale", noScale, "attn_scale_value is not set"});
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto reason = declineReason(testCase.spec);
+        EXPECT_NE(reason.find(testCase.expected), std::string::npos) << reason;
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphItServes)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
+    EXPECT_FALSE(recorder.hasLogContaining(std::string(DECLINE_PREFIX)));
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)

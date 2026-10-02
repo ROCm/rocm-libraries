@@ -9,8 +9,10 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -57,6 +60,9 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_de
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
+
+/// The engine name the decline reasons are logged under.
+constexpr std::string_view ENGINE_NAME = "hipkernel:Gfx950AttentionDense";
 
 // KMD fields (12-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
@@ -211,19 +217,19 @@ enum class MaskType : int
 };
 
 /**
- * @brief Which mask the graph is asking for.
+ * @brief Which mask the graph is asking for, or why it asks for one this engine lacks.
  *
  * A real bound wins over the deprecated booleans: a graph that sets a boolean AND
  * carries a bound is asking for a windowed mask.
  */
-std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
+std::variant<MaskType, std::string_view> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
     const bool topLeftDeprecated = attributes.causal_mask();
     const bool bottomRightDeprecated = attributes.causal_mask_bottom_right();
 
     if(topLeftDeprecated && bottomRightDeprecated)
     {
-        return std::nullopt;
+        return std::string_view("causal_mask and causal_mask_bottom_right are both set");
     }
 
     const int64_t left
@@ -236,7 +242,8 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     // Decline early so the graph is not silently served with wrong numerics.
     if(right != UNBOUNDED && right != 0)
     {
-        return std::nullopt;
+        return std::string_view("a non-zero right_bound (bidirectional window) is not "
+                                "supported; the kernel is causal or unmasked only");
     }
 
     // A bounded left edge is a window whatever the booleans say, and no shipped variant
@@ -244,7 +251,8 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     // wrong mask with no error.
     if(left != UNBOUNDED)
     {
-        return std::nullopt;
+        return std::string_view("a left_bound (sliding window) is not supported; no "
+                                "shipped variant carries a window");
     }
 
     if(topLeftDeprecated)
@@ -320,19 +328,91 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
     return problem;
 }
 
-/**
- * @brief Graph-scoped applicability for the whole engine.
- *
- * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips
- *          EVERY remaining pack, not just this one.
- */
-std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
+/// The graph match's answer: the tokens it bound, or why it declined.
+///
+/// hipDNN reports a declined graph to its caller only as "No engine configurations
+/// available for the graph", and the SDK's own INFO line does not say which engine or
+/// why. The reason is therefore logged here, at INFO, naming the field that failed.
+using GraphMatchVerdict = std::variant<BoundTokens, std::string>;
+
+template <typename... Parts>
+std::string concat(const Parts&... parts)
+{
+    std::ostringstream out;
+    (out << ... << parts);
+    return out.str();
+}
+
+std::string formatAxes(const flatbuffers::Vector<int64_t>* values)
+{
+    if(values == nullptr)
+    {
+        return "(none)";
+    }
+    std::ostringstream out;
+    out << '[';
+    for(uint32_t i = 0; i < values->size(); ++i)
+    {
+        out << (i == 0 ? "" : ", ") << values->Get(i);
+    }
+    out << ']';
+    return out.str();
+}
+
+/// "Q (uid 1): dims [..], strides [..]".
+std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
+{
+    return concat(role,
+                  " (uid ",
+                  tensor.uid(),
+                  "): dims ",
+                  formatAxes(tensor.dims()),
+                  ", strides ",
+                  formatAxes(tensor.strides()));
+}
+
+/// Why an operand is not one the kernel can address. Callers validated it well formed.
+std::string notBshdReason(std::string_view role, const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const int64_t heads = dims->Get(HEAD_AXIS);
+    const int64_t sequence = dims->Get(SEQ_AXIS);
+    const int64_t headSize = dims->Get(HEAD_SIZE_AXIS);
+    const auto show = [](std::optional<int64_t> value) {
+        return value.has_value() ? std::to_string(*value) : std::string("overflow");
+    };
+    return concat(describeOperand(role, tensor),
+                  " is not dense BSHD (token-major, head fastest); the kernel bakes strides [",
+                  show(checkedProduct({sequence, heads, headSize})),
+                  ", ",
+                  headSize,
+                  ", ",
+                  show(checkedProduct({heads, headSize})),
+                  ", 1] (unit-extent axes exempt) and takes no stride arguments");
+}
+
+/// Why an operand fails the total predicates, or nullopt when it passes them.
+std::optional<std::string> malformedReason(std::string_view role,
+                                           const data_objects::TensorAttributes& tensor)
+{
+    if(isWellFormedOperand(tensor))
+    {
+        return std::nullopt;
+    }
+    return concat(describeOperand(role, tensor),
+                  " must be a rank-4 (B, H, S, D) tensor with positive extents, not virtual "
+                  "and not pass-by-value");
+}
+
+GraphMatchVerdict matchGraphOrExplain(const MatchContext& context)
 {
     // --- 1. Node shape. One SDPA-forward node; this engine serves a whole graph.
     const auto* attributesPtr = sdpaNode(context);
     if(attributesPtr == nullptr)
     {
-        return std::nullopt;
+        return concat("the graph is not a single SDPA-forward node (",
+                      context.graph.nodeCount(),
+                      " node(s))");
     }
     const auto& attributes = *attributesPtr;
 
@@ -343,23 +423,29 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
     {
-        return std::nullopt;
+        return std::string("the SDPA node names a Q, K, V or O uid the graph has no tensor for");
     }
 
     // --- 3. Total predicates, before anything indexes an axis.
-    if(!isWellFormedOperand(*q) || !isWellFormedOperand(*k) || !isWellFormedOperand(*v)
-       || !isWellFormedOperand(*o))
+    for(const auto& [role, tensor] :
+        {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}, std::pair{"O", o}})
     {
-        return std::nullopt;
+        if(auto reason = malformedReason(role, *tensor))
+        {
+            return std::move(*reason);
+        }
     }
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
     //
     // O is held to the same rule at §5, so that an output whose extents disagree declines
     // on the disagreement instead.
-    if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v))
+    for(const auto& [role, tensor] : {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}})
     {
-        return std::nullopt;
+        if(!hasBshdStrides(*tensor))
+        {
+            return notBshdReason(role, *tensor);
+        }
     }
 
     // --- 5. Cross-tensor consistency.
@@ -368,11 +454,20 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     if(k->data_type() != problem.dataType || v->data_type() != problem.dataType
        || o->data_type() != problem.dataType)
     {
-        return std::nullopt;
+        return concat("Q, K, V and O must share one data type, got ",
+                      data_objects::EnumNameDataType(problem.dataType),
+                      ", ",
+                      data_objects::EnumNameDataType(k->data_type()),
+                      ", ",
+                      data_objects::EnumNameDataType(v->data_type()),
+                      ", ",
+                      data_objects::EnumNameDataType(o->data_type()));
     }
     if(!supportedDataTypeName(problem.dataType).has_value())
     {
-        return std::nullopt;
+        return concat("data type ",
+                      data_objects::EnumNameDataType(problem.dataType),
+                      " is not supported; the kernel is built for BFLOAT16 and HALF");
     }
 
     // V shares K's base and stride in the builder, so it must share K's shape exactly.
@@ -381,33 +476,49 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || v->dims()->Get(SEQ_AXIS) != problem.seqLenKv
        || v->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
-        return std::nullopt;
+        return concat(describeOperand("V", *v),
+                      " must have K's batch, heads and sequence and Q's head size, got K dims ",
+                      formatAxes(k->dims()),
+                      " and Q head size ",
+                      problem.headSize);
     }
     if(k->dims()->Get(BATCH_AXIS) != problem.batch
        || k->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
-        return std::nullopt;
+        return concat(describeOperand("K", *k),
+                      " must have Q's batch and head size, got Q dims ",
+                      formatAxes(q->dims()));
     }
     // O is Q's shape: the epilogue reuses the query base and stride verbatim.
     if(o->dims()->Get(BATCH_AXIS) != problem.batch
        || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
        || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
-       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize || !hasBshdStrides(*o))
+       || o->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
-        return std::nullopt;
+        return concat(
+            describeOperand("O", *o), " must have Q's dims, got Q dims ", formatAxes(q->dims()));
+    }
+    if(!hasBshdStrides(*o))
+    {
+        return notBshdReason("O", *o);
     }
 
     // GQA: the kernel derives its group size by integer division, so a non-divisible
     // pair silently drops heads.
     if(problem.numKvHeads <= 0 || problem.numQueryHeads % problem.numKvHeads != 0)
     {
-        return std::nullopt;
+        return concat("query heads ",
+                      problem.numQueryHeads,
+                      " must be a multiple of key/value heads ",
+                      problem.numKvHeads);
     }
 
     // head_size is 64 or 128 (AttentionDenseSpec.__post_init__).
     if(problem.headSize != 64 && problem.headSize != 128)
     {
-        return std::nullopt;
+        return concat("head size ",
+                      problem.headSize,
+                      " is not supported; the kernel is built for 64 and 128");
     }
 
     // --- 6. 32-bit addressing. K/V bound is bytes, Q/O is elements. A product too large
@@ -418,21 +529,24 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
     if(!kvBytes.has_value() || *kvBytes >= INT32_LIMIT)
     {
-        return std::nullopt;
+        return std::string("K or V is 2^31 bytes or larger; the kernel addresses K/V with "
+                           "32-bit byte offsets");
     }
     const auto qElements
         = checkedProduct({problem.batch, problem.seqLenQ, problem.numQueryHeads, problem.headSize});
     if(!qElements.has_value() || *qElements >= INT32_LIMIT)
     {
-        return std::nullopt;
+        return std::string("Q or O has 2^31 elements or more; the kernel addresses them with "
+                           "32-bit element offsets");
     }
 
     // --- 7. The mask. hipDNN has no `causal` boolean; see maskTypeFor.
-    const auto mask = maskTypeFor(attributes);
-    if(!mask.has_value())
+    const auto maskOrReason = maskTypeFor(attributes);
+    if(const auto* reason = std::get_if<std::string_view>(&maskOrReason))
     {
-        return std::nullopt;
+        return std::string(*reason);
     }
+    const auto mask = std::get<MaskType>(maskOrReason);
 
     int64_t causal = 0;
 
@@ -441,7 +555,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // matched by a graph that does not ask for one.
     const int64_t slidingWindow = 0;
 
-    switch(*mask)
+    switch(mask)
     {
     case MaskType::NO_MASK:
         causal = 0;
@@ -454,13 +568,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         // Sq == Skv.
         if(problem.seqLenQ != problem.seqLenKv)
         {
-            return std::nullopt;
+            return concat("bottom-right causal needs seqlen_q == seqlen_kv, got ",
+                          problem.seqLenQ,
+                          " and ",
+                          problem.seqLenKv,
+                          "; the kernel's causal mask is top-left");
         }
         causal = 1;
         break;
     default:
         // Unrecognised mask kinds are declined, never served as if dense.
-        return std::nullopt;
+        return std::string("unrecognised mask kind");
     }
 
     // --- 8. Every optional attribute this kernel cannot honour, declined explicitly.
@@ -468,18 +586,20 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // Additive attention bias.
     if(attributes.attn_mask_tensor_uid().has_value())
     {
-        return std::nullopt;
+        return std::string("an additive attention mask (attn_mask tensor) is not supported");
     }
     // Device-resident scale: the ABI takes `scale` as an f32 kernarg.
     if(attributes.scale_tensor_uid().has_value())
     {
-        return std::nullopt;
+        return std::string("a scale tensor is not supported; the kernel takes the scale as "
+                           "a host value (attn_scale_value)");
     }
     // varlen, both spellings.
     if(attributes.seq_len_q_tensor_uid().has_value()
        || attributes.seq_len_kv_tensor_uid().has_value())
     {
-        return std::nullopt;
+        return std::string("variable sequence lengths (seq_len_q/seq_len_kv tensors) are not "
+                           "supported");
     }
     // Dropout.
     if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
@@ -487,20 +607,23 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.dropout_scale_tensor_uid().has_value()
        || attributes.dropout_probability().has_value())
     {
-        return std::nullopt;
+        return std::string("dropout is not supported");
     }
     // Paged KV.
     if(attributes.page_table_k_tensor_uid().has_value()
        || attributes.page_table_v_tensor_uid().has_value()
        || attributes.max_seq_len_kv().has_value())
     {
-        return std::nullopt;
+        return std::string("paged K/V (page tables or max_seq_len_kv) is not supported");
     }
     // Block-sparse, and attention SINKS.
-    if(attributes.block_mask_tensor_uid().has_value()
-       || attributes.sink_token_tensor_uid().has_value())
+    if(attributes.block_mask_tensor_uid().has_value())
     {
-        return std::nullopt;
+        return std::string("a block mask is not supported");
+    }
+    if(attributes.sink_token_tensor_uid().has_value())
+    {
+        return std::string("attention sinks (sink_token tensor) are not supported");
     }
     // FP8 quantization.
     if(attributes.descale_q_tensor_uid().has_value()
@@ -510,7 +633,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.scale_s_tensor_uid().has_value() || attributes.scale_o_tensor_uid().has_value()
        || attributes.amax_s_tensor_uid().has_value() || attributes.amax_o_tensor_uid().has_value())
     {
-        return std::nullopt;
+        return std::string("FP8 scaling tensors (descale, scale or amax) are not supported");
     }
     // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
     if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
@@ -518,12 +641,17 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
        || attributes.rng_dump_tensor_uid().has_value()
        || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
     {
-        return std::nullopt;
+        return std::string("softmax statistics outputs (stats, max, sum_exp, rng_dump or "
+                           "generate_stats) are not supported");
     }
     // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask() || attributes.padding_mask())
+    if(attributes.alibi_mask())
     {
-        return std::nullopt;
+        return std::string("alibi_mask is not supported");
+    }
+    if(attributes.padding_mask())
+    {
+        return std::string("padding_mask is not supported");
     }
     // mma_core_mode is the MMA operand precision. This kernel's MFMA operands are the
     // graph's own fp16/bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
@@ -535,18 +663,22 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)
     {
-        return std::nullopt;
+        return concat("mma_core_mode ",
+                      data_objects::EnumNameDataType(mmaCoreMode),
+                      " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
     }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {
-        return std::nullopt;
+        return concat("implementation hint ",
+                      data_objects::EnumNameAttentionImplementation(attributes.implementation()),
+                      " is not supported; only AUTO is");
     }
 
     // The softmax scale is a REQUIRED launch argument with no default.
     if(!attributes.attn_scale_value().has_value())
     {
-        return std::nullopt;
+        return std::string("attn_scale_value is not set");
     }
     const float scale = attributes.attn_scale_value().value();
 
@@ -562,6 +694,23 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(SCALE_BITS_TOKEN)] = static_cast<int64_t>(scaleBits);
     return bound;
+}
+
+/**
+ * @brief Graph-scoped applicability for the whole engine.
+ *
+ * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips
+ *          EVERY remaining pack, not just this one.
+ */
+std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
+{
+    auto verdict = matchGraphOrExplain(context);
+    if(const auto* reason = std::get_if<std::string>(&verdict))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME << " declined the graph: " << *reason);
+        return std::nullopt;
+    }
+    return std::get<BoundTokens>(std::move(verdict));
 }
 
 /// Re-reads the bindings a match established.
