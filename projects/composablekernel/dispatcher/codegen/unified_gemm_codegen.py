@@ -2049,6 +2049,8 @@ class UnifiedGemmCodegen:
                     trait.epilogue,
                     trait.persistent,
                     tile.warp_tile_k,
+                    tile.warp_k,
+                    tile.tile_k,
                 ):
                     continue
                 # The CShuffle-store pow2 repeat gate applies only to the cshuffle

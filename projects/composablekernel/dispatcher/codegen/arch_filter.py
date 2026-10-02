@@ -792,6 +792,8 @@ class ArchFilter:
                 scheduler=config.scheduler,
                 epilogue=config.epilogue,
                 warp_tile_k=config.warp_tile_k,
+                warp_k=config.warp_k,
+                tile_k=config.tile_k,
             )
             if reason:
                 result.add_error(reason)

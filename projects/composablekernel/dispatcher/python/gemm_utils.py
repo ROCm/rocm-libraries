@@ -2936,7 +2936,7 @@ def expand_sweep(
                 # hands back a config whose header is never emitted.
                 if variant == "preshuffle" and _codegen_common().preshuffle_pipeline_reject_reason(
                     pipe, arch, layout[:3], pm, pn, pk, wm * wn * wk, dtype,
-                    warp_tile_k=wtk,
+                    warp_tile_k=wtk, warp_k=wk, tile_k=tk,
                 ):
                     continue
                 val = None

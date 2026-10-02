@@ -1470,6 +1470,10 @@ PRESHUFFLE_GFX1250_LAYOUT = "rcr"
 PRESHUFFLE_PAD_NK_REJECT_REASON = (
     "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
 )
+# These block GEMMs ignore K warps while the launch still counts them, so the
+# extra waves run as M warps past the tile and corrupt C (comp_tdm* only survive
+# through their TDM store), on every arch.
+PRESHUFFLE_WARP_K1_PIPELINES = PACKED_B_PIPELINES + ("comp_async",)
 
 
 def _is_true(value) -> bool:
@@ -1490,14 +1494,16 @@ def preshuffle_pipeline_reject_reason(
     epilogue: str = "",
     persistent: bool = False,
     warp_tile_k: Optional[int] = None,
+    warp_k: Optional[int] = None,
+    tile_k: Optional[int] = None,
 ) -> str:
     """Reason string if a gemm_preshuffle pipeline config is not allowed, else "".
 
     Pipelines outside PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only get the
-    scheduler and tdm-epilogue checks, plus the pad_n/pad_k check on gfx1250.
-    Empty gpu_target / layout / dtype / scheduler / epilogue and None pads /
-    num_waves / warp_tile_k mean "not known yet" and are not checked, so the
-    helper can run at trait level and at tile level.
+    scheduler, tdm-epilogue and warp_k checks, plus the pad_n/pad_k check on
+    gfx1250. Empty gpu_target / layout / dtype / scheduler / epilogue and None
+    pads / num_waves / warp_tile_k / warp_k / tile_k mean "not known yet" and
+    are not checked, so the helper can run at trait level and at tile level.
     """
     # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
     want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
@@ -1505,6 +1511,8 @@ def preshuffle_pipeline_reject_reason(
         return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
     if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
         return f"preshuffle {pipeline} cannot use the tdm epilogue"
+    if pipeline in PRESHUFFLE_WARP_K1_PIPELINES and warp_k not in (None, 1):
+        return f"preshuffle {pipeline} requires warp_k=1, got {warp_k}"
     arch = normalize_gfx_arch(gpu_target)
     pads = (pad_m, pad_n, pad_k)
     if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
@@ -1526,6 +1534,10 @@ def preshuffle_pipeline_reject_reason(
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
+    # The TDM LDS descriptors put one pad per K row; the LDS pad interval only
+    # lands there when the row (tile_k elements) is a power of two.
+    if pipeline in TDM_PIPELINES and tile_k is not None and tile_k & (tile_k - 1):
+        return f"preshuffle {pipeline} requires a power-of-two tile_k, got {tile_k}"
     if (
         pipeline == "comp_async"
         and warp_tile_k is not None

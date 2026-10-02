@@ -60,10 +60,10 @@ def _full_pads(pipeline):
     return pipeline == "comp_async"
 
 
-def _single_config_json(pipeline, pad=False, warp_tile_k=32):
+def _single_config_json(pipeline, pad=False, warp_tile_k=32, **tile):
     scheduler, epilogue = _traits(pipeline)
     return {
-        "tile_config": {k: [v] for k, v in {**TILE, "warp_tile_k": warp_tile_k}.items()},
+        "tile_config": {k: [v] for k, v in {**TILE, "warp_tile_k": warp_tile_k, **tile}.items()},
         "trait_config": {
             "pipeline": [pipeline], "scheduler": [scheduler], "epilogue": [epilogue],
             "pad_m": [pad], "pad_n": [pad], "pad_k": [pad], "persistent": [False],
@@ -71,12 +71,13 @@ def _single_config_json(pipeline, pad=False, warp_tile_k=32):
     }
 
 
-def _generate(pipeline, gpu_target, layout="rcr", pad=None, datatype="fp16", warp_tile_k=32):
+def _generate(pipeline, gpu_target, layout="rcr", pad=None, datatype="fp16", warp_tile_k=32,
+              **tile):
     pad = _full_pads(pipeline) if pad is None else pad
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         cfg = root / "cfg.json"
-        cfg.write_text(json.dumps(_single_config_json(pipeline, pad, warp_tile_k)))
+        cfg.write_text(json.dumps(_single_config_json(pipeline, pad, warp_tile_k, **tile)))
         gen = UnifiedGemmCodegen(
             root / "out", datatype=datatype, layout=layout, gpu_target=gpu_target,
             config_file=cfg, variants=[GemmVariant.PRESHUFFLE],
@@ -112,6 +113,14 @@ class TestRejectHelperParity(unittest.TestCase):
             args = (pipeline, arch, layout, *pads, waves, dtype, sched, epi, persistent, wtk)
             self.assertEqual(cc.preshuffle_pipeline_reject_reason(*args),
                              TE.preshuffle_pipeline_reject_reason(*args), args)
+
+    def test_helpers_agree_on_warp_k_and_tile_k(self):
+        grid = itertools.product(ALL_PIPELINES, ("", "gfx950", "gfx1250"), (None, 1, 2),
+                                 (None, 64, 192))
+        for pipeline, arch, warp_k, tile_k in grid:
+            kw = dict(gpu_target=arch, warp_k=warp_k, tile_k=tile_k)
+            self.assertEqual(cc.preshuffle_pipeline_reject_reason(pipeline, **kw),
+                             TE.preshuffle_pipeline_reject_reason(pipeline, **kw), (pipeline, kw))
 
 
 class TestRejectRules(unittest.TestCase):
@@ -186,6 +195,22 @@ class TestRejectRules(unittest.TestCase):
             self.assertEqual(self._ok("comp_tdm", dtype=dtype, warp_tile_k=64), "")
         self.assertEqual(self._ok("comp_async", dtype="fp16", warp_tile_k=32), "")
 
+    def test_warp_k_must_be_one(self):
+        for pipeline in cc.PRESHUFFLE_WARP_K1_PIPELINES:
+            self.assertIn("warp_k=1", self._ok(pipeline, warp_k=2))
+            self.assertEqual(self._ok(pipeline, warp_k=1), "")
+        # Not a gfx1250 rule: the gfx942/gfx950 warp tables list [2, 1, 2].
+        self.assertIn("warp_k=1", self.reject("preshufflev2", "gfx950", warp_k=2))
+        for pipeline in cc.TDM_PIPELINES:
+            self.assertEqual(self._ok(pipeline, warp_k=2), "")
+
+    def test_comp_tdm_power_of_two_tile_k(self):
+        for pipeline in cc.TDM_PIPELINES:
+            self.assertIn("power-of-two tile_k", self._ok(pipeline, tile_k=192))
+            for tile_k in (64, 128, 256):
+                self.assertEqual(self._ok(pipeline, tile_k=tile_k), "")
+        self.assertEqual(self._ok("comp_async", tile_k=192), "")
+
 
 class TestCodegen(unittest.TestCase):
     def test_rejected_configs_emit_nothing(self):
@@ -204,6 +229,12 @@ class TestCodegen(unittest.TestCase):
             with self.subTest(pipeline="comp_async", dtype=dtype):
                 self.assertEqual(_generate("comp_async", "gfx1250", datatype=dtype,
                                            warp_tile_k=64), [])
+        for pipeline in cc.PRESHUFFLE_WARP_K1_PIPELINES:
+            with self.subTest(pipeline=pipeline, warp_k=2):
+                self.assertEqual(_generate(pipeline, "gfx1250", warp_n=2, warp_k=2), [])
+        for pipeline in cc.TDM_PIPELINES:
+            with self.subTest(pipeline=pipeline, tile_k=192):
+                self.assertEqual(_generate(pipeline, "gfx1250", tile_k=192), [])
 
     def test_accepted_configs_emit_one_kernel(self):
         # Only preshufflev2 / preshuffle_tdm read host-packed B.
