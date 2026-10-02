@@ -1,22 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the StreamKForceDPOnly SGPR-reduction changes (AIHPBLAS-4145).
+"""Emission contracts for DataParallel with StaticGrid assignment.
 
-StreamKForceDPOnly is the SK3 DP-first path on gfx1250. Because every workgroup
-processes complete tiles and the reduction is always the single-kernel tree path,
-a family of StreamK SGPRs become dead / compile-time constants:
-
-  * ``StreamKLocalStart`` == 0 and ``StreamKLocalEnd`` == ItersPerTile always,
-    so both persistent SGPRs are dropped and their readers are constant-folded.
-  * ``AddressWS`` / ``AddressFlags`` / ``SrdWS`` (the workspace + synchronizer-flag
-    kernarg pointers / SRD) are never dereferenced, so they are dropped from the
-    kernarg SGPR define, the ``.kd`` signature metadata, and the host kernarg
-    builder (ContractionSolution.cpp, host-side, not unit-tested here).
-
-Each folded reader is gated on ``kernel["StreamKForceDPOnly"]``. These tests pin
-that behaviour by driving the individual emitter methods with both DP-only and
-non-DP-only kernels and asserting the DP-only path drops the dead SGPR reads while
-the non-DP-only path is unchanged.
+Every workgroup processes complete tiles, so no partial reduction, workspace,
+or synchronizer flags are needed. The DataParallel component folds local K
+bounds and omits AddressWS, AddressFlags, SrdWS, StreamKLocalStart, and
+StreamKLocalEnd. These tests compare those paths with partial-tile StreamK
+emission and check canonical SizeMapping metadata.
 
 The component-level harness (SimpleNamespace / mock-writer + rocisa RegisterPool,
 introspecting emitted items) is reused from ``test_PrefetchAcrossPersistent``; the
@@ -48,7 +38,10 @@ import Tensile.KernelWriter as kw_module
 import Tensile.KernelWriterAssembly as kwa_module
 from Tensile.Common.DataType import DataType
 from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-from Tensile.Components.Subtile.SubtileGREmit import tdmApplyStreamKOffsetSubtile
+from Tensile.Components.TileProcessingStrategy import DataParallel
+from Tensile.Components.PersistentLoop import PersistentLoopOn
+from Tensile.Components.WorkAssignment import StaticGrid
+from Tensile.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
 from Tensile.Contractions import SizeMapping
 
 # Reuse the established component-level harness helpers rather than reinventing
@@ -57,9 +50,10 @@ from Tensile.Contractions import SizeMapping
 from test_PrefetchAcrossPersistent import (
     _StubLabels,
     _StubStreamK,
+    _ClassicPapWrapperWriter,
     _instruction_indices,
     _module_items,
-    _prefetch_across_persistent,
+    _pap_wrapper_kernel,
     _tensor_parameters,
 )
 
@@ -109,7 +103,7 @@ class _SKWriter:
         self.states = SimpleNamespace(
             unrollIdx=0,
             indexChars=["I", "J", "K", "L", "M"],
-            skConstVgprs={},
+            persistentConstVgprs={},
             a=SimpleNamespace(tileInfo=SimpleNamespace(depthUBytes=256)),
             b=SimpleNamespace(tileInfo=SimpleNamespace(depthUBytes=256)),
         )
@@ -122,14 +116,14 @@ class _SKWriter:
         yield SimpleNamespace(idx=base, size=size)
 
     # StreamK constant SGPRs are kept in-place (returns the symbolic name) in this
-    # mock; isStreamKConstantsToVgprEnabled=False so no VGPR readfirstlane fires.
-    def acquireStreamKConstSgpr(self, kernel, name):
+    # mock; isPersistentConstantsToVgprEnabled=False so no VGPR readfirstlane fires.
+    def acquirePersistentConstSgpr(self, kernel, name):
         return name
 
-    def releaseStreamKConstSgpr(self, nameOrIdx):
+    def releasePersistentConstSgpr(self, nameOrIdx):
         pass
 
-    def isStreamKConstantsToVgprEnabled(self, kernel):
+    def isPersistentConstantsToVgprEnabled(self, kernel):
         return False
 
     def cmpNamedArgTypeEq(self, module, value, comment=""):
@@ -141,11 +135,14 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
 
+
     def tdmFusePaired(self, kernel):
         return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
 
     def _tdmPairedParityOrder(self, kernel, tpa, tpb):
         return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
@@ -153,7 +150,8 @@ class _SKWriter:
 
 def _sk_common_kernel(dp_only):
     return {
-        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
+        "WorkAssignment": "StaticGrid",
         "NoTailLoop": True,
         "DepthU": 64,
         "ProblemType": {
@@ -164,79 +162,63 @@ def _sk_common_kernel(dp_only):
     }
 
 
-def _sk():
-    return StreamKTwoTileDPFirst()
+def _processing(dp_only=True):
+    return DataParallel() if dp_only else StreamKTwoTileDPFirst()
 
 
 # ---------------------------------------------------------------------------
 # 1. classic PAP: the AddressFlags "parallel reduction: skip PAP" compare is
-#    folded out under DP-only. StreamKIter >= StreamKIterEnd lives in the
-#    papHasNextPersistentIteration seam (nested Module), not as a top-level
-#    instruction in prefetchAcrossPersistent.
+#    folded out under DP-only. Assignment owns the pending-work bound check.
 # ---------------------------------------------------------------------------
 def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
-    _, dp_items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
-    _, nodp_items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=0)
+    dp_items = _pap_items(monkeypatch, dp_only=True)
+    nodp_items = _pap_items(monkeypatch, dp_only=False)
 
     # DP-only: no AddressFlags synchronizer compare ...
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
     # non-DP-only: the AddressFlags compare is present (path unchanged).
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
 
-    skip_label = Label("SK_SkipNllPAP_unit", "")
-    sk3_items = _module_items(
-        StreamKTwoTileDPFirst().papHasNextPersistentIteration(
-            writer=None, kernel={}, skipLabel=skip_label
-        )
-    )
-    assert _instruction_indices(sk3_items, SCmpGeU32, src_contains="StreamKIter")
+    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="NextTile")
+    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="PersistentIteration")
 
 
 # ---------------------------------------------------------------------------
 # 2. Subtile PAP (KernelWriter.prefetchAcrossPersistentSubtile): same fold.
 # ---------------------------------------------------------------------------
-class _SubtilePapWriter:
-    def __init__(self):
-        self.labels = _StubLabels()
-        self.vgprPool = SimpleNamespace(
-            checkOutAligned=lambda *a, **k: 300,
-            checkIn=lambda *a, **k: None,
-        )
-
-    def isPrefetchAcrossPersistentEnabled(self, kernel):
-        return True
-
-    def papTileIdentityNames(self, kernel):
-        return []
-
-    def papCheckpointCurrentTileIdentityVgprs(self, kernel, prevTile):
-        return Module("papCheckpointCurrentTileIdentityVgprs")
-
-    def papRestoreCurrentTileIdentityVgprs(self, kernel, prevTile):
-        return Module("papRestoreCurrentTileIdentityVgprs")
-
+class _SubtilePapWriter(_ClassicPapWrapperWriter):
     def setupPrefetchAcrossPersistentSubtileLoads(self, kernel, tpa, tpb, preloopGrModule=None):
         return Module("setupPrefetchAcrossPersistentSubtileLoads")
 
 
-def _subtile_pap_items(monkeypatch, dp_only):
-    monkeypatch.setattr(kw_module.Component.StreamK, "find", lambda writer: _StubStreamK())
-    writer = _SubtilePapWriter()
-    kernel = {"UseSubtileImpl": True, "StreamKForceDPOnly": 1 if dp_only else 0}
+def _pap_items(monkeypatch, dp_only, subtile=False):
+    processing = _processing(dp_only)
+    processing.prefetchAcrossPersistentSetupNextTile = _StubStreamK().prefetchAcrossPersistentSetupNextTile
+    monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: processing)
+    monkeypatch.setattr(kw_module.Component.WorkAssignment, "find", lambda writer: StaticGrid())
+    monkeypatch.setattr(kw_module.Component.PersistentLoop, "find", lambda writer: PersistentLoopOn())
+    writer = _SubtilePapWriter() if subtile else _ClassicPapWrapperWriter()
+    kernel = _pap_wrapper_kernel(UseSubtileImpl=subtile,
+                                TileProcessingStrategy="DataParallel" if dp_only else "StreamK")
+    writer.states.kernel = kernel
+    writer.states.currentTileWork = processing.tileWork(kernel)
     tpa, tpb = _tensor_parameters()
-    module = kw_module.KernelWriter.prefetchAcrossPersistentSubtile(writer, kernel, tpa, tpb)
-    return _module_items(module)
+    if subtile:
+        module = kw_module.KernelWriter.prefetchAcrossPersistentSubtile(writer, kernel, tpa, tpb)
+    else:
+        module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(writer, kernel, tpa, tpb)
+    return list(module.flatitems())
 
 
 def test_subtile_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
-    dp_items = _subtile_pap_items(monkeypatch, dp_only=True)
-    nodp_items = _subtile_pap_items(monkeypatch, dp_only=False)
+    dp_items = _pap_items(monkeypatch, dp_only=True, subtile=True)
+    nodp_items = _pap_items(monkeypatch, dp_only=False, subtile=True)
 
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="StreamKIter")
+    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="NextTile")
 
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="StreamKIter")
+    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="PersistentIteration")
 
 
 # ---------------------------------------------------------------------------
@@ -248,11 +230,12 @@ def _strided_or_general_items(dp_only):
     strided = Label("StridedBatchedGemmLoad", "")
     general = Label("GeneralBatchedGemmLoad", "")
     kernel = {
-        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
+        "WorkAssignment": "StaticGrid",
         "ProblemType": {"SupportUserArgs": True},
     }
-    module = _sk().stridedBatchOrGeneralBatch(_SKWriter(), strided, general, kernel)
-    return _module_items(module), general.getLabelName()
+    module = _processing(dp_only).routeToGeneralBatchedOrStridedBatched(_SKWriter(), strided, general, kernel)
+    return list(module.flatitems()), general.getLabelName()
 
 
 def test_general_batched_flag_check_folded_under_dp_only():
@@ -280,10 +263,10 @@ def test_general_batched_flag_check_folded_under_dp_only():
 def _calc_loop_num_iter_items(dp_only):
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only)
-    module = _sk().calculateLoopNumIterCommon(
+    module = _processing(dp_only).calculateLoopNumIter(
         writer, kernel, "LoopCounterL", 0, SimpleNamespace(idx=50)
     )
-    return _module_items(module)
+    return list(module.flatitems())
 
 
 def test_calculate_loop_num_iter_folds_to_iterspertile_under_dp_only():
@@ -310,9 +293,9 @@ def test_dp_only_streamk_common_helpers_emit_empty_modules():
     kernel = _sk_common_kernel(dp_only=True)
     tp = {"tensorChar": "A", "bpe": 2}
 
-    assert _sk().computeLoadSrdCommon(writer, kernel, tp, 60).itemsSize() == 0
-    assert _sk().declareStaggerParmsCommon(writer, kernel).itemsSize() == 0
-    assert _sk().tailLoopNumIterCommon(writer, kernel, sgpr("LoopCounterL")).itemsSize() == 0
+    assert _processing().computeLoadSrd(writer, kernel, tp, 60).itemsSize() == 0
+    assert _processing().declareStaggerParms(writer, kernel).itemsSize() == 0
+    assert _processing().tailLoopNumIter(writer, kernel, sgpr("LoopCounterL")).itemsSize() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +306,8 @@ def _gra_addresses_items(dp_only):
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only)
     tp = {"tensorChar": "A", "bpe": 2}
-    module = _sk().graAddressesCommon(writer, kernel, tp, 10)
-    return _module_items(module)
+    module = _processing(dp_only).graAddresses(writer, kernel, tp, 10)
+    return list(module.flatitems())
 
 
 def test_gra_addresses_dp_only_moves_only_base_address():
@@ -348,11 +331,11 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
     writer = _SKWriter()
     tpa, tpb = _tensor_parameters()
 
-    dp_mod = kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
-        writer, {"StreamKForceDPOnly": 1}, tpa, tpb
+    dp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
+        writer, {"TileProcessingStrategy": "DataParallel"}, tpa, tpb
     )
-    nodp_mod = kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
-        writer, {"StreamKForceDPOnly": 0}, tpa, tpb
+    nodp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
+        writer, {"TileProcessingStrategy": "StreamK"}, tpa, tpb
     )
 
     assert dp_mod.itemsSize() == 0
@@ -364,7 +347,7 @@ def _tdm_setup_increment_items(dp_only):
     tpa, tpb = _tensor_parameters(with_mx=True)
     # Keys so TDMFuse=2 actually resolves; the increment reads the grouping table.
     kernel = {
-        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
         "TDMFuse": 2,
         "TDMInst": 3,
         "NumWaves": 4,
@@ -398,8 +381,8 @@ def test_tdm_streamk_offset_applier_never_writes_the_shared_set_increment():
     tpa, tpb = _tensor_parameters()
     for dp_only in (0, 1):
         items = _module_items(
-            kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
-                writer, {"StreamKForceDPOnly": dp_only}, tpa, tpb
+            kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
+                writer, {"TileProcessingStrategy": "DataParallel" if dp_only else "StreamK"}, tpa, tpb
             )
         )
         assert not [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
@@ -409,8 +392,8 @@ def test_tdm_apply_streamk_offset_subtile_noop_under_dp_only():
     writer = _SKWriter()
     tp = {"tensorChar": "A"}
 
-    dp_mod = tdmApplyStreamKOffsetSubtile(writer, {"StreamKForceDPOnly": 1}, tp)
-    nodp_mod = tdmApplyStreamKOffsetSubtile(writer, {"StreamKForceDPOnly": 0}, tp)
+    dp_mod = tdmApplyTileKOffsetSubtile(writer, {"TileProcessingStrategy": "DataParallel"}, tp)
+    nodp_mod = tdmApplyTileKOffsetSubtile(writer, {"TileProcessingStrategy": "StreamK"}, tp)
 
     assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
@@ -421,12 +404,12 @@ def test_tdm_apply_streamk_tail_offset_derives_iterspertile_under_dp_only():
     tpa, tpb = _tensor_parameters()
 
     dp_items = _module_items(
-        kwa_module.KernelWriterAssembly.tdmApplyStreamKTailOffsetWaveSeparated(
+        kwa_module.KernelWriterAssembly.tdmApplyTileTailOffsetWaveSeparated(
             writer, _sk_common_kernel(dp_only=True), tpa, tpb
         )
     )
     nodp_items = _module_items(
-        kwa_module.KernelWriterAssembly.tdmApplyStreamKTailOffsetWaveSeparated(
+        kwa_module.KernelWriterAssembly.tdmApplyTileTailOffsetWaveSeparated(
             writer, _sk_common_kernel(dp_only=False), tpa, tpb
         )
     )
@@ -439,31 +422,33 @@ def test_tdm_apply_streamk_tail_offset_derives_iterspertile_under_dp_only():
 
 
 # ---------------------------------------------------------------------------
-# 9. SizeMapping seam: streamKForceDPOnly round-trips from the solution state
+# 9. SizeMapping seam: canonical strategy round-trips from the solution state
 #    (the host contract that keeps ContractionSolution.cpp in sync).
 # ---------------------------------------------------------------------------
 def _minimal_size_mapping_state():
     from test_streamk_force_dp_only import minimal_size_mapping_state
 
-    return minimal_size_mapping_state()
+    state = minimal_size_mapping_state()
+    state.pop("StreamK")
+    return state
 
 
-def test_size_mapping_streamk_force_dp_only_round_trips():
-    assert "streamKForceDPOnly" in SizeMapping.StateKeys
+def test_size_mapping_data_parallel_round_trips():
+    assert "tileProcessingStrategy" in SizeMapping.StateKeys
 
     state = _minimal_size_mapping_state()
-    state["StreamK"] = 3
-    state["StreamKForceDPOnly"] = 1
-    assert SizeMapping.FromOriginalState(state).streamKForceDPOnly == 1
+    state["TileProcessingStrategy"] = "DataParallel"
+    state["WorkAssignment"] = "StaticGrid"
+    assert SizeMapping.FromOriginalState(state).tileProcessingStrategy == "DataParallel"
 
     state_off = _minimal_size_mapping_state()
-    state_off["StreamK"] = 3
-    state_off.pop("StreamKForceDPOnly", None)
-    assert SizeMapping.FromOriginalState(state_off).streamKForceDPOnly == 0
+    state_off["TileProcessingStrategy"] = "StreamK"
+    state_off["WorkAssignment"] = "StaticGrid"
+    assert SizeMapping.FromOriginalState(state_off).tileProcessingStrategy == "StreamK"
 
 
 # ---------------------------------------------------------------------------
-# 7 + 8 + 10. Real gfx1250 SK3 kernel emit (CPU-only assembly text). Auto-skips
+# 7 + 8 + 10. Real gfx1250 static kernel emit (CPU-only assembly text). Auto-skips
 # when amdclang++ cannot target gfx1250 (via the gfx1250_iim fixture). Proves the
 # dead workspace/flag SGPRs and the StreamK local-bound SGPRs are absent from the
 # emitted assembly (SGPR defines, .kd signature metadata) under DP-only, and
@@ -472,8 +457,8 @@ def test_size_mapping_streamk_force_dp_only_round_trips():
 _DEAD_SGPR_SYMBOLS = ["AddressWS", "AddressFlags", "SrdWS", "StreamKLocalStart", "StreamKLocalEnd"]
 
 
-def _sk3_gfx1250_params(gfx1250_iim, dp_only):
-    """A minimal, valid F16 TN SK3 gfx1250 solution config.
+def _static_gfx1250_params(gfx1250_iim, dp_only):
+    """A minimal, valid F16 TN static gfx1250 solution config.
 
     Kept intentionally SGPR-light (no MX, PrefetchAcrossPersistent=0,
     PrefetchGL2=0) so the *non*-DP-only variant, which still defines
@@ -528,8 +513,8 @@ def _sk3_gfx1250_params(gfx1250_iim, dp_only):
         "SourceSwap": False,
         "ExpandPointerSwap": False,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
-        "StreamK": 3,
-        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
+        "WorkAssignment": "StaticGrid",
         "PrefetchAcrossPersistent": 0,
         "PrefetchGL2": 0,
         "UseSubtileImpl": False,
@@ -548,7 +533,7 @@ def _sk3_gfx1250_params(gfx1250_iim, dp_only):
     return params
 
 
-def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
+def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     import shutil
 
     import rocisa
@@ -561,10 +546,10 @@ def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
         processKernelSource,
     )
 
-    params = _sk3_gfx1250_params(gfx1250_iim, dp_only)
+    params = _static_gfx1250_params(gfx1250_iim, dp_only)
     sol = Solution(params, False, True, False, assembler, gfx1250_iim)
     capsys.readouterr()
-    assert sol.get("Valid") is True, "base SK3 gfx1250 solution must derive cleanly"
+    assert sol.get("Valid") is True, "base static gfx1250 solution must derive cleanly"
 
     kernels = generateKernelObjectsFromSolutions([sol])
     assert kernels, "solution produced no kernels"
@@ -590,7 +575,7 @@ def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
 def test_dp_only_kernel_asm_omits_workspace_and_local_sgpr_symbols(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    src = _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=True)
+    src = _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=True)
     for symbol in _DEAD_SGPR_SYMBOLS:
         assert symbol not in src, "DP-only asm unexpectedly references %s" % symbol
 
@@ -598,17 +583,17 @@ def test_dp_only_kernel_asm_omits_workspace_and_local_sgpr_symbols(
 def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    src = _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=False)
+    src = _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=False)
     for symbol in _DEAD_SGPR_SYMBOLS:
         assert symbol in src, "non-DP-only asm unexpectedly missing %s" % symbol
 
 
 # ---------------------------------------------------------------------------
-# 10. rapTileBatch: the batch of the tile at StreamKIter, with none of the
+# 10. peekTileBatch: the batch of the tile at NextTile, with none of the
 #     side effects that would make it unsafe where ReuseAcrossPersistent
 #     needs it.
 # ---------------------------------------------------------------------------
-def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
+def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it(monkeypatch):
     """RAP asks for this before it knows whether it will run the tile here.
 
     The reuse copy can only serve tiles in the batch its resident A was filled
@@ -618,25 +603,25 @@ def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
     this batch cannot: ``skTileIndex`` resets the local-read offsets and
     ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
 
-    So rapTileBatch repeats their arithmetic and writes only its destination. A
+    So peekTileBatch repeats their arithmetic and writes only its destination. A
     later edit that reaches for skIndexToWG instead would leave WorkGroup* set
     for a tile the fill copy then re-derives, which no build failure would catch.
     """
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only=True)
-    kernel["StreamK"] = 3
     kernel["WavefrontSize"] = 32
 
-    rendered = str(_sk().rapTileBatch(writer, kernel, "RAPResidentBatch"))
+    monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
+    rendered = str(StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch"))
 
-    # StreamKIter still names the pending tile here; graWorkGroup advances it.
-    assert "s[sgprStreamKIter]" in rendered
+    # NextTile names pending work; activation advances it only when claimed.
+    assert "s[sgprNextTile]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
     assert "s[sgprRAPResidentBatch]" in rendered
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (
-            "rapTileBatch claimed %s for a tile it may hand back to the fill copy"
+            "peekTileBatch claimed %s for a tile it may hand back to the fill copy"
             % claimed
         )
