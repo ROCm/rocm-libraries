@@ -7308,6 +7308,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
+    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0/strict
+    # steppings (gfx1250-strict / gfx1250v0), not the base gfx1250 build. All three
+    # share ISA (12,5,0), so gate on the concrete arch name instead. Persists across
+    # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
+    _stArchName = globalParameters.get("StinkyTofuArchName") or ""
+    ti.setForceScaledWMMA(_stArchName in ("gfx1250-strict", "gfx1250v0"))
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
