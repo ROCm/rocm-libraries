@@ -3,61 +3,20 @@
 
 #pragma once
 
-#include <cstddef>
-#include <iostream>
 #include <string>
 
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
+#include "harness/bundle/VerifierTally.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-/// How many test bodies each oracle graded this run, for the coverage summary.
-struct VerifierTally
-{
-    size_t golden = 0;
-    size_t gpuReference = 0;
-    size_t cpuReference = 0;
-    size_t none = 0;
-
-    void add(Verifier verifier)
-    {
-        switch(verifier)
-        {
-        case Verifier::GOLDEN:
-            ++golden;
-            return;
-        case Verifier::GPU_REFERENCE:
-            ++gpuReference;
-            return;
-        case Verifier::CPU_REFERENCE:
-            ++cpuReference;
-            return;
-        case Verifier::NONE:
-        default:
-            ++none;
-            return;
-        }
-    }
-
-    size_t total() const
-    {
-        return golden + gpuReference + cpuReference + none;
-    }
-};
-
-inline VerifierTally& verifierTally()
-{
-    static VerifierTally s_tally;
-    return s_tally;
-}
-
 /// Where a test body's findings go once they are decided.
 ///
-/// All three destinations behind it are process-wide singletons. Reached through
+/// All four destinations behind it are process-wide singletons. Reached through
 /// this seam, a test asserts on what the harness published instead of clearing
 /// global state in SetUp and hoping no other suite wrote to it in between.
 ///
@@ -100,8 +59,8 @@ public:
     virtual void recordVerifier(const std::string& bundlePath, Verifier verifier) = 0;
 };
 
-/// The production sinks: the run's coverage counters, verdict table, and
-/// unverifiable-bundle report.
+/// The production sinks: the run's coverage counters, verdict table,
+/// unverifiable-bundle report, and verifier tally.
 class GlobalVerificationReporter : public IVerificationReporter
 {
 public:
@@ -149,8 +108,7 @@ public:
 
     void recordVerifier(const std::string& bundlePath, Verifier verifier) override
     {
-        verifierTally().add(verifier);
-        std::cout << "[ VERIFIER ] " << toString(verifier) << ": " << bundlePath << '\n';
+        VerifierTally::get().record(bundlePath, verifier);
     }
 };
 

@@ -249,7 +249,9 @@ Verified by: golden 0, gpu_ref 9, cpu_ref 0, none 3
 `golden`, `gpu_ref` and `cpu_ref` name what the outputs were compared against,
 whether the comparison passed or failed. `none` means nothing was compared: a skip
 (the engine declined, or no reference could run the op), a failure before the
-comparison, or a bundle whose `enforcement_level` stops short of comparing.
+comparison, or a bundle whose `enforcement_level` stops short of comparing. With
+`--gtest_repeat=N` the line counts the last iteration, like the Passed, Skipped and
+Failed counts above it.
 
 Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
 runs the bundle graphs without any DVC pull. Bundle registration is on by default;
