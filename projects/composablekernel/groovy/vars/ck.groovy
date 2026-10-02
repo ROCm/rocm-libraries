@@ -723,16 +723,26 @@ def build_client_examples(String arch){
 }
 
 def build_and_run_fmha(String arch){
-    def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
+    def cmd
+    if(arch == "gfx1250"){
+        cmd = """export HSA_MODEL_LIB=/libhsakmtmodel.so && \
+                 export HSA_MODEL_TOPOLOGY=/topology/mi450 && \
+                 cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
                 -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                 -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" .. && \
                 ninja -j128 tile_example_fmha_fwd tile_example_fmha_bwd && \
                 cd ../ &&
                 example/ck_tile/01_fmha/script/run_full_test.sh "CI_${params.COMPILER_VERSION}" "${env.BRANCH_NAME}" "${NODE_NAME}" "${arch}" """
-    if(arch == "gfx1250"){
-        cmd = """export HSA_MODEL_LIB=/libhsakmtmodel.so \
-                 export HSA_MODEL_TOPOLOGY=/topology/mi450 """ + cmd
+    }
+    else{
+        cmd = """cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
+                -DGPU_TARGETS="${arch}" \
+                -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
+                -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" .. && \
+                ninja -j128 tile_example_fmha_fwd tile_example_fmha_bwd && \
+                cd ../ &&
+                example/ck_tile/01_fmha/script/run_full_test.sh "CI_${params.COMPILER_VERSION}" "${env.BRANCH_NAME}" "${NODE_NAME}" "${arch}" """
     }
     return cmd
 }
@@ -1029,6 +1039,9 @@ def buildAndTest(Map conf=[:]){
         def dockerOpts = get_docker_options()
         def image
         def retimage
+        def arch = check_arch_name()
+
+        if(arch == "gfx1250"){image = "${env.CK_DOCKERHUB}:ck_ub24.04_gfx1250_ffm"}
 
         setGithubStatus("${env.STAGE_NAME}", 'pending', "Starting ${env.STAGE_NAME}")
         try {
@@ -1053,7 +1066,6 @@ def buildAndTest(Map conf=[:]){
                     cmake_build(conf)
                     if (isMainBuild && !conf.get("setup_args","").contains("gfx1250")) {
                         //check whether to run performance tests on this node
-                        def arch = check_arch_name()
                         if ( params.RUN_INDUCTOR_TESTS && arch == "gfx90a" ){
                                 echo "Run inductor codegen tests"
                                 sh "projects/composablekernel/script/run_inductor_tests.sh"
