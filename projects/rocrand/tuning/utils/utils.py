@@ -78,12 +78,6 @@ class Parser:
             help="Specify arch, needed when running in simulation",
         )
         parser.add_argument(
-            "--save-metadata",
-            action="store_true",
-            default=False,
-            help="Save Kernel Tuner metadata (default: off)",
-        )
-        parser.add_argument(
             "--seed",
             type=int,
             default=-1,
