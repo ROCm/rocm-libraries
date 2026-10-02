@@ -3624,14 +3624,19 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
-    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
-    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
+    # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
+    def evaluateDisableXdlArbStall() -> bool:
+      return not state["ProblemType"]["Sparse"] and not isPersistent(state)
+
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
-      return bool(state["ProblemType"]["Sparse"])
+      return True
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
     state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
+    state["DisableXdlArbStall"] = evaluateDisableXdlArbStall()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -4149,9 +4154,9 @@ class Solution(collections.abc.Mapping):
             ## turn-off padding for directToLds
             if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
               ldsPadM = 0
-            # TDM's pad_amount field is dword-granular
+            # TDM pads must be an even number of dwords (see LDS_PAD_STEP_BYTES).
             if state["TDMInst"] and ldsPadM != 0:
-              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), LDS_PAD_STEP_BYTES)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -4197,7 +4202,7 @@ class Solution(collections.abc.Mapping):
             pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
-            err = ldsPadError(int(val), 4 if tc == "Metadata" else LDS_PAD_STEP_BYTES)
+            err = ldsPadError(int(val), LDS_PAD_STEP_BYTES)
             if err:
               reject(state, printRejectionReason,
                      f"ldsPad{tc}={int(val)}: {err} for the TDM pad_amount field")

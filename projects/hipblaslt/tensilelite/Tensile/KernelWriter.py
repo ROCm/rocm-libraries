@@ -101,6 +101,13 @@ def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitte
               and not preLoopLocalReadDrainEmitted)
 
 
+def clusterBarrierSplitWaveLoop(kernel):
+  # InitCIterWmma clones every chain head and skips v_mov, so the wave-split
+  # loop has to stay off or that clone cannot cover the accumulators.
+  return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
+              and kernel.get("InitCIterWmma", 0) != 1)
+
+
 # Make const values immutable
 @dataclass(frozen=True)
 class ConstValues():
@@ -6366,7 +6373,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module = Module("body")
     module.add(Label("ASM_Start", "Main body of the asm kernel"))
     module.add(self.defineAndResources(kernel, tensorParametersA, tensorParametersB, tPM))
-    module.add(self.disableWmmaArbStall())
+    module.add(self.disableWmmaArbStall(kernel))
 
     # gfx1250 moves SK constants to VGPRs inside defineAndResources so the
     # freed SGPR slots can be reused before defineVariableSgprs runs.
@@ -6579,6 +6586,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st["MX"]))
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd["MX"]))
+        # Metadata always uses the non-wave-separated descriptor (see initTDMDescriptor),
+        # regardless of NumWaves, so its tail reset is unconditional on the branch above.
+        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and kernel["enableTDMMetadata"]:
+          module.add(self.resetTDMDescriptorForTail(kernel, tPM))
 
       # LDS mem tokens: baseline buffer 0 for tail-loop codegen
       self.resetLdsTokensForTailLoop()
@@ -7159,6 +7170,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # InsertClusterBarrierPass duplicates the Rule 3 loop only for
+                               # HalfPLR kernels that already post a cluster barrier.
+                               "ClusterBarrierSplitWaveLoop": clusterBarrierSplitWaveLoop(kernel),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
@@ -11140,7 +11154,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if self.states.dcpTokenGate:
       for stages in self.states.memTokenLdsDcp.values():
         tokens.extend(stages)
-    if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+    if kernel["TDMSplit"]:
       for row in self.states.memTokenLdsSplit:
         tokens.extend(row)
     return sorted(set(tokens))

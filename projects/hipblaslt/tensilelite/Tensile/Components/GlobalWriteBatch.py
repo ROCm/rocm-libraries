@@ -2095,6 +2095,8 @@ class GlobalWriteBatchWriter:
           printExit("Unsupport compute type for E output. (%s)"%self.kernel["ProblemType"]["ComputeDataType"].toEnum())
 
         module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+        if self.parentWriter.states.bpeE * self.gwvw > 8:
+          module.add(SNop(1, "2 wait states required when next inst writes vgprs held by previous dwordx3/x4 store inst"))
 
       SaturateTypeInt8 = SaturateCastType.NORMAL
 
