@@ -81,25 +81,31 @@ protected:
         return policy;
     }
 
-    /// Counts engine and reference executions. A gmock Times(0) cannot express
-    /// "never ran" here: driveHarness intercepts every failure, so the violation
-    /// would land in `results` and read as the verdict a FAIL test expects.
-    void countExecutions()
+    /// Counts reference executions, replacing whatever execute() action either
+    /// reference had -- so call it only where no reference is expected to produce
+    /// output. A gmock Times(0) cannot express "never ran" here: driveHarness
+    /// intercepts every failure, so the violation would land in `results` and read
+    /// as the verdict a FAIL test expects. The engine is left alone.
+    void countReferenceRuns()
     {
         using ::testing::_;
-        ON_CALL(_mocks.engineRunner, execute(_, _, _))
-            .WillByDefault([this](GraphSession&, const std::optional<LoadedEngine>&, VariantPack&) {
-                ++_executions;
-                return EngineOpResult::succeeded();
-            });
         for(auto* reference : {&_mocks.gpuReference, &_mocks.cpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
-                .WillByDefault([this](void*, size_t, const VariantPack&) { ++_executions; });
+                .WillByDefault([this](void*, size_t, const VariantPack&) { ++_referenceRuns; });
         }
     }
 
-    int _executions = 0;
+    int _referenceRuns = 0;
+
+    /// The engine still runs when no oracle is left: its own verdict -- a decline
+    /// in particular -- comes first. An under-call is checked at mock destruction,
+    /// outside driveHarness's capture, so Times(1) does hold here.
+    void expectEngineRuns()
+    {
+        using ::testing::_;
+        EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
+    }
 
     /// The reference says up front, via isApplicable(), that it has no plan.
     static void declineUpFront(::testing::NiceMock<MockReferenceGraphExecutor>& executor)
@@ -447,19 +453,21 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
     EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
-// ── Oracle settled before the engine runs ───────────────────────────────────
-// Golden data and isApplicable() are both known before runEngine(), so a bundle
-// with no oracle is decided there: the engine never runs for a verdict nothing can
-// check. Without --fail-on-no-oracle that verdict is a SKIP; with it, a FAIL. A
-// reference that errored fails either way -- that is a bug in the oracle, not a
-// gap in coverage.
+// ── Oracle resolved before the engine runs ──────────────────────────────────
+// Golden data and isApplicable() are both known before runEngine(), so the chain
+// is resolved there; a reference that said no up front is never executed. The
+// engine still runs and answers first -- a decline is a SKIP whatever the oracles
+// said. An engine that ran with no oracle left SKIPs without --fail-on-no-oracle
+// and FAILs with it. A reference that errored fails either way -- that is a bug in
+// the oracle, not a gap in coverage.
 
-TEST_F(TestVerificationModePathsFixture, AutoNoOracleNeverRunsEngineAndSkips)
+TEST_F(TestVerificationModePathsFixture, AutoNoOracleRunsNoReferenceAndSkips)
 {
     useMatchingEngine();
     declineUpFront(_mocks.gpuReference);
     declineUpFront(_mocks.cpuReference);
-    countExecutions();
+    countReferenceRuns();
+    expectEngineRuns();
 
     std::vector<std::string> unverifiable;
     testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
@@ -469,7 +477,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoOracleNeverRunsEngineAndSkips)
                  VerificationMode::AUTO,
                  &results);
 
-    EXPECT_EQ(_executions, 0) << "settled before the engine; nothing should run";
+    EXPECT_EQ(_referenceRuns, 0) << "a reference that declined up front must not run";
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
@@ -484,7 +492,8 @@ TEST_F(TestVerificationModePathsFixture, AutoNoOracleFailsUnderFailOnNoOracle)
     useMatchingEngine();
     declineUpFront(_mocks.gpuReference);
     declineUpFront(_mocks.cpuReference);
-    countExecutions();
+    countReferenceRuns();
+    expectEngineRuns();
 
     std::vector<std::string> unverifiable;
     testing_support::captureUnverifiable(_mocks.reporter, unverifiable);
@@ -494,7 +503,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoOracleFailsUnderFailOnNoOracle)
                  failOnNoOraclePolicy(VerificationMode::AUTO),
                  &results);
 
-    EXPECT_EQ(_executions, 0) << "settled before the engine; nothing should run";
+    EXPECT_EQ(_referenceRuns, 0) << "a reference that declined up front must not run";
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
@@ -577,7 +586,7 @@ TEST_F(TestVerificationModePathsFixture, AutoLateCapabilityMissFailsUnderFailOnN
 }
 
 // An applicability check that throws is a broken reference, not a decline. With
-// nothing else to fall back on, the bundle fails before the engine runs.
+// nothing else to fall back on, the bundle fails once the engine has run.
 TEST_F(TestVerificationModePathsFixture, AutoApplicabilityErrorWithNoFallbackFails)
 {
     using ::testing::_;
@@ -585,7 +594,8 @@ TEST_F(TestVerificationModePathsFixture, AutoApplicabilityErrorWithNoFallbackFai
     ON_CALL(_mocks.gpuReference, isApplicable(_, _))
         .WillByDefault(::testing::Throw(std::runtime_error("stub: GPU probe crashed")));
     declineUpFront(_mocks.cpuReference);
-    countExecutions();
+    countReferenceRuns();
+    expectEngineRuns();
 
     std::vector<std::string> refErrors;
     testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
@@ -595,7 +605,7 @@ TEST_F(TestVerificationModePathsFixture, AutoApplicabilityErrorWithNoFallbackFai
                  VerificationMode::AUTO,
                  &results);
 
-    EXPECT_EQ(_executions, 0) << "settled before the engine; nothing should run";
+    EXPECT_EQ(_referenceRuns, 0) << "a reference that declined up front must not run";
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
@@ -627,11 +637,12 @@ TEST_F(TestVerificationModePathsFixture, AutoApplicabilityErrorFallsThroughToCpu
 
 // Explicit modes have a one-entry chain and follow the same rules.
 
-TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableNeverRunsEngineAndSkips)
+TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableRunsNoReferenceAndSkips)
 {
     useMatchingEngine();
     declineUpFront(_mocks.gpuReference);
-    countExecutions();
+    countReferenceRuns();
+    expectEngineRuns();
     EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
         .WillRepeatedly(::testing::ReturnRef(_mocks.gpuReference));
     EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
@@ -640,7 +651,7 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableNeverRunsEngineA
     runCapturing(
         loadBundle("gpu_na", /*includeGoldenOutput=*/true), VerificationMode::GPU, &results);
 
-    EXPECT_EQ(_executions, 0) << "settled before the engine; nothing should run";
+    EXPECT_EQ(_referenceRuns, 0) << "a reference that declined up front must not run";
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
@@ -650,14 +661,15 @@ TEST_F(TestVerificationModePathsFixture, DeviceModeNotApplicableFailsUnderFailOn
 {
     useMatchingEngine();
     declineUpFront(_mocks.gpuReference);
-    countExecutions();
+    countReferenceRuns();
+    expectEngineRuns();
 
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("gpu_na_fail", /*includeGoldenOutput=*/true),
                  failOnNoOraclePolicy(VerificationMode::GPU),
                  &results);
 
-    EXPECT_EQ(_executions, 0) << "settled before the engine; nothing should run";
+    EXPECT_EQ(_referenceRuns, 0) << "a reference that declined up front must not run";
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_FALSE(testing_support::anySkipped(results));
@@ -698,6 +710,57 @@ TEST_F(TestVerificationModePathsFixture, DeclinedEngineSkipsEvenWithNoOracle)
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// The engine can also decline later than ranking, from execute(). That decline is
+// the engine's answer too, and wins over "no oracle" in every mode.
+TEST_F(TestVerificationModePathsFixture, LateEngineDeclineSkipsEvenWithNoOracle)
+{
+    using ::testing::_;
+    for(const VerificationMode mode : {VerificationMode::AUTO, VerificationMode::GPU})
+    {
+        const std::string label = mode == VerificationMode::AUTO ? "auto" : "gpu";
+        SCOPED_TRACE(label);
+        testing_support::HarnessMocks mocks;
+        ON_CALL(mocks.engineRunner, execute(_, _, _))
+            .WillByDefault(
+                ::testing::Return(EngineOpResult::declinedBy("stub: provider declined late")));
+        declineUpFront(mocks.gpuReference);
+        declineUpFront(mocks.cpuReference);
+
+        IntegrationBundleVerificationHarness harness(
+            mocks.dependencies(failOnNoOraclePolicy(mode)));
+        harness.setBundle(loadBundle("late_decline_" + label, /*includeGoldenOutput=*/false),
+                          "vmode-test-bundle");
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        EXPECT_TRUE(testing_support::anySkipped(results));
+        EXPECT_FALSE(testing_support::anyFailed(results));
+        EXPECT_THAT(testing_support::allMessages(results),
+                    ::testing::HasSubstr("stub: provider declined late"));
+    }
+}
+
+// An engine that breaks is at fault whether or not anything could have checked
+// its output: the engine's FAIL, not the no-oracle one.
+TEST_F(TestVerificationModePathsFixture, EngineErrorFailsAsEngineEvenWithNoOracle)
+{
+    using ::testing::_;
+    ON_CALL(_mocks.engineRunner, execute(_, _, _))
+        .WillByDefault(::testing::Return(EngineOpResult::failed("stub: engine crashed")));
+    declineUpFront(_mocks.gpuReference);
+    declineUpFront(_mocks.cpuReference);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("engine_error_no_oracle", /*includeGoldenOutput=*/false),
+                 failOnNoOraclePolicy(VerificationMode::AUTO),
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("stub: engine crashed"));
+    EXPECT_THAT(messages, ::testing::Not(::testing::HasSubstr("no oracle")));
 }
 
 // ── Enforcement-level gate ──────────────────────────────────────────────────

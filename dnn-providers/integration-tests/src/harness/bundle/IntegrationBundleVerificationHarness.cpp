@@ -9,7 +9,6 @@
 #include <ostream>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
@@ -309,21 +308,15 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     // seconds per skip, and left those inputs cached on the bundle for the rest of
     // the run.
     //
-    // Which oracle will judge the engine is settled here too, before the engine runs:
-    // golden data and isApplicable() are both knowable now, and an engine run nothing
-    // can check is GPU time spent on a verdict that was already decided. Golden mode
-    // has its own, stricter, demand for its one oracle -- see runGoldenMode().
+    // Which oracle will judge the engine is resolved here too, before the engine runs:
+    // golden data and isApplicable() are both knowable now. The verdict still waits
+    // for the engine, which can decline from execute() as well as at ranking -- see
+    // runReferenceMode(). Golden mode has its own, stricter, demand for its one
+    // oracle -- see runGoldenMode().
     OracleChain oracles;
     if(session.engines.accepted)
     {
-        if(_deps.policy.mode != VerificationMode::GOLDEN)
-        {
-            oracles = resolveOracles(_deps.policy.mode);
-            if(oracles.exhausted())
-            {
-                return noOracle(oracles, VerificationDepth::NOT_REACHED);
-            }
-        }
+        oracles = resolveOracles(_deps.policy.mode);
 
         if(auto unavailable = prepareInputs())
         {
@@ -369,7 +362,9 @@ IntegrationBundleVerificationHarness::OracleChain
         break;
     case VerificationMode::GOLDEN:
     default:
-        throw std::logic_error("resolveOracles: no reference chain for this verification mode");
+        // Golden mode demands its one oracle in runGoldenMode(); an unknown mode is
+        // failed by runComparison()'s own switch. Neither has a chain to resolve.
+        return chain;
     }
 
     chain.ready = nextApplicableReference(chain);
@@ -466,6 +461,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
 VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session,
                                                                            OracleChain& oracles)
 {
+    // The engine answers first, even when no oracle is left to check it. A decline
+    // -- from ranking or from execute() -- is a SKIP and a break is the engine's
+    // FAIL, whatever the oracles said up front; only an engine that ran is owed an
+    // oracle, and runOracleChain() reports it unverifiable when none is left.
     auto engine = runEngine(session);
     if(engine.status != EngineStatus::RAN)
     {
@@ -503,11 +502,12 @@ VerificationOutcome
         case RefStatus::RUNTIME_ERROR:
         {
             const bool fallsThrough = chain.next < chain.candidates.size();
-            const std::string context
-                = !chain.autoMode ? "verification-mode explicit"
-                  : fallsThrough
-                      ? "auto mode, falling through to " + refLabel(chain.candidates[chain.next])
-                      : "auto mode, last resort";
+            // "the next reference", not a name: the next candidate has not been probed
+            // yet and may turn out not to be applicable.
+            const std::string context = !chain.autoMode ? "verification-mode explicit"
+                                        : fallsThrough
+                                            ? "auto mode, falling through to the next reference"
+                                            : "auto mode, last resort";
             recordRefError(label + " errored (" + context + "): " + result.message);
             chain.refErrored = true;
             chain.tried.push_back(label + " (errored: " + result.message + ")");

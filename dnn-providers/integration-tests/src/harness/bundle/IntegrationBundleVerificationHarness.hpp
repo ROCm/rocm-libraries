@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -69,9 +70,10 @@ struct ClaimPhase
 /// Runs one bundle against the engine under test and decides what that says.
 ///
 /// Fallback chain: golden → GPU ref → CPU ref (RFC 0010 §4.4). Oracle availability is
-/// settled before the engine runs, so a bundle nothing can verify never runs it; that
-/// bundle SKIPs, or FAILs under policy.failOnNoOracle. A reference that errored is a
-/// FAIL either way. Inputs are read-only (shared); outputs are separate allocations
+/// resolved before the engine runs, but the engine still answers first: a decline is
+/// a SKIP whatever the oracles said. An engine that ran with nothing left to verify it
+/// SKIPs, or FAILs under policy.failOnNoOracle. A reference that errored is a FAIL
+/// either way. Inputs are read-only (shared); outputs are separate allocations
 /// per executor.
 ///
 /// **This class has no virtual members.** Everything that needs a GPU, a handle, a
@@ -400,11 +402,6 @@ private:
         /// A reference errored rather than declined. That is a bug in the oracle, not
         /// a coverage gap, so the bundle fails whatever policy.failOnNoOracle says.
         bool refErrored = false;
-
-        bool exhausted() const
-        {
-            return !golden && !ready.has_value();
-        }
     };
 
     OracleChain resolveOracles(VerificationMode mode);

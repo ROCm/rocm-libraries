@@ -202,6 +202,7 @@ protected:
         opts.articlePath = TEST_ARTICLE_PATH;
         opts.engineName = TEST_ENGINE_NAME;
         opts.failOnUnsupported = true;
+        opts.failOnNoOracle = true;
         TestConfig::initialize(std::move(opts));
     }
 };
@@ -221,10 +222,16 @@ TEST_F(TestConfigInitialized, FailOnUnsupportedReturnsTrue)
     EXPECT_TRUE(TestConfig::get().failOnUnsupported());
 }
 
-// Off unless asked for: the no-oracle FAIL is opt-in until the default flips.
+TEST_F(TestConfigInitialized, FailOnNoOracleReturnsTrue)
+{
+    EXPECT_TRUE(TestConfig::get().failOnNoOracle());
+}
+
+// Off unless asked for: the no-oracle FAIL is opt-in until the default flips. Read
+// off the options struct, since the singleton above was initialized with it on.
 TEST_F(TestConfigInitialized, FailOnNoOracleDefaultsToFalse)
 {
-    EXPECT_FALSE(TestConfig::get().failOnNoOracle());
+    EXPECT_FALSE(hipdnn_integration_tests::TestConfigOptions{}.failOnNoOracle);
 }
 
 TEST_F(TestConfigInitialized, SkipGraphValidationReturnsFalse)
