@@ -542,7 +542,7 @@ namespace rocsparse
     // The buffer starts with the permutation array, which tracks where each entry moves
     // while the indices are sorted, followed by scratch space shared by the index sort
     // and the value permutation.
-    static size_t csxsort_perm_size(int64_t nnz, rocsparse_indextype perm_indextype)
+    static size_t csxsort_perm_size_in_bytes(int64_t nnz, rocsparse_indextype perm_indextype)
     {
         return rocsparse::align_size<char>(rocsparse::indextype_sizeof(perm_indextype) * nnz);
     }
@@ -575,7 +575,7 @@ rocsparse_status rocsparse::csxsort_buffer_size(rocsparse_handle            hand
               ? rocsparse::align_size<char>(rocsparse::datatype_sizeof(target->data_type) * nnz)
               : 0;
 
-    *buffer_size_in_bytes = rocsparse::csxsort_perm_size(nnz, ptr_type)
+    *buffer_size_in_bytes = rocsparse::csxsort_perm_size_in_bytes(nnz, ptr_type)
                             + rocsparse::max(sort_buffer_size, gather_buffer_size);
 
     return rocsparse_status_success;
@@ -628,7 +628,7 @@ rocsparse_status rocsparse::csxsort(rocsparse_handle            handle,
     const size_t ind_stride_target = target->columns_values_batch_stride * ind_size;
     const size_t val_stride_target = target->columns_values_batch_stride * val_size;
 
-    const size_t perm_size        = rocsparse::csxsort_perm_size(nnz, ptr_type);
+    const size_t perm_size        = rocsparse::csxsort_perm_size_in_bytes(nnz, ptr_type);
     const size_t sort_buffer_size = buffer_size_in_bytes - perm_size;
     void*        perm             = buffer;
     void*        sort_buffer      = reinterpret_cast<char*>(buffer) + perm_size;
