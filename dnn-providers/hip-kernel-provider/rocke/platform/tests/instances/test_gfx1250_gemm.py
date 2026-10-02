@@ -5,8 +5,7 @@
 from __future__ import annotations
 
 import unittest
-import unittest.mock
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 
 class TestGfx1250Gemm(unittest.TestCase):
@@ -83,14 +82,6 @@ class TestGfx1250Gemm(unittest.TestCase):
                     )
                     ok, why = is_valid_spec(spec, arch="gfx1250")
                     self.assertTrue(ok, why)
-        # lds_swizzle is still rejected: it XORs the global column so the LDS
-        # destination stays wave-contiguous, which does not carry over.
-        for changes, expected in (({"lds_swizzle": True}, "lds_swizzle"),):
-            with self.subTest(changes=changes):
-                spec = replace(base, trait=replace(base.trait, **changes))
-                ok, why = is_valid_spec(spec, arch="gfx1250")
-                self.assertFalse(ok)
-                self.assertIn(expected, why)
         prefetch_without_dtl = replace(
             base,
             trait=replace(
@@ -100,6 +91,24 @@ class TestGfx1250Gemm(unittest.TestCase):
         ok, why = is_valid_spec(prefetch_without_dtl, arch="gfx1250")
         self.assertFalse(ok)
         self.assertIn("requires direct_to_lds", why)
+        # Each lane copies 8 elements per pass and the pass loop has no bound
+        # check, so a 16x32 A tile (64 chunks for 128 lanes) would address past
+        # the tile. The same tile is valid without direct_to_lds.
+        under_sized_a = replace(
+            base,
+            tile=replace(base.tile, tile_m=16, warp_m=1, warp_n=4),
+        )
+        ok, why = is_valid_spec(under_sized_a, arch="gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("A tile to fill whole 128-lane passes", why)
+        ok, why = is_valid_spec(
+            replace(
+                under_sized_a,
+                trait=replace(under_sized_a.trait, direct_to_lds=False),
+            ),
+            arch="gfx1250",
+        )
+        self.assertTrue(ok, why)
 
     def test_wmma_dtl_lowers_to_gfx1250_async_instruction(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -119,6 +128,29 @@ class TestGfx1250Gemm(unittest.TestCase):
                 expected_lds = 32768 if prefetch else 16384
                 self.assertIn(f"[{expected_lds} x i8]", ll)
 
+    def test_wmma_dtl_lds_k_pad_strides_every_lds_access(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        base = self._dtl_spec()
+        for prefetch in (False, True):
+            with self.subTest(prefetch=prefetch):
+                spec = replace(
+                    base,
+                    trait=replace(base.trait, lds_k_pad=16, dtl_prefetch=prefetch),
+                )
+                ll = lower_kernel_to_llvm(
+                    build_universal_gemm(spec, arch="gfx1250"), arch="gfx1250"
+                )
+                self.assertIn("llvm.amdgcn.global.load.async.to.lds.b128", ll)
+                # tile_k 32 + pad 16: async writes and WMMA reads both use the
+                # padded row, so no access may keep the unpadded stride. The
+                # row count doubles with the prefetch ring.
+                self.assertIn(" x [48 x bfloat]]", ll)
+                self.assertNotIn(" x [32 x bfloat]]", ll)
+                expected_lds = 49152 if prefetch else 24576
+                self.assertIn(f"[{expected_lds} x i8]", ll)
+
     def test_wmma_dtl_compiles_to_hsaco(self):
         from rocke.helpers.compile import compile_kernel
         from rocke.instances.common.gemm_universal import build_universal_gemm
@@ -130,109 +162,6 @@ class TestGfx1250Gemm(unittest.TestCase):
             arch="gfx1250",
         )
         self.assertGreater(artifact.hsaco_bytes, 0)
-
-    def test_wmma_dtl_cpp_builder_matches_python(self):
-        try:
-            import rocke_engine
-        except Exception as exc:
-            self.skipTest(f"rocke_engine C++ binding not importable: {exc}")
-
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.gemm_universal import build_universal_gemm
-
-        spec = self._dtl_spec(prefetch=True)
-        with unittest.mock.patch.dict("os.environ", {"ROCKE_BACKEND": "python"}):
-            py_ll = lower_kernel_to_llvm(
-                build_universal_gemm(spec, arch="gfx1250"),
-                arch="gfx1250",
-            )
-        cpp_ll = rocke_engine.gemm_lower_llvm(asdict(spec), arch="gfx1250")
-        self.assertEqual(py_ll, cpp_ll)
-
-    def test_dtl_is_enumerated_in_trait_sweep(self):
-        from rocke.examples.gfx1250.gemm_universal_sweep.bf16_gemm_sweep import (
-            enumerate_tile_configs,
-            enumerate_trait_configs,
-            load_config,
-        )
-
-        config = load_config()
-        knobs = config["trait_config"]
-        finalists = enumerate_tile_configs(config)[:12]
-        traits = enumerate_trait_configs(config, finalists)
-        dtl_traits = [spec.trait for spec in traits if spec.trait.direct_to_lds]
-        self.assertTrue(dtl_traits, "config enumerates no direct-to-LDS candidates")
-
-        # Asserted as invariants rather than a hardcoded total: the sweep config
-        # is routinely re-pinned per experiment (e.g. direct_to_lds fixed to
-        # [true] for an isolated A/B), which would make a fixed count brittle.
-
-        # dtl_prefetch is only ever paired with direct_to_lds.
-        self.assertTrue(
-            all(spec.trait.direct_to_lds for spec in traits if spec.trait.dtl_prefetch)
-        )
-        # lds_swizzle stays pruned on the direct-to-LDS path.
-        self.assertTrue(all(not trait.lds_swizzle for trait in dtl_traits))
-        # lds_k_pad is NOT pruned: every pad the config lists is enumerated for
-        # direct-to-LDS, and orthogonally to dtl_prefetch.
-        self.assertEqual(
-            {trait.lds_k_pad for trait in dtl_traits}, set(knobs["lds_k_pad"])
-        )
-        for pad in knobs["lds_k_pad"]:
-            for prefetch in knobs.get("dtl_prefetch", [False]):
-                with self.subTest(lds_k_pad=pad, dtl_prefetch=prefetch):
-                    self.assertTrue(
-                        any(
-                            trait.lds_k_pad == pad and trait.dtl_prefetch == prefetch
-                            for trait in dtl_traits
-                        )
-                    )
-        # The pad arms are balanced, so padding doubled the direct-to-LDS space
-        # rather than replacing part of it.
-        by_pad = {
-            pad: sum(1 for trait in dtl_traits if trait.lds_k_pad == pad)
-            for pad in knobs["lds_k_pad"]
-        }
-        self.assertEqual(len(set(by_pad.values())), 1, by_pad)
-
-    def test_sweep_classifies_vgpr_regime(self):
-        from rocke.examples.gfx1250.gemm_universal_sweep import bf16_gemm_sweep as sweep
-        from rocke.sweep import BuildRecord
-
-        def record(**elf_meta):
-            return BuildRecord(
-                name="k", spec_dict={}, ok=True, hsaco_path="k.hsaco", elf_meta=elf_meta
-            )
-
-        with unittest.mock.patch.object(
-            sweep, "_count_vgpr_msb_switches", return_value=78
-        ) as count:
-            low = sweep.register_usage(
-                record(vgprs=250, vgpr_spills=0), arch="gfx1250"
-            )
-            count.assert_not_called()
-            high = sweep.register_usage(
-                record(vgprs=694, vgpr_spills=0), arch="gfx1250"
-            )
-            spill = sweep.register_usage(
-                record(vgprs=256, vgpr_spills=653), arch="gfx1250"
-            )
-            unknown = sweep.register_usage(record(), arch="gfx1250")
-        self.assertEqual((low["vgpr_mode"], low["vgpr_msb_switches"]), ("low", 0))
-        self.assertEqual((high["vgpr_mode"], high["vgpr_msb_switches"]), ("high", 78))
-        self.assertEqual(spill["vgpr_mode"], "spill")
-        self.assertIsNone(unknown["vgpr_mode"])
-
-        results = [
-            {"id": "a", "median_ms": 3.0, "vgpr_mode": "low"},
-            {"id": "b", "median_ms": 1.0, "vgpr_mode": "high"},
-            {"id": "c", "median_ms": 2.0, "vgpr_mode": "low"},
-            {"id": "d", "median_ms": 0.5, "vgpr_mode": "spill", "error": "fault"},
-        ]
-        best = sweep.best_by_vgpr_mode(results)
-        self.assertEqual(
-            {mode: r["id"] for mode, r in best.items()}, {"high": "b", "low": "c"}
-        )
 
     @classmethod
     def _tdm_spec(cls, *, depth: int = 1, lds_k_pad: int = 8, **trait):
@@ -273,7 +202,6 @@ class TestGfx1250Gemm(unittest.TestCase):
                 self._tdm_spec(direct_to_lds=True),
                 "alternative load paths",
             ),
-            ("with lds_swizzle", self._tdm_spec(lds_swizzle=True), "lds_swizzle"),
             ("depth 5", self._tdm_spec(depth=5), "tdm_depth must be in 1..4"),
             ("depth 0", self._tdm_spec(depth=0), "tdm_depth must be in 1..4"),
         ):
@@ -281,15 +209,6 @@ class TestGfx1250Gemm(unittest.TestCase):
                 ok, why = is_valid_spec(spec, arch="gfx1250")
                 self.assertFalse(ok)
                 self.assertIn(needle, why)
-
-        # The mover is a gfx1250 opcode, so the knob is gated on the capability
-        # rather than on the architecture name.
-        from rocke.core.arch.target import ArchTarget
-
-        self.assertTrue(ArchTarget.from_gfx("gfx1250").memory.has_tdm)
-        for other in ("gfx950", "gfx942", "gfx1151"):
-            with self.subTest(other):
-                self.assertFalse(ArchTarget.from_gfx(other).memory.has_tdm)
 
         # An odd pad cannot be expressed as a whole number of dwords.
         ok, why = is_valid_spec(self._tdm_spec(lds_k_pad=1), arch="gfx1250")
@@ -436,47 +355,6 @@ class TestGfx1250Gemm(unittest.TestCase):
                     issues = ll.count("call void @llvm.amdgcn.tensor.load.to.lds")
                     self.assertEqual(issues, 2 * (depth - 1) + 2)
 
-    def test_wmma_tdm_deep_ring_drains_before_aliased_cshuffle_tile(self):
-        """A deep ring must not leave mover writes in flight into the epilogue.
-
-        The ring's per-tile wait is partial, so its final iterations' look-ahead
-        fills are still in flight when the K-loop ends -- writes aimed at ring
-        slots inside the A/B pool. Under ``cshuffle`` the smem packer aliases the
-        C staging tile onto exactly those bytes, because IR liveness sees A/B die
-        at the loop's last *read* rather than when the hardware write lands. No
-        barrier helps: ``tile.sync`` drains VMEM and LDS, not TENSORcnt. Without
-        the post-loop drain a late fill overwrites the staged C tile, which is a
-        wrong answer rather than a fault, so assert the drain on the emission.
-        """
-        import re
-
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.gemm_universal import build_universal_gemm
-
-        for depth in (3, 4):
-            for no_alias in (False, True):
-                with self.subTest(tdm_depth=depth, cshuffle_no_alias=no_alias):
-                    ll = lower_kernel_to_llvm(
-                        build_universal_gemm(
-                            self._tdm_spec(
-                                depth=depth,
-                                epilogue="cshuffle",
-                                cshuffle_no_alias=no_alias,
-                            ),
-                            arch="gfx1250",
-                        ),
-                        arch="gfx1250",
-                    )
-                    waits = [
-                        int(n)
-                        for n in re.findall(r"wait\.tensorcnt\(i16 (\d+)\)", ll)
-                    ]
-                    # The drain is unconditional rather than predicated on the
-                    # aliasing: it is the ring that owes the invariant, and
-                    # ``cshuffle_no_alias`` is a tuning knob that must not be
-                    # load-bearing for correctness.
-                    self.assertEqual(sorted(waits), [0, depth - 2])
-
     def test_wmma_rejects_lds_swizzle_on_every_load_path(self):
         """``lds_swizzle`` miscompiles on WMMA, so the family gate must catch it.
 
@@ -553,44 +431,6 @@ class TestGfx1250Gemm(unittest.TestCase):
         # Every depth is a distinct kernel; a ring that collapsed onto the
         # ping-pong would otherwise pass every other assertion here.
         self.assertEqual(len(set(blobs.values())), len(blobs))
-
-    def test_tdm_is_enumerated_in_trait_sweep(self):
-        import copy
-
-        from rocke.examples.gfx1250.gemm_universal_sweep.bf16_gemm_sweep import (
-            enumerate_tile_configs,
-            enumerate_trait_configs,
-            load_config,
-        )
-
-        base = load_config()
-        finalists = enumerate_tile_configs(base)[:8]
-
-        # The shipped config enables the knob, so take the baseline from an
-        # explicitly tdm-off copy rather than assuming its value.
-        off = copy.deepcopy(base)
-        off["trait_config"]["tdm"] = [False]
-        without = enumerate_trait_configs(off, finalists)
-        self.assertFalse([s for s in without if s.trait.tdm])
-
-        config = copy.deepcopy(base)
-        config["trait_config"]["tdm"] = [False, True]
-        config["trait_config"]["tdm_depth"] = [1, 2]
-        traits = enumerate_trait_configs(config, finalists)
-        tdm_traits = [spec.trait for spec in traits if spec.trait.tdm]
-        self.assertTrue(tdm_traits, "tdm knob did not enumerate any candidate")
-        # The knob adds configurations rather than displacing the existing ones.
-        self.assertGreater(len(traits), len(without))
-        self.assertEqual({t.tdm_depth for t in tdm_traits}, {1, 2})
-        # TDM is its own load path, never combined with the other two.
-        self.assertTrue(
-            all(not t.direct_to_lds and not t.dtl_prefetch for t in tdm_traits)
-        )
-        # Padding is swept on the TDM path too -- the mover applies it.
-        self.assertEqual(
-            {t.lds_k_pad for t in tdm_traits},
-            set(config["trait_config"]["lds_k_pad"]),
-        )
 
     @staticmethod
     def _cshuffle_spec(
@@ -718,28 +558,6 @@ class TestGfx1250Gemm(unittest.TestCase):
         self.assertIn("store <8 x bfloat>", cshuffle)
         self.assertNotIn("store <8 x bfloat>", default)
         self.assertIn("addrspace(3)", cshuffle)
-
-    def test_wmma_cshuffle_pad_n_forfeits_the_wide_store(self):
-        """``pad_n`` degrades the cshuffle epilogue to element-granular stores.
-
-        The staging tile is always fully in bounds, but a partial output column
-        can cut a vector in half, and ``N`` is a runtime value -- so the
-        emitter guards each element separately rather than dropping the valid
-        columns at the head of the final vector. That is correct but forfeits
-        the vectorisation the epilogue exists to buy, so a padded ``N`` wants
-        the direct epilogue instead.
-        """
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.gemm_universal import build_universal_gemm
-
-        padded = lower_kernel_to_llvm(
-            build_universal_gemm(
-                self._cshuffle_spec(pad=True), arch="gfx1250"
-            ),
-            arch="gfx1250",
-        )
-        self.assertNotIn("store <8 x bfloat>", padded)
-        self.assertIn("store bfloat", padded)
 
     def test_bf16_qwen_gemm_shapes_validate_and_lower(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm

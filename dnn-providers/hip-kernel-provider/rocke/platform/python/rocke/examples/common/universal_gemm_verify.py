@@ -96,6 +96,13 @@ def main() -> int:
         "runs a deeper ring with a partial wait",
     )
     p.add_argument(
+        "--lds-k-pad",
+        type=int,
+        default=0,
+        help="pad each A/B LDS row by this many elements (0 = unpadded). "
+        "Ignored by direct-to-LDS off gfx1250.",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
@@ -154,6 +161,7 @@ def main() -> int:
         dtl_prefetch=args.dtl_prefetch,
         tdm=args.tdm,
         tdm_depth=args.tdm_depth,
+        lds_k_pad=args.lds_k_pad,
         persistent=args.persistent_ctas > 0,
         persistent_ctas=args.persistent_ctas,
     )

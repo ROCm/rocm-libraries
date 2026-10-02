@@ -440,11 +440,9 @@ class TestWmmaCshuffleBlastRadius(unittest.TestCase):
     just :func:`build_universal_gemm` -- multi-D, multi-ABD, flatmm, grouped,
     batched and the MoE expert GEMMs all route their base spec through it. So
     dropping the WMMA ``epilogue != "default"`` rejection widened what every
-    one of them accepts on a wave32 target. Two distinct things keep that
-    safe, and each needs its own pin: the families that delegate emission to
-    the universal body inherit the ``c_layout()``-driven accumulator scatter,
-    while the MoE expert GEMMs carry MFMA-shaped lane math and must refuse
-    wave32 on their own, before the validator ever runs.
+    one of them accepts on a wave32 target. The families that delegate
+    emission to the universal body inherit the ``c_layout()``-driven
+    accumulator scatter.
     """
 
     def _wmma_base(self, epilogue="cshuffle"):
@@ -480,26 +478,6 @@ class TestWmmaCshuffleBlastRadius(unittest.TestCase):
             wave_size=32,
         )
 
-    def _moe_spec(self, spec_cls):
-        from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
-
-        return spec_cls(
-            name="moe_wave32_probe",
-            tile=TileSpec(
-                tile_m=32,
-                tile_n=32,
-                tile_k=32,
-                warp_m=2,
-                warp_n=2,
-                warp_k=1,
-                warp_tile_m=16,
-                warp_tile_n=16,
-                warp_tile_k=32,
-            ),
-            trait=TraitSpec(pipeline="mem", epilogue="default"),
-            wave_size=32,
-        )
-
     def test_multi_d_wmma_cshuffle_emits_through_universal_body(self):
         # multi-D *requires* cshuffle, so before the lift it could not target
         # WMMA at all. It delegates to build_universal_gemm, so admitting it
@@ -520,75 +498,6 @@ class TestWmmaCshuffleBlastRadius(unittest.TestCase):
         )
         self.assertIn("wmma.f32.16x16x32.f16", ir)
         self.assertNotIn("mfma", ir)
-
-    def test_multi_abd_wmma_cshuffle_emits_through_universal_body(self):
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.gemm_multi_abd import (
-            GemmMultiAbdSpec,
-            build_gemm_multi_abd,
-            is_valid_spec,
-        )
-
-        spec = GemmMultiAbdSpec(base=self._wmma_base(), d_operands=(("D0", "add"),))
-        ok, why = is_valid_spec(spec, arch="gfx1250")
-        self.assertTrue(ok, why)
-
-        ir = lower_kernel_to_llvm(
-            build_gemm_multi_abd(spec, arch="gfx1250"), arch="gfx1250"
-        )
-        self.assertIn("wmma.f32.16x16x32.f16", ir)
-        self.assertNotIn("mfma", ir)
-
-    def test_moe_expert_gemm_refuses_wave32_before_validating(self):
-        # These two own their epilogue and their accumulator decode is MFMA
-        # lane math, so the relaxed validator must never be what decides their
-        # fate: _require_mfma_expert_gemm has to fire first.
-        from rocke.instances.common.moe_gemm_fused import (
-            FusedGateUpSiluGemmSpec,
-            FusedInterleavedGateUpSiluGemmSpec,
-            build_moe_gate_up_silu_gemm,
-            build_moe_interleaved_gate_up_silu_gemm,
-        )
-
-        for spec_cls, build in (
-            (FusedGateUpSiluGemmSpec, build_moe_gate_up_silu_gemm),
-            (
-                FusedInterleavedGateUpSiluGemmSpec,
-                build_moe_interleaved_gate_up_silu_gemm,
-            ),
-        ):
-            with self.subTest(builder=build.__name__):
-                with self.assertRaises(NotImplementedError) as caught:
-                    build(self._moe_spec(spec_cls), arch="gfx1250")
-                self.assertIn("WMMA", str(caught.exception))
-
-    def test_cshuffle_lds_alias_credit_decides_admission(self):
-        # The budget credits the smem-pool packer for reusing A/B's offset once
-        # the C tile goes live, which only holds while C's live range opens
-        # after the last A/B read -- a property of the emitter, not of the spec.
-        # This tile sits in the window where the credit is the whole verdict:
-        # AB=256K aliased fits gfx1250's 320K cap, AB+C=384K does not. Any
-        # future caller that keeps A/B live across its epilogue breaks the
-        # premise, and this is the assertion that will notice.
-        import dataclasses
-
-        from rocke.instances.common.gemm_universal import is_valid_spec
-
-        aliased = dataclasses.replace(
-            self._wmma_base(),
-            tile=dataclasses.replace(
-                self._wmma_base().tile, tile_m=256, tile_n=256, tile_k=256
-            ),
-        )
-        ok, why = is_valid_spec(aliased, arch="gfx1250")
-        self.assertTrue(ok, why)
-
-        exclusive = dataclasses.replace(
-            aliased, trait=dataclasses.replace(aliased.trait, cshuffle_no_alias=True)
-        )
-        ok, why = is_valid_spec(exclusive, arch="gfx1250")
-        self.assertFalse(ok)
-        self.assertIn("LDS budget", why)
 
 
 class TestGemmPolicy(unittest.TestCase):

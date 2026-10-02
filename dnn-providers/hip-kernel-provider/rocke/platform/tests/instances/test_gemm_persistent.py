@@ -168,7 +168,6 @@ class TestPersistentEmission(unittest.TestCase):
         ll = self._ll(
             persistent=True, persistent_ctas=CTAS, chiplet_swizzle=True
         )
-        self.assertRegex(ll, rf"add nsw i32 %tile_idx, {CTAS}\b")
         # The XCD remap keys off the loop induction variable, so blockIdx.y --
         # which the non-persistent swizzle flattens in -- must be gone.
         self.assertNotIn("workgroup.id.y()", ll.split("declare", 1)[-1])

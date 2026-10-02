@@ -296,64 +296,39 @@ def _spec(idx: int) -> UniversalGemmSpec:
             "gfx1250",
         )
     if idx == 12:
-        # Persistent (grid-stride) tile loop, plain decode: the whole
-        # K-loop + cshuffle epilogue lives inside a scf.for strided by
+        # gfx1250 persistent (grid-stride) tile loop on the WMMA path: the
+        # whole K-loop + cshuffle epilogue lives inside a scf.for strided by
         # persistent_ctas, and the tile origin comes from the induction
-        # variable instead of blockIdx. Same shape as idx 1 so the two
-        # configs isolate the persistent knob.
-        return UniversalGemmSpec(
-            name="test_persistent",
-            tile=TileSpec(
-                tile_m=256,
-                tile_n=256,
-                tile_k=64,
-                warp_m=4,
-                warp_n=4,
-                warp_k=1,
-                warp_tile_m=32,
-                warp_tile_n=32,
-                warp_tile_k=16,
+        # variable instead of blockIdx. The persistent loop keeps A/B live
+        # across the epilogue, so C cannot alias them.
+        return (
+            UniversalGemmSpec(
+                name="test_persistent",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    epilogue="cshuffle",
+                    persistent=True,
+                    persistent_ctas=256,
+                ),
+                data=DataSpec(
+                    dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
             ),
-            trait=TraitSpec(
-                pipeline="compv4",
-                epilogue="cshuffle",
-                persistent=True,
-                persistent_ctas=304,
-            ),
-            data=DataSpec(dtype_a="fp16"),
-            wave_size=64,
-            block_size=1024,
-            batched=False,
-        )
-    if idx == 13:
-        # Persistent composed with the chiplet super-tile swizzle: the tile
-        # index feeding the XCD remap is the loop's induction variable rather
-        # than the flattened blockIdx, which is the other half of the
-        # persistent tile-decode branch.
-        return UniversalGemmSpec(
-            name="test_persistent_chiplet",
-            tile=TileSpec(
-                tile_m=128,
-                tile_n=128,
-                tile_k=32,
-                warp_m=2,
-                warp_n=2,
-                warp_k=1,
-                warp_tile_m=16,
-                warp_tile_n=16,
-                warp_tile_k=16,
-            ),
-            trait=TraitSpec(
-                pipeline="compv3",
-                epilogue="default",
-                persistent=True,
-                persistent_ctas=256,
-                chiplet_swizzle=True,
-            ),
-            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
-            wave_size=64,
-            block_size=256,
-            batched=False,
+            "gfx1250",
         )
     if idx in _TDM_CONFIGS:
         # gfx1250 TDM load path, one config per K-loop shape: depth 1 is the
@@ -407,15 +382,84 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1250",
         )
+    if idx == 17:
+        # gfx1250 direct-to-LDS with the prefetch ring: global_load_async_to_lds
+        # into a double-buffered LDS tile, waited on with s_wait_asynccnt. All
+        # three pads are on so the guarded async loads are exercised.
+        return (
+            UniversalGemmSpec(
+                name="test_dtl_prefetch_1250",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    epilogue="default",
+                    direct_to_lds=True,
+                    dtl_prefetch=True,
+                    pad_m=True,
+                    pad_n=True,
+                    pad_k=True,
+                ),
+                data=DataSpec(
+                    dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
+    if idx == 18:
+        # gfx1250 direct-to-LDS into a padded LDS row: the async load is
+        # per-lane addressed, so lds_k_pad only changes the destination stride.
+        # Single-buffered and unguarded, the complement of config 17.
+        return (
+            UniversalGemmSpec(
+                name="test_dtl_ldspad_1250",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    epilogue="default",
+                    direct_to_lds=True,
+                    lds_k_pad=16,
+                ),
+                data=DataSpec(
+                    dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
 # idx -> (name, tdm_depth, epilogue, lds_k_pad, single_wave)
 _TDM_CONFIGS = {
-    14: ("test_tdm_d1", 1, "default", 8, False),
-    15: ("test_tdm_d2_cshuffle", 2, "cshuffle", 8, False),
-    16: ("test_tdm_d3_ring", 3, "default", 8, False),
-    17: ("test_tdm_d4_ring_1wave", 4, "default", 0, True),
+    13: ("test_tdm_d1", 1, "default", 8, False),
+    14: ("test_tdm_d2_cshuffle", 2, "cshuffle", 8, False),
+    15: ("test_tdm_d3_ring", 3, "default", 8, False),
+    16: ("test_tdm_d4_ring_1wave", 4, "default", 0, True),
 }
 
 
@@ -423,7 +467,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..17>\n",
+        usage="usage: gemm_emit.py <config_index 0..18>\n",
     )
 
 

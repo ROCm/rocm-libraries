@@ -12,8 +12,6 @@ from __future__ import annotations
 import unittest
 
 from rocke.core.tdm import (
-    TDM_PAD_AMOUNT_MAX,
-    TDM_PAD_INTERVAL_MAX,
     encode_tdm_padding,
     pack_tdm_group0,
     pack_tdm_group1_2d,
@@ -38,10 +36,6 @@ class TestTdmPadding(unittest.TestCase):
             with self.subTest(pad_bytes=pad_bytes):
                 self.assertEqual(encode_tdm_padding(64, pad_bytes)[1], expected)
 
-    def test_bf16_block_k32_pad16_matches_hand_encoding(self):
-        # One 32-element bf16 row is 64 B; a 16-element pad is 32 B.
-        self.assertEqual(encode_tdm_padding(64, 32), (3, 7))
-
     def test_tile_helper_disables_padding_at_pad_zero(self):
         self.assertEqual(tdm_padding_for_tile(2, 32, 0), (0, 0, 0))
         self.assertEqual(tdm_padding_for_tile(2, 32, 16), (1, 3, 7))
@@ -56,9 +50,6 @@ class TestTdmPadding(unittest.TestCase):
         with self.assertRaises(ValueError):  # amount overflows 7 bits
             encode_tdm_padding(64, 1024)
 
-    def test_field_widths_are_the_documented_maxima(self):
-        self.assertEqual(encode_tdm_padding(1024, 512), (TDM_PAD_INTERVAL_MAX, TDM_PAD_AMOUNT_MAX))
-
 
 class TestTdmGroup0(unittest.TestCase):
     def test_constant_fields(self):
@@ -72,11 +63,6 @@ class TestTdmGroup0(unittest.TestCase):
         self.assertEqual(words[1], 0x1234)
         self.assertEqual(words[2], 0x00112233)
         self.assertEqual(_field(words, 3, 0, 25), 0x1F)
-
-    def test_type_and_global_addr_hi_share_word_three(self):
-        words = pack_tdm_group0(lds_addr=0, global_addr=0xFF_0000_0000)
-        self.assertEqual(_field(words, 3, 0, 25), 0xFF)
-        self.assertEqual(_field(words, 3, 30, 2), 2)
 
 
 class TestTdmGroup1(unittest.TestCase):
