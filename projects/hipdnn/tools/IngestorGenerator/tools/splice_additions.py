@@ -53,10 +53,18 @@ def dump(obj: dict) -> str:
 
 
 def _read(path: Path) -> tuple[str, str]:
-    """Text with LF line endings, plus the newline the file uses on disk."""
+    """Text with LF line endings, plus the newline the file uses on disk.
+
+    A file mixing CRLF and LF has no single newline to write back, so a rewrite
+    would change retained bytes; it is refused."""
     raw = path.read_bytes().decode("utf-8")
-    newline = "\r\n" if "\r\n" in raw else "\n"
-    return raw.replace("\r\n", "\n"), newline
+    crlf = raw.count("\r\n")
+    if crlf and crlf != raw.count("\n"):
+        raise SpliceRefused(
+            f"{path}: mixes CRLF and LF line endings, so a rewrite cannot keep its "
+            "bytes. Normalise it to one line ending in a separate commit first."
+        )
+    return raw.replace("\r\n", "\n"), "\r\n" if crlf else "\n"
 
 
 def _load_dir(root: Path) -> dict[str, dict]:

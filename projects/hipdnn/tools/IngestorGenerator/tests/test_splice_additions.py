@@ -220,3 +220,18 @@ def test_keeps_crlf_line_endings_of_a_windows_checkout(tmp_path, live):
         a=before.split(b"\r\n"), b=after.split(b"\r\n")
     ).get_opcodes()
     assert {op for op, *_ in ops} == {"equal", "insert"}
+
+
+def test_refuses_a_live_file_with_mixed_line_endings(tmp_path, live):
+    kdp = live / _KDP
+    lf = kdp.read_bytes().replace(b"\r\n", b"\n")
+    first, rest = lf.split(b"\n", 1)
+    kdp.write_bytes(first + b"\r\n" + rest)  # one CRLF line, the rest LF
+    before = _snapshot(live)
+    scratch = _render(_with(_add_kernel), tmp_path, "scratch")
+
+    result = _splice(live, scratch)
+
+    assert result.returncode == 1
+    assert "mixes CRLF and LF" in result.stderr
+    assert _snapshot(live) == before
