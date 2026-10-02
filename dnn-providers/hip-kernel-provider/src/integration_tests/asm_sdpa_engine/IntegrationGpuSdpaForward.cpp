@@ -212,16 +212,9 @@ protected:
         {
             attributes.set_diagonal_band_left_bound(testCase.leftBound);
             attributes.set_diagonal_band_right_bound(testCase.rightBound);
-            if(testCase.topLeftAlignment)
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-                attributes.set_causal_mask(true);
-            }
-            else
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-                attributes.set_causal_mask_bottom_right(true);
-            }
+            attributes.set_diagonal_alignment(testCase.topLeftAlignment
+                                                  ? DiagonalAlignment::TOP_LEFT
+                                                  : DiagonalAlignment::BOTTOM_RIGHT);
         }
 
         auto [o, stats] = graph.sdpa(q, k, v, attributes);

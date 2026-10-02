@@ -67,8 +67,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
     hipdnn_frontend::graph::SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("SdpaFwd");
-    sdpaAttrs.set_causal_mask(causalMask);
-    sdpaAttrs.set_causal_mask_bottom_right(causalMaskBottomRight);
+    sdpaAttrs.causal_mask = causalMask;
+    sdpaAttrs.causal_mask_bottom_right = causalMaskBottomRight;
     sdpaAttrs.set_alibi_mask(alibiMask);
     sdpaAttrs.set_diagonal_alignment(diagonalAlignment);
     sdpaAttrs.set_generate_stats(generateStats);

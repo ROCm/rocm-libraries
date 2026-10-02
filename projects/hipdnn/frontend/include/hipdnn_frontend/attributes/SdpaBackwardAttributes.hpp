@@ -436,16 +436,34 @@ public:
         padding_mask = value;
         return *this;
     }
+    /// @brief Request a top-left causal mask (cuDNN semantics).
+    ///
+    /// true sets diagonal_alignment = TOP_LEFT and right_bound = 0; false is a no-op. The
+    /// deprecated causal_mask member is not modified, and later bound or alignment setters take
+    /// precedence.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask(bool value)
     {
-        causal_mask = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
+    /// @brief Request a bottom-right causal mask (cuDNN semantics).
+    ///
+    /// true sets diagonal_alignment = BOTTOM_RIGHT and right_bound = 0; false is a no-op. The
+    /// deprecated causal_mask_bottom_right member is not modified, and later bound or alignment
+    /// setters take precedence.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_causal_mask_bottom_right(bool value)
     {
-        causal_mask_bottom_right = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
