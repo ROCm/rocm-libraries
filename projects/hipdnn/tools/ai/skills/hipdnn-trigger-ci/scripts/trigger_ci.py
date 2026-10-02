@@ -26,6 +26,11 @@ Examples:
     python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 \\
         --test-labels test:hipdnn,test:miopenprovider --dry-run
 
+    # Re-run multi-arch tests at another tier, reusing run 36880722738's build
+    python3 <skill>/scripts/trigger_ci.py --pr 12751 dispatch -w multi-arch \\
+        --gfx gfx94X --test-labels test:hipdnn,test_filter:comprehensive \\
+        --reuse-build 36880722738 --dry-run
+
     # Check CI status for a PR
     python3 <skill>/scripts/trigger_ci.py --pr 10770 status
 
@@ -65,7 +70,13 @@ WORKFLOWS = {
     },
     "multi-arch": {
         "file": "therock-multi-arch-ci.yml",
-        "fields": ["gfx", "windows_gfx", "test_labels", "windows_test_labels"],
+        "fields": [
+            "gfx",
+            "windows_gfx",
+            "test_labels",
+            "windows_test_labels",
+            "reuse_build",
+        ],
     },
     "hipdnn-superbuild": {
         "file": "hipdnn-superbuild-ci.yml",
@@ -79,6 +90,7 @@ INPUT_MAP = {
     "projects": "projects",
     "test_labels": "linux_test_labels",
     "windows_test_labels": "windows_test_labels",
+    "reuse_build": "baseline_run_id",
 }
 
 OPTION_NAMES = {
@@ -87,6 +99,7 @@ OPTION_NAMES = {
     "projects": "--projects",
     "test_labels": "--test-labels",
     "windows_test_labels": "--windows-test-labels",
+    "reuse_build": "--reuse-build",
 }
 
 INSTALL_HINTS = {
@@ -285,6 +298,40 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
     return run_id
 
 
+def check_reuse_baseline(run_id, workflow_file, ref):
+    run = json.loads(
+        run_cmd(
+            [
+                "gh",
+                "api",
+                f"repos/{REPO}/actions/runs/{run_id}",
+                "--jq",
+                "{path, head_sha, status, repo: .head_repository.full_name}",
+            ]
+        )
+    )
+    head_sha = run_cmd(["gh", "api", f"repos/{REPO}/commits/{ref}", "--jq", ".sha"])
+    problems = []
+    # The path can carry a "@ref" suffix, so compare only the file part.
+    if run["path"].split("@")[0] != f".github/workflows/{workflow_file}":
+        problems.append(f"is a run of {run['path']}, not {workflow_file}")
+    if run["repo"] != REPO:
+        problems.append(f"built code from {run['repo']}, not {REPO}")
+    # Artifacts built from another commit would be tested as if they were ref's.
+    if run["head_sha"] != head_sha:
+        problems.append(
+            f"built {run['head_sha'][:11]}, but '{ref}' is at {head_sha[:11]}"
+        )
+    # An unfinished run may not have uploaded every artifact yet, and the new
+    # dispatch cancels it through the workflow's concurrency group.
+    if run["status"] != "completed":
+        problems.append(f"is still {run['status']}")
+    if problems:
+        for problem in problems:
+            print(f"error: --reuse-build run {run_id} {problem}", file=sys.stderr)
+        sys.exit(1)
+
+
 def find_active_run(ref):
     active = []
     for status in ("in_progress", "queued"):
@@ -333,6 +380,10 @@ def cmd_dispatch(args):
         value = getattr(args, field, "") or ""
         if value:
             inputs[INPUT_MAP[field]] = value
+    if args.reuse_build:
+        check_reuse_baseline(args.reuse_build, wf["file"], ref)
+        # Copy every build stage from the baseline run; only tests run.
+        inputs["prebuilt_stages"] = "all"
     pinned = checkout_therock_ref()
     if pinned and pinned != THEROCK_SNAPSHOT_REF:
         print(
@@ -487,6 +538,15 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         dest="windows_test_labels",
         default="",
         help="Windows test labels, comma-separated (multi-arch only)",
+    )
+    dispatch.add_argument(
+        "--reuse-build",
+        dest="reuse_build",
+        type=int,
+        default=None,
+        metavar="RUN_ID",
+        help="Skip the build and copy its artifacts from this completed multi-arch "
+        "run of the same commit (multi-arch only)",
     )
     # A real dispatch needs --yes, so it cannot happen by leaving a flag out.
     mode = dispatch.add_mutually_exclusive_group(required=True)

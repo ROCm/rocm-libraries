@@ -1,7 +1,7 @@
 ---
 name: hipdnn-trigger-ci
 description: Dispatch TheRock CI, TheRock Multi-Arch CI or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects and test labels, then check status or watch the run. Always dry-runs first; a real dispatch needs explicit user approval.
-argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [--gfx <families>] [--windows-gfx <families>] [--projects <paths>] [--test-labels <labels>] [--dry-run|--yes] [--run-id <run-id>]"
+argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [--gfx <families>] [--windows-gfx <families>] [--projects <paths>] [--test-labels <labels>] [--reuse-build <run-id>] [--dry-run|--yes] [--run-id <run-id>]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -25,12 +25,13 @@ Infer options from the user request:
   - `therock-ci`: Linux `gfx94X, gfx950, gfx125X`, Windows `gfx1151` (`.github/workflows/therock-ci.yml`, "Fetch Linux/Windows targets for build and test" steps).
 - **Projects** (`therock-ci` only, required there): `--projects`, space-separated subtree paths that are keys of `subtree_to_project_map` in `.github/scripts/therock_matrix.py` (for example `dnn-providers/integration-tests`, `projects/hipdnn`), or `all`. The workflow has no default: without it a run builds and tests nothing yet completes, so `dispatch` refuses `-w therock-ci` without `--projects`.
 - **Test labels** (`multi-arch` only): `--test-labels` (Linux) and `--windows-test-labels`, comma-separated. See the test reference below.
+- **Reuse a build** (`multi-arch` only): `--reuse-build <run-id>` skips every build stage and copies the artifacts from that earlier multi-arch run (`prebuilt_stages=all`, `baseline_run_id=<run-id>`), so only the tests run. Use it to re-run tests with other labels or another tier without rebuilding. The script refuses a run of another workflow or repo, a run of a different commit than the branch head, and a run that has not completed. It does not check the baseline's jobs: every family requested now must have built successfully in that run, or its test jobs fail on missing artifacts. A cancelled run whose build stages all passed is a valid baseline. The workflow's own reuse policy never copies `compiler-runtime`; `all` does, which is untested here, so confirm the first such run gets past the copy step.
 
 `dispatch` rejects an option the chosen workflow does not take (for example `--test-labels` with `-w therock-ci`, or any option with `-w hipdnn-superbuild`) instead of dropping it.
 
 The accepted GPU family names come from TheRock's `build_tools/github_actions/amdgpu_family_matrix.py` at the TheRock ref pinned in `.github/actions/ci-env/action.yml` (`therock-ref`). `trigger_ci.py --help` prints a hardcoded snapshot of the list and names the TheRock commit it was taken from, and `dispatch` warns when the checkout's `therock-ref` differs from it; in that case, or when a name is rejected, re-read `amdgpu_family_matrix.py` at the current `therock-ref`. Names are case-insensitive. A family that has no entry for the target platform is dropped for that platform (for example `gfx94X` and `gfx950` are Linux-only). `multi-arch` rejects an unknown name with an error listing the known families; `therock-ci` skips unknown names silently, so check the spelling. `multi-arch` also accepts `gfx1250-strict` (dispatch-only) and `all`.
 
-Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `baseline_repository`, `build_python_packages`, `build_pytorch`, `build_jax`, `build_native_linux`) that this script does not expose. Read `.github/workflows/therock-multi-arch-ci.yml` if the user needs one; pass it through `gh workflow run` directly only after showing the user the command.
+Multi-arch has further dispatch inputs (`baseline_repository`, `build_python_packages`, `build_pytorch`, `build_jax`, `build_native_linux`, and `prebuilt_stages` values other than `all`) that this script does not expose. Read `.github/workflows/therock-multi-arch-ci.yml` if the user needs one; pass it through `gh workflow run` directly only after showing the user the command.
 
 ## Workflow
 
@@ -40,11 +41,11 @@ Multi-arch has further dispatch inputs (`prebuilt_stages`, `baseline_run_id`, `b
 
 3. Dry-run the dispatch and show the user the printed command:
    ```bash
-   python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch> | --pr <pr-number>] dispatch -w <workflow> [--gfx <families>] [--windows-gfx <families>] [--projects "<paths>"] [--test-labels <labels>] [--windows-test-labels <labels>] --dry-run
+   python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch> | --pr <pr-number>] dispatch -w <workflow> [--gfx <families>] [--windows-gfx <families>] [--projects "<paths>"] [--test-labels <labels>] [--windows-test-labels <labels>] [--reuse-build <run-id>] --dry-run
    ```
    Here `<workflow>` is `multi-arch`, `therock-ci` or `hipdnn-superbuild`; `<families>`, `<paths>` and `<labels>` are the values described under Inputs.
 
-4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
+4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. A multi-arch dispatch cancels any queued or in-progress multi-arch run on the same commit (the workflow's concurrency group); say so when asking for approval if one exists. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
 
 5. Check status or watch:
    ```bash
@@ -125,6 +126,12 @@ Same, but at the quick tier:
 
 ```bash
 python3 <skill-directory>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X --windows-gfx none --test-labels test:miopenprovider,test_filter:quick --dry-run
+```
+
+Re-run the tests of a finished multi-arch run at the comprehensive tier, without rebuilding (the run must be of the branch's current head commit):
+
+```bash
+python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> dispatch -w multi-arch --gfx gfx94X --windows-gfx none --test-labels test:miopenprovider,test_filter:comprehensive --reuse-build <run-id> --dry-run
 ```
 
 Check or follow the run on a PR's branch:
