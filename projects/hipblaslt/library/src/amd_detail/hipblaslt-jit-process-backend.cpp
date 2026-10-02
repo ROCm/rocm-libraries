@@ -24,8 +24,7 @@ namespace hipblaslt_jit
                     return {nullptr, std::move(status)};
                 }
                 debug::Phase storePhase("store");
-                auto         store = makeLibraryStore(
-                    JitLibrary::process(), made.backend->info(), jitCodeObjectVersion);
+                auto         store = makeLibraryStore(JitLibrary::process(), jitCodeObjectVersion);
                 storePhase.stop();
                 debug::Phase components("components");
                 return {std::make_shared<const Jit>(Jit::Components{std::move(made.backend),

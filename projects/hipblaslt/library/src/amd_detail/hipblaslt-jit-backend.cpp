@@ -130,10 +130,13 @@ namespace hipblaslt_jit
         };
     }
 
-    std::shared_ptr<const SolutionStore>
-        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion)
+    Jit::StoreFactory makeLibraryStore(JitLibrary& library, int codeObjectVersion)
     {
-        return std::make_shared<const LibraryStore>(library, backend, codeObjectVersion);
+        return [&library, codeObjectVersion](const BackendInfo& backend, const std::string& version) {
+            auto keyed    = backend;
+            keyed.version = version;
+            return std::make_shared<const LibraryStore>(library, std::move(keyed), codeObjectVersion);
+        };
     }
 
     namespace
@@ -223,7 +226,7 @@ namespace hipblaslt_jit
             }
             const auto lookup = [&](const char* phase) {
                 debug::Phase timed(phase);
-                status = jit->components().store->lookup(
+                status = jit->store()->lookup(
                     request, target, count, workspaceLimit, excludeKernels, fill.indices);
                 if(!status.ok())
                     status.stage = Stage::Lookup;
@@ -718,9 +721,10 @@ namespace hipblaslt_ext::experimental
                 auto status = hipblaslt_jit::DeviceTarget::make(device, target);
                 auto& library = hipblaslt_jit::JitLibrary::process();
                 components.store
-                    = hipblaslt_jit::makeLibraryStore(library, info, hipblaslt_jit::jitCodeObjectVersion);
+                    = hipblaslt_jit::makeLibraryStore(library, hipblaslt_jit::jitCodeObjectVersion);
+                const hipblaslt_jit::Jit generator(std::move(components));
                 if(status.ok())
-                    status = components.store->lookup(
+                    status = generator.store()->lookup(
                         *operation, target, count, workspaceLimit, {}, indices);
                 const auto found = indices.size();
                 if(status.ok() && found < count)
@@ -733,7 +737,6 @@ namespace hipblaslt_ext::experimental
                            = library.solutionByIndex(device, *target.hardware, index, why))
                             published.push_back(solution->kernelName);
                     }
-                    const hipblaslt_jit::Jit generator(std::move(components));
                     auto outcome = generator.generate(
                         *operation, target, count - found, workspaceLimit, published);
                     for(auto index : outcome.indices)

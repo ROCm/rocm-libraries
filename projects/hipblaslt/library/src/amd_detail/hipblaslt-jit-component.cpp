@@ -130,22 +130,32 @@ namespace hipblaslt_jit
         const auto& c = m_components;
         if(!c.backend || !c.builder || !c.loader)
             throw std::invalid_argument("Jit requires a backend, a builder and a loader");
-        const auto& transported = c.backend->info().contracts;
-        if(transported.empty())
-            return;
-        if(c.predictor)
-            for(const auto& contract : c.predictor->modeledContracts())
-                if(transported.count(contract))
-                    m_contracts.insert(contract);
-        if(m_contracts.empty() || !c.knowledge)
+        const auto& info        = c.backend->info();
+        const auto& transported = info.contracts;
+        m_version               = info.version;
+        if(!transported.empty())
         {
-            std::string names;
-            for(const auto& contract : transported)
-                names += (names.empty() ? "" : ", ") + contract;
-            throw std::invalid_argument("Backend " + c.backend->info().id
-                                        + " requires a predictor for one of " + names
-                                        + " and tuning knowledge");
+            if(c.predictor)
+                for(const auto& contract : c.predictor->modeledContracts())
+                    if(transported.count(contract))
+                        m_contracts.insert(contract);
+            auto join = [](const std::set<std::string>& contracts, const char* separator) {
+                std::string names;
+                for(const auto& contract : contracts)
+                    names += (names.empty() ? "" : separator) + contract;
+                return names;
+            };
+            if(m_contracts.empty() || !c.knowledge)
+                throw std::invalid_argument("Backend " + info.id
+                                            + " requires a predictor for one of "
+                                            + join(transported, ", ") + " and tuning knowledge");
+            m_version += "|predictor=" + std::string(c.predictor->id())
+                         + ";contracts=" + join(m_contracts, ",")
+                         + "|knowledge=" + std::string(c.knowledge->id()) + "@"
+                         + c.knowledge->version();
         }
+        if(c.store)
+            m_store = c.store(info, m_version);
     }
 
     Jit::Outcome Jit::generate(const OperationRequest&         request,
@@ -271,13 +281,13 @@ namespace hipblaslt_jit
         }
 
         bool load = true;
-        if(c.store && !supported.empty())
+        if(m_store && !supported.empty())
         {
             std::vector<int32_t> indices;
             if(trace)
                 trace->publishing(supported.size());
             debug::Phase publishPhase("publish");
-            status = guarded([&] { return c.store->publish(request, target, supported, indices); });
+            status = guarded([&] { return m_store->publish(request, target, supported, indices); });
             publishPhase.stop();
             if(status.ok() && indices.size() != supported.size())
                 status = {Status::Code::Failed,

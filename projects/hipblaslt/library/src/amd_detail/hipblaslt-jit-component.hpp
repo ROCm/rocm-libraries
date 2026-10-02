@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-backend.hpp"
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <set>
@@ -211,6 +212,10 @@ namespace hipblaslt_jit
     class Jit
     {
     public:
+        // Makes the store for the backend under the Jit's version.
+        using StoreFactory = std::function<std::shared_ptr<const SolutionStore>(
+            const BackendInfo& backend, const std::string& version)>;
+
         struct Components
         {
             std::shared_ptr<const Backend>           backend;
@@ -218,7 +223,7 @@ namespace hipblaslt_jit
             std::shared_ptr<const TuningKnowledge>   knowledge; // iff predictor
             std::shared_ptr<const CodeObjectBuilder> builder;
             std::shared_ptr<const SolutionLoader>    loader;
-            std::shared_ptr<const SolutionStore>     store; // optional
+            StoreFactory                             store; // optional
         };
 
         struct Outcome
@@ -246,10 +251,22 @@ namespace hipblaslt_jit
         {
             return m_components;
         }
+        // The backend's version; with a prediction, followed by
+        // |predictor=<id>;contracts=<sorted contracts>|knowledge=<id>@<version>.
+        const std::string& version() const noexcept
+        {
+            return m_version;
+        }
+        const std::shared_ptr<const SolutionStore>& store() const noexcept
+        {
+            return m_store;
+        }
 
     private:
-        Components            m_components;
-        std::set<std::string> m_contracts; // the backend's and the predictor's
+        Components                           m_components;
+        std::set<std::string>                m_contracts; // the backend's and the predictor's
+        std::string                          m_version;
+        std::shared_ptr<const SolutionStore> m_store;
     };
 }
 

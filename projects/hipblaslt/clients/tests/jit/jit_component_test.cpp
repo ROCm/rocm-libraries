@@ -293,9 +293,10 @@ namespace
 
     struct Store final : hj::SolutionStore
     {
-        Log&       log;
-        hj::Status result;
-        bool       shortIndices = false;
+        Log&        log;
+        hj::Status  result;
+        bool        shortIndices = false;
+        std::string version; // the one the Jit made this store for
         explicit Store(Log& l)
             : log(l)
         {
@@ -347,7 +348,13 @@ namespace
         }
         hj::Jit jit() const
         {
-            return hj::Jit({backend, predictor, knowledge, builder, loader, store});
+            hj::Jit::StoreFactory factory;
+            if(store)
+                factory = [s = store](const hj::BackendInfo&, const std::string& version) {
+                    s->version = version;
+                    return s;
+                };
+            return hj::Jit({backend, predictor, knowledge, builder, loader, factory});
         }
         hj::Jit::Outcome run(size_t                          count   = 1,
                              const std::vector<std::string>& exclude = {}) const
@@ -417,10 +424,26 @@ namespace
                     && rejected({predicted, predictor, nullptr, builder, loader, nullptr})
                     && rejected({other, predictor, knowledge, builder, loader, nullptr}),
                 "Jit accepted a prediction contract it cannot satisfy");
+        backend->information.version   = "b1";
+        predicted->information.version = "b2";
+        auto        store              = std::make_shared<Store>(log);
+        std::string storeBackend;
+        auto        factory = [&](const hj::BackendInfo& info, const std::string& version) {
+            storeBackend   = info.id;
+            store->version = version;
+            return store;
+        };
         hj::Jit plain({backend, nullptr, nullptr, builder, loader, nullptr});
-        hj::Jit modeled({predicted, predictor, knowledge, builder, loader, nullptr});
+        hj::Jit modeled({predicted, predictor, knowledge, builder, loader, factory});
         require(plain.components().backend == backend, "Jit did not keep its components");
-        std::cout << "PASS Jit construction validates components and prediction contracts\n";
+        const std::string composed
+            = "b2|predictor=fake-model;contracts=fake.v1|knowledge=fake-knowledge@3";
+        require(plain.version() == "b1" && !plain.store() && modeled.version() == composed
+                    && modeled.store() == store && store->version == composed
+                    && storeBackend == "fake-backend",
+                "Jit did not make its store under the composed version");
+        std::cout << "PASS Jit construction validates components and prediction contracts, and "
+                     "makes the store under the composed version\n";
     }
 
     void pipeline()

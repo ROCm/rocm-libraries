@@ -337,7 +337,7 @@ still run on every match.
 | Field | Contents |
 | --- | --- |
 | `target` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
-| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the mock backend's is a hash of its replayed bundles. |
+| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the mock backend's is a hash of its replayed bundles. For a backend that consumes predictions, the version is followed by `\|predictor=<id>;contracts=<contracts>\|knowledge=<id>@<version>`: the predictor, the modeled contracts that both it and the backend support, sorted, and the tuning knowledge with its version. |
 | `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
 | `code_object_version` | The code-object version that the generator and the builder use (4) |
 | `rocm_path` | The ROCm path that the builder passes to comgr |
