@@ -21,6 +21,7 @@ never by filename.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -72,6 +73,18 @@ class KpackUnavailable(RuntimeError):
     """rocm_kpack cannot be imported, so no payload can be read. An environment
     problem, reported once with its own exit code, never as a failure of every
     packed descriptor."""
+
+
+def _forget_rocm_kpack() -> None:
+    """Drop the rocm_kpack modules a failed import attempt left cached. A broken
+    installed package leaves its parent `rocm_kpack` in sys.modules, and the next
+    candidate's import would then resolve submodules against that package instead
+    of the candidate directory."""
+    for name in [
+        n for n in sys.modules if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+    ]:
+        del sys.modules[name]
+    importlib.invalidate_caches()
 
 
 class Profile:
@@ -270,6 +283,7 @@ class Payloads:
                 return module
             except HkpPackError as exc:
                 errors.append(f"{candidate or 'installed package'}: {exc}")
+                _forget_rocm_kpack()
         searched = ", ".join(str(d) for d in DEFAULT_KPACK_PYTHON_DIRS)
         raise KpackUnavailable(
             "rocm_kpack is not importable, so --mode full cannot read the payload "

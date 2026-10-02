@@ -1081,6 +1081,51 @@ class TestMissingRocmKpackIsAnEnvironmentError:
         assert code == gate_module.EXIT_ENVIRONMENT, capsys.readouterr().out
         assert calls == [named]
 
+    @staticmethod
+    def _package(root: Path, *modules: str) -> Path:
+        """A rocm_kpack package under `root` holding only `modules`."""
+        package = root / "rocm_kpack"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        for module in modules:
+            (package / f"{module}.py").write_text(f"ORIGIN = {str(root)!r}\n")
+        return root
+
+    @pytest.fixture
+    def no_cached_rocm_kpack(self):
+        """Run with no rocm_kpack module cached, and put the cache back afterwards."""
+
+        def cached():
+            return {
+                n: m
+                for n, m in sys.modules.items()
+                if n == "rocm_kpack" or n.startswith("rocm_kpack.")
+            }
+
+        saved = cached()
+        for name in saved:
+            del sys.modules[name]
+        yield
+        for name in cached():
+            del sys.modules[name]
+        sys.modules.update(saved)
+
+    def test_a_broken_installed_package_does_not_hide_the_default_directory(
+        self, monkeypatch, tmp_path, no_cached_rocm_kpack
+    ):
+        # The installed package imports, but has no kpack submodule. The first
+        # attempt caches its `rocm_kpack`; the directory attempt must not reuse it.
+        installed = self._package(tmp_path / "site-packages")
+        default = self._package(
+            tmp_path / "opt-rocm-kpack-python", "kpack", "compression"
+        )
+        monkeypatch.syspath_prepend(str(installed))
+        monkeypatch.setattr(gate_module, "DEFAULT_KPACK_PYTHON_DIRS", (default,))
+
+        module = gate_module.Payloads()._load_kpack()
+
+        assert module.ORIGIN == str(default)
+
 
 # TestRealArchiveSelectedConsumer is the one class that builds a real kpack archive,
 # carried as a skip rather than a hard failure so a checkout without rocm_kpack keeps
