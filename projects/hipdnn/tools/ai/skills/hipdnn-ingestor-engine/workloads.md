@@ -34,6 +34,31 @@ never reduce the denominator to successful timing rows.
 Counts and outcomes are bound to the identities in [RUNBOOK.md](RUNBOOK.md#8-handoff)'s
 *Handoff* cover sheet.
 
+### Fetching the external corpora
+
+`ROCm/dnn-benchmarking`'s `Workloads/{headline,microbench,models}/` hold DVC pointer
+files (`*.tar.gz.dvc`) to an anonymous-read S3 remote (`.dvc/config`), not graphs. Pull
+only the archives your scope needs, then unpack each into its own corpus directory:
+
+```bash
+git clone --depth 1 https://github.com/ROCm/dnn-benchmarking.git
+cd dnn-benchmarking
+command -v dvc || python3 -m pip install "dvc[s3]"   # into a venv you own
+dvc config --local core.site_cache_dir /absolute/writable/dvc-site-cache
+dvc pull Workloads/headline/attn.tar.gz.dvc Workloads/microbench/aiter.tar.gz.dvc
+mkdir -p "$CORPUS_DIR/aiter"
+tar -xzf Workloads/microbench/aiter.tar.gz -C "$CORPUS_DIR/aiter"
+```
+
+Check for `dvc` first: the hipDNN gfx950 image ships it (`/usr/bin/dvc`, 3.67.0), and
+installing `dvc[s3]` from PyPI can take more than 15 minutes on a slow node. DVC keeps a
+site cache under `/var/tmp/dvc` by default; where `/var/tmp` is read-only, as in the
+gfx950 hipDNN enroot image, `dvc pull` fails with `[Errno 30] Read-only file system:
+'/var/tmp/dvc'` until `core.site_cache_dir` names a writable directory, as above. Record
+the dnn-benchmarking revision and each archive's DVC `md5` from its `.dvc` file as the
+corpus identity. The archives mix dtypes and features, so out-of-scope graphs remain
+counted as exclusions with reasons.
+
 ## Applicability and reference contract
 
 rocKE profiles scope the candidate registry to the actual kernel family/algorithm and
@@ -81,6 +106,25 @@ Reference capability must cover the approved features and shapes. Narrow the cor
 under an explicit scope decision to keep runtime affordable, never by dropping
 correctness obligations. Final measurements use fresh output produced after the final
 generation, build and install.
+
+### Correctness tolerances
+
+Each harness grades at its own tolerance, and a pass in one does not predict a pass in
+the other:
+
+| Harness | Tolerance | Source |
+|---|---|---|
+| hipDNN device tests (RUNBOOK stage 5) | Per-operation test tolerance; SDPA forward 1e-2 for half and bf16, 1e-5 for float | `sdpa::getToleranceFwd` in `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp`, adjusted only by a `[[tolerance_overrides]]` entry in the engine's test TOML |
+| dnn-benchmark `--validate` (stage 7 sweep) | rtol = atol = 1e-3 for half; rtol 3e-2, atol 1e-3 for bf16; rtol 1e-5, atol 1e-6 otherwise | `_default_tolerance_for_output` in dnn-benchmarking `src/dnn_benchmarking/execution/suite_runner.py`; `--rtol`/`--atol` override every output |
+
+The benchmark default is the stage 7 acceptance criterion. Do not loosen either
+tolerance to make a run pass: adding `--rtol`/`--atol` to `benchmark.argv` or a new TOML
+override is a correctness change that needs an explicit user decision. Report every miss
+with its graph, dtype, observed max absolute and relative error and the tolerance it
+missed, plus the same graph on the unmodified baseline installation as a control.
+Repeat it over at least three seeds or rounds, since error near the limit can change
+between runs with a fixed seed. A miss the baseline shares is a pre-existing condition
+to report next to the result, not a pass.
 
 ### Terminal sweep statuses
 

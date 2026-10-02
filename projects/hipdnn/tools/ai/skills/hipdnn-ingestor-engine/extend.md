@@ -121,7 +121,9 @@ when it names any. The entry runs `hip_kernel_provider_census_tests`, the binary
 suites are compiled into. An addition under an uncensused suite states its inventory
 through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
 eligibility. Device proof must explicitly select and numerically verify the new
-candidate; passing the unchanged default is not extension acceptance.
+candidate; passing the unchanged default is not extension acceptance. RUNBOOK stage 5
+(*Where an extension's explicit selection runs*) names where those cases go and the
+command that runs only them.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5
