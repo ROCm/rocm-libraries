@@ -2,7 +2,7 @@
 # name: test_r2_activation_gfx942_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_D_GradH_A_S_UserArgs_gYvLluGLd6dX0W4-ZWFBdYrmigpuJuCe_KdMm7vuEuY=',
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_D_GradH_A_S_UserArgs_PO4gDxn2BzAuKthreoqv5wEsR8KNn7Z7PqD8oxV_H3M=',
       'err': 0,
     }),
   ])
