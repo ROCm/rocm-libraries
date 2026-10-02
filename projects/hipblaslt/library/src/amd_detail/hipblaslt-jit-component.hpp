@@ -167,6 +167,8 @@ namespace hipblaslt_jit
         std::vector<uint8_t>   entry;
         std::string            kernelName; // the entry's main kernel
         std::vector<BuildUnit> units;
+        // HIP front-end flags for every Hip unit, after the builder's own.
+        std::vector<std::string> hipFlags;
     };
 
     constexpr int jitCodeObjectVersion = 4;
