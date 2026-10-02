@@ -26,8 +26,6 @@
  *******************************************************************************/
 
 #pragma once
-#ifndef LOGGING_H
-#define LOGGING_H
 
 #include "tuple_helper.hpp"
 #include <cmath>
@@ -270,9 +268,17 @@ private:
 
     ~LoggerSingleton()
     {
-        if(log_file_ofs.is_open())
+        // open_log_stream arms this stream to throw, and close() flushes. An
+        // exception escaping a destructor terminates the process.
+        try
         {
-            log_file_ofs.close();
+            if(log_file_ofs.is_open())
+            {
+                log_file_ofs.close();
+            }
+        }
+        catch(...)
+        {
         }
     }
 };
@@ -453,5 +459,3 @@ void log_argument(std::ostream& os, H head)
 {
     os << "\n" << head;
 }
-
-#endif // LOGGING_H

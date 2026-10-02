@@ -71,7 +71,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StaggerU: [0]
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
