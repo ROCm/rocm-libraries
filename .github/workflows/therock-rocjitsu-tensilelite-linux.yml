@@ -104,9 +104,18 @@ jobs:
             -s rocm-libraries/.github/scripts/tests -p 'rocjitsu*_test.py'
 
       - name: Run rocjitsu tensilelite tests
+        id: tests
         # The suite supervisor stops earlier, leaving time to reap and report.
         timeout-minutes: 345
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_tensilelite_test.sh
+
+      # A killed test step can still be reported as successful; verify the
+      # supervisor's records instead and keep the container's memory counters.
+      - name: Check suite completeness
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: |
+          python rocm-libraries/.github/scripts/rocjitsu_check_suite.py \
+            --report-dir "${REPORT_DIR}"
 
       - name: Upload test reports
         if: ${{ always() }}
