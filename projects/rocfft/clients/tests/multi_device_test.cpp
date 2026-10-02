@@ -427,9 +427,63 @@ static const auto multi_gpu_tokens = {
     // clang-format on
 };
 
+// Single-process multi-device distributions of 2D and 3D transforms with a
+// Bluestein (prime 10007) length on the contiguous or a non-contiguous axis:
+// one side is split on the slowest axis, the other on the fastest axis, the
+// latter never being in the real domain.
+static std::vector<std::string> multi_gpu_bluestein_tokens()
+{
+    std::vector<std::string> tokens;
+    if(mp_lib != fft_params::fft_mp_lib_none || gpus_per_rank < 2)
+        return tokens;
+
+    const std::vector<std::vector<size_t>> lengths
+        = {{16, 10007}, {10007, 16}, {10007, 16, 16}, {16, 10007, 16}, {16, 16, 10007}};
+    for(const auto& length : lengths)
+    {
+        // split axes (indices in fields, i.e. batch first) on input and output
+        for(const auto& [in_split, out_split] : {std::pair<size_t, size_t>{1, length.size()},
+                                                 std::pair<size_t, size_t>{length.size(), 1}})
+        {
+            for(const auto transform_type : trans_type_range_full)
+            {
+                for(const auto placement : {fft_placement_notinplace, fft_placement_inplace})
+                {
+                    for(const auto nbatch : multi_gpu_batch_range)
+                    {
+                        fft_params p;
+                        p.length         = length;
+                        p.precision      = fft_precision_single;
+                        p.nbatch         = nbatch;
+                        p.transform_type = transform_type;
+                        p.placement      = placement;
+                        p.validate();
+
+                        // do not split the contiguous axis in the real domain
+                        if(p.is_real() && (p.is_forward() ? in_split : out_split) == length.size())
+                            continue;
+
+                        // as many bricks as devices, but no empty brick
+                        std::vector<unsigned int> in_grid(length.size() + 1, 1);
+                        std::vector<unsigned int> out_grid(length.size() + 1, 1);
+                        in_grid[in_split]   = std::min(gpus_per_rank, p.ilength()[in_split - 1]);
+                        out_grid[out_split] = std::min(gpus_per_rank, p.olength()[out_split - 1]);
+                        p.distribute_field<fft_io::fft_io_in>(gpus_per_rank, in_grid);
+                        p.distribute_field<fft_io::fft_io_out>(gpus_per_rank, out_grid);
+                        tokens.push_back(p.token());
+                    }
+                }
+            }
+        }
+    }
+    return tokens;
+}
+
 std::vector<fft_params> param_generator_multi_gpu_adhoc()
 {
     auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
+    for(auto& p : param_generator_token(test_prob, multi_gpu_bluestein_tokens()))
+        all_params.push_back(std::move(p));
 
     // check if fields use more bricks than we can support
     auto too_many_bricks = [=](const std::vector<fft_params::fft_field>& fields, size_t maxBricks) {
@@ -488,6 +542,58 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
                          accuracy_test::TestName);
+
+// A distributed Bluestein (prime 10007) plan must not silently fall back to
+// running the whole transform on one device. Detect that fallback by checking
+// every device's work buffer stays below the single-device size.
+class multi_gpu_workbuf : public accuracy_test
+{
+};
+// no instance without multiple devices
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(multi_gpu_workbuf);
+
+TEST_P(multi_gpu_workbuf, distribute_bluestein_workspace)
+{
+    try
+    {
+        const auto& dist  = GetParam();
+        const auto  token = dist.token();
+
+        // Reference: the same logical transform on a single device.  Its
+        // work buffer is what one device needs to run the whole transform.
+        fft_params base = dist;
+        base.ifields.clear();
+        base.ofields.clear();
+        rocfft_params ref{base};
+        ASSERT_EQ(ref.setup_structs(), fft_status_success) << "reference plan: " << token;
+        const size_t single_whole
+            = *std::max_element(ref.workbuffersizes.begin(), ref.workbuffersizes.end());
+        ASSERT_GT(single_whole, 0u) << "reference plan needs no work buffer: " << token;
+
+        rocfft_params dist_params{dist};
+        ASSERT_EQ(dist_params.setup_structs(), fft_status_success) << "distributed plan: " << token;
+        const size_t max_per_device = *std::max_element(dist_params.workbuffersizes.begin(),
+                                                        dist_params.workbuffersizes.end());
+
+        // A device reaching the single-device size means the whole transform
+        // ran on it, i.e. the gather/scatter fallback was taken instead of a
+        // real multi-device decomposition.
+        EXPECT_LT(max_per_device, single_whole)
+            << "multi-device plan appears to have fallen back to single-device "
+               "gather/scatter: a device requires a work buffer of size "
+            << byte_size_to_str(max_per_device)
+            << " while the single-device plan requires as much or less, i.e., "
+            << byte_size_to_str(single_whole);
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
+// same (pseudo-)random selection as the multi_gpu_adhoc_token accuracy tests
+INSTANTIATE_TEST_SUITE_P(bluestein,
+                         multi_gpu_workbuf,
+                         ::testing::ValuesIn(param_generator_token(test_prob,
+                                                                   multi_gpu_bluestein_tokens())),
+                         multi_gpu_workbuf::TestName);
 
 std::vector<fft_params> param_generator_some_continuous_brick()
 {
