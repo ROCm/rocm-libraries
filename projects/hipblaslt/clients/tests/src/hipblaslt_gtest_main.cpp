@@ -32,7 +32,10 @@
 #include "utility.hpp"
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-#include "a2a_rank_child.hpp"
+namespace hipblaslt_bench
+{
+    int run_rank_child();
+}
 #endif
 
 #include <cstdlib>

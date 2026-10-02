@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "EpsilonTestUtils.hpp"
+#include "ScalarTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -62,7 +62,8 @@ flatbuffers::FlatBufferBuilder
                                                    meanVarianceDataType,
                                                    &channelOnlyStrides,
                                                    &channelOnlyDims));
-    tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
+    tensors.push_back(
+        createScalarTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType, "epsilon"));
 
     auto attrs = CreateBatchnormInferenceAttributesVarianceExt(
         builder, xUid, meanUid, varianceUid, scaleUid, biasUid, yUid, epsilonUid);

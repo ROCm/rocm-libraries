@@ -349,8 +349,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -375,8 +376,9 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     {
         bool eight
             = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        bool half = strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0;
+        const int* allowed = eight ? allowed_8bit : half ? allowed_16bit : allowed_32bit;
+        int acount = eight ? 6 : 5;
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(

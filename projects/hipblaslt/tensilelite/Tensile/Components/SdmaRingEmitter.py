@@ -120,15 +120,17 @@ class SdmaRingEmitter:
     # ---- cursor lazy-init --------------------------------------------------
 
     def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS, cursorOffS):
-        """Raise both cursors to at least the hardware write pointer.
+        """Raise cachedWptr to at least the hardware write pointer, and
+        committedWptr too, but only when cachedWptr was below it.
 
         MUST be emitted before the reserve loop: once a producer has reserved
         from a cursor that is too low, the damage is done.
 
-        No glc -- nothing here wants the pre-op value. The trailing s_waitcnt is
-        not optional: the reserve loop reads the same cursor, and SMEM ops are
-        not ordered against each other without it.
+        The trailing s_waitcnt is not optional: the reserve loop reads the same
+        cursor, and SMEM ops are not ordered against each other without it.
         """
+        skipLabel = Label(w.labels.getNameInc("sdma_lazy_skip_commit"),
+                          "LazyInit: cachedWptr already >= hwWptr, leave committedWptr")
         wptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_wptrPtr", preventOverflow=False)
         hwWptrS  = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_hwWptr", preventOverflow=False)
         module.add(self._peerLoad(SLoadB64, sgpr(wptrPtrS, 2), peerGroupS, OFF_wptr,
@@ -138,16 +140,26 @@ class SdmaRingEmitter:
                             soffset=hex(0), smem=SMEMModifiers(glc=True),
                             comment="hwWptr = *wptr (glc: past the caches)"))
         module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr load"))
-        # Non-returning, so hwWptrS survives the first and feeds the second.
-        module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
+        # wptrPtrS is dead past the load above; it takes the pre-op cachedWptr.
+        oldS = wptrPtrS
+        module.add(SMovB64(dst=sgpr(oldS, 2), src=sgpr(hwWptrS, 2), comment="SDATA in = hwWptr"))
+        module.add(SAtomicUmaxX2(dst=sgpr(oldS, 2), base=sgpr(cursorBaseS, 2),
                                  soffset=sgpr(cursorOffS),
-                                 smem=SMEMModifiers(offset=CUR_cachedWptr),
-                                 comment="cachedWptr = max(cachedWptr, hwWptr)"))
+                                 smem=SMEMModifiers(glc=True, offset=CUR_cachedWptr),
+                                 comment="old = cachedWptr; cachedWptr = max(cachedWptr, hwWptr)"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait cachedWptr pre-op"))
+        module.add(SSubU32(dst=sgpr(oldS + 0), src0=sgpr(oldS + 0), src1=sgpr(hwWptrS + 0),
+                           comment="old - hwWptr (lo)"))
+        module.add(SSubBU32(dst=sgpr(oldS + 1), src0=sgpr(oldS + 1), src1=sgpr(hwWptrS + 1),
+                            comment="old - hwWptr (hi, borrow): SCC = old < hwWptr"))
+        module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                                comment="old >= hwWptr -> leave committedWptr"))
         module.add(SAtomicUmaxX2(dst=sgpr(hwWptrS, 2), base=sgpr(cursorBaseS, 2),
                                  soffset=sgpr(cursorOffS),
                                  smem=SMEMModifiers(offset=CUR_committedWptr),
                                  comment="committedWptr = max(committedWptr, hwWptr)"))
-        module.add(SWaitCnt(kmcnt=0, comment="cursors raised before anyone reserves"))
+        module.add(SWaitCnt(kmcnt=0, comment="committedWptr raised"))
+        module.add(skipLabel)
         w.sgprPool.checkIn(hwWptrS)
         w.sgprPool.checkIn(wptrPtrS)
 
