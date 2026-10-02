@@ -6,7 +6,7 @@
  * and
  * Hari & Kovac (2019). On the Convergence of Complex Jacobi Methods.
  *     Linear and Multilinear Algebra 69(3), p. 489-514.
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -169,6 +169,14 @@ __device__ void run_syevj(const rocblas_int dimx,
         local_res += cosines_res[i];
         local_diag += std::real(sines_diag[i]);
     }
+
+    // -----------------------------------------------------------------------------
+    // this read of cosines_res[]/sines_diag[] must complete before the first
+    // sweep overwrites them with the rotation (c,s1). Without it tolerance is not
+    // workgroup-uniform, so the loop may run a different number of barriers per wave
+    // -----------------------------------------------------------------------------
+    __syncthreads();
+
     S tolerance = (local_res + local_diag) * abstol * abstol;
     S small_num = get_safemin<S>() / eps;
 
@@ -319,6 +327,11 @@ __device__ void run_syevj(const rocblas_int dimx,
         local_res = 0;
         for(i = 0; i < dimx; i++)
             local_res += cosines_res[i];
+
+        // ---------------------------------------------------------------
+        // make sure it is safe for next sweep to over-write cosines_res[]
+        // ---------------------------------------------------------------
+        __syncthreads();
 
         sweeps++;
     }

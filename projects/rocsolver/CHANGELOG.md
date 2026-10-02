@@ -20,6 +20,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed a race condition in SYEVJ GPU kernel.
+
 ### Known issues
 ### Upcoming changes
 

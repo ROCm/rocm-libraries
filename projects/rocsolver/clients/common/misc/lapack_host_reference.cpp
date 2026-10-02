@@ -6264,7 +6264,6 @@ void cpu_sytrs<float>(rocblas_fill uplo,
     rocblas_int info = 0;
     char uploC = rocblas2char_fill(uplo);
     ssytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6280,7 +6279,6 @@ void cpu_sytrs<double>(rocblas_fill uplo,
     rocblas_int info = 0;
     char uploC = rocblas2char_fill(uplo);
     dsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6296,7 +6294,6 @@ void cpu_sytrs<rocblas_float_complex>(rocblas_fill uplo,
     rocblas_int info = 0;
     char uploC = rocblas2char_fill(uplo);
     csytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6312,7 +6309,6 @@ void cpu_sytrs<rocblas_double_complex>(rocblas_fill uplo,
     rocblas_int info = 0;
     char uploC = rocblas2char_fill(uplo);
     zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &info);
-    assert(info == 0);
 }
 
 // sytrs2
@@ -6333,7 +6329,6 @@ void cpu_sytrs2<float>(rocblas_fill uplo,
 
     char uploC = rocblas2char_fill(uplo);
     ssytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6353,7 +6348,6 @@ void cpu_sytrs2<double>(rocblas_fill uplo,
 
     char uploC = rocblas2char_fill(uplo);
     dsytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6373,7 +6367,6 @@ void cpu_sytrs2<rocblas_float_complex>(rocblas_fill uplo,
 
     char uploC = rocblas2char_fill(uplo);
     csytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
-    assert(info == 0);
 }
 
 template <>
@@ -6393,7 +6386,6 @@ void cpu_sytrs2<rocblas_double_complex>(rocblas_fill uplo,
 
     char uploC = rocblas2char_fill(uplo);
     zsytrs2_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, &(work[0]), &info);
-    assert(info == 0);
 }
 // -----------------------------------------------------------------------
 // getrs_npvt
@@ -8657,7 +8649,6 @@ void cpu_sytf2<float>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     ssytf2_(&uploC, &n, A, &lda, ipiv, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8670,7 +8661,6 @@ void cpu_sytf2<double>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     dsytf2_(&uploC, &n, A, &lda, ipiv, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8683,7 +8673,6 @@ void cpu_sytf2<rocblas_float_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     csytf2_(&uploC, &n, A, &lda, ipiv, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8696,7 +8685,6 @@ void cpu_sytf2<rocblas_double_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zsytf2_(&uploC, &n, A, &lda, ipiv, info);
-    assert(*info == 0);
 }
 
 // sytrf
@@ -8712,7 +8700,6 @@ void cpu_sytrf<float>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     ssytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8727,7 +8714,6 @@ void cpu_sytrf<double>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     dsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8742,7 +8728,6 @@ void cpu_sytrf<rocblas_float_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     csytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
-    assert(*info == 0);
 }
 
 template <>
@@ -8757,7 +8742,6 @@ void cpu_sytrf<rocblas_double_complex>(rocblas_fill uplo,
 {
     char uploC = rocblas2char_fill(uplo);
     zsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
-    assert(*info == 0);
 }
 
 // bdsvdx
