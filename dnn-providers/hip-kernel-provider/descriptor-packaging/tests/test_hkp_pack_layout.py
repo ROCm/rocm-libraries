@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import provenance_sidecar
+from conftest import read_shipped
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
@@ -32,14 +32,6 @@ ROCKE_ARCH = "gfx950"
 
 def _read(path):
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_shipped(path):
-    """A packed descriptor with each UKD's provenance read back from its sidecar.
-
-    `attach` refuses a UKD that also carries provenance inline, so every caller
-    also asserts the shipped file holds none."""
-    return provenance_sidecar.attach(path, _read(path))
 
 
 def _load_kpack(rocm_kpack_dir):
@@ -383,7 +375,7 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
     # the nested output tree.
     kinds = {}
     for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read_shipped(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             ks = ukd["kernel_source"]
@@ -627,7 +619,7 @@ def test_example_tree_packs_both_producers(
     # Both producers contributed, asserted via provenance rather than filename.
     kinds = set()
     for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read_shipped(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             kinds.add(ukd["provenance"]["origin_kind"])
@@ -695,7 +687,7 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
 
     by_kind = {}
     for kdp in (tmp_path / "out" / ARCH).rglob("*.kdp.json"):
-        for ukd in _read_shipped(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]
@@ -1596,7 +1588,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
     shard = tmp_path / "out" / ARCH / "pointwise"
-    kdp = _read_shipped(shard / "solo.kdp.json")
+    kdp = read_shipped(shard / "solo.kdp.json")
     assert kdp["arch"] == [ARCH]
     inline = kdp["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1605,7 +1597,7 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
     assert "provenance" not in inline["kernel_source"]
     assert kdp["kernelDescriptors"][1] == _STANDALONE_ID
 
-    standalone = _read_shipped(shard / _STANDALONE_FILE)
+    standalone = read_shipped(shard / _STANDALONE_FILE)
     assert standalone["arch"] == [ARCH]
     assert standalone["kernel_source"] == _STANDALONE_SOURCE
     assert standalone["provenance"] == _expected_provenance(
@@ -1638,7 +1630,7 @@ def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    emitted = _read_shipped(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
+    emitted = read_shipped(tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json")
     assert emitted["arch"] == [ARCH]
     inline = emitted["kernelDescriptors"][0]
     assert inline["arch"] == [ARCH]
@@ -1775,7 +1767,7 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     assert hip_kdp["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
     embedded = out / "embedded" / "pointwise"
-    emb_kdp = _read_shipped(embedded / "solo.kdp.json")
+    emb_kdp = read_shipped(embedded / "solo.kdp.json")
     assert emb_kdp["kernelDescriptors"][0]["kernel_source"] == _EMBEDDED_SOURCE
     assert emb_kdp["kernelDescriptors"][0]["provenance"]["source_label"] == _LABEL
     assert _read(embedded / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
@@ -1819,7 +1811,7 @@ def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
 
-    shipped = _read_shipped(tmp_path / "out" / ARCH / "solo.kdp.json")
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo.kdp.json")
     inline = shipped["kernelDescriptors"][0]
     assert inline["provenance"]["rewritten"] == []
 

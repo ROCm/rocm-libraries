@@ -25,7 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import agreement, pipeline, provenance_sidecar
+from conftest import write_shipped
+from hkp_pack import agreement, pipeline
 from hkp_pack.errors import HkpPackError
 from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
@@ -963,18 +964,10 @@ class _ReaderArtifact:
             doc = dict(
                 kdp, kernelDescriptors=[self.ukd if self.inline else self.ukd["id"]]
             )
-            self._write_packed(self.root / f"{name}.kdp.json", doc)
+            write_shipped(self.root / f"{name}.kdp.json", doc)
         if not self.inline:
             self.ukd_path.parent.mkdir(parents=True, exist_ok=True)
-            self._write_packed(self.ukd_path, self.ukd)
-
-    @staticmethod
-    def _write_packed(path, doc):
-        """Write `doc` as the packer ships it, provenance in the sidecar beside it."""
-        doc = json.loads(json.dumps(doc))
-        name, data = provenance_sidecar.detach(path.name, doc)
-        path.with_name(name).write_bytes(data)
-        path.write_text(json.dumps(doc))
+            write_shipped(self.ukd_path, self.ukd)
 
     def write_archive(self, payload):
         kpack, compression = load_kpack(self.python_dir)
