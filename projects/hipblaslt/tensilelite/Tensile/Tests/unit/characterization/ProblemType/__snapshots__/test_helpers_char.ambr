@@ -27,6 +27,7 @@
     'IndexAssignmentsLD',
     'MXBlockA',
     'MXBlockB',
+    'MXScaleFormat',
     'MacDataTypeA',
     'MacDataTypeB',
     'MetadataLayout',
@@ -144,6 +145,9 @@
     ]),
     'MXBlockB': list([
       'int',
+    ]),
+    'MXScaleFormat': list([
+      'str',
     ]),
     'MacDataTypeA': list([
       'int',
