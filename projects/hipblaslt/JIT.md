@@ -13,7 +13,7 @@ This page is the single JIT guide and carries the roadmap. It has three parts:
 - [Current behavior](#current-behavior) describes what the code implements
   today. "Implemented" means present in the source, not released or approved
   as product naming.
-- [Target design](#target-design) is the approved plan of record. The six
+- [Target design](#target-design) is the approved plan of record. The seven
   roadmap steps implement it; the work listed after the roadmap remains future.
 - [Roadmap](#roadmap) lists the implementation steps between the two, with the
   status of each.
@@ -24,7 +24,7 @@ generator and its current direct entry point. The
 builder, recipes, bundles and ranked candidate validation. The
 [JIT test guide](clients/tests/jit/README.md) covers building and running the
 tests. The [design notes](jit-design/README.md) hold the KernelFromAnywhere
-(KFA) assessment and the timing/progress plans.
+(KFA) assessment.
 
 ## Summary
 
@@ -523,7 +523,131 @@ once per process.
 A query that generates waits for the whole generation, which takes seconds to
 minutes per problem. Generation runs in a new directory under the system
 temporary directory (`TMPDIR` on Linux). It is removed after success and kept
-after a failure, whose report names the log inside it.
+after a failure, whose report names the log inside it. With
+[`HIPBLASLT_JIT_DEBUG`](#diagnostics-with-hipblaslt_jit_debug) set, the
+generator's event and timing files are in that directory too.
+
+### Diagnostics with `HIPBLASLT_JIT_DEBUG`
+
+In a JIT build with `HIPBLASLT_JIT` set to `1` or `2`, `HIPBLASLT_JIT_DEBUG`
+prints where JIT time goes and what JIT is doing. Its value is a
+comma-separated list of category names, in any case:
+
+| Name | Lines |
+| --- | --- |
+| `timing` | One line when each heuristic query, `hipblasLtMatmul` call, generation and generated solution finishes, with the duration of each step |
+| `progress` | One line per step as it happens: lookups, waits, generation stages, events relayed from the generator, builds and publication |
+| `all` | Every category, including categories added later |
+
+Unset or empty prints nothing. A number, including `0` and `1`, or an unknown
+name prints `hipblaslt warning: HIPBLASLT_JIT_DEBUG=<value>: ignoring <names>;
+the value is timing, progress or all, comma-separated` once and is ignored; the
+names beside it still apply. hipBLASLt reads the variable once per process.
+With `HIPBLASLT_JIT` off, and in a build without JIT, it prints nothing and no
+warning.
+
+The lines go to stderr. `HIPBLASLT_JIT_DEBUG_FILE` names a file to append them
+to instead, with `%i` replaced by the process ID; the file is created readable
+and writable by its owner only. Each line is written whole, so threads and
+processes that share a file never split a line. A file that cannot be opened
+prints one warning, and the lines go to stderr. The lines are not copied into
+the hipBLASLt log.
+
+Every line is the prefix `hipblaslt jit-debug ` followed by one JSON object,
+so `grep '^hipblaslt jit-debug '` separates the lines and one JSON parser reads
+them. The object starts with these keys:
+
+| Key | Value |
+| --- | --- |
+| `v` | Schema version, `1`. New keys keep the version; a changed meaning increments it |
+| `cat` | `timing` or `progress` |
+| `ev` | The event |
+| `pid`, `tid` | The process ID and a thread number counted from 1 in each process |
+| `t_ms` | Milliseconds on the monotonic clock since the process's first line |
+| `q` | The query the line belongs to, `<pid>.<n>`, or `null` |
+| `gen` | Inside a generation, the generation, `<pid>.g<n>` |
+
+Durations are nanoseconds in an `ns` object, in the order the steps ran, and
+each includes the steps nested in it. A string longer than 512 bytes is cut and
+the line gets `"truncated":true`; most TensileLite kernel names are, and the
+solution index identifies the solution. A line longer than 4 KiB keeps only the
+keys above, with `"truncated":true` and its full size as `oversize`.
+
+`timing` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. It is a `progress` line when only `progress` is on |
+| `setup` | The first JIT use in the process: the tool paths, and the time to check them, create the backend (which hashes the generator sources), open the JIT solution library and create the components |
+| `library.init` | A device's pre-tuned library initialization |
+| `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`; `best` from the pre-tuned query, split into `equality`, `jit` and `others` when JIT runs between them; `all` from the `getAllSolutions` fill; otherwise `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
+| `matmul` | `hipblasLtMatmul` without an algorithm or with a JIT solution: the first call for each problem and algorithm, and every call that generated, loaded a code object (`loaded` is `now`) or skipped generation during a capture, with the selection, library lookup, preparation, code-object load and launch durations |
+| `generation` | Each generation: the requested and candidate counts, failures, the problem, the generator `module` and its `exit`, the generator's own stage times as `child` (`unattributed` is generator time outside its stages), the generated and published counts, and the durations of prediction, scratch, request writing, the generator, bundle reading, building, support checks, publication (lock wait, time holding the lock, refresh) and loading, with `other` the rest |
+| `solution` | One per generated solution: rank, kernel, `outcome` (`built`, `build_failed`, `unsupported`, `published`, `publish_failed`, `loaded` or `load_failed`), index, message, assembly and HIP unit counts with each HIP unit's compile time as `hip_units`, and the metadata, assembly, HIP compile, link, build and support durations |
+| `query.aggregate`, `matmul.aggregate` | At most once per second, and at exit: the calls not printed in full, per API or per problem and algorithm, as `calls`, `ns.sum` and `ns.max` |
+
+`progress` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `query.start`, `query.end` | A heuristic query or `hipblasLtMatmul` without an algorithm starts and ends |
+| `lookup` | The JIT solution library lookup: `result` (`hit`, `partial` or `miss`), `found` and `needed` |
+| `capture.skip` | Generation skipped because the stream is being captured |
+| `generation.wait` | The query waited for another thread's generation of the same problem, named in `waited_on` |
+| `generation.repeated` | The problem fell short in an earlier generation in this process, so it is not generated again |
+| `generation.start`, `generation.end` | A generation starts, with the requested and candidate counts and the problem, and ends, with `outcome` (`ok`, `partial`, `failed` or `empty`) and the generated, published and loaded counts |
+| `child.start`, `child.exit` | The generator process starts, with its module and log, and exits, with `started`, `code`, `signal`, the events relayed and the malformed lines `dropped` |
+| `child.request`, `child.stage`, `child.candidate`, `child.done` | Events relayed from the generator: what it was asked for, the start and end of each stage, each candidate it tried and its final status, with `child_pid`, its sequence number `seq` and `child_t_ms` on the clock of `t_ms`. A rejected candidate within 500 ms of the last one relayed is counted in the next one's `rejected_so_far` instead |
+| `child.heartbeat` | Every 10 seconds while the generator writes no event: the seconds of silence, the events so far and the open stage |
+| `build.start`, `build.end` | Each solution's code-object build, with its `outcome` |
+| `publish.start`, `publish.done` | Publication into the JIT solution library, with `fresh` and `reused` entries |
+| `load.done` | Solutions loaded without publication |
+| `failure` | A failed stage and its message |
+
+`query.start`, `query.end`, `lookup` and `query` lines share a budget of 50
+lines that refills at 10 per second. Lines over the budget are counted and
+reported by a `suppressed` line in their category before the next line that is
+written, and a dropped `query` line is added to `query.aggregate`. Repeated
+`matmul` calls go to `matmul.aggregate`. Generation lines are never dropped.
+
+A cache hit with `HIPBLASLT_JIT_DEBUG=timing`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"timing","ev":"query","pid":4242,"tid":1,"t_ms":5258.696,"q":"4242.4","api":"cpp","mode":1,"requested":2,"returned":2,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT","from":{"equality":0,"jit":2,"others":0,"best":2},"jit":{"needed":2,"hits":2,"kept":2,"dropped":0},"ns":{"total":277874,"jit_target":3660,"lookup_attach":14369,"lookup_refresh":6900,"lookup_scan":231155,"jit_lookup":256484,"jit_support":3850,"jit":271284,"others":1370,"get_best":276604}}
+```
+
+The start of a generation with `HIPBLASLT_JIT_DEBUG=progress`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"lookup","pid":4242,"tid":1,"t_ms":155.350,"q":"4242.1","result":"miss","found":0,"needed":2}
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"generation.start","pid":4242,"tid":1,"t_ms":155.791,"q":"4242.1","gen":"4242.g1","requested":2,"candidates":72,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT"}
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"child.candidate","pid":4242,"tid":1,"t_ms":2357.843,"q":"4242.1","gen":"4242.g1","child_pid":4250,"seq":9,"child_t_ms":2306.568,"rejected_so_far":0,"rank":0,"index":0,"of":72,"id":135,"outcome":"selected"}
+```
+
+With a category on, hipBLASLt passes `--debug <categories> --debug-dir <dir>`
+to `Tensile.JitGemm` or `Tensile.SingleSolution`, where `<dir>` is `jit-debug`
+in the generator's working directory inside the scratch directory. The
+generator appends its progress events to `events.jsonl` there as they happen
+and writes its stage times to `timing.json` when it finishes. hipBLASLt reads
+`events.jsonl` every 100 ms while the generator runs and once after it exits,
+relays each complete line, and adds `timing.json` to the `generation` line.
+
+When the generator is killed, the events it wrote before are relayed,
+`child.exit` reports the signal, the `generation` line has `child_timing`
+`"missing"` in place of `child`, `generation.end` reports `failed`, the
+`generate failed` report names the log as for any failure, and the kept scratch
+directory holds `jit-debug/events.jsonl`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"child.exit","pid":4242,"tid":1,"t_ms":2354.601,"q":"4242.1","gen":"4242.g1","started":true,"code":0,"signal":9,"events":13,"dropped":0,"ns":{"child":2198082498}}
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"generation.end","pid":4242,"tid":1,"t_ms":2355.121,"q":"4242.1","gen":"4242.g1","outcome":"failed","generated":0,"published":0,"loaded":0,"failures":1,"ns":{"total":2199557457}}
+```
+
+Unset, empty, with `HIPBLASLT_JIT` off, or in a build without JIT, the
+variable adds no lines, files, generator arguments or clock reads. With any
+value, the results, return statuses, JIT solution library contents and the
+other stderr output are the same as without it, and a line that cannot be
+written never fails a call.
 
 ### Validation
 
@@ -536,8 +660,10 @@ device library's Equality results, JIT solutions and other pre-tuned results,
 a tuning override that names a JIT solution, `hipblasLtMatmul` without an
 algorithm and heuristic queries that generate during stream capture in each
 capture mode, the same query from
-several threads and processes at once, a problem the backend cannot rank, and
-failure reports.
+several threads and processes at once, a problem the backend cannot rank,
+failure reports, and the `HIPBLASLT_JIT_DEBUG` lines: timing that adds up,
+progress in order, no change when it is off, debug files, and a generator
+killed during generation.
 The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only for
 gfx1250 on any host; the second generates heuristic solutions with
 `Tensile.JitGemm` and builds them with comgr. The
@@ -797,8 +923,9 @@ each step advances.
 | 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
 | 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
 | 6. Validation sweep | Done | The shared driver's heuristic routes cover each mode, a published index resolved with JIT off, distinct kernels when several solutions are requested, the order of a device library's Equality results, JIT solutions and other pre-tuned results, a problem the backend cannot rank, and threads and processes that query the same problem at once. The gfx1250 routes generate ranked heuristic solutions and build their code objects without a gfx1250 device. | Overall JIT validation |
+| 7. Timing and progress diagnostics | Done | `HIPBLASLT_JIT_DEBUG` categories `timing` and `progress`, or `all`, print JSON lines on stderr or to `HIPBLASLT_JIT_DEBUG_FILE` for heuristic queries, `hipblasLtMatmul`, generations and their solutions, with the generator's own stages and events relayed through `--debug` and `--debug-dir`. Unset, empty or with JIT off it adds no lines, files, generator arguments or clock reads. The shared driver's debug routes and `hipblaslt-jit-debug-test` check it. | Overall JIT validation |
 
-The following work sits outside the six steps and remains future:
+The following work sits outside the seven steps and remains future:
 
 | Work | Remaining contract |
 | --- | --- |
@@ -806,5 +933,4 @@ The following work sits outside the six steps and remains future:
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
 | HipKittens and other backends | Implement the backend interface. A HipKittens backend is planned: run-time instantiation through comgr, opt-in, in developer builds only. It is not implemented. |
 | KFA metadata convergence | Complete the KFA metadata that JIT generators emit, then prove argument, launch, helper, workspace and synchronization equivalence before generated kernels share the custom-kernel dispatch path. This reuses the KFA path; it does not make the JIT load prebuilt kernels. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
-| Timing/progress | Independent `HIPBLASLT_JIT_DEBUG` categories `timing`, `progress`, or `timing,progress`. Unset/empty adds no collection, observer or files. See the [host](jit-design/timing-host-plan.md) and [Python](jit-design/timing-python-plan.md) plans. |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |

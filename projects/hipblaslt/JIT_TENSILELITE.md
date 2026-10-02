@@ -145,7 +145,12 @@ The output directory contains the source bundle `bundle/`: `library/` holds the
 serialized one-solution library, `sources/` holds the main kernel assembly and
 the helper HIP source with its headers, and `manifest.json` records provenance.
 Generator diagnostics remain in the sibling `<output>.log`; the child working
-directory is `<output>.cwd`. Use a new output path for another compilation.
+directory is `<output>.cwd`. When
+[`HIPBLASLT_JIT_DEBUG`](JIT.md#diagnostics-with-hipblaslt_jit_debug) is in
+effect, the backend passes the generator `--debug` and
+`--debug-dir <output>.cwd/jit-debug`, so that directory holds the generator's
+`events.jsonl` and `timing.json`. Use a new output path for another
+compilation.
 
 On failure, `getGemmAlgo` clears the result, sets `result.state`, and returns a
 status; `Diagnostics::message` provides details when available. A missing recipe

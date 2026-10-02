@@ -60,6 +60,19 @@ stderr and returns a nonzero exit status. Programs invoking it should check
 that status and then read `new-request-output/bundle/manifest.json`; stdout is
 human-readable progress, not a JSON response.
 
+`Tensile.SingleSolution` and
+[`Tensile.JitGemm`](#select-a-recipe-for-a-gemm-problem) take two private
+options that `--help` does not list. `--debug CATEGORIES` (`timing`, `progress`
+or `all`, comma-separated) records how long each stage takes and what it does:
+progress lines starting with `progress:` go to stderr as they happen, and a
+timing table starting with `timing:` follows at the end. `--debug-dir DIR`,
+which requires `--debug`, writes them as files instead: each progress event is
+appended to `DIR/events.jsonl` as one JSON line, and the stage times are written
+to `DIR/timing.json` when the command finishes. Nothing else the command writes
+changes, and a failure to record never fails it. hipBLASLt passes both when
+[`HIPBLASLT_JIT_DEBUG`](../JIT.md#diagnostics-with-hipblaslt_jit_debug) asks
+for them.
+
 ## Describe one solution
 
 Supply one `BenchmarkProblems` entry with one problem type and one parameter
