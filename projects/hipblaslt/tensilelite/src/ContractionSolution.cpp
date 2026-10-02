@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerWgmKernargs.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -38,6 +39,7 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
+#include <optional>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/PreSwizzle.hpp>
 #endif
@@ -2978,6 +2980,26 @@ namespace TensileLite
         if(T_Debug)
             std::cout << "Custom call arguments:" << std::endl;
 
+        // rocRoller workgroup-mapping kernels read M, N, the macrotile, and
+        // WGM. hipBLASLt supplies DEFAULT_WGM (2). Computed only if a custom
+        // kernel argument asks for one of those semantics.
+        std::optional<RocRollerWgmKernargs> wgmKernargs;
+        auto wgmKernarg = [&]() -> RocRollerWgmKernargs const& {
+            if(!wgmKernargs)
+            {
+                if(problem.problemSizes().size() < 2)
+                    throw std::runtime_error(
+                        "rocRoller WGM kernargs need M and N problem sizes");
+                wgmKernargs = evaluateRocRollerWgmKernargs(
+                    static_cast<int64_t>(problem.problemSizes()[0]),
+                    static_cast<int64_t>(problem.problemSizes()[1]),
+                    customKernel.macrotile.x,
+                    customKernel.macrotile.y,
+                    RocRollerDefaultWgm);
+            }
+            return *wgmKernargs;
+        };
+
         for(auto arg : customKernel.args)
         {
             if(T_Debug)
@@ -3435,6 +3457,43 @@ namespace TensileLite
                     rv.args.template append<uint32_t>("RNDSeed", distribution(gen));
                     break;
                 }
+
+                // rocRoller workgroup mapping. libdivide branchfree magics of
+                // the WGM integer, numTilesN, the tail, and the main block,
+                // plus the two signed quotients. Not Tensile magicNumber().
+                case CustomArgSemantic::WorkgroupMapping:
+                    rv.args.appendCustomType("WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
+                    break;
+                case CustomArgSemantic::MagicMultipleWgm:
+                    rv.args.appendCustomType("MagicMultipleWgm", wgmKernarg().magicMultipleWgm, arg.type);
+                    break;
+                case CustomArgSemantic::MagicShiftAndSignWgm:
+                    rv.args.appendCustomType("MagicShiftAndSignWgm", wgmKernarg().magicShiftAndSignWgm, arg.type);
+                    break;
+                case CustomArgSemantic::MagicMultipleNumTilesN:
+                    rv.args.appendCustomType("MagicMultipleNumTilesN", wgmKernarg().magicMultipleNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::MagicShiftAndSignNumTilesN:
+                    rv.args.appendCustomType("MagicShiftAndSignNumTilesN", wgmKernarg().magicShiftAndSignNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::QuotientTilesMByWgm:
+                    rv.args.appendCustomType("QuotientTilesMByWgm", wgmKernarg().quotientTilesMByWgm, arg.type);
+                    break;
+                case CustomArgSemantic::MagicMultipleWgmTail:
+                    rv.args.appendCustomType("MagicMultipleWgmTail", wgmKernarg().magicMultipleWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::MagicShiftAndSignWgmTail:
+                    rv.args.appendCustomType("MagicShiftAndSignWgmTail", wgmKernarg().magicShiftAndSignWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::QuotientTilesByBlock:
+                    rv.args.appendCustomType("QuotientTilesByBlock", wgmKernarg().quotientTilesByBlock, arg.type);
+                    break;
+                case CustomArgSemantic::MagicMultipleWgmMainBlock:
+                    rv.args.appendCustomType("MagicMultipleWgmMainBlock", wgmKernarg().magicMultipleWgmMainBlock, arg.type);
+                    break;
+                case CustomArgSemantic::MagicShiftAndSignWgmMainBlock:
+                    rv.args.appendCustomType("MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
+                    break;
 
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));

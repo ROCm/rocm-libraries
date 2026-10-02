@@ -93,69 +93,85 @@ def _parse_tensile_yaml(path, kernel_name=None):
         except yaml.YAMLError as e:
             raise RuntimeError(f"Failed to parse Tensile YAML '{path}': {e}") from e
 
-    try:
-        bp = data["BenchmarkProblems"][0]
-        problem_type = bp[0]
-        bench = bp[1]
-    except (KeyError, IndexError, TypeError) as e:
+    problems = data.get("BenchmarkProblems")
+    if not isinstance(problems, list) or not problems:
         raise RuntimeError(
             f"Tensile YAML '{path}' does not contain BenchmarkProblems[0] "
             "with ProblemType and ForkParameters"
-        ) from e
+        )
 
-    config = {"ProblemType": problem_type}
-
-    fork_params = bench.get("ForkParameters", [])
     available_kernels = []
-    for entry in fork_params:
-        if not isinstance(entry, dict):
-            continue
-
-        if "CustomKernel" in entry:
+    matched = None
+    for bp in problems:
+        try:
+            problem_type = bp[0]
+            bench = bp[1]
+        except (KeyError, IndexError, TypeError) as e:
+            raise RuntimeError(
+                f"Tensile YAML '{path}' does not contain BenchmarkProblems[0] "
+                "with ProblemType and ForkParameters"
+            ) from e
+        fork_params = bench.get("ForkParameters", []) if isinstance(bench, dict) else []
+        kernel_here = None
+        for entry in fork_params:
+            if not isinstance(entry, dict) or "CustomKernel" not in entry:
+                continue
             for ck in entry["CustomKernel"]:
                 if not isinstance(ck, dict) or "name" not in ck:
                     continue
                 available_kernels.append(ck["name"])
                 if kernel_name and ck["name"] != kernel_name:
                     continue
-                config["CustomKernel"] = {
-                    k: v for k, v in ck.items() if k != "name"
-                }
-                break
-
-        if "MatrixInstruction" in entry:
-            mi_list = entry["MatrixInstruction"]
-            if mi_list and isinstance(mi_list[0], list):
-                config["MatrixInstruction"] = mi_list[0][:4]
-
-        if "WavefrontSize" in entry:
-            wf_list = entry["WavefrontSize"]
-            if wf_list:
-                config["WavefrontSize"] = wf_list[0]
-
-        for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
-            if pred_key not in entry:
+                if kernel_here is None:
+                    kernel_here = ck
+        if kernel_here is None:
+            continue
+        if kernel_name and kernel_here["name"] != kernel_name:
+            continue
+        config = {"ProblemType": problem_type}
+        config["CustomKernel"] = {
+            k: v for k, v in kernel_here.items() if k != "name"
+        }
+        for entry in fork_params:
+            if not isinstance(entry, dict):
                 continue
-            values = entry[pred_key]
-            if not isinstance(values, list) or len(values) != 1:
-                raise RuntimeError(
-                    f"Custom kernel predicate '{pred_key}' must be a single-valued "
-                    f"ForkParameter (got {values!r}); a custom kernel must commit "
-                    f"to one constraint, not a search space."
-                )
-            checkParametersAreValid((pred_key, values), validParameters)
-            config[pred_key] = values[0]
+            if "MatrixInstruction" in entry:
+                mi_list = entry["MatrixInstruction"]
+                if mi_list and isinstance(mi_list[0], list):
+                    config["MatrixInstruction"] = mi_list[0][:4]
+            if "WavefrontSize" in entry:
+                wf_list = entry["WavefrontSize"]
+                if wf_list:
+                    config["WavefrontSize"] = wf_list[0]
+            if "StaggerU" in entry:
+                values = entry["StaggerU"]
+                if isinstance(values, list) and len(values) == 1:
+                    config["StaggerU"] = values[0]
+            for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
+                if pred_key not in entry:
+                    continue
+                values = entry[pred_key]
+                if not isinstance(values, list) or len(values) != 1:
+                    raise RuntimeError(
+                        f"Custom kernel predicate '{pred_key}' must be a single-valued "
+                        f"ForkParameter (got {values!r}); a custom kernel must commit "
+                        f"to one constraint, not a search space."
+                    )
+                checkParametersAreValid((pred_key, values), validParameters)
+                config[pred_key] = values[0]
+        matched = config
+        break
 
-    if kernel_name and "CustomKernel" not in config:
+    if kernel_name and matched is None:
         raise RuntimeError(
             f"Kernel '{kernel_name}' not found in {path}. "
             f"Available: {available_kernels or 'none'}"
         )
 
-    if "CustomKernel" not in config:
+    if matched is None:
         raise RuntimeError(f"No CustomKernel entry found in {path}")
 
-    return config
+    return matched
 
 
 def _fmt_yaml_scalar(value):
@@ -255,6 +271,8 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     if config and "MatrixInstruction" in config:
         mi = config["MatrixInstruction"]
         lines.append(f"  MatrixInstruction: {_fmt_yaml_inline(mi)}")
+        if "StaggerU" in config:
+            lines.append(f"  StaggerU: {_fmt_yaml_scalar(config['StaggerU'])}")
 
         macrotile = config.get("CustomKernel", {}).get("macrotile")
         threads = config.get("CustomKernel", {}).get("threads")
