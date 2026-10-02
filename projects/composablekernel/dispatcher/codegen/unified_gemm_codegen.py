@@ -2345,6 +2345,7 @@ def _show_arch_info(gpu_target: str, datatype: str):
     """Display supported configurations for a GPU architecture"""
     # Same "{a}_{b}_{acc}" key the warp-tile tables are indexed by. Resolved
     # first so an unmapped datatype is an error, not a printout.
+gpu_target = normalize_gfx_arch(gpu_target)
     dtype_key = "_".join(TypeMappings.get_arch_dtype_triple(datatype))
 
     if not HAS_ARCH_FILTER:
