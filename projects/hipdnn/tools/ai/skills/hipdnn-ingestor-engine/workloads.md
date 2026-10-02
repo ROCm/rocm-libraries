@@ -46,7 +46,8 @@ cd dnn-benchmarking
 command -v dvc || python3 -m pip install "dvc[s3]"   # into a venv you own
 dvc config --local core.site_cache_dir /absolute/writable/dvc-site-cache
 dvc pull Workloads/headline/attn.tar.gz.dvc Workloads/microbench/aiter.tar.gz.dvc
-mkdir -p "$CORPUS_DIR/aiter"
+mkdir -p "$CORPUS_DIR/attn" "$CORPUS_DIR/aiter"
+tar -xzf Workloads/headline/attn.tar.gz -C "$CORPUS_DIR/attn"
 tar -xzf Workloads/microbench/aiter.tar.gz -C "$CORPUS_DIR/aiter"
 ```
 
