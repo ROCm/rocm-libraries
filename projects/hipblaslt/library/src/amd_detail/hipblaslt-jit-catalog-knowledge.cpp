@@ -1,18 +1,18 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 
 namespace hipblaslt_jit
 {
     namespace
     {
-        class TensileLiteDefaults final : public TuningKnowledge
+        class CatalogKnowledge final : public TuningKnowledge
         {
         public:
             std::string_view id() const noexcept override
             {
-                return "tensilelite-defaults.v1";
+                return "catalog.v1";
             }
             std::vector<CandidateSeed> seeds(const OperationRequest&,
                                              const DeviceTarget& target) const override
@@ -53,8 +53,8 @@ namespace hipblaslt_jit
         };
     }
 
-    std::shared_ptr<const TuningKnowledge> makeTensileLiteDefaults()
+    std::shared_ptr<const TuningKnowledge> makeCatalogKnowledge()
     {
-        return std::make_shared<const TensileLiteDefaults>();
+        return std::make_shared<const CatalogKnowledge>();
     }
 }

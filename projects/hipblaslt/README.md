@@ -329,4 +329,4 @@ To contribute to our repository, you can create a GitHub pull request.
 
 ## JIT contributor guides
 
-The [JIT guide](JIT.md) describes current just-in-time (JIT) behavior, the approved target design and the roadmap.
+The [JIT guide](JIT.md) describes just-in-time (JIT) GEMM generation, and the [JIT test guide](clients/tests/jit/README.md) its tests.

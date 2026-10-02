@@ -11,7 +11,7 @@
 #include <vector>
 #include <zlib.h>
 
-namespace hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts
+namespace hipblaslt_jit::source_bundle
 {
     namespace fs = std::filesystem;
     inline void require(bool condition, const std::string& message)

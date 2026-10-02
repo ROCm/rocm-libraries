@@ -12,7 +12,7 @@ Generation finishes inside the heuristic query, before correctness checks,
 warmup, and timing. CPU timing still includes host dispatch for each GEMM. This
 feature targets functional coverage; the predicted solution is not guaranteed to
 be the fastest available kernel. Incorporating tuning knowledge into prediction
-is planned work in the [JIT roadmap](../../JIT.md#roadmap).
+is planned work in the [JIT roadmap](../../JIT_ROADMAP.md#roadmap).
 
 The components interact in this order:
 
@@ -36,7 +36,7 @@ describes the modes, the order of the lookup and the failure reports.
 
 JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
-`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT build instructions](../../JIT.md#build)
+`HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT build instructions](../../JIT_TENSILELITE.md#build)
 describe the required host library, comgr, Python dependencies, and compiler
 setup. With `HIPBLASLT_JIT=2`, the benchmark does not require a prebuilt
 hipBLASLt device library.

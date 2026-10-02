@@ -1,0 +1,3984 @@
+{
+  "schema_version": 3,
+  "mode": "source",
+  "architecture": {
+    "requested": "gfx950:sramecc+:xnack-",
+    "resolved": "gfx950:sramecc+:xnack-",
+    "compiler_target": "gfx950:sramecc+:xnack-"
+  },
+  "main_kernel": {
+    "name": "Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA1024_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB16_LPMXSA0_LPMXSB0_LPMn1_LRVWn1_LWPMn1_MIAV0_MIWT2_1_MXLIBL_MXSFNS_MO64_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTG0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVG0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR1_PKA1_RAP0_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THG0_THMXSA0_THMXSB0_THM0_THWS0_TPSN_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1"
+  },
+  "sources": [
+    "sources/Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x64_MI16x1At7U2N--TTZcFskVoYI6-maU6dxvS5UgoWEf_4BjQUk=.s",
+    "sources/TensileTypes.h",
+    "sources/tensile_bfloat16.h",
+    "sources/tensile_float8_bfloat8.h",
+    "sources/KernelHeader.h",
+    "sources/ReductionTemplate.h",
+    "sources/memory_gfx.h",
+    "sources/Kernels.cpp",
+    "sources/Kernels.h"
+  ],
+  "helpers": [
+    {
+      "kind": "kernel_family",
+      "generator": "KernelWriterConversion",
+      "name": "Cijk_SH_PostGSU16_VW4"
+    },
+    {
+      "kind": "kernel_family",
+      "generator": "KernelWriterConversion",
+      "name": "Cijk_SH_PostGSU16_VW2"
+    },
+    {
+      "kind": "kernel_family",
+      "generator": "KernelWriterConversion",
+      "name": "Cijk_SH_PostGSU16_VW1"
+    }
+  ],
+  "solution": {
+    "index": 0,
+    "name": "Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA1024_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB16_LPMXSA0_LPMXSB0_LPMn1_LRVWn1_LWPMn1_MIAV0_MIWT2_1_MXLIBL_MXSFNS_MO64_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTG0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVG0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR1_PKA1_RAP0_SGROB0_SIA3_SS0_SU0_SUM0_SUS128_SPO0_SRVW0_SSO0_SVW8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THG0_THMXSA0_THMXSB0_THM0_THWS0_TPSN_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCG0",
+    "kernel_name": "Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA1024_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB16_LPMXSA0_LPMXSB0_LPMn1_LRVWn1_LWPMn1_MIAV0_MIWT2_1_MXLIBL_MXSFNS_MO64_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTG0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVG0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PAP0_PGL0_PGR1_PLR1_PKA1_RAP0_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THG0_THMXSA0_THMXSB0_THM0_THWS0_TPSN_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGROn1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMXCC1"
+  },
+  "library": {
+    "format": "msgpack",
+    "logical_path": "library/TensileLibrary.dat",
+    "path": "library/TensileLibrary.dat.zlib"
+  },
+  "counts": {
+    "solutions": 1,
+    "main_kernels": 1,
+    "helper_generators": 3,
+    "support_generators": 0
+  },
+  "provenance": {
+    "config_sha256": "34e999d3e7447213a285df83adc670df565e29c206cf0899451cb86a0cabbe8d",
+    "generator_version": "5.0.0",
+    "source_revision": "042c2bff998e65e830c468d839bf45586ca736f4",
+    "compiler_version": "24.0.0",
+    "code_object_version": "4",
+    "kernargs_version": 3,
+    "persistent_loop_args_version": 0,
+    "keep_build_tmp": false
+  },
+  "jit_prediction": {
+    "model": "origami.gemm.estimation",
+    "candidate_id": 141,
+    "predicted_cycles": 18799.840061506544,
+    "selected_parameters": {
+      "MatrixInstruction": [
+        16,
+        16,
+        32,
+        1,
+        1,
+        2,
+        1,
+        2,
+        2
+      ],
+      "DepthU": 64,
+      "NonTemporalA": 0,
+      "NonTemporalB": 0,
+      "TileProcessingStrategy": "None",
+      "GlobalSplitU": 1,
+      "WorkGroupMapping": 2,
+      "WorkGroupMappingXCC": 8,
+      "WorkGroupMappingXCCGroup": 0,
+      "StaggerU": 0,
+      "StaggerUMapping": 0,
+      "StaggerUStride": 128
+    },
+    "implementation_parameters": {},
+    "ranked_candidates": [
+      {
+        "id": 135,
+        "predicted_cycles": 17618.547047654916,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            32,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 32,
+            "active_cus": 32,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 69,
+        "predicted_cycles": 17714.598198537737,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            32,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 32,
+            "active_cus": 32,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 141,
+        "predicted_cycles": 18799.840061506544,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            32,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 147,
+        "predicted_cycles": 18799.840061506544,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 75,
+        "predicted_cycles": 18992.096143599847,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            32,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 81,
+        "predicted_cycles": 18992.096143599847,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 153,
+        "predicted_cycles": 20175.783480151753,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 243,
+        "predicted_cycles": 20175.783480151753,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 195,
+        "predicted_cycles": 20469.875326026828,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            1,
+            4,
+            1
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            16,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 87,
+        "predicted_cycles": 20561.005076347086,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 201,
+        "predicted_cycles": 20561.005076347086,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 129,
+        "predicted_cycles": 20662.056916851376,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            1,
+            4,
+            1
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            16,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 159,
+        "predicted_cycles": 22739.260634708786,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 165,
+        "predicted_cycles": 22739.260634708786,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 249,
+        "predicted_cycles": 22739.260634708786,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 255,
+        "predicted_cycles": 22739.260634708786,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 93,
+        "predicted_cycles": 23511.919176511357,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 99,
+        "predicted_cycles": 23511.919176511357,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 207,
+        "predicted_cycles": 23511.919176511357,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 213,
+        "predicted_cycles": 23511.919176511357,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 171,
+        "predicted_cycles": 25848.124132772602,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 261,
+        "predicted_cycles": 25848.124132772602,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 105,
+        "predicted_cycles": 29529.24365944247,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 219,
+        "predicted_cycles": 29529.24365944247,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 132,
+        "predicted_cycles": 30735.05757510938,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            32,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 32,
+            "active_cus": 32,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 66,
+        "predicted_cycles": 30783.06025262013,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            32,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 32,
+            "active_cus": 32,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 144,
+        "predicted_cycles": 31328.480794204606,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 138,
+        "predicted_cycles": 31329.140953973903,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            32,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 78,
+        "predicted_cycles": 31424.499050267492,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            32,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 72,
+        "predicted_cycles": 31425.159208927424,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            32,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 177,
+        "predicted_cycles": 31965.743332959697,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            8,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 267,
+        "predicted_cycles": 31965.743332959697,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 150,
+        "predicted_cycles": 32419.367278841208,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 240,
+        "predicted_cycles": 32419.367278841208,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 84,
+        "predicted_cycles": 32611.48317326167,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 198,
+        "predicted_cycles": 32611.48317326167,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 8,
+            "active_cus": 8,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 192,
+        "predicted_cycles": 32734.87097071448,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            1,
+            4,
+            1
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            16,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 126,
+        "predicted_cycles": 32830.88707444865,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            1,
+            4,
+            1
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            16,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 2,
+            "wgmxcc": 8,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 16,
+            "active_cus": 16,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 156,
+        "predicted_cycles": 34862.17739511557,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 162,
+        "predicted_cycles": 34862.17739511557,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 246,
+        "predicted_cycles": 34862.17739511557,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 252,
+        "predicted_cycles": 34862.17739511557,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 90,
+        "predicted_cycles": 35246.797734840686,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 96,
+        "predicted_cycles": 35246.797734840686,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 204,
+        "predicted_cycles": 35246.797734840686,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            64,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 210,
+        "predicted_cycles": 35246.797734840686,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            64,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 4,
+            "active_cus": 4,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 168,
+        "predicted_cycles": 37785.57971978076,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 258,
+        "predicted_cycles": 37785.57971978076,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 102,
+        "predicted_cycles": 41027.16905423746,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 216,
+        "predicted_cycles": 41027.16905423746,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 0,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 111,
+        "predicted_cycles": 42934.62854930462,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            8,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 225,
+        "predicted_cycles": 42934.62854930462,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 183,
+        "predicted_cycles": 43188.5928826595,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 273,
+        "predicted_cycles": 43188.5928826595,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 174,
+        "predicted_cycles": 43496.55438422177,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            8,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 264,
+        "predicted_cycles": 43496.55438422177,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 108,
+        "predicted_cycles": 54164.04215168024,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            8,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 222,
+        "predicted_cycles": 54164.04215168024,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            4,
+            2,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            128,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 180,
+        "predicted_cycles": 54814.21308132164,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            4,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 270,
+        "predicted_cycles": 54814.21308132164,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 117,
+        "predicted_cycles": 68080.3665130795,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 231,
+        "predicted_cycles": 68080.3665130795,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 189,
+        "predicted_cycles": 70136.447996034,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            8,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 279,
+        "predicted_cycles": 70136.447996034,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 114,
+        "predicted_cycles": 79602.96777284567,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            4,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 228,
+        "predicted_cycles": 79602.96777284567,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            2,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            128,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 0,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 2,
+            "active_cus": 2,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 186,
+        "predicted_cycles": 81502.4137045468,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            32,
+            1,
+            1,
+            8,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 276,
+        "predicted_cycles": 81502.4137045468,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            16,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 123,
+        "predicted_cycles": 119907.94197697497,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            8,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 237,
+        "predicted_cycles": 119907.94197697497,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 64,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            64
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 0
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 120,
+        "predicted_cycles": 131151.6820093851,
+        "parameters": {
+          "MatrixInstruction": [
+            16,
+            16,
+            16,
+            1,
+            1,
+            8,
+            8,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      },
+      {
+        "id": 234,
+        "predicted_cycles": 131151.6820093851,
+        "parameters": {
+          "MatrixInstruction": [
+            32,
+            32,
+            8,
+            1,
+            1,
+            4,
+            4,
+            2,
+            2
+          ],
+          "DepthU": 32,
+          "NonTemporalA": 0,
+          "NonTemporalB": 0
+        },
+        "modeled": {
+          "macro_tile": [
+            256,
+            256,
+            32
+          ],
+          "workgroup_mapping": {
+            "wgm": 1,
+            "wgmxcc": 0,
+            "wgmxccchunk": 0,
+            "wgmxccsplitk": 0
+          },
+          "stagger": {
+            "staggerU": 8,
+            "staggerUMapping": 1,
+            "staggerUStrideShift": 1
+          },
+          "launch": {
+            "stream_k": 0,
+            "reduction": "none",
+            "grid": 1,
+            "active_cus": 1,
+            "timesteps": 1,
+            "split_factor": 1
+          }
+        }
+      }
+    ],
+    "rejections": [
+      {
+        "candidate_id": 69,
+        "reason": "Same kernel as candidate 135"
+      }
+    ],
+    "defaults_source": "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters",
+    "default_parameters": {
+      "InnerUnroll": 1,
+      "KernelLanguage": "Assembly",
+      "LdsPadA": -1,
+      "LdsPadMXSA": -1,
+      "LdsPadB": -1,
+      "LdsPadMXSB": -1,
+      "LdsPadMetadata": -1,
+      "LdsBlockSizePerPadA": -1,
+      "LdsBlockSizePerPadMXSA": -1,
+      "LdsBlockSizePerPadB": -1,
+      "LdsBlockSizePerPadMXSB": -1,
+      "LdsBlockSizePerPadMetadata": -1,
+      "TransposeLDS": -1,
+      "TransposeLDSMetadata": -1,
+      "MaxOccupancy": 64,
+      "MaxLDS": -1,
+      "VectorWidthA": -1,
+      "VectorWidthB": -1,
+      "VectorStore": -1,
+      "StoreVectorWidth": -1,
+      "GlobalReadVectorWidthA": -1,
+      "GlobalReadVectorWidthB": -1,
+      "LocalReadVectorWidth": -1,
+      "LocalReadVectorWidthA": -1,
+      "LocalReadVectorWidthB": -1,
+      "WaveSeparateGlobalReadA": 0,
+      "WaveSeparateGlobalReadB": 0,
+      "WaveSeparateGlobalReadMetadata": 0,
+      "UnrollLoopSwapGlobalReadOrder": 0,
+      "PrefetchGlobalRead": 1,
+      "PrefetchLocalRead": 1,
+      "PrefetchGL2": 0,
+      "ClusterLocalRead": 1,
+      "SuppressNoLoadLoop": false,
+      "ExpandPointerSwap": true,
+      "ScheduleGlobalRead": 1,
+      "ScheduleLocalWrite": 1,
+      "ScheduleIterAlg": 3,
+      "GlobalReadPerMfma": 1.0,
+      "LocalWritePerMfma": -1,
+      "InterleaveAlpha": 0,
+      "OptNoLoadLoop": 1,
+      "BufferLoad": true,
+      "BufferStore": true,
+      "CompactLoopStore": false,
+      "DirectToVgprA": false,
+      "DirectToVgprB": false,
+      "DirectToVgprMXSA": false,
+      "DirectToVgprMXSB": false,
+      "DirectToVgprSparseMetadata": false,
+      "DirectToLds": 0,
+      "DirectToLdsMetadata": 1,
+      "UseSubtileImpl": false,
+      "UseSgprForGRO": -1,
+      "UseInstOffsetForGRO": 0,
+      "AssertSummationElementMultiple": 1,
+      "AssertFree0ElementMultiple": 1,
+      "AssertFree1ElementMultiple": 1,
+      "AssertAIGreaterThanEqual": -1,
+      "AssertAILessThanEqual": -1,
+      "MagicDivAlg": 2,
+      "GlobalSplitUAlgorithm": "MultipleBuffer",
+      "GlobalSplitUCoalesced": false,
+      "GlobalSplitUWorkGroupMappingRoundRobin": false,
+      "Use64bShadowLimit": true,
+      "Use64bShadowLimitMX": false,
+      "NumLoadsCoalescedA": 1,
+      "NumLoadsCoalescedB": 1,
+      "WorkGroup": [
+        16,
+        16,
+        1
+      ],
+      "ThreadTile": [
+        4,
+        4
+      ],
+      "WavefrontSize": -1,
+      "1LDSBuffer": 0,
+      "LDSSegmentInterleave": 0,
+      "NonTemporalE": 0,
+      "NonTemporalGate": 0,
+      "NonTemporalD": 0,
+      "NonTemporalC": 0,
+      "NonTemporalMXSA": 0,
+      "NonTemporalMXSB": 0,
+      "NonTemporalWS": 0,
+      "NonTemporalMetadata": 0,
+      "NonTemporal": -1,
+      "TemporalHint": -1,
+      "TemporalHintE": 0,
+      "TemporalHintGate": 0,
+      "TemporalHintD": 0,
+      "TemporalHintC": 0,
+      "TemporalHintA": 0,
+      "TemporalHintMXSA": 0,
+      "TemporalHintB": 0,
+      "TemporalHintMXSB": 0,
+      "TemporalHintWS": 0,
+      "TemporalHintMetadata": 0,
+      "NonVolatile": -1,
+      "NonVolatileE": 0,
+      "NonVolatileGate": 0,
+      "NonVolatileD": 0,
+      "NonVolatileC": 0,
+      "NonVolatileA": 0,
+      "NonVolatileMXSA": 0,
+      "NonVolatileB": 0,
+      "NonVolatileMXSB": 0,
+      "NonVolatileWS": 0,
+      "NonVolatileMetadata": 0,
+      "PreloadKernArgs": true,
+      "NoReject": false,
+      "StoreRemapVectorWidth": 0,
+      "SourceSwap": false,
+      "UseDualFMAC": false,
+      "StorePriorityOpt": false,
+      "NumElementsPerBatchStore": 0,
+      "StoreSyncOpt": 0,
+      "GroupLoadStore": false,
+      "MIArchVgpr": false,
+      "WorkAssignment": "StaticGrid",
+      "StreamKAtomic": 0,
+      "WorkQueueStealing": 0,
+      "PersistentXCCMapping": 0,
+      "StreamKFixupTreeReduction": 0,
+      "DebugStreamK": 0,
+      "DebugPersistentKernelLoopForever": false,
+      "ActivationFused": true,
+      "ActivationFuncCall": true,
+      "ActivationAlt": false,
+      "WorkGroupReduction": false,
+      "ConvertAfterDS": false,
+      "ForceDisableShadowInit": false,
+      "InitCIterWmma": -1,
+      "LDSTrInst": false,
+      "WaveSplitK": false,
+      "MbskPrefetchMethod": -1,
+      "PrefetchAcrossPersistent": 0,
+      "ReuseAcrossPersistent": 0,
+      "UseCustomMainLoopSchedule": -1,
+      "SpaceFillingAlgo": [],
+      "SFCWGM": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "AdaptiveGemm": 0,
+      "AdaptiveGemmGSUA": 0,
+      "AdaptiveGemmNTAB": 0,
+      "ExtraMiLatencyLeft": -1,
+      "ExtraLatencyForLR": 0,
+      "TailloopInNll": false,
+      "SwapGlobalReadOrder": 0,
+      "ScheduleGROverBarrier": -1,
+      "DtlPlusLdsBuf": -1,
+      "TDMPlusLdsBuf": 0,
+      "MinGRIncPerMfma": -1,
+      "UsePLRPack": 0,
+      "TDMInst": 0,
+      "TDMSplit": false,
+      "TDMLoadWaveSync": false,
+      "MXScaleFormat": "Auto",
+      "MXLoadInst": "Auto",
+      "SwInstructionPrefetch": 1,
+      "ClusterDim": [
+        1,
+        1
+      ],
+      "HalfPLR": 0,
+      "TDMIterateMode": 0
+    },
+    "resolved_parameters": {
+      "InnerUnroll": 1,
+      "KernelLanguage": "Assembly",
+      "LdsPadA": 32,
+      "LdsPadMXSA": 0,
+      "LdsPadB": 16,
+      "LdsPadMXSB": 0,
+      "LdsPadMetadata": -1,
+      "LdsBlockSizePerPadA": 1024,
+      "LdsBlockSizePerPadMXSA": 0,
+      "LdsBlockSizePerPadB": 128,
+      "LdsBlockSizePerPadMXSB": 0,
+      "LdsBlockSizePerPadMetadata": 0,
+      "TransposeLDS": 1,
+      "TransposeLDSMetadata": -1,
+      "MaxOccupancy": 64,
+      "MaxLDS": 163840,
+      "VectorWidthA": 2,
+      "VectorWidthB": 1,
+      "VectorStore": -1,
+      "StoreVectorWidth": 8,
+      "GlobalReadVectorWidthA": 8,
+      "GlobalReadVectorWidthB": 8,
+      "LocalReadVectorWidth": -1,
+      "LocalReadVectorWidthA": 8,
+      "LocalReadVectorWidthB": 8,
+      "WaveSeparateGlobalReadA": 0,
+      "WaveSeparateGlobalReadB": 0,
+      "WaveSeparateGlobalReadMetadata": 0,
+      "UnrollLoopSwapGlobalReadOrder": 0,
+      "PrefetchGlobalRead": 1,
+      "PrefetchLocalRead": 1,
+      "PrefetchGL2": 0,
+      "ClusterLocalRead": 1,
+      "SuppressNoLoadLoop": false,
+      "ExpandPointerSwap": true,
+      "ScheduleGlobalRead": 1,
+      "ScheduleLocalWrite": 1,
+      "ScheduleIterAlg": 3,
+      "GlobalReadPerMfma": 1.0,
+      "LocalWritePerMfma": -1,
+      "InterleaveAlpha": 0,
+      "OptNoLoadLoop": 1,
+      "BufferLoad": true,
+      "BufferStore": true,
+      "CompactLoopStore": false,
+      "DirectToVgprA": false,
+      "DirectToVgprB": false,
+      "DirectToVgprMXSA": false,
+      "DirectToVgprMXSB": false,
+      "DirectToVgprSparseMetadata": false,
+      "DirectToLds": 0,
+      "DirectToLdsMetadata": 0,
+      "UseSubtileImpl": false,
+      "UseSgprForGRO": -1,
+      "UseInstOffsetForGRO": 0,
+      "AssertSummationElementMultiple": 1,
+      "AssertFree0ElementMultiple": 1,
+      "AssertFree1ElementMultiple": 1,
+      "AssertAIGreaterThanEqual": -1,
+      "AssertAILessThanEqual": -1,
+      "StaggerU": 0,
+      "StaggerUStride": 128,
+      "StaggerUMapping": 0,
+      "MagicDivAlg": 2,
+      "GlobalSplitU": 1,
+      "GlobalSplitUAlgorithm": "MultipleBuffer",
+      "GlobalSplitUCoalesced": false,
+      "GlobalSplitUWorkGroupMappingRoundRobin": false,
+      "Use64bShadowLimit": true,
+      "Use64bShadowLimitMX": false,
+      "NumLoadsCoalescedA": 1,
+      "NumLoadsCoalescedB": 1,
+      "WorkGroup": [
+        32,
+        8,
+        1
+      ],
+      "WorkGroupMapping": 2,
+      "WorkGroupMappingXCC": 8,
+      "WorkGroupMappingXCCGroup": 0,
+      "ThreadTile": [
+        1,
+        1
+      ],
+      "WavefrontSize": 64,
+      "MatrixInstruction": [
+        16,
+        16,
+        32,
+        1
+      ],
+      "1LDSBuffer": 0,
+      "LDSSegmentInterleave": 0,
+      "DepthU": 64,
+      "NonTemporalE": 0,
+      "NonTemporalGate": 0,
+      "NonTemporalD": 0,
+      "NonTemporalC": 0,
+      "NonTemporalA": 0,
+      "NonTemporalMXSA": 0,
+      "NonTemporalB": 0,
+      "NonTemporalMXSB": 0,
+      "NonTemporalWS": 0,
+      "NonTemporalMetadata": 0,
+      "NonTemporal": -1,
+      "TemporalHint": -1,
+      "TemporalHintE": 0,
+      "TemporalHintGate": 0,
+      "TemporalHintD": 0,
+      "TemporalHintC": 0,
+      "TemporalHintA": 0,
+      "TemporalHintMXSA": 0,
+      "TemporalHintB": 0,
+      "TemporalHintMXSB": 0,
+      "TemporalHintWS": 0,
+      "TemporalHintMetadata": 0,
+      "NonVolatile": -1,
+      "NonVolatileE": 0,
+      "NonVolatileGate": 0,
+      "NonVolatileD": 0,
+      "NonVolatileC": 0,
+      "NonVolatileA": 0,
+      "NonVolatileMXSA": 0,
+      "NonVolatileB": 0,
+      "NonVolatileMXSB": 0,
+      "NonVolatileWS": 0,
+      "NonVolatileMetadata": 0,
+      "PreloadKernArgs": true,
+      "NoReject": false,
+      "StoreRemapVectorWidth": 0,
+      "SourceSwap": false,
+      "UseDualFMAC": false,
+      "StorePriorityOpt": false,
+      "NumElementsPerBatchStore": 0,
+      "StoreSyncOpt": 0,
+      "GroupLoadStore": false,
+      "MIArchVgpr": false,
+      "TileProcessingStrategy": "None",
+      "WorkAssignment": "StaticGrid",
+      "StreamKAtomic": 0,
+      "WorkQueueStealing": 0,
+      "PersistentXCCMapping": 0,
+      "StreamKFixupTreeReduction": 0,
+      "DebugStreamK": 0,
+      "DebugPersistentKernelLoopForever": false,
+      "ActivationFused": true,
+      "ActivationFuncCall": false,
+      "ActivationAlt": false,
+      "WorkGroupReduction": false,
+      "ConvertAfterDS": false,
+      "ForceDisableShadowInit": false,
+      "InitCIterWmma": 0,
+      "LDSTrInst": false,
+      "WaveSplitK": false,
+      "MbskPrefetchMethod": 0,
+      "PrefetchAcrossPersistent": 0,
+      "ReuseAcrossPersistent": 0,
+      "UseCustomMainLoopSchedule": 0,
+      "SpaceFillingAlgo": [],
+      "SFCWGM": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "AdaptiveGemm": 0,
+      "AdaptiveGemmGSUA": 0,
+      "AdaptiveGemmNTAB": 0,
+      "ExtraMiLatencyLeft": -1,
+      "ExtraLatencyForLR": 0,
+      "TailloopInNll": false,
+      "SwapGlobalReadOrder": 0,
+      "ScheduleGROverBarrier": 0,
+      "DtlPlusLdsBuf": 0,
+      "TDMPlusLdsBuf": 0,
+      "MinGRIncPerMfma": 3,
+      "UsePLRPack": 0,
+      "TDMInst": 0,
+      "TDMSplit": false,
+      "TDMLoadWaveSync": false,
+      "MXScaleFormat": "NoSwizzle",
+      "MXLoadInst": "BufferLoad",
+      "SwInstructionPrefetch": 1,
+      "ClusterDim": [
+        1,
+        1
+      ],
+      "HalfPLR": 0,
+      "TDMIterateMode": 0,
+      "MacroTile0": 64,
+      "MacroTile1": 32,
+      "MIWaveTile": [
+        2,
+        1
+      ],
+      "MIWaveGroup": [
+        2,
+        2
+      ],
+      "NumThreads": 256,
+      "_GlobalAccumulation": "MultipleBuffer",
+      "_staggerStrideShift": 0
+    },
+    "derived_parameters": {
+      "LdsPadA": 32,
+      "LdsPadMXSA": 0,
+      "LdsPadB": 16,
+      "LdsPadMXSB": 0,
+      "LdsBlockSizePerPadA": 1024,
+      "LdsBlockSizePerPadMXSA": 0,
+      "LdsBlockSizePerPadB": 128,
+      "LdsBlockSizePerPadMXSB": 0,
+      "LdsBlockSizePerPadMetadata": 0,
+      "TransposeLDS": 1,
+      "MaxLDS": 163840,
+      "VectorWidthA": 2,
+      "VectorWidthB": 1,
+      "StoreVectorWidth": 8,
+      "GlobalReadVectorWidthA": 8,
+      "GlobalReadVectorWidthB": 8,
+      "LocalReadVectorWidthA": 8,
+      "LocalReadVectorWidthB": 8,
+      "DirectToLdsMetadata": 0,
+      "WorkGroup": [
+        32,
+        8,
+        1
+      ],
+      "ThreadTile": [
+        1,
+        1
+      ],
+      "WavefrontSize": 64,
+      "ActivationFuncCall": false,
+      "InitCIterWmma": 0,
+      "MbskPrefetchMethod": 0,
+      "UseCustomMainLoopSchedule": 0,
+      "ScheduleGROverBarrier": 0,
+      "DtlPlusLdsBuf": 0,
+      "MinGRIncPerMfma": 3,
+      "MXScaleFormat": "NoSwizzle",
+      "MXLoadInst": "BufferLoad",
+      "MacroTile0": 64,
+      "MacroTile1": 32,
+      "MIWaveTile": [
+        2,
+        1
+      ],
+      "MIWaveGroup": [
+        2,
+        2
+      ],
+      "NumThreads": 256,
+      "_GlobalAccumulation": "MultipleBuffer",
+      "_staggerStrideShift": 0
+    },
+    "wave_layout_origin": "Selected Tensile recipe; native wave size from Tensile defaults",
+    "problem": {
+      "m": 256,
+      "n": 128,
+      "k": 512,
+      "batch": 1,
+      "transpose_a": false,
+      "transpose_b": false,
+      "c_equals_d": true,
+      "num_cus": 0,
+      "strides_a": [
+        1,
+        256,
+        0
+      ],
+      "sizes_a": [
+        256,
+        512,
+        1
+      ],
+      "strides_b": [
+        1,
+        512,
+        0
+      ],
+      "sizes_b": [
+        512,
+        128,
+        1
+      ],
+      "strides_c": [
+        1,
+        256,
+        0
+      ],
+      "sizes_c": [
+        256,
+        128,
+        1
+      ],
+      "strides_d": [
+        1,
+        256,
+        0
+      ],
+      "sizes_d": [
+        256,
+        128,
+        1
+      ]
+    },
+    "problem_type": {
+      "OperationType": "GEMM",
+      "Batched": true,
+      "StridedBatched": true,
+      "TransposeA": false,
+      "TransposeB": false,
+      "ComplexConjugateA": false,
+      "ComplexConjugateB": false,
+      "DataType": 4,
+      "DataTypeA": 4,
+      "DataTypeB": 4,
+      "MacDataTypeA": 4,
+      "MacDataTypeB": 4,
+      "DestDataType": 4,
+      "ComputeDataType": 0,
+      "F32XdlMathOp": 0,
+      "HighPrecisionAccumulate": true,
+      "UseBias": 0,
+      "UseE": false,
+      "Gradient": false,
+      "UseScaleAB": "",
+      "UseScaleCD": false,
+      "UseScaleAlphaVec": 0,
+      "OutputAmaxD": false,
+      "MXBlockA": 0,
+      "MXBlockB": 0,
+      "Sparse": 0,
+      "SwizzleTensorA": false,
+      "SwizzleTensorB": false,
+      "UseGateResidual": false
+    },
+    "hardware": {
+      "device_id": 0,
+      "cu_count": 256,
+      "xcd_count": 8,
+      "compute_clock_ghz": 2.4,
+      "lds_capacity": 163840,
+      "rf_capacity": 524288
+    },
+    "model_assumptions": {
+      "occupancy": 1,
+      "stream_k": 0,
+      "stream_k_origin": "caller-selected data-parallel domain; Origami does not select enablement",
+      "workgroup_mapping": "select_workgroup_mapping; unsupported transport rejects the candidate",
+      "stagger": "select_staggerU; all three outputs including zeros are preserved",
+      "vector_widths": "not predicted by estimation; Tensile derives actual widths",
+      "epilogue": "bias, activation, auxiliary outputs and scaling overhead are not modeled",
+      "architecture_constants": "Origami native architecture model"
+    },
+    "summary": "origami.gemm.estimation candidate 141: 18799.8 predicted cycles; 1 earlier candidates rejected by Tensile",
+    "modeled_contract": "origami.gemm.dp.v1",
+    "modeled": {
+      "macro_tile": [
+        64,
+        32,
+        64
+      ],
+      "workgroup_mapping": {
+        "wgm": 2,
+        "wgmxcc": 8,
+        "wgmxccchunk": 0,
+        "wgmxccsplitk": 0
+      },
+      "stagger": {
+        "staggerU": 0,
+        "staggerUMapping": 0,
+        "staggerUStrideShift": 0
+      },
+      "launch": {
+        "stream_k": 0,
+        "reduction": "none",
+        "grid": 16,
+        "active_cus": 16,
+        "timesteps": 1,
+        "split_factor": 1
+      }
+    }
+  }
+}

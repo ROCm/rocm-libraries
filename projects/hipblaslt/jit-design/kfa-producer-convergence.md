@@ -11,10 +11,10 @@ interface.
 Convergence means the same versioned metadata schema and execution semantics across
 producers, not identical symbols, layouts, or tuning values.
 
-The approved [target design](../JIT.md#target-design) makes the explicit JIT entry
+The approved [target design](../JIT_ROADMAP.md#target-design) makes the explicit JIT entry
 points internal and has JIT-generated solutions supply the heuristic query after
 the pre-tuned Equality results. The sections below reflect that design. The
-[roadmap](../JIT.md#roadmap) records which steps are implemented.
+[roadmap](../JIT_ROADMAP.md#roadmap) records which steps are implemented.
 
 **The infrastructure already exists in the source tree as Gemm-From-Anywhere (GFA) V1.**
 Its guide is [CustomKernels/README.md](../tensilelite/Tensile/CustomKernels/README.md).
@@ -172,7 +172,7 @@ equality distance; Prediction uses Origami to rank existing solutions. Modes and
 available branches affect traversal. JIT prediction of new recipes
 is a different task and remains outside the existing-solution ranking contract.
 
-The approved target design in [JIT.md](../JIT.md#heuristic-integration-and-hipblaslt_jit)
+The approved target design in [JIT_ROADMAP.md](../JIT_ROADMAP.md#heuristic-integration-and-hipblaslt_jit)
 places JIT generation outside the pre-tuned library:
 
 - JIT is not a row inside the pre-tuned library. With `HIPBLASLT_JIT=1`,
@@ -197,10 +197,11 @@ places JIT generation outside the pre-tuned library:
 - The explicit entry points are internal. Deterministic backend choice and
   prewarming remain available to unit tests through the internal headers.
 
-JIT.md also defines the failure rules (JIT failures are always reported),
-build-time tool-path defaults with `HIPBLASLT_JIT_*` overrides for the heuristic
-path, and the cache key under which mismatched libraries are ignored rather than
-deleted. Its [heuristic integration](../JIT.md#heuristic-integration) section
+The target design also defines the failure rules (JIT failures are always
+reported), build-time tool-path defaults with `HIPBLASLT_JIT_*` overrides for
+the heuristic path, and the cache key under which mismatched libraries are
+ignored rather than deleted. The
+[heuristic integration](../JIT.md#heuristic-integration) section of JIT.md
 defines the rest of the query contract: a query may return fewer than
 `requestedAlgoCount` results with success; in fallback mode a failed pre-tuned
 lookup keeps its error unless JIT adds a result, and in forced mode a JIT failure
@@ -219,6 +220,6 @@ adding a type.
 2. **Validation:** define a distinct schema/profile version and backward-compatible reader. Validate required executable fields, recognized semantics, argument offsets/types/sizes, symbols, targets and complete artifact contents. Do not overload provenance Version or weaken artifact containment/integrity checks. Add strict validation at this producer/consumer boundary.
 3. **Equivalence:** compare old and metadata-driven argument bytes, complete launch descriptors, workspace requirements and full helper sequence for the same concrete requests. Then run representative numerical/runtime tests on their actual GPUs, including nontrivial C/D strides, batching, split-K/Stream-K, scaling/epilogues, and malformed/unsupported metadata. Source inspection alone is not a runtime-equivalence result.
 4. **Shared path:** gate each proven profile onto KFA-driven execution, retaining existing support predicates and HIP adapter. Unproven profiles continue on their established path until extended and validated. An existing external fixture and equivalent generated kernel should exercise the same consumer.
-5. **Simplification:** consolidate/delete only the code now demonstrably redundant. The private source-bundle layout that `Tensile.SingleSolution --source-only` writes and that `readSourceBundle` in `hipblaslt-jit-tensilelite-artifacts.hpp` and `readTensileSourceBundle`'s library identity check read is a concrete transport candidate once common KFA artifacts cover its requirements. Published solutions already live in the JIT solution library's standard TensileLibrary layout, so only the transport from generator to builder is private. Much validation migrates rather than vanishes. Retire generated/custom packing forks only when no supported profile depends on them.
+5. **Simplification:** consolidate/delete only the code now demonstrably redundant. The private source-bundle layout that `Tensile.SingleSolution --source-only` writes and that `readSourceBundle` in `hipblaslt-jit-source-bundle.hpp` and `readTensileSourceBundle`'s library identity check read is a concrete transport candidate once common KFA artifacts cover its requirements. Published solutions already live in the JIT solution library's standard TensileLibrary layout, so only the transport from generator to builder is private. Much validation migrates rather than vanishes. Retire generated/custom packing forks only when no supported profile depends on them.
 
-This sequence is independent of the seven target-design roadmap steps in [JIT.md](../JIT.md#roadmap). KFA convergence is future work.
+This sequence is independent of the seven target-design roadmap steps in [JIT_ROADMAP.md](../JIT_ROADMAP.md#roadmap). KFA convergence is future work.

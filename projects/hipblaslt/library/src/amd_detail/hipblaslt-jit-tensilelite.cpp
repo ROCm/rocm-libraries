@@ -1,11 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-debug-child.hpp"
 #include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-heuristic.hpp"
-#include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-loader.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
 #include "hipblaslt-jit-tensilelite.hpp"
@@ -536,7 +537,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
                     std::make_shared<const TensileLiteBackend>(options),
                     hipblaslt_jit::makeOrigamiPredictor(),
-                    hipblaslt_jit::makeTensileLiteDefaults(),
+                    hipblaslt_jit::makeCatalogKnowledge(),
                     hipblaslt_jit::makeComgrBuilder(),
                     hipblaslt_jit::makeTensileLoader(),
                     nullptr}));
@@ -550,12 +551,10 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     }
 }
 
-namespace hipblaslt_jit
+namespace hipblaslt_ext::experimental::jit::tensilelite::detail
 {
     namespace
     {
-        namespace fs = std::filesystem;
-
         std::string configured(const char* variable, const char* builtIn)
         {
             const char* value = rocblaslt_secure_getenv(variable);
@@ -568,88 +567,38 @@ namespace hipblaslt_jit
                     Stage::Configure,
                     std::string(what) + " not found at " + path + "; set " + variable};
         }
-
-        std::pair<std::shared_ptr<const Jit>, Status> buildProcessJit();
-
-        // With timing, a setup line reports the first processJit call.
-        std::pair<std::shared_ptr<const Jit>, Status> makeProcessJit()
-        {
-            if(!debug::on(debug::Timing))
-                return buildProcessJit();
-            debug::Record record;
-            auto          made = [&] {
-                debug::Scope scope(&record);
-                return buildProcessJit();
-            }();
-            debug::Line line(debug::Timing, "setup");
-            line.add("status", made.second.ok() ? "ok" : "failed");
-            if(!made.second.ok())
-                line.add("message", made.second.message);
-            uint64_t total = 0;
-            for(const char* phase : {"tool_check", "backend", "store", "components"})
-                total += record.nanoseconds(phase);
-            const std::pair<const char*, uint64_t> first{"total", total};
-            record.write(line, &first);
-            line.write();
-            return made;
-        }
-
-        std::pair<std::shared_ptr<const Jit>, Status> buildProcessJit()
-        {
-            namespace tensilelite = hipblaslt_ext::experimental::jit::tensilelite;
-            debug::Phase         toolCheck("tool_check");
-            tensilelite::Options options;
-            options.pythonExecutable
-                = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_DEFAULT_PYTHON);
-            options.tensileSourceDirectory
-                = configured("HIPBLASLT_JIT_TENSILE_SOURCE", HIPBLASLT_JIT_DEFAULT_TENSILE_SOURCE);
-            options.pythonPath
-                = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_DEFAULT_PYTHONPATH);
-            options.cxxCompiler = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_DEFAULT_CXX);
-            std::error_code error;
-            if(!fs::is_regular_file(tensilelite::findProgram(options.pythonExecutable), error))
-                return {nullptr, missing("Python", options.pythonExecutable, "HIPBLASLT_JIT_PYTHON")};
-            if(!fs::is_directory(fs::u8path(options.tensileSourceDirectory) / "Tensile", error))
-                return {nullptr,
-                        missing("TensileLite source",
-                                options.tensileSourceDirectory,
-                                "HIPBLASLT_JIT_TENSILE_SOURCE")};
-            if(!fs::is_regular_file(tensilelite::findProgram(options.cxxCompiler), error))
-                return {nullptr, missing("C++ compiler", options.cxxCompiler, "HIPBLASLT_JIT_CXX")};
-            toolCheck.stop();
-            debug::set("python", debug::Line::quote(options.pythonExecutable));
-            debug::set("tensile_source", debug::Line::quote(options.tensileSourceDirectory));
-            debug::set("cxx", debug::Line::quote(options.cxxCompiler));
-            try
-            {
-                // The backend hashes the generator sources for its version.
-                debug::Phase backendPhase("backend");
-                auto backend = std::make_shared<const tensilelite::TensileLiteBackend>(options);
-                backendPhase.stop();
-                debug::Phase storePhase("store");
-                auto         store
-                    = makeLibraryStore(JitLibrary::process(), backend->info(), jitCodeObjectVersion);
-                storePhase.stop();
-                debug::Phase components("components");
-                return {std::make_shared<const Jit>(Jit::Components{std::move(backend),
-                                                                    makeOrigamiPredictor(),
-                                                                    makeTensileLiteDefaults(),
-                                                                    makeComgrBuilder(),
-                                                                    makeTensileLoader(),
-                                                                    std::move(store)}),
-                        {}};
-            }
-            catch(const std::exception& e)
-            {
-                return {nullptr, {Status::Code::Failed, Stage::Configure, e.what()}};
-            }
-        }
     }
 
-    std::shared_ptr<const Jit> processJit(Status& why)
+    Status makeProcessBackend(hipblaslt_jit::ProcessBackend& made)
     {
-        static const auto process = makeProcessJit();
-        why                       = process.second;
-        return process.first;
+        namespace debug = hipblaslt_jit::debug;
+        debug::Phase toolCheck("tool_check");
+        Options      options;
+        options.pythonExecutable = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_DEFAULT_PYTHON);
+        options.tensileSourceDirectory
+            = configured("HIPBLASLT_JIT_TENSILE_SOURCE", HIPBLASLT_JIT_DEFAULT_TENSILE_SOURCE);
+        options.pythonPath
+            = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_DEFAULT_PYTHONPATH);
+        options.cxxCompiler = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_DEFAULT_CXX);
+        std::error_code error;
+        if(!fs::is_regular_file(findProgram(options.pythonExecutable), error))
+            return missing("Python", options.pythonExecutable, "HIPBLASLT_JIT_PYTHON");
+        if(!fs::is_directory(fs::u8path(options.tensileSourceDirectory) / "Tensile", error))
+            return missing("TensileLite source",
+                           options.tensileSourceDirectory,
+                           "HIPBLASLT_JIT_TENSILE_SOURCE");
+        if(!fs::is_regular_file(findProgram(options.cxxCompiler), error))
+            return missing("C++ compiler", options.cxxCompiler, "HIPBLASLT_JIT_CXX");
+        toolCheck.stop();
+        debug::set("python", debug::Line::quote(options.pythonExecutable));
+        debug::set("tensile_source", debug::Line::quote(options.tensileSourceDirectory));
+        debug::set("cxx", debug::Line::quote(options.cxxCompiler));
+        // The backend hashes the generator sources for its version.
+        debug::Phase backendPhase("backend");
+        made.backend = std::make_shared<const TensileLiteBackend>(options);
+        backendPhase.stop();
+        made.predictor = hipblaslt_jit::makeOrigamiPredictor();
+        made.knowledge = hipblaslt_jit::makeCatalogKnowledge();
+        return {};
     }
 }

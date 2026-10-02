@@ -1,14 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# The JIT HipKittens backend, included from library/src/amd_detail when
-# HIPBLASLT_JIT_ENABLE_HIPKITTENS is ON. The HipKittens headers its kernel
-# templates include are run-time data: they are staged next to the built
-# library and installed with the runtime under hipblaslt/hipkittens/<commit>.
-# Offline builds set FETCHCONTENT_SOURCE_DIR_HIPKITTENS to an unpacked archive
-# of the pinned commit. Sets HIPBLASLT_JIT_HIPKITTENS when the backend is built.
+# The HipKittens backend: HIPBLASLT_JIT can compile HipKittens kernel templates
+# at run time. Included by the HIPBLASLT_ENABLE_JIT block of
+# library/src/amd_detail/CMakeLists.txt. The HipKittens headers the templates
+# include are run-time data: they are staged next to the built library and
+# installed with the runtime under hipblaslt/hipkittens/<commit>. Offline
+# builds set FETCHCONTENT_SOURCE_DIR_HIPKITTENS to an unpacked archive of the
+# pinned commit.
+option(HIPBLASLT_JIT_ENABLE_HIPKITTENS "Build the JIT HipKittens backend (developer builds)." OFF)
+if(NOT HIPBLASLT_JIT_ENABLE_HIPKITTENS)
+    return()
+endif()
+if(NOT TARGET _rocisa)
+    message(FATAL_ERROR "HIPBLASLT_JIT_ENABLE_HIPKITTENS requires the local _rocisa target")
+endif()
 
-set(HIPBLASLT_JIT_HIPKITTENS OFF)
 set(_hk_gfx950 OFF)
 foreach(_hk_target IN LISTS GPU_TARGETS)
     if(_hk_target MATCHES "^gfx950(:|$)")
@@ -82,7 +89,8 @@ rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
     COMPONENT runtime)
 
 # The compiled-in resources: header manifest, kernel templates and their entries.
-set(_hk_variant_dir "${PROJECT_SOURCE_DIR}/library/src/amd_detail/hipkittens")
+set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
+set(_hk_variant_dir "${_hk_source}/hipkittens")
 set(_hk_variants "${_hk_variant_dir}/gemm_bf16_tn_256x256x64_gfx950.yaml")
 set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resources.cpp")
 if(WIN32)
@@ -107,12 +115,25 @@ add_custom_target(hipblaslt-hipkittens-resources DEPENDS "${_hk_resources}")
 add_dependencies(hipblaslt hipblaslt-hipkittens-resources)
 
 target_sources(hipblaslt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-hipkittens.cpp"
+    "${_hk_source}/hipblaslt-jit-hipkittens.cpp"
     "${_hk_resources}")
 set_source_files_properties("${_hk_resources}" TARGET_DIRECTORY hipblaslt
-    PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
+    PROPERTIES INCLUDE_DIRECTORIES "${_hk_source}")
 target_compile_definitions(hipblaslt PRIVATE
     HIPBLASLT_JIT_HIPKITTENS
     HIPBLASLT_JIT_HIPKITTENS_DIR="${_hk_relative}"
     HIPBLASLT_JIT_HIPKITTENS_FALLBACK="${CMAKE_INSTALL_FULL_LIBDIR}/${_hk_relative}")
-set(HIPBLASLT_JIT_HIPKITTENS ON)
+
+if(HIPBLASLT_BUILD_TESTING)
+    # "host" needs no gfx950 device; "gpu" and "library" run the kernels on one.
+    add_executable(hipblaslt-jit-hipkittens-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/hipkittens_backend_test.cpp"
+        "${_hk_source}/hipblaslt-jit-code-object.cpp")
+    target_include_directories(hipblaslt-jit-hipkittens-test PRIVATE
+        "${_hk_source}" "${_hk_source}/rocblaslt/include" "${_hk_source}/rocblaslt/src/include")
+    target_link_libraries(hipblaslt-jit-hipkittens-test PRIVATE
+        roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+    target_compile_features(hipblaslt-jit-hipkittens-test PRIVATE cxx_std_17)
+    set_target_properties(hipblaslt-jit-hipkittens-test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+endif()

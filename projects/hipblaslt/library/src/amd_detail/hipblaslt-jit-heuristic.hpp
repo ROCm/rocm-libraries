@@ -8,11 +8,23 @@
 // What heuristic queries use when HIPBLASLT_JIT is 1 or 2.
 namespace hipblaslt_jit
 {
-    // The Jit for this process, built on first use: TensileLite with the tool
-    // paths configured when hipBLASLt was built, each replaced by
-    // HIPBLASLT_JIT_PYTHON, HIPBLASLT_JIT_TENSILE_SOURCE,
-    // HIPBLASLT_JIT_PYTHONPATH or HIPBLASLT_JIT_CXX when set, publishing to
-    // JitLibrary::process(). Null, with why set, when a tool is missing.
+    // The generator side of the process's Jit.
+    struct ProcessBackend
+    {
+        std::shared_ptr<const Backend>         backend;
+        std::shared_ptr<const Predictor>       predictor; // iff the backend consumes predictions
+        std::shared_ptr<const TuningKnowledge> knowledge; // iff predictor
+    };
+
+    // Defined by the one provider the build links, which hipBLASLt's CMake
+    // configuration selects. A provider that cannot generate returns a
+    // Configure failure; processJit reports it for every query.
+    Status makeDefaultProcessBackend(ProcessBackend& made);
+
+    // The Jit for this process, built on first use from
+    // makeDefaultProcessBackend, the comgr builder and the Tensile loader,
+    // publishing to JitLibrary::process(). Null, with why set, when the
+    // provider fails.
     std::shared_ptr<const Jit> processJit(Status& why);
 
     // The JIT solutions for one heuristic query.

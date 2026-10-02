@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-debug.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include <cerrno>
 #include <new>
 #include <optional>

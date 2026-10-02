@@ -70,7 +70,7 @@ which requires `--debug`, writes them as files instead: each progress event is
 appended to `DIR/events.jsonl` as one JSON line, and the stage times are written
 to `DIR/timing.json` when the command finishes. Nothing else the command writes
 changes, and a failure to record never fails it. hipBLASLt passes both when
-[`HIPBLASLT_JIT_DEBUG`](../JIT.md#diagnostics-with-hipblaslt_jit_debug) asks
+[`HIPBLASLT_JIT_DEBUG`](../JIT_TENSILELITE.md#diagnostics) asks
 for them.
 
 ## Describe one solution
@@ -191,7 +191,7 @@ The manifest is a provenance record. A source-only manifest has
 | `solution` | Local index, solution name, and kernel name |
 | `library` | Format, logical path, and physical path |
 | `counts` | One solution, one main kernel, and helper/support generator counts |
-| `provenance` | YAML hash, generator version/revision, compiler identity, code-object and kernel-argument versions, and temporary-retention choice |
+| `provenance` | YAML hash, generator version/revision, compiler identity, code-object, kernel-argument and persistent-loop argument layout versions, and temporary-retention choice |
 
 For MsgPack, `library.path` names the physical `.dat.zlib` file and
 `library.logical_path` names `.dat`; the runtime loader understands both.
