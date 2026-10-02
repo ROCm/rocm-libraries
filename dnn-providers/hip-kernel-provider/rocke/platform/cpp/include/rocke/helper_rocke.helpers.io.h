@@ -101,6 +101,14 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
                                           rocke_value_t* idx,
                                           const char* dtype);
 
+/* Signature note for rocke_b_load_vec, rocke_b_load_vec_as_f32 and
+ * rocke_b_store_vec: `nontemporal` was added as a plain trailing parameter
+ * and every caller was updated. These are internal helpers with no consumer
+ * outside rocke/platform (invariants.md section 4, Note), so no `_ex` variant
+ * is kept. If a second flag lands on these helpers, switch them to an options
+ * struct (as rocke_param_opts_t / rocke_inline_asm_opts_t in ir.h do) instead
+ * of adding another positional parameter. */
+
 /* C99 port of rocke.helpers.io.load_vec:
  *
  *     def load_vec(b, ptr, idx, *, dtype, n, nontemporal=False) -> Value:

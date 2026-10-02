@@ -284,9 +284,9 @@ _SPLIT = {"bf16x16"}
 
 
 def _stores_vector(n: int) -> bool:
-    # global_store_vN takes n in {1, 2, 4, 8} for 2-byte types (n=16 is f32-only
-    # and n=3 does not exist); other widths store element by element and are
-    # checked on the load side only.
+    # global_store_vN takes n in {1, 2, 4, 8} for 2- and 4-byte types (n=16 only
+    # for 1-byte types, and n=3 does not exist); other widths store element by
+    # element and are checked on the load side only.
     return n in (1, 2, 4, 8)
 
 
