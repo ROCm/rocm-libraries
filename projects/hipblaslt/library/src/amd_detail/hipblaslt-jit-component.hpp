@@ -1,0 +1,235 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "hipblaslt-jit-backend.hpp"
+#include <cstdint>
+#include <filesystem>
+#include <hip/hip_runtime_api.h>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace TensileLite
+{
+    class Hardware;
+}
+
+// Compiled-in stages of JIT solution generation. This is not a plugin ABI.
+namespace hipblaslt_jit
+{
+    using OperationRequest = hipblaslt_ext::experimental::jit::detail::OperationRequest;
+    using KernelBundle     = hipblaslt_ext::experimental::jit::detail::KernelBundle;
+
+    enum class Stage
+    {
+        Configure,
+        Generate,
+        Build,
+        Support,
+        Load,
+        Lookup,
+        Publish,
+    };
+
+    // "configure", "generate", ... as reports name stages.
+    const char* toString(Stage stage) noexcept;
+
+    struct Status
+    {
+        enum class Code
+        {
+            Success,
+            NotSupported, // outside the component's domain; not a defect
+            TargetMismatch, // configured for another device target
+            Failed,
+        };
+        Code        code  = Code::Success;
+        Stage       stage = Stage::Configure; // assigned by Jit
+        std::string message; // one line
+        std::string logPath; // kept for diagnosis, or empty
+        bool        ok() const noexcept
+        {
+            return code == Code::Success;
+        }
+    };
+
+    struct DeviceTarget
+    {
+        int             device = -1;
+        hipDeviceProp_t properties{};
+        std::string     targetId; // gcnArchName, e.g. "gfx950:sramecc+:xnack-"
+        std::string     isa; // targetId up to the first ':'
+        std::string     libraryArch; // GEMM library subtree, e.g. "gfx1250v0"
+        int             wavefrontSize = 0;
+        int             cuCount       = 0;
+        std::shared_ptr<TensileLite::Hardware> hardware;
+    };
+
+    // A header a HIP unit includes by name.
+    struct IncludeFile
+    {
+        std::string          name;
+        std::vector<uint8_t> bytes;
+    };
+
+    // A source file the builder assembles or compiles.
+    struct BuildUnit
+    {
+        enum class Role
+        {
+            Main,
+            Helper,
+        };
+        enum class Kind
+        {
+            Assembly,
+            Hip,
+        };
+        Role                     role = Role::Main;
+        std::string              name;
+        std::vector<uint8_t>     bytes;
+        Kind                     kind = Kind::Assembly;
+        std::vector<IncludeFile> includes; // Hip only
+    };
+
+    // One CustomKernel library entry plus the code that defines it.
+    struct GeneratedSolution
+    {
+        // A one-solution TensileLite library; its solution carries the customKernel record.
+        std::vector<uint8_t>   entry;
+        std::string            kernelName; // the entry's main kernel
+        std::vector<BuildUnit> units;
+    };
+
+    constexpr int jitCodeObjectVersion = 4;
+
+    struct GenerationRequest
+    {
+        const OperationRequest&  request;
+        const DeviceTarget&      target;
+        size_t                   count      = 1;
+        size_t                   workspaceLimit = 0;
+        std::vector<std::string> excludeKernels; // kernels the caller already has
+        std::filesystem::path    scratch; // private directory owned by this call
+        int codeObjectVersion = jitCodeObjectVersion; // for generators and the builder
+    };
+
+    struct BackendInfo
+    {
+        std::string id;
+        std::string name; // reported as Diagnostics::backend
+        std::string version; // changes whenever the generated solutions can change
+    };
+
+    class Backend
+    {
+    public:
+        virtual ~Backend()                               = default;
+        virtual const BackendInfo& info() const noexcept = 0;
+        // Returns up to request.count solutions and loads nothing. NotSupported
+        // means the request is outside the backend's domain.
+        virtual Status generate(const GenerationRequest&, std::vector<GeneratedSolution>&) const
+            = 0;
+    };
+
+    struct CodeObject
+    {
+        std::vector<uint8_t> bytes;
+    };
+
+    struct BuiltSolution
+    {
+        GeneratedSolution       generated;
+        CodeObject              object;
+        std::vector<CodeObject> helpers; // loaded next to the main object
+    };
+
+    class CodeObjectBuilder
+    {
+    public:
+        virtual ~CodeObjectBuilder() = default;
+        virtual Status
+            build(const GeneratedSolution&, const GenerationRequest&, BuiltSolution&) const = 0;
+    };
+
+    class SolutionLoader
+    {
+    public:
+        virtual ~SolutionLoader() = default;
+        // Evaluates the entry's predicates and workspace for the request. Loads no code.
+        virtual Status support(const BuiltSolution&,
+                               const OperationRequest&,
+                               const DeviceTarget&,
+                               size_t workspaceLimit) const
+            = 0;
+        // Loads the code objects into a process-local executable bundle.
+        virtual Status load(const BuiltSolution&,
+                            const OperationRequest&,
+                            const DeviceTarget&,
+                            size_t                               workspaceLimit,
+                            std::shared_ptr<const KernelBundle>& bundle) const
+            = 0;
+    };
+
+    class SolutionStore
+    {
+    public:
+        virtual ~SolutionStore() = default;
+        // Up to count indices of stored solutions for exactly this request that
+        // need at most maxWorkspaceBytes, best first, without excluded kernels.
+        virtual Status lookup(const OperationRequest&,
+                              const DeviceTarget&,
+                              size_t                          count,
+                              size_t                          maxWorkspaceBytes,
+                              const std::vector<std::string>& excludeKernels,
+                              std::vector<int32_t>&           indices) const
+            = 0;
+        // Returns one library index per solution, in order.
+        virtual Status publish(const OperationRequest&,
+                               const DeviceTarget&,
+                               const std::vector<BuiltSolution>&,
+                               std::vector<int32_t>& indices) const
+            = 0;
+    };
+
+    class Jit
+    {
+    public:
+        struct Components
+        {
+            std::shared_ptr<const Backend>           backend;
+            std::shared_ptr<const CodeObjectBuilder> builder;
+            std::shared_ptr<const SolutionLoader>    loader;
+            std::shared_ptr<const SolutionStore>     store; // optional
+        };
+
+        struct Outcome
+        {
+            std::vector<int32_t>                             indices; // published
+            std::vector<std::shared_ptr<const KernelBundle>> unpublished; // process-local
+            std::vector<Status>                              failures; // in the order they happened
+            std::string                                      summary; // the backend's success note
+        };
+
+        // Throws std::invalid_argument when a required component is missing.
+        explicit Jit(Components components);
+
+        // Generate, build and check support, then publish, or load when
+        // there is no store or publishing failed. Returns at most count
+        // solutions that support the request. Thread-safe.
+        Outcome generate(const OperationRequest&         request,
+                         const DeviceTarget&             target,
+                         size_t                          count,
+                         size_t                          workspaceLimit,
+                         const std::vector<std::string>& excludeKernels) const;
+
+        const Components& components() const noexcept
+        {
+            return m_components;
+        }
+
+    private:
+        Components m_components;
+    };
+}
