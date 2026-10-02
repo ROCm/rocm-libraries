@@ -17,6 +17,8 @@ ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
 
+MIN_TIERED_BUNDLE_SEGMENTS = 6
+
 ADVISORY_LAYOUT_ERROR = (
     "cannot derive advisory path; expected "
     "{Tier}/{Operation}/{Layout}/{DataType}/[{Variant}/...]/{Name}/{Name}.json"
@@ -464,16 +466,21 @@ def derive_advisory(
         return None
 
     parts = path.parts
-    # Anchor on the last tier segment: an enclosing directory may itself be named
-    # after a tier, and everything before the bundle root must stay out of the suite name.
+    # Scan backwards from the deepest position the minimal layout allows: variant and
+    # bundle directories may be named after a tier, and so may an enclosing directory.
+    last_possible_tier_index = len(parts) - MIN_TIERED_BUNDLE_SEGMENTS
     tier_index = next(
         (
             index
-            for index in range(len(parts) - 1, -1, -1)
+            for index in range(last_possible_tier_index, -1, -1)
             if parts[index] in ALLOWED_TIERS
         ),
         None,
     )
+
+    if tier_index is None and any(part in ALLOWED_TIERS for part in parts[:-1]):
+        result.error(path, ADVISORY_LAYOUT_ERROR)
+        return None
 
     if tier_index is None:
         result.warning(
@@ -487,12 +494,8 @@ def derive_advisory(
         tier = default_tier
         bundle_parts = parts[-5:]
     else:
-        trailing_parts = parts[tier_index:]
-        if len(trailing_parts) < 6:
-            result.error(path, ADVISORY_LAYOUT_ERROR)
-            return None
-        tier = trailing_parts[0]
-        bundle_parts = trailing_parts[1:]
+        tier = parts[tier_index]
+        bundle_parts = parts[tier_index + 1 :]
 
     operation, layout, data_type = bundle_parts[:3]
     *variants, name, _ = bundle_parts[3:]

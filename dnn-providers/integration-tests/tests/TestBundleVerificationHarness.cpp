@@ -26,6 +26,7 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
@@ -364,6 +365,25 @@ TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("Engine could not execute bundle"),
+              std::string::npos);
+    EXPECT_FALSE(bundle->tensors.has_value());
+}
+
+TEST_F(TestGoldenHarnessFixture, RaggedBundleWithoutBlobsIsUnverifiable)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    auto bundle = makeRuntimePbvFillBundle();
+    bundle->graphBuffer = test_utils::markFirstTensorRagged(bundle->graphBuffer.data());
+    ASSERT_FALSE(bundle->tensors.has_value());
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("ragged inputs require golden blobs"),
               std::string::npos);
     EXPECT_FALSE(bundle->tensors.has_value());
 }

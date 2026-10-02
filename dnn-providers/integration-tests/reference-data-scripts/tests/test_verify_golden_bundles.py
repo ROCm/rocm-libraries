@@ -939,14 +939,30 @@ class TestDeriveAdvisory(unittest.TestCase):
         self.assertEqual(advisory.test_case, "Small")
         self.assertFalse(result.has_errors())
 
-    def test_variant_named_after_tier_anchors_on_last_tier(self) -> None:
+    def test_variant_named_after_tier_is_kept_as_variant(self) -> None:
         advisory, result = self.derive("quick/Op/nhwc/fp32/full/Small/Small.json")
 
-        self.assertIsNone(advisory)
-        self.assertEqual(
-            self.messages(result, "error"),
-            [verify_golden_bundles.ADVISORY_LAYOUT_ERROR],
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/Small/")
+        self.assertEqual(advisory.test_suite, "quick_Op_nhwc_fp32_full_Small")
+        self.assertFalse(result.has_errors())
+
+    def test_bundle_named_after_tier_is_kept_as_name(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/fp32/full/full.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/")
+        self.assertEqual(advisory.test_case, "full")
+        self.assertFalse(result.has_errors())
+
+    def test_tier_named_ancestor_and_variant_anchor_on_bundle_tier(self) -> None:
+        advisory, result = self.derive(
+            "quick/checkout/quick/Op/nhwc/fp32/full/Small/Small.json"
         )
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.full_test_name, "quick_Op_nhwc_fp32_full_Small.Small")
+        self.assertFalse(result.has_errors())
 
 
 if __name__ == "__main__":
