@@ -191,7 +191,7 @@ The manifest is a provenance record. A source-only manifest has
 | `solution` | Local index, solution name, and kernel name |
 | `library` | Format, logical path, and physical path |
 | `counts` | One solution, one main kernel, and helper/support generator counts |
-| `provenance` | YAML hash, generator version/revision, compiler identity, code-object and kernel-argument versions, and temporary-retention choice |
+| `provenance` | YAML hash, generator version/revision, compiler identity, code-object, kernel-argument and persistent-loop argument layout versions, and temporary-retention choice |
 
 For MsgPack, `library.path` names the physical `.dat.zlib` file and
 `library.logical_path` names `.dat`; the runtime loader understands both.

@@ -117,7 +117,10 @@ namespace hipblaslt_ext::experimental::jit::mock
                     std::ofstream(log) << failure.message << '\n' << describe(request, *gemm) << '\n';
                     std::error_code error;
                     if(fs::exists(log, error))
-                        failure.logPath = log.u8string();
+                    {
+                        failure.logPath = fs::absolute(log, error).u8string();
+                        failure.message += "; see " + failure.logPath;
+                    }
                     return failure;
                 }
                 const auto problem  = hipblaslt_jit::lowerForJit(*gemm);

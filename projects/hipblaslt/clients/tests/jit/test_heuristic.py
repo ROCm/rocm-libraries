@@ -5,6 +5,8 @@
 Each route runs the test binary in fresh processes with its own JIT library,
 temporary and cache directories under the output directory, and an empty
 HIPBLASLT_TENSILE_LIBPATH unless the route needs the build's device library.
+With --backend test the build's JIT backend is the test backend, which replays
+the --replay bundles; otherwise it is the TensileLite generator.
 """
 
 import argparse
@@ -26,6 +28,10 @@ IGNORED = "is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT"
 DEFAULT_SIZE = (256, 128, 512)
 # Sizes the FP16 NN Equality logic tunes; the default size has no Equality hit.
 EQUALITY_SIZES = ((1024, 4096, 20), (2048, 128, 16), (864, 512, 432), (128, 5120, 1024))
+# "tensilelite" or "test"; main sets it.
+BACKEND = "tensilelite"
+# Routes that need the generator child process.
+TENSILELITE_ROUTES = ("debug-killed-child",)
 
 
 def require(condition, message):
@@ -34,7 +40,7 @@ def require(condition, message):
 
 
 class Runner:
-    def __init__(self, executable, output):
+    def __init__(self, executable, output, replay=None):
         self.executable = executable
         self.output = output
         empty = output / "empty-device-library"
@@ -51,6 +57,8 @@ class Runner:
             TMPDIR=str(output / "tmp"),
             XDG_CACHE_HOME=str(output / "xdg"),
         )
+        if replay:
+            self.env["HIPBLASLT_JIT_TEST_REPLAY"] = replay
 
     def __call__(self, name, args, drop=(), **overrides):
         env = {key: value for key, value in self.env.items() if key not in drop}
@@ -97,12 +105,19 @@ def size_args(size):
     return ["--m", str(m), "--n", str(n), "--k", str(k)]
 
 
-def trap_python(output):
-    """A Python wrapper that records its arguments and fails when the trap is set.
+def generation_trap(output):
+    """Environments for a route whose later processes must not generate.
 
-    The tool paths are part of the cache key, so every process of a route that
-    shares a JIT library runs this wrapper.
+    Returns (generating, trapped): generating is the environment that generates,
+    and trapped(path) the one in which generation records its request in path
+    and fails. Both keep the backend version, which keys the JIT library, so
+    every process of the route that shares a library uses one of them. The
+    TensileLite version covers the tool paths, so both run a Python wrapper.
     """
+    if BACKEND == "test":
+        return {}, lambda path: dict(
+            HIPBLASLT_JIT_TEST_FAULT="record", HIPBLASLT_JIT_TEST_RECORD=str(path)
+        )
     python = output / "python"
     python.write_text(
         "#!/bin/sh\n"
@@ -113,7 +128,8 @@ def trap_python(output):
         f'exec "{sys.executable}" "$@"\n'
     )
     python.chmod(0o700)
-    return python, output / "trap.txt"
+    generating = dict(HIPBLASLT_JIT_PYTHON=str(python))
+    return generating, lambda path: dict(generating, HIPBLASLT_JIT_TEST_TRAP=str(path))
 
 
 def picked(stderr):
@@ -175,12 +191,13 @@ def forced(run, output):
 
 
 def cache_hit(run, output):
-    python, trap = trap_python(output)
+    generating, trapped = generation_trap(output)
+    trap = output / "trap.txt"
     stderr, first = run(
         "publish",
         ["--api", "c", "--requested", "1"],
         HIPBLASLT_JIT="2",
-        HIPBLASLT_JIT_PYTHON=str(python),
+        **generating,
     )
     check_jit_results(stderr, first, ("c",), 1)
     published = queries(first, "c")[0]["indices"]
@@ -188,8 +205,7 @@ def cache_hit(run, output):
         "reuse",
         ["--api", "both", "--requested", "1", "--null-algo"],
         HIPBLASLT_JIT="2",
-        HIPBLASLT_JIT_PYTHON=str(python),
-        HIPBLASLT_JIT_TEST_TRAP=str(trap),
+        **trapped(trap),
     )
     check_jit_results(stderr, second, ("c", "cpp"), 1)
     for api in ("c", "cpp"):
@@ -204,8 +220,7 @@ def cache_hit(run, output):
         "resolve",
         ["--api", "none", "--from-index", ",".join(map(str, published))],
         HIPBLASLT_JIT="0",
-        HIPBLASLT_JIT_PYTHON=str(python),
-        HIPBLASLT_JIT_TEST_TRAP=str(trap),
+        **trapped(trap),
     )
     (resolved,) = queries(third, "from-index")
     require(
@@ -379,14 +394,14 @@ def null_algo(run, output):
 
 def capture(run, output):
     unpublished = (256, 128, 576)
-    python, trap = trap_python(output)
-    jit = dict(HIPBLASLT_JIT_PYTHON=str(python))
-    trapped = dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(trap))
+    generating, trapping = generation_trap(output)
+    trap = output / "trap.txt"
+    trapped = trapping(trap)
     _, records = run(
         "publish",
         ["--api", "c", "--requested", "1", "--no-run"],
         HIPBLASLT_JIT="2",
-        **jit,
+        **generating,
     )
     (published,) = queries(records, "c")
     require(published["count"] == 1, f"The JIT library was not seeded: {published}")
@@ -397,7 +412,7 @@ def capture(run, output):
         "failing-generation",
         ["--api", "none", "--null-algo"] + size_args(unpublished),
         HIPBLASLT_JIT="2",
-        **dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(failed)),
+        **trapping(failed),
     )
     missing = queries(records, "null-algo")[0]["status"]
     require(
@@ -523,11 +538,20 @@ def capture_query(run, output):
 
 
 def report(run, output):
+    # The configure failure names the variable to set.
+    if BACKEND == "test":
+        causes = (
+            ("configure", dict(HIPBLASLT_JIT_TEST_FAULT="unknown"), "HIPBLASLT_JIT_TEST_FAULT"),
+            ("generate", dict(HIPBLASLT_JIT_TEST_FAULT="generate"), None),
+        )
+    else:
+        causes = (
+            ("configure", dict(HIPBLASLT_JIT_PYTHON="/nonexistent"), "HIPBLASLT_JIT_PYTHON"),
+            ("generate", dict(HIPBLASLT_JIT_PYTHON="/bin/false"), None),
+        )
     for mode, status in (("1", INVALID_VALUE), ("2", 0)):
-        for cause, python, phrase in (
-            ("configure", "/nonexistent", "configure failed"),
-            ("generate", "/bin/false", "generate failed"),
-        ):
+        for cause, overrides, variable in causes:
+            phrase = cause + " failed"
             name = f"mode-{mode}-{cause}"
             scratch = output / name
             scratch.mkdir()
@@ -535,8 +559,8 @@ def report(run, output):
                 name,
                 ["--api", "both", "--handles", "2", "--queries", "2", "--no-run"],
                 HIPBLASLT_JIT=mode,
-                HIPBLASLT_JIT_PYTHON=python,
                 TMPDIR=str(scratch),
+                **overrides,
             )
             lines = reports(stderr)
             require(
@@ -551,8 +575,8 @@ def report(run, output):
                 and len(records) == 8,
                 f"{name}: expected 8 empty queries with status {status}: {records}",
             )
-            if cause == "configure":
-                require("HIPBLASLT_JIT_PYTHON" in lines[0], "The variable to set is not named")
+            if variable:
+                require(variable in lines[0], "The variable to set is not named")
             else:
                 (log,) = re.findall(r"see (\S+\.log)", lines[0])
                 require(
@@ -575,12 +599,13 @@ def partial_fill(run, output):
     if any(record["count"] >= probe for record in pretuned.values()):
         print(f"SKIP heuristic-partial-fill: the device library fills {probe} requests")
         return
-    python, trap = trap_python(output)
+    generating, trapped = generation_trap(output)
+    trap = output / "trap.txt"
     stderr, records = run(
         "publish",
         ["--api", "c", "--requested", "1", "--no-run"],
         HIPBLASLT_JIT="2",
-        HIPBLASLT_JIT_PYTHON=str(python),
+        **generating,
     )
     (published,) = queries(records, "c")
     require(published["count"] == 1, f"The JIT library was not seeded: {published}")
@@ -591,8 +616,7 @@ def partial_fill(run, output):
             ["--api", api, "--requested", str(record["count"] + 1), "--no-run"],
             drop,
             HIPBLASLT_JIT="1",
-            HIPBLASLT_JIT_PYTHON=str(python),
-            HIPBLASLT_JIT_TEST_TRAP=str(trap),
+            **trapped(trap),
         )
         (filled,) = queries(records, api)
         require(filled["status"] == 0, f"{api} fill failed: {filled}")
@@ -695,9 +719,10 @@ def provider_order(run, output):
             " or a size without one"
         )
         return
-    python, trap = trap_python(output)
-    jit = dict(HIPBLASLT_JIT="1", HIPBLASLT_JIT_PYTHON=str(python))
-    trapped = dict(jit, HIPBLASLT_JIT_TEST_TRAP=str(trap))
+    generating, trapping = generation_trap(output)
+    trap = output / "trap.txt"
+    jit = dict(HIPBLASLT_JIT="1", **generating)
+    trapped = dict(HIPBLASLT_JIT="1", **trapping(trap))
     library = output / "lib"
     cases = (
         ("equality", size_args(equality), 3, base_equality),
@@ -897,11 +922,16 @@ def debug_timing(run, output):
     (setup,) = events(lines, "setup")
     require(setup["status"] == "ok" and setup["ns"]["total"] > 0, f"Wrong setup: {setup}")
     (generation,) = events(lines, "generation")
-    ns, child = generation["ns"], generation["child"]
+    ns = generation["ns"]
+    if BACKEND == "test":
+        generator, child_ok = ns["backend"], "child" not in generation
+    else:
+        child = generation["child"]
+        generator = ns["child"]
+        child_ok = child["status"] == "ok" and ns["child"] >= child["total"]
     require(
-        child["status"] == "ok"
-        and ns["child"] >= child["total"]
-        and ns["total"] >= ns["child"] + ns["build"] + ns["publish"]
+        child_ok
+        and ns["total"] >= generator + ns["build"] + ns["publish"]
         and "publish_lock_wait" in ns
         and generation["published"] == generation["generated"] == 3,
         f"Wrong generation line: {generation}",
@@ -998,16 +1028,13 @@ def debug_progress(run, output):
         "A timing line or duration was written",
     )
     names = [line["ev"] for line in lines]
+    child = ["child.start", "child.stage", "child.candidate", "child.done", "child.exit"]
     order = [
         "process",
         "query.start",
         "lookup",
         "generation.start",
-        "child.start",
-        "child.stage",
-        "child.candidate",
-        "child.done",
-        "child.exit",
+        *(child if BACKEND == "tensilelite" else ()),
         "build.start",
         "build.end",
         "publish.start",
@@ -1018,13 +1045,18 @@ def debug_progress(run, output):
     positions = [names.index(name) for name in order]
     require(positions == sorted(positions), f"Events out of order: {names}")
     require(events(lines, "lookup")[0]["result"] == "miss", "The first lookup hit")
-    exit_ = names.index("child.exit")
-    relayed = [i for i, name in enumerate(names) if name.startswith("child.") and i != exit_]
-    require(
-        all(i < exit_ for i in relayed)
-        and all("child_t_ms" in lines[i] for i in relayed if names[i] != "child.start"),
-        "Child events were relayed after child.exit or without child_t_ms",
-    )
+    if BACKEND == "tensilelite":
+        exit_ = names.index("child.exit")
+        relayed = [
+            i for i, name in enumerate(names) if name.startswith("child.") and i != exit_
+        ]
+        require(
+            all(i < exit_ for i in relayed)
+            and all("child_t_ms" in lines[i] for i in relayed if names[i] != "child.start"),
+            "Child events were relayed after child.exit or without child_t_ms",
+        )
+    else:
+        require(not any(name.startswith("child.") for name in names), "A child event without a child")
     (end,) = events(lines, "generation.end")
     require(end["outcome"] == "ok" and end["published"] == 2, f"Wrong end: {end}")
 
@@ -1044,14 +1076,16 @@ def debug_progress(run, output):
         ),
         "The capture report changed",
     )
+    child = "child, " if BACKEND == "tensilelite" else ""
     print(
-        "PASS heuristic-debug-progress: query, lookup, generation, child, build and"
+        f"PASS heuristic-debug-progress: query, lookup, generation, {child}build and"
         " publish events in order; a capture reports capture.skip"
     )
 
 
 def debug_off(run, output):
-    python = argv_python(output)
+    # The TensileLite generator's arguments must not change either.
+    python = argv_python(output) if BACKEND == "tensilelite" else None
     args = ["--api", "c", "--requested", "1"]
     seen = None
     warning = (
@@ -1063,10 +1097,10 @@ def debug_off(run, output):
         argv = output / f"{name}.argv"
         overrides = dict(
             HIPBLASLT_JIT="1",
-            HIPBLASLT_JIT_PYTHON=str(python),
-            HIPBLASLT_JIT_TEST_ARGV=str(argv),
             HIPBLASLT_JIT_LIBRARY_PATH=str(output / f"lib-{name}"),
         )
+        if python:
+            overrides.update(HIPBLASLT_JIT_PYTHON=str(python), HIPBLASLT_JIT_TEST_ARGV=str(argv))
         if value is not None:
             overrides["HIPBLASLT_JIT_DEBUG"] = value
         stderr, records = run(name, args, **overrides)
@@ -1077,7 +1111,7 @@ def debug_off(run, output):
             f"{name}: wrong warnings {debug_warnings(stderr)}",
         )
         require(
-            argv.exists() and "--debug" not in argv.read_text(),
+            not python or (argv.exists() and "--debug" not in argv.read_text()),
             f"{name}: the generator got --debug",
         )
         require(seen is None or results(records) == seen, f"{name}: results changed")
@@ -1308,14 +1342,26 @@ ROUTES = {
 
 
 def main():
+    global BACKEND
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("route", choices=ROUTES)
     parser.add_argument("fresh_output", type=Path)
+    parser.add_argument("--backend", choices=("tensilelite", "test"), default="tensilelite")
+    parser.add_argument(
+        "--replay", action="append", type=Path, help="a bundle for the test backend to replay"
+    )
     args = parser.parse_args()
+    if (args.backend == "test") != bool(args.replay):
+        parser.error("--replay is required with --backend test, and only then")
+    if args.backend == "test" and args.route in TENSILELITE_ROUTES:
+        parser.error(f"{args.route} needs the TensileLite generator")
+    BACKEND = args.backend
     args.fresh_output.mkdir(parents=True, exist_ok=False)
     output = args.fresh_output.resolve()
-    ROUTES[args.route](Runner(args.executable.resolve(strict=True), output), output)
+    replay = args.replay and os.pathsep.join(str(path.resolve(strict=True)) for path in args.replay)
+    runner = Runner(args.executable.resolve(strict=True), output, replay)
+    ROUTES[args.route](runner, output)
 
 
 if __name__ == "__main__":

@@ -529,6 +529,8 @@ def _build(
                 "compiler_version": ".".join(map(str, toolchain.assembler.version)),
                 "code_object_version": codeObjectVersion,
                 "kernargs_version": solution["InternalSupportParams"]["KernArgsVersion"],
+                "persistent_loop_args_version":
+                    solution["InternalSupportParams"].get("PersistentLoopArgsVersion", 0),
                 "keep_build_tmp": keepBuildTmp,
             },
         }

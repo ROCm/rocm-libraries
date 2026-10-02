@@ -267,6 +267,14 @@ damage valid bundles and check that the public C and extension paths reject
 them without writing output or workspace. A failed build names the retained
 `comgr.log` in its message.
 
+The tests that need no generator replay gfx950 source bundles committed in
+`clients/tests/jit/data`. Their manifests record the kernel-argument and
+persistent-loop argument layout versions of the generator that wrote them, and
+the `jit-bundle-freshness` test fails when those differ from TensileLite's,
+when the code-object version differs from the builder's, or when a bundle no
+longer reads or builds. [Their README](clients/tests/jit/data/README.md) gives
+the commands that regenerate them.
+
 ### Persistent solution library
 
 The JIT solution library keeps generated solutions on disk so that later

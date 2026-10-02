@@ -31,7 +31,7 @@ cmake --build "$project_build" --parallel 8 --target \
   hipblaslt-jit-mock-backend-test \
   hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-process-test \
   hipblaslt-jit-source-bundle-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
-  hipblaslt-jit-heuristic-test
+  hipblaslt-jit-bundle-freshness-test hipblaslt-jit-heuristic-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
@@ -45,7 +45,25 @@ separated by `:` (`;` on Windows). `HIPBLASLT_JIT_TEST_FAULT` set to `generate`,
 request to the file `HIPBLASLT_JIT_TEST_RECORD` names. The tests that need
 no generator are also CTest tests:
 `ctest --test-dir "$project_build/clients/tests/jit" -L jit-cpu` runs the ones
-that need no GPU, and `-L jit-gpu` runs the rest.
+that need no GPU, and `-L jit-gpu` runs the rest. Instead of generating, they
+replay, publish and rebuild the gfx950 source bundles committed in
+[`data`](data/README.md):
+
+- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug` and
+  `jit-code-object`, and with `HIPBLASLT_ENABLE_YAML=OFF` also `jit-library`,
+  `jit-library-concurrency` and `jit-bundle-freshness`. The last fails when
+  the committed bundles no longer match the generator;
+  [their README](data/README.md) says how to regenerate them, and
+  `"$project_python" regenerate_bundles.py --build "$project_build"` does all
+  of it.
+- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
+  build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
+  `jit-bundle-failures`, `jit-helper-failures` and `jit-api-splitk`,
+  `jit-api-streamk`, `jit-api-amax` and `jit-api-alpha-zero`, the replayed
+  forms of the driver cases of those names. In a build without a generator
+  backend it also has `jit-heuristic-<route>` for every heuristic route except
+  `debug-killed-child`, run through the test backend replaying the `rank-1`,
+  `rank-2` and `splitk` bundles.
 
 Choose a fresh output directory. When other work shares the host, set
 `HIP_VISIBLE_DEVICES` to keep the tests on one GPU. The driver checks that the shared library and
@@ -174,7 +192,7 @@ limits.
 
 `hipblaslt-jit-mock-backend-test` takes one argument, a source bundle directory
 that `Tensile.SingleSolution --source-only` wrote; the driver passes
-`<output>/splitk-api/bundle`. It creates the mock backend with
+`<output>/splitk-api/bundle` and CTest `data/gfx950/splitk`. It creates the mock backend with
 `jit::mock::createBackend` from `hipblaslt-jit-mock.hpp`, so generation runs no
 Python and no subprocess, and checks the same FP16 problem as the direct and
 generic tests, the record fault, a replay after an Origami prediction and
@@ -187,10 +205,18 @@ uses as the scratch parent; it needs no GPU. `hipblaslt-jit-debug-test` takes a
 fresh output directory too, needs no GPU and starts its child processes itself.
 Both are built only with `HIPBLASLT_ENABLE_JIT=ON`.
 
+`test_bundle_failures.py` and `test_helper_failures.py` take an API test
+binary, a valid split-K source bundle and a fresh output directory. With
+`--replay` the binary is `hipblaslt-jit-api-test`, which replays copies of the
+bundle that the scripts damage; without it the binary is
+`hipblaslt-jit-tensilelite-api-test`, and a substitute generator writes the
+damaged copies.
+
 ## JIT solution library tests
 
 `hipblaslt-jit-library-test` compiles the JIT solution library directly and
-needs no GPU. It takes the `splitk-api` source bundle, whose library entry it
+needs no GPU. It takes a split-K source bundle, the driver's `splitk-api`
+bundle or `data/gfx950/splitk`, whose library entry it
 publishes under several kernel names, and a scratch directory for the libraries
 it creates; it ignores `HIPBLASLT_JIT_LIBRARY_PATH`. Adding
 `--writers N --per-writer M` runs the multi-process check instead: N writer
@@ -227,6 +253,10 @@ together.
 driver route in fresh processes, each with its own JIT solution library,
 temporary and cache directories under the output directory, and an empty
 `HIPBLASLT_TENSILE_LIBPATH` unless the route uses the build's device library.
+With `--backend test` and one `--replay BUNDLE` per bundle, the build's JIT
+backend must be the test backend: the routes replay those bundles, and its
+record fault stands in for a generator that fails if it runs.
+`debug-killed-child` needs the TensileLite generator.
 
 ## Code-object tests
 
