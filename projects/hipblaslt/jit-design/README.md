@@ -6,8 +6,8 @@ separates current behavior from the approved target design and carries the
 roadmap.
 
 - [KFA producer convergence](kfa-producer-convergence.md): KernelFromAnywhere
-  (KFA) contract discovery, producer gaps, concrete type reuse, the existing
-  rocRoller route, and selection constraints. Complete producer metadata
+  (KFA) contract discovery, producer gaps, concrete type reuse, and selection
+  constraints. Complete producer metadata
   precedes proof and shared dispatch.
 - [Host timing and progress](timing-host-plan.md): independent opt-in
   `HIPBLASLT_JIT_DEBUG` categories, provider/process boundaries, report transport

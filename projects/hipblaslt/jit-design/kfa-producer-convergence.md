@@ -1,9 +1,12 @@
 # KernelFromAnywhere discovery and implemented contract
 
-KernelFromAnywhere (KFA) is the common-metadata direction for just-in-time (JIT)
-generation. General matrix multiplication (GEMM) is the current operation profile;
-other operation profiles remain proposed. This note uses API for application
-programming interface and ABI for application binary interface.
+KernelFromAnywhere (KFA) is the existing path for prebuilt and handwritten assembly
+kernels, and its metadata is the candidate common encoding for what just-in-time
+(JIT) generators emit. The JIT serves backends that generate code at run time; it
+does not ingest prebuilt kernels. General matrix multiplication (GEMM) is the
+current operation profile; other operation profiles remain proposed. This note
+uses API for application programming interface and ABI for application binary
+interface.
 
 Convergence means the same versioned metadata schema and execution semantics across
 producers, not identical symbols, layouts, or tuning values.
@@ -17,14 +20,14 @@ the pre-tuned Equality results. The sections below reflect that design. The
 Its guide is [CustomKernels/README.md](../tensilelite/Tensile/CustomKernels/README.md).
 GFA V1 provides the metadata format, generic Tensile-host argument dispatch, and
 checked-in demos from external sources. It does not include full production kernel
-sets, hipKittens, or **JIT generation**, so the current source is not a standalone
-universal KFA runtime.
+sets and is not a standalone universal KFA runtime. It is the path for prebuilt and
+handwritten assembly kernels; JIT generation is separate and does not ingest them.
 
-## Intended lifecycle and reusable seams
+## Existing custom-kernel lifecycle
 
-1. A backend produces AMD graphics processing unit (GPU) assembly (`.s`), with an entry point and normal `.amdgpu_metadata`. GFA's checked-in origin directories are `tensile`, `aiter`, `ck`, `rocroller`, `wave`, and `triton`. Directories are organizational, not runtime backend registration.
+1. An external producer supplies AMD graphics processing unit (GPU) assembly (`.s`) ahead of time, with an entry point and normal `.amdgpu_metadata`. GFA's checked-in origin directories include `tensile`, `aiter`, `ck`, `wave` and `triton`. Directories are organizational, not runtime backend registration.
 2. Embed a top-level **`custom.config` YAML (YAML Ain't Markup Language) mapping inside that metadata section**, carrying the higher-level Tensile-side interface and provenance. `Tensile.AddCustomConfig` can mechanically extract it from a benchmark YAML and inject it into the assembly. `--dry-run` previews it; a provenance-only injection is insufficient to make an external kernel usable. The tool refuses duplicate custom.config insertion. This is source preparation, not an automatic decoder for arbitrary precompiled binaries.
-3. A logic-file solution or benchmark `CustomKernel`/`CustomKernels` request resolves the assembly by name. `CustomKernels.getCustomKernelConfig` reads it, validates recognized parameters, forces assembly language and the selected kernel name, and supplies the CustomKernel mapping. `BenchmarkProblems._getCustomKernelSolutionObj` constructs **one Solution without benchmarking**, making it a concrete future singleton-ingestion seam. The broader enumeration helper warning-skips bad custom metadata; a JIT adapter should preserve fail-closed request behavior instead.
+3. A logic-file solution or benchmark `CustomKernel`/`CustomKernels` request resolves the assembly by name. `CustomKernels.getCustomKernelConfig` reads it, validates recognized parameters, forces assembly language and the selected kernel name, and supplies the CustomKernel mapping. `BenchmarkProblems._getCustomKernelSolutionObj` constructs **one Solution without benchmarking**, and the broader enumeration helper warning-skips bad custom metadata. Custom kernels enter the pre-tuned library through this build-time path; the JIT does not add a run-time ingestion route for them.
 4. Existing generator/build machinery reads the custom source, assembles/links normal code objects, and serializes the Tensile solution library. Existing selection and device-library loading then find the appropriate solution/code object. Runtime `generateCustomCall` binds its declared argument semantics from the concrete GEMM request. Built-in solve logic still owns applicable helper sequence, workspace and scheduling behavior.
 
 Source anchors (all under `projects/hipblaslt/tensilelite`): `Tensile/CustomKernels.py:135,187,368`; `Tensile/AddCustomConfig.py:78,207,344`; `Tensile/BenchmarkProblems.py:306,359`; `Tensile/LibraryIO.py:743`; `Tensile/KernelWriterAssembly.py:172,185`; `Tensile/Toolchain/Assembly.py:86`; `src/ContractionSolution.cpp:2783`.
@@ -71,7 +74,6 @@ and microscaled 4-bit floating point (MXFP4):
 | `custom_aiter_bf16.yaml` | BF16 → BF16 | gfx950 |
 | `custom_aiter_f4.yaml` | MXFP4 → BF16, prescribed swizzle/scale layout | gfx950 |
 | `custom_ck.yaml` | FP16 → FP16 | gfx942 |
-| `custom_rr.yaml` | FP16 → FP16 | gfx942 |
 | `custom_wave_bf16.yaml` | BF16 → FP32 | gfx950 |
 | `custom_triton_f4.yaml` | MXFP4 → BF16, packed-stride mapping | gfx950 |
 | `custom_tensile_sk.yaml` | FP16 → FP16, StreamK | gfx942 |
@@ -82,7 +84,7 @@ Reusable tests cover AddCustomConfig injection, strict/non-strict metadata comma
 
 ## Producer-first convergence
 
-**KFA metadata is the target common kernel encoding. TensileLite production must emit a complete compatible representation before both origins share the same argument/launch path.** The ingestion facts above describe the existing implementation; do not introduce a competing opaque runtime to avoid the KFA contract.
+**KFA metadata is the target common kernel encoding. TensileLite production must emit a complete compatible representation before both origins share the same argument/launch path.** The ingestion facts above describe the existing custom-kernel path, which remains the only way prebuilt kernels enter hipBLASLt. Do not introduce a competing opaque runtime or a JIT ingestion route to avoid the KFA contract.
 
 Generated Tensile kernels already populate a `CustomKernel` record in `KernelWriter._getKernelSource:12444–12474`. `_registerKernelArgs:12302` records ordered typed semantics, and the record includes symbol, tile, threads and grid. `Contractions.Solution.FromOriginalState:940–1007` serializes it together with **ProblemType, SizeMapping, hardware/problem/task predicates and InternalArgsSupport**. Those surrounding fields are still essential executable metadata. `SingleSolution._build:409–425` constructs the existing `MasterSolutionLibrary.BenchmarkingLibrary`, applies names and writes its normal YAML/MessagePack library. This is already partial convergence at the producer and library levels. `TensileCreateLibrary/Run.py:262–273,341–351` explicitly carries the generated CustomKernel mapping from worker results back onto original/serialized solutions. However, assembly emission in `rocisa/rocisa/include/code.hpp:1524–1526` currently embeds only `InternalSupportParams.KernArgsVersion` within `custom.config`; normal kernel ABI metadata is also present. The complete semantic description lives in solution state/library, not in self-contained generated assembly. Producer convergence must close that packaging gap too.
 
@@ -142,28 +144,6 @@ API. Their headers are internal and used by unit tests, and Jit invokes the
 backend behind them. Evaluate these reuse choices against that internal
 contract.
 
-## Existing rocRoller route
-
-The current [rocRoller host route](../library/src/amd_detail/rocblaslt/src/rocroller/rocroller_host.cpp)
-derives `KernelType`, obtains Origami-ranked configurations, and checks a handle-owned
-kernel cache. On a miss it calls `RocRollerGemmKernel::generate`; the
-[kernel implementation](../library/src/amd_detail/rocblaslt/src/rocroller/gemm.cpp)
-uses `CommandKernel::generateKernel` and `loadKernel`, then binds `CommandArguments`,
-checks predicates, and calls `launchKernel`. The
-[configuration selector](../library/src/amd_detail/rocblaslt/src/rocroller/solution_selection.cpp)
-and [cache](../library/src/amd_detail/rocblaslt/src/rocroller/solution_cache.cpp)
-are separate responsibilities. This route precedes Tensile solution lookup and
-does not pass through generic `getJitAlgo` or the Tensile KFA consumer. It is
-not a JIT backend, and `HIPBLASLT_JIT=2` skips it so that JIT is the only
-source of solutions.
-
-The checked-in [rocRoller KFA fixture](../tensilelite/Tensile/Tests/custom/custom_rr.yaml)
-demonstrates one assembly artifact entering existing custom-kernel ingestion. It
-does not prove automatic KFA export from runtime generation. The rocRoller dispatch
-branch also supports precompiled custom code objects with handwritten argument
-packing; [custom_kernels.cpp](../library/src/amd_detail/rocblaslt/src/rocroller/custom_kernels.cpp)
-includes kernels from other producers, so this route does not identify a kernel's producer.
-
 ## Producer proposals
 
 | TensileLite proposal | Other-generator proposal |
@@ -201,9 +181,9 @@ places JIT generation outside the pre-tuned library:
   consulted when there is no root library or operation branch, which a row could
   not catch.
 - The retry that repeats an xf32 lookup with FP32 math covers both pre-tuned
-  searches, and JIT runs once per query. When rocRoller's early route applies, its
-  results and the `getAllSolutions` fill come first, and JIT supplies what is still
-  missing from `requestedAlgoCount`.
+  searches, and JIT runs once per query. When another hipBLASLt route answers the
+  problem before the Tensile lookup, its results and the `getAllSolutions` fill come
+  first, and JIT supplies what is still missing from `requestedAlgoCount`.
 - JIT is consulted when the Equality results are fewer than `requestedAlgoCount`.
   It consults the JIT solution library and generates as many solutions as are
   needed to reach the requested count; the other pre-tuned libraries and the
@@ -212,7 +192,7 @@ places JIT generation outside the pre-tuned library:
   [ExactLogicLibrary::findTopSolutions](../tensilelite/include/Tensile/ExactLogicLibrary.hpp)
   accumulation, which skips the rows that a search excludes.
 - With `HIPBLASLT_JIT=2`, JIT is the only source: Equality, Prediction, the other
-  pre-tuned libraries and the rocRoller early route are skipped. The JIT solution
+  pre-tuned libraries and every other hipBLASLt source are skipped. The JIT solution
   library is consulted before generation.
 - The explicit entry points are internal. Deterministic backend choice and
   prewarming remain available to unit tests through the internal headers.

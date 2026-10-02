@@ -219,8 +219,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
 #ifdef HIPBLASLT_ENABLE_JIT
 /*******************************************************************************
  * jitAfterEquality() is true when getBestSolutions() consults JIT: in mode 1, *
- * except for the rocRoller path and grouped GEMM, where a caller lets JIT     *
- * fill what is still missing at the end.                                      *
+ * except for grouped GEMM and problems that an earlier hipBLASLt route        *
+ * answers, where a caller lets JIT fill what is still missing at the end.     *
  *******************************************************************************/
 bool jitAfterEquality(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
 bool jitAfterEquality(rocblaslt::RocGemmType gemmType);

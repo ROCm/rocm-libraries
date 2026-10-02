@@ -38,7 +38,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Resolved issues
 
 * Fixed `hipblasLtMatmulAlgoGetHeuristic` leaving `returnAlgoCount` unset when it fails, and reading past the result array when a tuning override matches a query for one solution.
-* Fixed `hipblasLtMatmul` crashing, instead of returning `HIPBLAS_STATUS_NOT_SUPPORTED`, for an algorithm whose solution index is not in the loaded library.
+* Fixed `hipblasLtMatmul` crashing, instead of returning `HIPBLAS_STATUS_INTERNAL_ERROR`, for an algorithm whose solution index is not in the loaded library.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
 * Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.

@@ -3396,7 +3396,7 @@ namespace
 #endif
     }
 
-    // A process-local JIT algorithm or a JIT library index; rocRoller runs neither.
+    // A process-local JIT algorithm or a JIT library index.
     [[maybe_unused]] bool isJitSolution(const rocblaslt_matmul_algo* algo)
     {
 #ifdef HIPBLASLT_ENABLE_JIT

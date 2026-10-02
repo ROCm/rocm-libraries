@@ -74,8 +74,10 @@ TensileLite checks parameter names, types, allowed values, matrix instructions,
 and derived solution properties using its existing validators. Multiple
 problem sizes are parsed but never timed or used to choose a recipe. Custom
 kernels, solution pools, and alternate tuning modes are outside this entry
-point. Non-null obsolete benchmark steps and parameter-level `CustomKernel`
-are rejected. `NoReject` cannot disable validation.
+point. Custom kernels are served through the KFA custom-kernel path
+([CustomKernels/README.md](Tensile/CustomKernels/README.md)), not through this
+entry point or the JIT. Non-null obsolete benchmark steps and parameter-level
+`CustomKernel` are rejected. `NoReject` cannot disable validation.
 
 The derived solution determines which helpers are built. For example, split-K
 may divide the reduction across workgroups and require an output-conversion

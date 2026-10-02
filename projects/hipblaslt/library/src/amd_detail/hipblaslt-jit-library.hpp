@@ -22,8 +22,8 @@ namespace TensileLite::hip
 
 namespace hipblaslt_jit
 {
-    // Pre-built Tensile indices are dense from 0 and rocRoller indices are
-    // negative, so JIT solution library indices use the rest of the int32 range.
+    // Pre-built Tensile indices are dense from 0 and other encoded solution indices
+    // are negative, so JIT solution library indices use the rest of the int32 range.
     constexpr int32_t jitIndexBase = 0x40000000;
     constexpr bool    isJitIndex(int32_t index) noexcept
     {
