@@ -49,6 +49,23 @@ namespace hipdnn_corpus_gen
 /// engine; the default accepts everything, which explores the declared space alone.
 using ProblemOracle = std::function<bool(const ProblemPoint&)>;
 
+/// A point every oracle admits: the problems several engines all serve, which is the only
+/// corpus on which their selections can be compared. Stops at the first refusal, so an engine
+/// listed later is not asked about a problem an earlier one already declined.
+inline ProblemOracle allOf(std::vector<ProblemOracle> oracles)
+{
+    return [oracles = std::move(oracles)](const ProblemPoint& point) {
+        for(const auto& admits : oracles)
+        {
+            if(!admits(point))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 /// How hard to look, and for how much. Identical in meaning for every operation.
 struct ExplorationRequest
 {
@@ -372,6 +389,35 @@ inline std::string describe(const ProblemPoint& point)
     return text;
 }
 
+/// Every numeric parameter's search window: the benchmarking ceiling, or a declared semantic
+/// range where one exists.
+/// Shared by the exploration and by a regime focus (RegimeFocus.hpp), so the two cannot walk
+/// different boxes.
+inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metadata,
+                                                 const ExplorationRequest& request)
+{
+    std::vector<ShapeDimension> window;
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(parameter.type != ParameterType::INT64 && parameter.type != ParameterType::FLOAT64)
+        {
+            continue;
+        }
+        // A semantic range, where one exists, is a genuine constraint of the operation and is
+        // honoured. Its absence is the normal case and means the ceiling applies (§4.3.2).
+        ShapeDimension dimension{parameter.name, 1, request.numericCeiling};
+        if(parameter.range.has_value())
+        {
+            // The floor is taken as declared, including zero: a padding of 0 is the unpadded
+            // convolution, which is the only one some engines accept.
+            dimension.low = parameter.range->first;
+            dimension.high = std::min(request.numericCeiling, parameter.range->second);
+        }
+        window.push_back(dimension);
+    }
+    return window;
+}
+
 } // namespace detail
 
 /// @brief Explores the space @p metadata declares, keeping the points @p admits accepts.
@@ -398,26 +444,10 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     ProblemCorpus corpus;
     corpus.operation = metadata.operation;
 
-    std::vector<ShapeDimension> numericWindow;
-    for(const auto& parameter : metadata.parameters)
+    const auto numericWindow = detail::numericWindow(metadata, request);
+    for(const auto& dimension : numericWindow)
     {
-        if(parameter.type != ParameterType::INT64 && parameter.type != ParameterType::FLOAT64)
-        {
-            continue;
-        }
-        corpus.numericParameters.push_back(parameter.name);
-
-        // A semantic range, where one exists, is a genuine constraint of the operation and is
-        // honoured. Its absence is the normal case and means the ceiling applies (§4.3.2).
-        ShapeDimension dimension{parameter.name, 1, request.numericCeiling};
-        if(parameter.range.has_value())
-        {
-            // The floor is taken as declared, including zero: a padding of 0 is the unpadded
-            // convolution, which is the only one some engines accept.
-            dimension.low = parameter.range->first;
-            dimension.high = std::min(request.numericCeiling, parameter.range->second);
-        }
-        numericWindow.push_back(dimension);
+        corpus.numericParameters.push_back(dimension.name);
     }
 
     size_t totalCombinations = 0;

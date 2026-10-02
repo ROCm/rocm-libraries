@@ -22,6 +22,7 @@
 #include <hipdnn_corpus_gen/ModelShapeSource.hpp>
 #include <hipdnn_corpus_gen/PointFilter.hpp>
 #include <hipdnn_corpus_gen/PoolAssembly.hpp>
+#include <hipdnn_corpus_gen/RegimeFocus.hpp>
 #include <hipdnn_corpus_gen/RegimeLabel.hpp>
 
 #include <hipdnn_frontend.hpp>
@@ -148,6 +149,11 @@ struct Options
     std::string probe;
     int64_t engineId = 0;
     bool haveEngineId = false;
+    /// Engines that must ALSO serve every problem (`--also-engine-name`), so the corpus is the
+    /// shapes every named engine runs -- what a cross-engine comparison needs, since a problem
+    /// one engine declines scores nothing in it. Resolved to registered ids before use.
+    std::vector<std::string> alsoEngineNames;
+    std::vector<int64_t> alsoEngineIds;
 
     /// Deliberate consent to generate without asking an engine anything. Naming an engine is
     /// otherwise required, because the alternative is a corpus whose applicability is inferred
@@ -177,6 +183,13 @@ struct Options
     /// construction rather than by trusting a random split.
     std::vector<std::filesystem::path> excludeCorpora;
 
+    /// Problems owed to named regimes: `--regime-quota` applies to every operation (key ""),
+    /// `--regime-quotas` names operations. A caller that has measured where a model is weak
+    /// asks for more of that population here, rather than for more of everything.
+    std::map<std::string, std::map<std::string, int64_t>> regimeQuotas;
+    std::vector<std::filesystem::path> regimeQuotaFiles;
+    std::string quotaError;
+
     /// Benchmarking ceiling in bytes across a problem's tensors. 256 MiB by default: large
     /// enough for real layers, small enough that no single problem dominates a corpus run.
     int64_t maxBytes = 256LL * 1024 * 1024;
@@ -191,6 +204,9 @@ void printHelp(const char* program)
               << "                         so the corpus is what that engine actually serves.\n"
               << "                         Needs a GPU and --plugin-dir.\n"
               << "  --engine-id <id>       Same, by id; decimal or 0x-prefixed hex\n"
+              << "  --also-engine-name <name>  Another engine that must ALSO serve every\n"
+              << "                         problem (repeatable): the corpus is then the\n"
+              << "                         shapes all of them serve, for comparing engines.\n"
               << "  --without-engine       Generate with no engine, on no GPU. The corpus is\n"
               << "                         then every problem the DECLARATIONS express, which\n"
               << "                         is a superset of what any engine serves, and any\n"
@@ -219,6 +235,15 @@ void printHelp(const char* program)
               << "                         different parameters conjoin, the same parameter\n"
               << "                         repeated widens it (q.head_dim=64 q.head_dim=128)\n"
               << "  --exclude-corpus <m>   manifest.json whose graphs must not recur (repeatable)\n"
+              << "  --regime-quota <r>=<n> At least n problems in regime r, as manifest.csv\n"
+              << "                         labels it (decode_short_mha); every operation.\n"
+              << "                         Repeatable. A regime the first pass under-fills is\n"
+              << "                         searched again with its declared equalities pinned.\n"
+              << "                         --count below the quotas' sum does not trim them;\n"
+              << "                         above it, the rest is cut as usual. 0 (default)\n"
+              << "                         with quotas means the quotas alone. Exit 3 when a\n"
+              << "                         quota is short and not shown saturated.\n"
+              << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
               << "  --budget <n>           First-pass oracle calls per combination (default\n"
               << "                         20000); growth toward --count may reach 64x this\n"
               << "  --ceiling <n>          Largest extent to propose (default 4096)\n"
@@ -253,6 +278,10 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
             options.engineName = next();
             options.engineId = hipdnn_data_sdk::utilities::engineNameToId(options.engineName);
             options.haveEngineId = true;
+        }
+        else if(arg == "--also-engine-name")
+        {
+            options.alsoEngineNames.push_back(next());
         }
         else if(arg == "--engine-id")
         {
@@ -314,6 +343,22 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         else if(arg == "--exclude-corpus")
         {
             options.excludeCorpora.emplace_back(next());
+        }
+        else if(arg == "--regime-quota")
+        {
+            const auto clause = next();
+            const auto split = clause.rfind('=');
+            if(split == std::string::npos || split == 0)
+            {
+                options.quotaError = "--regime-quota takes <regime>=<n>, not '" + clause + "'";
+                continue;
+            }
+            options.regimeQuotas[""][clause.substr(0, split)]
+                = std::strtoll(clause.substr(split + 1).c_str(), nullptr, 10);
+        }
+        else if(arg == "--regime-quotas")
+        {
+            options.regimeQuotaFiles.emplace_back(next());
         }
         else if(arg == "--budget")
         {
@@ -377,6 +422,11 @@ int runGenerator(const std::vector<std::string>& args)
     if(options.operationsDir.empty())
     {
         std::cerr << "--operations is required\n";
+        return 1;
+    }
+    if(!options.quotaError.empty())
+    {
+        std::cerr << options.quotaError << "\n";
         return 1;
     }
     // An engine is required, and the way out of it has to be said out loud. Generating without
@@ -491,6 +541,77 @@ int runGenerator(const std::vector<std::string>& args)
         return 1;
     }
 
+    // Quotas, resolved per operation and compiled before anything is searched: a regime no
+    // declared facet can spell would otherwise cost a whole search and then be reported as
+    // saturated -- "the engine serves none" -- when it does not exist at all.
+    for(const auto& path : options.regimeQuotaFiles)
+    {
+        std::ifstream file(path);
+        nlohmann::json quotas;
+        if(!file || !(file >> quotas) || !quotas.is_object())
+        {
+            std::cerr << "cannot read --regime-quotas " << path
+                      << " as {\"<operation>\": {\"<regime>\": n}}\n";
+            return 1;
+        }
+        for(const auto& operation : quotas.items())
+        {
+            for(const auto& quota : operation.value().items())
+            {
+                if(!quota.value().is_number_integer())
+                {
+                    std::cerr << path << ": quota for " << operation.key() << "/" << quota.key()
+                              << " is not an integer\n";
+                    return 1;
+                }
+                options.regimeQuotas[operation.key()][quota.key()] = quota.value().get<int64_t>();
+            }
+        }
+    }
+    std::map<std::string, std::map<std::string, int64_t>> quotasFor;
+    std::map<std::string, std::map<std::string, hipdnn_corpus_gen::RegimeFocus>> focusFor;
+    for(const auto& requested : options.regimeQuotas)
+    {
+        const auto& operation = requested.first;
+        const auto& quotas = requested.second;
+        const bool named = !operation.empty();
+        const bool selectedHere
+            = std::any_of(selected.operations.begin(),
+                          selected.operations.end(),
+                          [&](const auto& entry) { return entry.second.operation == operation; });
+        if(named && !selectedHere)
+        {
+            std::cerr << "--regime-quotas names operation '" << operation
+                      << "', which is not among those being generated\n";
+            return 1;
+        }
+        for(const auto& entry : selected.operations)
+        {
+            const auto& metadata = entry.second;
+            if(named && metadata.operation != operation)
+            {
+                continue;
+            }
+            for(const auto& [regime, count] : quotas)
+            {
+                std::string error;
+                const auto focus = hipdnn_corpus_gen::compileRegimeFocus(metadata, regime, error);
+                if(!focus.has_value())
+                {
+                    std::cerr << error << "\n";
+                    return 1;
+                }
+                if(count < 0)
+                {
+                    std::cerr << "quota for " << regime << " is negative\n";
+                    return 1;
+                }
+                quotasFor[metadata.operation][regime] = count;
+                focusFor[metadata.operation].emplace(regime, *focus);
+            }
+        }
+    }
+
     // Held out by construction. `benchmark` is content-derived, so the check is a set
     // difference over ids -- a random split would leave the comparison graphs in the training
     // corpus often enough to flatter every model trained on it.
@@ -585,11 +706,32 @@ int runGenerator(const std::vector<std::string>& args)
         // value means they never have to.
         options.engineId = requested->first;
         resolvedEngine = requested->second;
+        for(const auto& name : options.alsoEngineNames)
+        {
+            const auto also = std::find_if(
+                engines.begin(), engines.end(), [&](const auto& e) { return e.second == name; });
+            if(also == engines.end())
+            {
+                std::cerr << "Engine '" << name << "' (--also-engine-name) is not registered by "
+                          << "any loaded plugin.\n";
+                release();
+                return 1;
+            }
+            options.alsoEngineIds.push_back(also->first);
+        }
+    }
+    else if(!options.alsoEngineNames.empty())
+    {
+        std::cerr << "--also-engine-name needs an engine to ask: it cannot be combined with "
+                     "--without-engine\n";
+        release();
+        return 1;
     }
 
     // What shape generation records about an engine's coverage, beside the declarations.
     // Absent means nothing is recorded and every engine is searched.
     hipdnn_corpus_gen::EngineCoverageEntry coverage;
+    std::string coverageEngine = resolvedEngine;
     {
         const auto tablePath = std::filesystem::path(options.operationsDir) / "engines.json";
         if(std::filesystem::exists(tablePath))
@@ -613,10 +755,20 @@ int runGenerator(const std::vector<std::string>& args)
                 release();
                 return 1;
             }
-            const auto known = table.find(resolvedEngine);
-            if(known != table.end())
+            // The corpus is what EVERY named engine serves, so it is bounded by the narrowest
+            // coverage: one engine whose coverage is its pack makes the whole corpus the pack's.
+            std::vector<std::string> named{resolvedEngine};
+            named.insert(
+                named.end(), options.alsoEngineNames.begin(), options.alsoEngineNames.end());
+            for(const auto& name : named)
             {
-                coverage = known->second;
+                const auto known = table.find(name);
+                if(known != table.end()
+                   && (coverage.coverage != hipdnn_corpus_gen::EngineCoverage::PACK))
+                {
+                    coverage = known->second;
+                    coverageEngine = name;
+                }
             }
         }
     }
@@ -625,14 +777,14 @@ int runGenerator(const std::vector<std::string>& args)
     {
         if(options.packRoots.empty())
         {
-            std::cerr << resolvedEngine
+            std::cerr << coverageEngine
                       << " serves exactly its pack's shapes (engines.json: " << coverage.reason
                       << ")\n"
                       << "so its corpus comes from the pack: pass --kdp-root.\n";
             release();
             return 1;
         }
-        std::cerr << resolvedEngine << ": coverage is its pack (engines.json); no search is run.\n";
+        std::cerr << coverageEngine << ": coverage is its pack (engines.json); no search is run.\n";
     }
 
     if(!options.probe.empty())
@@ -786,6 +938,11 @@ int runGenerator(const std::vector<std::string>& args)
     /// A shortfall some combination did not demonstrate was forced on it -- saturation is the
     /// only accepted reason to return fewer problems than `--count` asked for.
     bool shortfallUnproven = false;
+    /// Per operation and regime: what a quota asked, what the pools held before a focused
+    /// search, what the search added, and what the cut took.
+    nlohmann::json quotaReports = nlohmann::json::object();
+    /// A quota left short without its focused search being shown saturated.
+    std::vector<std::string> quotaShort;
     /// Whether the search found any served problem beyond the pack and model shapes.
     bool searchFoundMore = false;
     std::ofstream commands;
@@ -828,20 +985,26 @@ int runGenerator(const std::vector<std::string>& args)
         // ceiling on every axis, so without one it would propose tensors no device can hold. The
         // pack and model lists are real workloads -- a pack geometry is a kernel the engine
         // ships -- and a default sized for the search dropped 133 of rocKE's 664 served shapes.
-        const auto oracle = hipdnn_corpus_gen::makeCorpusOracle(handle,
-                                                                options.engineId,
-                                                                metadata,
-                                                                &result.buildFailures,
-                                                                &result.firstBuildError,
-                                                                /*maxBytes=*/0,
-                                                                &timing);
-        const auto searchOracle = hipdnn_corpus_gen::makeCorpusOracle(handle,
-                                                                      options.engineId,
-                                                                      metadata,
-                                                                      &result.buildFailures,
-                                                                      &result.firstBuildError,
-                                                                      options.maxBytes,
-                                                                      &timing);
+        // Every named engine is asked, primary first; a problem is served only if all serve it.
+        std::vector<int64_t> askedEngines{options.engineId};
+        askedEngines.insert(
+            askedEngines.end(), options.alsoEngineIds.begin(), options.alsoEngineIds.end());
+        const auto everyEngine = [&](int64_t maxBytes) {
+            std::vector<hipdnn_corpus_gen::ProblemOracle> each;
+            for(const auto id : askedEngines)
+            {
+                each.push_back(hipdnn_corpus_gen::makeCorpusOracle(handle,
+                                                                   id,
+                                                                   metadata,
+                                                                   &result.buildFailures,
+                                                                   &result.firstBuildError,
+                                                                   maxBytes,
+                                                                   &timing));
+            }
+            return hipdnn_corpus_gen::allOf(std::move(each));
+        };
+        const auto oracle = everyEngine(/*maxBytes=*/0);
+        const auto searchOracle = everyEngine(options.maxBytes);
 
         // Every admitted point's graph, built once here and looked up again at emission.
         // Stamping before selection is what makes `--exclude-corpus` exact: the id is the key
@@ -1058,6 +1221,74 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
+        // A regime the pools hold too few of is searched again, focused: its declared
+        // equalities pinned so the walk proposes only points that can carry the label. Only the
+        // shortfall is asked for, and everything the search finds still passes the engine, the
+        // declared constraints, --keep and --exclude-corpus exactly as the first pass did.
+        const auto quotas = quotasFor.find(result.operation);
+        std::map<std::string, hipdnn_corpus_gen::RegimeSearchResult> focused;
+        std::map<std::string, int64_t> pooledBefore;
+        if(quotas != quotasFor.end())
+        {
+            std::vector<ProblemPoint> anchors;
+            std::map<std::string, std::set<std::string>> byRegime;
+            std::set<std::string> everything;
+            for(const auto& pool : pools)
+            {
+                for(const auto& entry : pool.second)
+                {
+                    const auto key = hipdnn_corpus_gen::detail::describe(entry.point);
+                    byRegime[entry.regime].insert(key);
+                    everything.insert(key);
+                    anchors.push_back(entry.point);
+                }
+            }
+            const hipdnn_corpus_gen::ProblemOracle alreadyHave = [&](const ProblemPoint& point) {
+                return everything.count(hipdnn_corpus_gen::detail::describe(point)) > 0;
+            };
+            for(const auto& [regime, asked] : quotas->second)
+            {
+                const auto have = static_cast<int64_t>(byRegime[regime].size());
+                pooledBefore[regime] = have;
+                if(have >= asked || coverageIsPack)
+                {
+                    // A pack-coverage engine serves exactly its pack; a search could only
+                    // rediscover it, so a short quota there is the engine's limit.
+                    continue;
+                }
+                auto found
+                    = hipdnn_corpus_gen::exploreRegime(metadata,
+                                                       focusFor.at(result.operation).at(regime),
+                                                       options.exploration,
+                                                       asked - have,
+                                                       admits,
+                                                       alreadyHave,
+                                                       anchors);
+                size_t draw = 0;
+                for(const auto& point : found.problems)
+                {
+                    hipdnn_corpus_gen::PoolEntry entry;
+                    entry.point = point;
+                    entry.source = "sweep";
+                    entry.origin
+                        = result.operation + " focus " + regime + " draw " + std::to_string(draw++);
+                    entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
+                    if(admit(entry, true))
+                    {
+                        everything.insert(hipdnn_corpus_gen::detail::describe(entry.point));
+                        pools["sweep"].push_back(std::move(entry));
+                    }
+                }
+                std::cerr << "  focus " << regime << ": " << have << " pooled, " << asked - have
+                          << " wanted, " << found.problems.size() << " found (" << found.inRegime
+                          << " of " << found.proposed << " proposals in the regime)"
+                          << (found.saturated ? ", saturated"
+                                              : (found.searchCapped ? ", budget limit" : ""))
+                          << "\n";
+                focused.emplace(regime, std::move(found));
+            }
+        }
+
         // Spread a cut over every categorical combination as well as the regime, so a count
         // below the pools' size takes a proportional share of each dtype, layout and mode.
         for(auto& pool : pools)
@@ -1100,8 +1331,49 @@ int runGenerator(const std::vector<std::string>& args)
         }
 
         std::map<std::string, int64_t> allocation;
-        const auto chosen
-            = hipdnn_corpus_gen::select(deduplicated, count, options.shares, allocation);
+        std::map<std::string, hipdnn_corpus_gen::RegimeQuotaOutcome> quotaOutcome;
+        const auto& owed
+            = quotas != quotasFor.end() ? quotas->second : std::map<std::string, int64_t>{};
+        // With quotas, "everything the pools hold" would bury them: 0 means the quotas alone.
+        // So the cut is asked for nothing beyond them -- a quota short of its regime stays short
+        // rather than being padded from another -- while what was requested is their sum.
+        int64_t cut = count;
+        if(!owed.empty() && options.count == 0)
+        {
+            cut = 0;
+            count = 0;
+            for(const auto& quota : owed)
+            {
+                count += quota.second;
+            }
+        }
+        const auto chosen = hipdnn_corpus_gen::select(
+            deduplicated, cut, options.shares, allocation, owed, quotaOutcome);
+        for(const auto& [regime, outcome] : quotaOutcome)
+        {
+            const auto search = focused.find(regime);
+            const bool focusSearched = search != focused.end();
+            const bool saturated = coverageIsPack || (focusSearched && search->second.saturated);
+            quotaReports[result.operation][regime] = nlohmann::json{
+                {"asked", outcome.asked},
+                {"delivered", outcome.taken},
+                {"pooled_before_focus", pooledBefore[regime]},
+                {"found_by_focus", focusSearched ? search->second.problems.size() : 0},
+                {"focus_proposals", focusSearched ? search->second.proposed : 0},
+                {"focus_proposals_in_regime", focusSearched ? search->second.inRegime : 0},
+                {"saturated", saturated},
+                {"search_capped", focusSearched && search->second.searchCapped}};
+            if(outcome.taken < outcome.asked && !saturated)
+            {
+                quotaShort.push_back(result.operation + " " + regime + ": "
+                                     + std::to_string(outcome.taken) + " of "
+                                     + std::to_string(outcome.asked)
+                                     + (searched && search->second.searchCapped
+                                            ? " (focused search stopped at its budget limit while "
+                                              "still finding points; raise --budget)"
+                                            : " (not shown saturated)"));
+            }
+        }
 
         requested += count;
         for(const auto& share : allocation)
@@ -1212,7 +1484,16 @@ int runGenerator(const std::vector<std::string>& args)
         manifest.reports = sourceReports;
         manifest.reports["engine"]
             = options.engineName.empty() ? nlohmann::json() : nlohmann::json(options.engineName);
+        if(!options.alsoEngineNames.empty())
+        {
+            // Every problem is served by each of these as well as by `engine`.
+            manifest.reports["also_engines"] = options.alsoEngineNames;
+        }
         manifest.reports["excluded"] = excludedRows;
+        if(!quotaReports.empty())
+        {
+            manifest.reports["regime_quota"] = quotaReports;
+        }
         if(options.count > 0 && total < requested && !shortfall.empty())
         {
             manifest.reports["shortfall"] = shortfall;
@@ -1247,12 +1528,21 @@ int runGenerator(const std::vector<std::string>& args)
     {
         return 2;
     }
+    if(!quotaShort.empty())
+    {
+        std::cerr << "SHORT of regime quotas:\n";
+        for(const auto& line : quotaShort)
+        {
+            std::cerr << "  " << line << "\n";
+        }
+        return 3;
+    }
     if(coverageIsPack)
     {
         if(options.count > 0 && total < requested)
         {
             std::cerr << "Corpus is the engine's whole coverage: " << total << " of " << requested
-                      << " requested. " << resolvedEngine
+                      << " requested. " << coverageEngine
                       << " serves only its pack's shapes (engines.json).\n";
         }
         return 0;
