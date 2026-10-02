@@ -53,6 +53,32 @@ struct BlockFmhaBwdDQOnlyQMajor
     static constexpr index_t kQKHeaddim = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
 
+    // D64 P/dS intermediate conversion: preserve round-to-nearest-even for
+    // non-NaN values while omitting NaN canonicalization. Arbitrary NaN payloads
+    // are NOT preserved and may round to infinity or signed zero. Output
+    // epilogues retain the standard conversion. This is a separate numerical
+    // policy change from the D64 scheduling/layout optimizations.
+    template <typename SrcTensor>
+    CK_TILE_DEVICE static auto d64_cast_pds(const SrcTensor& src)
+    {
+        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 && kQKHeaddim == 64 && kVHeaddim == 64 &&
+                     std::is_same_v<GemmDataType, bf16_t> &&
+                     std::is_same_v<remove_cvref_t<typename SrcTensor::DataType>, float>)
+        {
+            return tile_elementwise_in(
+                [](const float& x) {
+                    const uint32_t b = bit_cast<uint32_t>(x);
+                    return bit_cast<bf16_t>(
+                        static_cast<uint16_t>((b + 0x7fffu + ((b >> 16) & 1u)) >> 16));
+                },
+                src);
+        }
+        else
+        {
+            return cast_tile<GemmDataType>(src);
+        }
+    }
+
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
     static constexpr index_t kPadHeadDimQ  = Problem::kPadHeadDimQ;
     static constexpr index_t kPadHeadDimV  = Problem::kPadHeadDimV;
@@ -482,7 +508,7 @@ struct BlockFmhaBwdDQOnlyQMajor
                 });
             });
 
-            const auto ds_gemm = cast_tile<GemmDataType>(ds);
+            const auto ds_gemm = d64_cast_pds(ds);
             block_sync_lds();
             store_tile(ds_lds_window, ds_gemm);
             block_sync_lds();
