@@ -307,9 +307,9 @@ public:
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
 
-        int64_t leftBound = (nodeAttributes->left_bound().has_value())
-                                ? nodeAttributes->left_bound().value()
-                                : -1;
+        const int64_t leftBound = (nodeAttributes->left_bound().has_value())
+                                      ? nodeAttributes->left_bound().value()
+                                      : -1;
         int64_t rightBound = (nodeAttributes->right_bound().has_value())
                                  ? nodeAttributes->right_bound().value()
                                  : -1;

@@ -26,7 +26,7 @@ template <typename SdpaAttributesType>
 DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttributes,
                                              const char* planName)
 {
-    int64_t leftBound
+    const int64_t leftBound
         = nodeAttributes.left_bound().has_value() ? nodeAttributes.left_bound().value() : -1;
     int64_t rightBound
         = nodeAttributes.right_bound().has_value() ? nodeAttributes.right_bound().value() : -1;
