@@ -889,8 +889,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 // These tests exercise the shared mask-precedence policy directly through
 // plan_utils::resolveMask rather than through isApplicable. A deprecated causal
 // boolean fixes the diagonal and its alignment but keeps a real left_bound
-// (a causal sliding window); only setting both deprecated booleans at once
-// throws. The policy is
+// (a causal sliding window). Setting both deprecated booleans at once, or a
+// boolean together with a positive right_bound, throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -1016,6 +1016,20 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return resolveMaskOf(builder).type;
 }
 
+// Resolve the mask the way the builders do, at the given sequence lengths.
+plan_utils::ResolvedMask resolveMaskForOf(const flatbuffers::FlatBufferBuilder& builder,
+                                          int64_t seqLenQ,
+                                          int64_t seqLenKv)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    return plan_utils::resolveMaskFor(attrs, seqLenQ, seqLenKv);
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -1035,16 +1049,15 @@ TEST_F(TestSdpaBwdPlanBuilder, CausalMaskWithLeftBoundIsTopLeftSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    // causal_mask=true plus left_bound is a causal sliding window (cuDNN's
-    // set_causal_mask(true).set_sliding_window_length(n)). The boolean fixes the
-    // diagonal and its alignment, overriding right_bound=64 and BOTTOM_RIGHT, and
-    // keeps left_bound. Serving it as plain causal would widen the window to the
-    // full triangle with no error.
+    // causal_mask=true plus left_bound is a causal sliding window, as cuDNN reads
+    // set_causal_mask(true) next to a window. The boolean fixes the diagonal and
+    // its alignment, overriding BOTTOM_RIGHT, and keeps left_bound. Serving it as
+    // plain causal would widen the window to the full triangle with no error.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/true,
         /*causalMaskBottomRight=*/false,
         flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::nullopt,
         DiagonalAlignment::BOTTOM_RIGHT);
 
     plan_utils::ResolvedMask mask;
@@ -1097,12 +1110,12 @@ TEST_F(TestSdpaBwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsBottomRightSl
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // Same rule for causal_mask_bottom_right: a bottom-right causal window of 64,
-    // whatever right_bound and diagonal_alignment say.
+    // whatever diagonal_alignment says.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
         flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::nullopt,
         DiagonalAlignment::TOP_LEFT);
 
     plan_utils::ResolvedMask mask;
@@ -1111,6 +1124,72 @@ TEST_F(TestSdpaBwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsBottomRightSl
     EXPECT_EQ(mask.left, 64);
     EXPECT_EQ(mask.right, 0);
     EXPECT_FALSE(mask.topLeft);
+}
+
+// A causal flag fixes right_bound at 0. An explicit positive right_bound next to
+// it contradicts the flag, and silently replacing it with 0 would serve a
+// narrower band than the graph describes, so it is declined (as cuDNN's Python
+// binding and the gfx950 dense pack do). -1 and 0 agree with the flag.
+TEST_F(TestSdpaBwdPlanBuilder, CausalMaskWithPositiveRightBoundThrows)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    for(const bool bottomRight : {false, true})
+    {
+        auto contradictory = createSdpaBwdGraphWithMask(/*causalMask=*/!bottomRight,
+                                                        /*causalMaskBottomRight=*/bottomRight,
+                                                        flatbuffers::Optional<int64_t>(64),
+                                                        flatbuffers::Optional<int64_t>(64),
+                                                        DiagonalAlignment::TOP_LEFT);
+        EXPECT_THROW(resolveMaskOf(contradictory), hipdnn_plugin_sdk::HipdnnPluginException)
+            << "bottomRight=" << bottomRight;
+
+        for(const int64_t agreeing : {int64_t{-1}, int64_t{0}})
+        {
+            auto consistent = createSdpaBwdGraphWithMask(/*causalMask=*/!bottomRight,
+                                                         /*causalMaskBottomRight=*/bottomRight,
+                                                         flatbuffers::Optional<int64_t>(64),
+                                                         flatbuffers::Optional<int64_t>(agreeing),
+                                                         DiagonalAlignment::TOP_LEFT);
+            plan_utils::ResolvedMask mask;
+            EXPECT_NO_THROW(mask = resolveMaskOf(consistent))
+                << "bottomRight=" << bottomRight << " right_bound=" << agreeing;
+            EXPECT_EQ(mask.right, 0);
+        }
+    }
+}
+
+// A causal window whose left_bound reaches the widest offset the band can span
+// hides nothing, so at those sequence lengths it is the plain causal mask and the
+// builders pick the causal kernel. left_bound 128 covers Sq = Skv = 129 (span 128)
+// but not 130. Bottom-right measures the left span along Skv.
+TEST_F(TestSdpaBwdPlanBuilder, CausalWindowCoveringTheSequenceIsPlainCausal)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto topLeft = createSdpaBwdGraphWithMask(/*causalMask=*/true,
+                                              /*causalMaskBottomRight=*/false,
+                                              flatbuffers::Optional<int64_t>(128),
+                                              flatbuffers::nullopt,
+                                              DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(resolveMaskForOf(topLeft, 129, 129).type, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(resolveMaskForOf(topLeft, 64, 64).type, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    const auto window = resolveMaskForOf(topLeft, 130, 130);
+    EXPECT_EQ(window.type, plan_utils::MaskType::SLIDING_WINDOW);
+    EXPECT_EQ(window.left, 128);
+    EXPECT_EQ(window.right, 0);
+
+    auto bottomRight = createSdpaBwdGraphWithMask(/*causalMask=*/false,
+                                                  /*causalMaskBottomRight=*/true,
+                                                  flatbuffers::Optional<int64_t>(255),
+                                                  flatbuffers::nullopt,
+                                                  DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(resolveMaskForOf(bottomRight, 64, 256).type,
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(resolveMaskForOf(bottomRight, 64, 257).type, plan_utils::MaskType::SLIDING_WINDOW);
+
+    // The attribute-only classification has no sequence lengths and stays a window.
+    EXPECT_EQ(classifyMask(topLeft), plan_utils::MaskType::SLIDING_WINDOW);
 }
 
 // left_bound and right_bound are int64 attributes; the DQDKDV kernel window

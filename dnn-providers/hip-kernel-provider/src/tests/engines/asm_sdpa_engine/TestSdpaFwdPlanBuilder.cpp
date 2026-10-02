@@ -806,8 +806,8 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 // These tests exercise the shared mask-precedence policy directly through
 // plan_utils::getMaskType rather than through isApplicable. A deprecated causal
 // boolean fixes the diagonal and its alignment but keeps a real left_bound
-// (a causal sliding window); only setting both deprecated booleans at once
-// throws. The policy is
+// (a causal sliding window). Setting both deprecated booleans at once, or a
+// boolean together with a positive right_bound, throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so testing the helper keeps the assertions meaningful on
 // any device — including this gfx950 box. Driving the policy through
@@ -920,6 +920,18 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
+// The mask the builder classifies at the given sequence lengths.
+plan_utils::MaskType
+    classifyMaskAt(const flatbuffers::FlatBufferBuilder& builder, int64_t seqLenQ, int64_t seqLenKv)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graphWrapper.nodeWrappers()
+                            .front()
+                            ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    return plan_utils::resolveMaskFor(attrs, seqLenQ, seqLenKv).type;
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -939,10 +951,10 @@ TEST_F(TestSdpaFwdPlanBuilder, CausalMaskWithLeftBoundIsSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    // causal_mask=true plus left_bound is a causal sliding window (cuDNN's
-    // set_causal_mask(true).set_sliding_window_length(n)), not plain causal.
-    // No forward kernel serves a window, so the engine must decline it rather
-    // than widen the window to the full causal triangle.
+    // causal_mask=true plus left_bound is a causal sliding window, as cuDNN reads
+    // set_causal_mask(true) next to a window, not plain causal. No forward kernel
+    // serves a window, so the engine must decline it rather than widen the window
+    // to the full causal triangle.
     auto builder = createSdpaFwdGraphWithMask(
         /*causalMask=*/true,
         /*causalMaskBottomRight=*/false,
@@ -1007,6 +1019,29 @@ TEST_F(TestSdpaFwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsSlidingWindow
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// A causal window that covers the whole sequence is plain causal, so the forward
+// keeps serving it on the causal kernel. Before windows were honoured under a
+// causal flag, such graphs ran as causal; only a window that hides keys is
+// declined. At Sq = Skv = 256 the left span is 255.
+TEST_F(TestSdpaFwdPlanBuilder, CausalWindowCoveringTheSequenceIsPlainCausal)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto covering = createSdpaFwdGraphWithMask(/*causalMask=*/true,
+                                               /*causalMaskBottomRight=*/false,
+                                               flatbuffers::Optional<int64_t>(255),
+                                               flatbuffers::nullopt,
+                                               DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(classifyMaskAt(covering, 256, 256), plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    auto window = createSdpaFwdGraphWithMask(/*causalMask=*/true,
+                                             /*causalMaskBottomRight=*/false,
+                                             flatbuffers::Optional<int64_t>(254),
+                                             flatbuffers::nullopt,
+                                             DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(classifyMaskAt(window, 256, 256), plan_utils::MaskType::SLIDING_WINDOW);
 }
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated

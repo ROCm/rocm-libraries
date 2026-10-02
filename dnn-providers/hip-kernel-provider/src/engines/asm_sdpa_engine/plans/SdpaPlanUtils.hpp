@@ -68,19 +68,43 @@ struct ResolvedMask
     bool topLeft = true;
 };
 
+// The kind of mask a band is, in the left / right / alignment convention
+// (-1 = unbounded).
+inline MaskType classifyBand(int64_t left, int64_t right, bool topLeft)
+{
+    if(left == -1 && right == -1)
+    {
+        return MaskType::NO_MASK;
+    }
+    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    {
+        return topLeft ? MaskType::TOP_LEFT_CAUSAL : MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
 // Resolve the mask requested by an SDPA (forward or backward) attribute set.
 //
 // Two sources can describe the mask: the modern left_bound / right_bound /
 // diagonal_alignment trio, and the deprecated causal_mask /
 // causal_mask_bottom_right booleans. A deprecated boolean fixes the diagonal
-// (right bound 0) and its alignment, overriding right_bound and
-// diagonal_alignment, but it keeps a real left_bound: causal_mask plus
-// left_bound is a causal sliding window, the way cuDNN's set_causal_mask(true)
-// plus set_sliding_window_length(n) spells one. This matches the CPU and GPU
-// SDPA references (extractDiagonalBandParams). Without a deprecated boolean
-// the trio is authoritative. The two deprecated booleans are mutually
-// exclusive, so setting both throws HipdnnPluginException(INVALID_VALUE), and
-// so does a bound below -1 (the CPU and GPU references reject those too).
+// (right bound 0) and its alignment, overriding diagonal_alignment, but it keeps
+// a real left_bound: causal_mask plus left_bound is a causal sliding window, as
+// cuDNN reads set_causal_mask(true) next to a window. This matches the CPU and
+// GPU SDPA references (extractDiagonalBandParams). Without a deprecated boolean
+// the trio is authoritative.
+//
+// left_bound counts like flash-attn's window_size_left: with the causal diagonal,
+// left_bound L keeps L + 1 keys per row, the diagonal included. cuDNN's
+// set_sliding_window_length(L) keeps L, so the two spellings are not the same
+// window (issue #12982). The engines and both references all use the L + 1 count.
+//
+// Invalid combinations throw HipdnnPluginException(INVALID_VALUE): both
+// deprecated booleans at once; a bound below -1 (the references reject those
+// too); and a deprecated boolean next to a positive right_bound, which the
+// boolean would otherwise silently override with 0 (cuDNN's Python binding and
+// the gfx950 dense pack reject that combination as well). An explicit
+// right_bound of -1 or 0 next to a boolean is accepted.
 //
 // Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
 // fields as plain bool defaulting to false, with no has_*() accessor.
@@ -117,6 +141,14 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
                 + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
 
+    if((causalDeprecated || bottomRightDeprecated) && rightBound > 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: a causal mask fixes right_bound at 0, but right_bound="
+                + std::to_string(rightBound) + " is set");
+    }
+
     ResolvedMask mask;
     mask.left = leftBound;
     if(causalDeprecated || bottomRightDeprecated)
@@ -129,23 +161,13 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
         mask.right = rightBound;
         mask.topLeft = attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT;
     }
-
-    if(mask.left == -1 && mask.right == -1) // both unbounded
-    {
-        mask.type = MaskType::NO_MASK;
-    }
-    else if(mask.left == -1 && mask.right == 0) // causal: attend up to the diagonal
-    {
-        mask.type = mask.topLeft ? MaskType::TOP_LEFT_CAUSAL : MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-    else
-    {
-        mask.type = MaskType::SLIDING_WINDOW; // anything else is a sliding window
-    }
+    mask.type = classifyBand(mask.left, mask.right, mask.topLeft);
     return mask;
 }
 
-// The kind of mask resolveMask() derives; see there for the precedence rules.
+// The kind of mask resolveMask() derives from the attributes alone; see there for
+// the precedence rules. An engine choosing a kernel wants resolveMaskFor(), which
+// also accounts for the sequence lengths.
 template <typename SdpaAttrsT>
 MaskType getMaskType(const SdpaAttrsT& attrs)
 {
@@ -172,6 +194,24 @@ inline std::pair<int32_t, int32_t>
         return (bound < 0 || bound >= span) ? int32_t{-1} : static_cast<int32_t>(bound);
     };
     return {narrow(mask.left, leftSpan), narrow(mask.right, rightSpan)};
+}
+
+// The mask a kernel has to apply to this graph at these sequence lengths:
+// resolveMask() with both bounds narrowed by kernelWindowBounds() and the kind
+// classified again on the narrowed bounds. A window that covers the whole
+// sequence is the plain mask it equals, so for example causal_mask with
+// left_bound 128 at Sq = Skv <= 129 is TOP_LEFT_CAUSAL and runs on a causal
+// kernel instead of needing a sliding-window one. `left` and `right` fit the
+// kernels' int32 window fields.
+template <typename SdpaAttrsT>
+ResolvedMask resolveMaskFor(const SdpaAttrsT& attrs, int64_t seqLenQ, int64_t seqLenKv)
+{
+    ResolvedMask mask = resolveMask(attrs);
+    const auto [left, right] = kernelWindowBounds(mask, seqLenQ, seqLenKv);
+    mask.left = left;
+    mask.right = right;
+    mask.type = classifyBand(left, right, mask.topLeft);
+    return mask;
 }
 
 // =============================================================================

@@ -25,7 +25,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <utility>
 
 // Backward CSV columns consumed by this builder:
@@ -628,12 +627,16 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "Head dimension must be one of {64, 128, 192} (Actual value: "
                                    + std::to_string(headDimQk) + ")");
 
-    // Classify the mask; contradictory mask attributes are an invalid-input
-    // condition the engine declines rather than dispatches.
+    // Classify the mask at this graph's sequence lengths, the same way buildPlan
+    // does, so a window that covers the whole sequence takes the causal kernel.
+    // Contradictory mask attributes are an invalid-input condition the engine
+    // declines rather than dispatches.
     MaskType maskType = MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        maskType
+            = plan_utils::resolveMaskFor(attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2))
+                  .type;
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -960,7 +963,7 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    const auto resolvedMask = plan_utils::resolveMask(sdpaAttrs);
+    const auto resolvedMask = plan_utils::resolveMaskFor(sdpaAttrs, seqLenQ, seqLenKv);
     const auto maskType = resolvedMask.type;
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
@@ -1177,11 +1180,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     {
         // Resolved bounds, not the raw attributes: a deprecated causal boolean
         // plus left_bound is a window whose right bound and alignment come from
-        // the boolean, not from right_bound / diagonal_alignment. Bounds that span
-        // the whole sequence become -1 so an int64 bound never wraps in the int32
-        // kernel field.
-        std::tie(params.windowLeft, params.windowRight)
-            = plan_utils::kernelWindowBounds(resolvedMask, seqLenQ, seqLenKv);
+        // the boolean, not from right_bound / diagonal_alignment. resolveMaskFor
+        // has already narrowed them (a bound that spans the whole sequence is -1),
+        // so an int64 bound never wraps in the int32 kernel field.
+        params.windowLeft = static_cast<int32_t>(resolvedMask.left);
+        params.windowRight = static_cast<int32_t>(resolvedMask.right);
         params.topLeftAlignment = resolvedMask.topLeft;
     }
 

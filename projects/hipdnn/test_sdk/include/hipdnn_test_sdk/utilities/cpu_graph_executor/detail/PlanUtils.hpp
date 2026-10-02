@@ -51,8 +51,9 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
 
     // Check deprecated attributes. Each one fixes the alignment and the right bound
     // (the diagonal) but not the left bound: a graph that also carries left_bound is
-    // a causal sliding window, the way cuDNN's set_causal_mask(true) plus
-    // set_sliding_window_length(n) describes one.
+    // a causal sliding window, as cuDNN reads set_causal_mask(true) next to a window.
+    // left_bound counts like flash-attn's window_size_left (L keeps L + 1 keys with
+    // the diagonal), one more than cuDNN's set_sliding_window_length(L); see #12982.
     if(nodeAttributes.causal_mask())
     {
         rightBound = 0;

@@ -440,12 +440,16 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_o_tensor_uid().has_value(),
                                "amax_o tensor not supported");
 
-    // Classify the mask; contradictory mask attributes are an invalid-input
+    // Classify the mask at this graph's sequence lengths, the same way buildPlan
+    // does: a causal window that covers the whole sequence is plain causal and runs
+    // on the causal kernel. Contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        maskType
+            = plan_utils::resolveMaskFor(attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2))
+                  .type;
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -639,7 +643,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    params.maskType = plan_utils::getMaskType(sdpaAttrs);
+    params.maskType = plan_utils::resolveMaskFor(sdpaAttrs, seqLenQ, seqLenKv).type;
 
     const auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());

@@ -724,11 +724,12 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
 
 TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
 {
-    // causal_mask=true plus left_bound=2 is a causal sliding window: what cuDNN's
-    // set_causal_mask(true).set_sliding_window_length(2) asks for. The deprecated
+    // causal_mask=true plus left_bound=2 is a causal sliding window. The deprecated
     // flag fixes the diagonal (right bound 0, top-left) and must keep the left bound,
     // so the output equals the explicit (leftBound=2, rightBound=0, TOP_LEFT) graph.
-    // Sq = Skv = 8, so rows 3..7 lose keys to the window and plain causal differs.
+    // hipDNN's left_bound=2 keeps 3 keys per row with the diagonal (cuDNN's
+    // set_sliding_window_length(2) would keep 2; see #12982). With Sq = Skv = 8 that
+    // hipDNN window makes rows 3..7 lose keys, so plain causal differs.
     const std::vector<int64_t> dims = {1, 2, 8, 8};
 
     const unsigned int seed = getGlobalTestSeed();

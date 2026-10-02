@@ -242,6 +242,7 @@ struct MaskSpec
 {
     bool causalMask = false;
     flatbuffers::Optional<int64_t> rightBound = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> leftBound = flatbuffers::nullopt;
 };
 
 flatbuffers::FlatBufferBuilder sdpaAttributesWith(const MaskSpec& spec)
@@ -254,17 +255,23 @@ flatbuffers::FlatBufferBuilder sdpaAttributesWith(const MaskSpec& spec)
     {
         attributes.add_right_bound(*spec.rightBound);
     }
+    if(spec.leftBound.has_value())
+    {
+        attributes.add_left_bound(*spec.leftBound);
+    }
     attributes.add_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
     fbb.Finish(attributes.Finish());
     return fbb;
 }
 
-bool requestsCausalFor(const MaskSpec& spec)
+bool requestsCausalFor(const MaskSpec& spec, int64_t seqLenQ = 256, int64_t seqLenKv = 256)
 {
     const auto fbb = sdpaAttributesWith(spec);
     return HipFlash2FwdPlanBuilder::requestsCausal(
         *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>(
-            fbb.GetBufferPointer()));
+            fbb.GetBufferPointer()),
+        seqLenQ,
+        seqLenKv);
 }
 
 // isApplicable accepts right_bound 0 with top-left alignment as TOP_LEFT_CAUSAL, so
@@ -282,6 +289,15 @@ TEST(TestHipFlash2RequestsCausal, DeprecatedCausalMaskSetsCausal)
 TEST(TestHipFlash2RequestsCausal, UnmaskedGraphDoesNotSetCausal)
 {
     EXPECT_FALSE(requestsCausalFor({/*causalMask=*/false, /*rightBound=*/flatbuffers::nullopt}));
+}
+
+// A causal window whose left_bound reaches Sq - 1 hides nothing, so it is plain
+// causal and the kernel's causal flag serves it. One key narrower and it is a
+// real window, which isApplicable declines.
+TEST(TestHipFlash2RequestsCausal, CausalWindowCoveringTheSequenceSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/true, flatbuffers::nullopt, /*leftBound=*/255}));
+    EXPECT_FALSE(requestsCausalFor({/*causalMask=*/true, flatbuffers::nullopt, /*leftBound=*/254}));
 }
 
 } // namespace

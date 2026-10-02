@@ -240,11 +240,12 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
         << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
 }
 
-// causal_mask=true plus left_bound=2 is a causal sliding window (cuDNN's
-// set_causal_mask(true).set_sliding_window_length(2)). The deprecated flag fixes the
-// diagonal but must keep the left bound, the same rule as the CPU reference, so the plan
-// equals a direct fprop() with (leftBound=2, rightBound=0, top-left). Sq = Skv = 8, so
-// rows 3..7 lose keys to the window and plain causal attention would not match.
+// causal_mask=true plus left_bound=2 is a causal sliding window. The deprecated flag
+// fixes the diagonal but must keep the left bound, the same rule as the CPU reference,
+// so the plan equals a direct fprop() with (leftBound=2, rightBound=0, top-left).
+// hipDNN's left_bound=2 keeps 3 keys per row with the diagonal (cuDNN's
+// set_sliding_window_length(2) would keep 2; see #12982). With Sq = Skv = 8 that
+// hipDNN window makes rows 3..7 lose keys, so plain causal attention would not match.
 TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
 {
     SKIP_IF_NO_DEVICES();
