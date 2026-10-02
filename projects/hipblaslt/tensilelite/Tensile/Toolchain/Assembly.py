@@ -30,11 +30,11 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Union, NamedTuple
 
-from Tensile.Common import ensurePath, print1, print2, printWarning
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.Architectures import compilerTargetOf, isaToGfx
-from Tensile.Common.Types import IsaVersion
-from Tensile.CustomKernels import validateCustomKernelMetadata
+from ..Common import ensurePath, print1, print2, printWarning
+from ..Common.GlobalParameters import globalParameters
+from ..Common.Architectures import compilerTargetOf, isaToGfx
+from ..Common.Types import IsaVersion
+from ..CustomKernels import validateCustomKernelMetadata
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler

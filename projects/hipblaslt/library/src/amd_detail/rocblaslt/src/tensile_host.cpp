@@ -65,6 +65,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -3515,7 +3516,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // Amax uses Synchronizer for its counter, so retain its GSU region.
-    return solution.sizeMapping.streamK > 0 && solution.sizeMapping.streamKAtomic == 0
+    return solution.sizeMapping.isStreamK() && solution.sizeMapping.streamKAtomic == 0
            && !solution.problemType.outputAmaxD;
 }
 
@@ -4858,9 +4859,21 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     heuristicResults.resize(solutions.size());
 
+    // findAllSolutions() returns a std::set of solution pointers, whose iteration order is not
+    // stable across processes. Callers index into the returned vector, so flatten the set by
+    // durable solution index to keep the result reproducible.
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> orderedSolutions(
+        solutions.begin(), solutions.end());
+    std::sort(orderedSolutions.begin(),
+              orderedSolutions.end(),
+              [](const std::shared_ptr<TensileLite::ContractionSolution>& lhs,
+                 const std::shared_ptr<TensileLite::ContractionSolution>& rhs) {
+                  return lhs->index < rhs->index;
+              });
+
     int i                 = 0;
     int duplicated_counts = 0;
-    for(auto solution : solutions)
+    for(auto solution : orderedSolutions)
     {
         // Custom kernels don't support general batched mode (pointer arrays)
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
@@ -5589,7 +5602,18 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     }
     if(solutionIndex == -1)
         return "";
-    auto        solution       = library->getSolutionByIndex(*hardware, solutionIndex);
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(solutionIndex < 0)
+    {
+        return rocRollerShortKernelNameFromEncodedSolutionIndex(solutionIndex);
+    }
+#endif
+
+    auto solution = library->getSolutionByIndex(*hardware, solutionIndex);
+    if(!solution)
+        return "";
+
     std::string modifiedString = "";
     if(gsu != solution->sizeMapping.globalSplitU && gsu != 0)
     {

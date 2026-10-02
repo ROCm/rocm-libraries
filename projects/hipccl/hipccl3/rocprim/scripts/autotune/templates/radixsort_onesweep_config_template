@@ -1,0 +1,29 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RADIX_SORT_ONESWEEP_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+radix_sort_onesweep_config_params{kernel_config_params{ {{ measurement['cfg']['histogram']['bs'] }}, {{ measurement['cfg']['histogram']['ipt'] }} },
+kernel_config_params{ {{ measurement['cfg']['sort']['bs'] }}, {{ measurement['cfg']['sort']['ipt'] }} }, {{ measurement['cfg']['bits_per_place'] }}, {{ measurement['cfg']['algorithm'] }} }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class key_type, class value_type> constexpr auto radix_sort_onesweep_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("radix_sort_onesweep_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return radix_sort_onesweep_config_params_base<key_type, value_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return radix_sort_onesweep_config_picker<
+        comp_target<{{ fallback_target.target.as_str() }}>,
+        key_type,
+        value_type>();
+{%- endmacro %}

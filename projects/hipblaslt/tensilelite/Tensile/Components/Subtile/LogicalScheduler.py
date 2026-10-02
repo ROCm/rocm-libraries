@@ -22,6 +22,7 @@ The schedule is built in these passes:
 """
 
 from __future__ import annotations
+from ...ExecutionPolicy import hasStaticAssignment
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, ClassVar, Dict, List, Optional, Tuple, Union
@@ -29,6 +30,8 @@ from bisect import bisect_left
 import copy
 import io
 import math
+
+from rocisa.instruction import SBitcmp1B32
 
 from rocisa.code import Module
 from .ScheduleTypes import (
@@ -46,7 +49,7 @@ DS_B128_VGPRS = 4
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
-    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    from .Kernel import RegisterTileInfo
     # min(): full b128 tiles get 4-VGPR alignment; smaller tiles aren't padded
     # up to 4 (which would waste registers and can break occupancy).
     align = min(numRegs, DS_B128_VGPRS)
@@ -3283,7 +3286,7 @@ class LogicalScheduler:
         zeros the accumulators before the mainloop's first accumulating MFMA.
         """
         def _build_initC(emitter):
-            from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+            from .Kernel import initVgprTilesToZero
             return initVgprTilesToZero(emitter.writer, emitter.kernel,
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
@@ -3416,16 +3419,16 @@ class LogicalScheduler:
         When schedule=True and a group has MFMAs, calls instructionSchedule
         for interleaving. When schedule=False, emits instructions sequentially.
         """
-        from Tensile.Components.Subtile.InstructionScheduler import (
+        from .InstructionScheduler import (
             instructionSchedule,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
-        from Tensile.Components.Subtile.WaitAluInsertion import (
+        from .WaitAluInsertion import (
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
-        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SCBranchSCC1, SMovB32
 
         # gfx1250 needs a larger ds_read->waitcnt gap.
         isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
@@ -3439,7 +3442,7 @@ class LogicalScheduler:
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
             and kernel.get("PrefetchAcrossPersistent")
-            and kernel.get("StreamK") == 3
+            and hasStaticAssignment(kernel)
         )
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
@@ -3460,21 +3463,21 @@ class LogicalScheduler:
                         if use_pap_preloop_skip and not first_gr_group_done:
                             if em.opType == 'gr':
                                 if not skipping_first_gr_group:
-                                    module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+                                    module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
                                                          comment="Subtile PAP: first PRELOOP GR already issued?"))
-                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                    module.add(SCBranchSCC1(labelName=pap_merge_label.getLabelName(),
                                                             comment="skip first PRELOOP GR group if primed"))
                                     skipping_first_gr_group = True
                             elif skipping_first_gr_group:
                                 module.add(pap_merge_label)
-                                module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+                                module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                                                    comment="Subtile PAP: clear after first PRELOOP GR merge"))
                                 first_gr_group_done = True
                         for inst in em.instructions:
                             module.add(inst)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
-            module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+            module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
@@ -3491,7 +3494,7 @@ class LogicalScheduler:
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
         # that sync); the wait is appended at the end to hide its cross-CU latency.
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from .ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
         return module
 
@@ -3561,7 +3564,7 @@ class LogicalScheduler:
         def make_subtile_pap_module(skip_barrier=False):
             if (kernel.get("UseSubtileImpl")
                 and kernel.get("PrefetchAcrossPersistent")
-                and kernel.get("StreamK") == 3
+                and hasStaticAssignment(kernel)
                 and hasattr(writer, "prefetchAcrossPersistentSubtile")):
                 preloop_gr = Module("Subtile PAP first PRELOOP GR")
                 for em in self._preloop_emitted[0][0]:
@@ -4047,7 +4050,7 @@ class LogicalScheduler:
 
         self._kernel = kernel
 
-        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        from .InstructionEmitter import InstructionEmitter
 
         emitter = InstructionEmitter(
             writer, kernel, self.config,
@@ -4311,7 +4314,7 @@ class LogicalScheduler:
 
     def print_emit_dep_order(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
-        from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
+        from .InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:
             all_partitions = self._emitted
         buf = io.StringIO()
