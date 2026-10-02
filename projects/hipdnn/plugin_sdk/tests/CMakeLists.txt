@@ -12,6 +12,30 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# TestUhdGenArtifact runs tools/uhd_gen and loads its output, so it needs the trainer's Python
+# dependencies. Build it only when they import, and warn otherwise so the gap stays visible.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import lightgbm, numpy, flatbuffers, pandas, sklearn"
+            RESULT_VARIABLE _uhd_gen_deps_missing
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_uhd_gen_deps_missing EQUAL 0)
+            set(HIPDNN_UHD_GEN_RUNNABLE ON)
+        else()
+            message(WARNING
+                    "TestUhdGenArtifact NOT built: uhd_gen's dependencies are not importable "
+                    "by ${Python3_EXECUTABLE}. Nothing then checks that a real uhd_gen "
+                    "artifact loads at run time. Install "
+                    "projects/hipdnn/tools/uhd_gen/requirements.txt, or use the hipDNN dev "
+                    "image, which does.")
+        endif()
+    else()
+        message(WARNING "TestUhdGenArtifact NOT built: no Python3 interpreter found")
+    endif()
+endif()
+
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
     TestArchMatch.cpp
@@ -50,6 +74,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
+    $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
@@ -154,6 +179,18 @@ target_link_libraries(
 # include path exposes cross-SDK test headers, so add it explicitly.
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
+if(HIPDNN_UHD_GEN_RUNNABLE)
+    # The interpreter that passed the probe above, and the directory `python -m uhd_gen`
+    # imports from (the tool is a source tree, not an installed package). Both are paths on
+    # this machine, so the test skips where they do not exist. It finds hipdnn_uhd_features
+    # beside itself: both are built into and installed to the same bin directory.
+    get_filename_component(_uhd_gen_tools_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../tools" ABSOLUTE)
+    target_compile_definitions(hipdnn_plugin_sdk_tests
+        PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
+                HIPDNN_UHD_GEN_TOOLS_DIR="${_uhd_gen_tools_dir}")
+
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
+endif()
 
 
 # Fault the HIP boundary without adding hooks to the installed SDK.

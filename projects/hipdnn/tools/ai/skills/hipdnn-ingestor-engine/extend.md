@@ -7,8 +7,9 @@ and what it must preserve.
 
 The baseline inventory is the known-good installation plus the complete engine tree:
 UED, referenced KMD, dispatch, optional heuristic, shared/per-pack matchers, KDPs and
-inline/standalone UKDs. Resolve by UUID, not filename — pointwise ADD/MUL/SUB share a
-KMD whose filename does not follow the individual packs.
+inline/standalone UKDs, plus every trained UHD the UED's role maps bind and its
+`heuristics/<ued-id>/` subtree. Resolve by UUID, not filename — pointwise ADD/MUL/SUB
+share a KMD whose filename does not follow the individual packs.
 
 Preserve old names, UUIDs, symbols, references and native hooks; only genuinely new
 objects get new IDs. Compare completed, KMD-typed metadata across the whole engine:
@@ -33,6 +34,12 @@ retained UUID, as must consumer IDs in the enclosing KDP's
 `provenance.specialization_contract` and any per-UKD override. A standalone UKD carries
 its own declaration. Do not overwrite a live shared descriptor because scratch
 generation emitted one.
+
+A trained UHD records the UED, KMD and matcher ids and revisions it was measured against
+(`trained_against`), so the role maps, revisions and matchers are retained identities
+too. A splice that changes KMD fields, a matcher or a revision invalidates the bound
+models. RUNBOOK stage 6's **Trained heuristics survive regeneration only by intent**
+owns the retain, retrain or drop decision.
 
 Append new entries to an existing KDP without dropping its siblings. Packaged changes
 enter the authored production source root and are repacked; a packed descriptor cannot
