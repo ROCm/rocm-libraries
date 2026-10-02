@@ -411,7 +411,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
     if(variant != 2)
     {
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormFwdTrainSpatial"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormFwdTrainSpatial"));
         _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                           static_cast<unsigned int>(ylocalsize),
                                           static_cast<unsigned int>(zlocalsize));
@@ -423,10 +423,10 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         // For variant 2, we need to configure three kernels
         _runnableKernels.push_back(
-            _compiledProgram->getKernel("BatchNormFwdTrainSpatialMeanVariance"));
+            _compiledProgram->getKernel("batchNormFwdTrainSpatialMeanVariance"));
         _runnableKernels.push_back(
-            _compiledProgram->getKernel("BatchNormFwdTrainSpatialFinalMeanVariance"));
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormFwdTrainSpatialNorm"));
+            _compiledProgram->getKernel("batchNormFwdTrainSpatialFinalMeanVariance"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormFwdTrainSpatialNorm"));
 
         _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                           static_cast<unsigned int>(ylocalsize),

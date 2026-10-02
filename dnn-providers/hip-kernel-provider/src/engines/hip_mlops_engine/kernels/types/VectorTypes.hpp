@@ -13,39 +13,41 @@ namespace hip_kernel_provider
 
 // used by batch norm functions.
 template <typename T, int N>
-struct mapped_vector_type
+struct MappedVectorType
 {
     static_assert(false, "there is no specialization for this T & N combination.");
 };
 
 template <typename Vec>
-struct mapped_vector_info;
+struct MappedVectorInfo;
 
-#define DEFINE_VECTOR_MAPPING(ScalarType, N)                                  \
-    template <>                                                               \
-    struct mapped_vector_type<ScalarType, N>                                  \
-    {                                                                         \
-        using type = ScalarType __attribute__((ext_vector_type(N)));          \
-    };                                                                        \
-    template <>                                                               \
-    struct mapped_vector_info<ScalarType __attribute__((ext_vector_type(N)))> \
-    {                                                                         \
-        using UnderlyingType = ScalarType;                                    \
-        static constexpr size_t size = N;                                     \
+// NOLINTBEGIN(bugprone-macro-parentheses)
+#define DEFINE_VECTOR_MAPPING(ScalarType, N)                                \
+    template <>                                                             \
+    struct MappedVectorType<ScalarType, N>                                  \
+    {                                                                       \
+        using type = ScalarType __attribute__((ext_vector_type(N)));        \
+    };                                                                      \
+    template <>                                                             \
+    struct MappedVectorInfo<ScalarType __attribute__((ext_vector_type(N)))> \
+    {                                                                       \
+        using UnderlyingType = ScalarType;                                  \
+        static constexpr size_t SIZE = N;                                   \
     };
 
-#define DEFINE_SCALAR_MAPPING(ScalarType)    \
-    template <>                              \
-    struct mapped_vector_type<ScalarType, 1> \
-    {                                        \
-        using type = ScalarType;             \
-    };                                       \
-    template <>                              \
-    struct mapped_vector_info<ScalarType>    \
-    {                                        \
-        using UnderlyingType = ScalarType;   \
-        static constexpr size_t size = 1;    \
+#define DEFINE_SCALAR_MAPPING(ScalarType)  \
+    template <>                            \
+    struct MappedVectorType<ScalarType, 1> \
+    {                                      \
+        using type = ScalarType;           \
+    };                                     \
+    template <>                            \
+    struct MappedVectorInfo<ScalarType>    \
+    {                                      \
+        using UnderlyingType = ScalarType; \
+        static constexpr size_t SIZE = 1;  \
     };
+// NOLINTEND(bugprone-macro-parentheses)
 
 DEFINE_SCALAR_MAPPING(double)
 DEFINE_SCALAR_MAPPING(float)
@@ -77,26 +79,26 @@ DEFINE_VECTOR_MAPPING(unsigned int, 4)
 // ext_vector_type, which is used here extensively, will fail
 
 template <>
-struct mapped_vector_type<__half, 1>
+struct MappedVectorType<__half, 1>
 {
     using type = _Float16;
 };
 
 template <>
-struct mapped_vector_info<__half>
+struct MappedVectorInfo<__half>
 {
     using UnderlyingType = _Float16;
-    static constexpr size_t size = 1;
+    static constexpr size_t SIZE = 1;
 };
 
 template <>
-struct mapped_vector_type<__half, 2>
+struct MappedVectorType<__half, 2>
 {
     using type = _Float16 __attribute__((ext_vector_type(2)));
 };
 
 template <>
-struct mapped_vector_type<__half, 4>
+struct MappedVectorType<__half, 4>
 {
     using type = _Float16 __attribute__((ext_vector_type(4)));
 };
@@ -107,7 +109,7 @@ namespace detail
 template <typename OutType, typename InType>
 __forceinline__ __device__ __host__ OutType scalarcast(InType in)
 {
-    if constexpr(std::is_same<OutType, InType>::value)
+    if constexpr(std::is_same_v<OutType, InType>)
     {
         return in;
     }
@@ -120,10 +122,10 @@ __forceinline__ __device__ __host__ OutType scalarcast(InType in)
 template <typename MappedVectorType, typename T>
 __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 {
-    using VectorInfo = mapped_vector_info<MappedVectorType>;
+    using VectorInfo = MappedVectorInfo<MappedVectorType>;
     MappedVectorType retval;
     auto* retvalPtr = reinterpret_cast<typename VectorInfo::UnderlyingType*>(&retval);
-    for(auto i = 0; i < VectorInfo::size; ++i)
+    for(auto i = 0; i < VectorInfo::SIZE; ++i)
     {
         retvalPtr[i] = detail::scalarcast<typename VectorInfo::UnderlyingType>(val);
     }
@@ -135,29 +137,29 @@ __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 template <typename OutType, typename InType>
 __forceinline__ __device__ __host__ OutType cast(InType input)
 {
-    using InTypeInfo = mapped_vector_info<InType>;
-    using OutTypeInfo = mapped_vector_info<OutType>;
+    using InTypeInfo = MappedVectorInfo<InType>;
+    using OutTypeInfo = MappedVectorInfo<OutType>;
 
-    constexpr auto inSize = InTypeInfo::size;
-    constexpr auto outSize = OutTypeInfo::size;
+    constexpr auto IN_SIZE = InTypeInfo::SIZE;
+    constexpr auto OUT_SIZE = OutTypeInfo::SIZE;
 
-    if constexpr(inSize == outSize && outSize == 4)
+    if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 4)
     {
         return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
     }
-    else if constexpr(inSize == outSize && outSize == 2)
+    else if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 2)
     {
         return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
     }
-    else if constexpr(inSize == outSize && outSize == 1)
+    else if constexpr(IN_SIZE == OUT_SIZE && OUT_SIZE == 1)
     {
         return detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input);
     }
-    else if constexpr(inSize == 1 && outSize > 1)
+    else if constexpr(IN_SIZE == 1 && OUT_SIZE > 1)
     {
         return detail::broadcast<OutType>(input);
     }

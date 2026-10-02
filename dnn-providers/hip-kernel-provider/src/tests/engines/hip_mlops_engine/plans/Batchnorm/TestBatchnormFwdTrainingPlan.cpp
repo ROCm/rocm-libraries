@@ -235,7 +235,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileCallsCompilerWithCorrectSingleKernel)
             EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("BatchNormFwdTrainSpatial"))
+            EXPECT_CALL(*program, getKernel("batchNormFwdTrainSpatial"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
             return program;
         });
@@ -267,13 +267,13 @@ TEST(TestBatchnormFwdTrainingPlan, CompileCallsCompilerWithCorrectMultipleKernel
 
     auto mockProgram = std::make_unique<MockCompiledProgram>();
 
-    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdTrainSpatialMeanVariance"))
+    EXPECT_CALL(*mockProgram, getKernel("batchNormFwdTrainSpatialMeanVariance"))
         .WillOnce(::testing::Return(::testing::ByMove(createKernel())));
 
-    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdTrainSpatialFinalMeanVariance"))
+    EXPECT_CALL(*mockProgram, getKernel("batchNormFwdTrainSpatialFinalMeanVariance"))
         .WillOnce(::testing::Return(::testing::ByMove(createKernel())));
 
-    EXPECT_CALL(*mockProgram, getKernel("BatchNormFwdTrainSpatialNorm"))
+    EXPECT_CALL(*mockProgram, getKernel("batchNormFwdTrainSpatialNorm"))
         .WillOnce(::testing::Return(::testing::ByMove(createKernel())));
 
     EXPECT_CALL(mockCompiler, compile("BatchNormFwdTrainSpatial.cpp", ::testing::_))
