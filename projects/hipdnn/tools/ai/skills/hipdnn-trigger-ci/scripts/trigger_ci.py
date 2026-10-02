@@ -298,7 +298,42 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
     return run_id
 
 
-def check_reuse_baseline(run_id, workflow_file, ref):
+def ref_head_sha(ref):
+    return run_cmd(["gh", "api", f"repos/{REPO}/commits/{ref}", "--jq", ".sha"])
+
+
+def runs_cancelled_by_dispatch(workflow_file, sha):
+    # The workflows' concurrency group is "<workflow>-<PR number or SHA>" with
+    # cancel-in-progress. A dispatch has no PR number, so it joins the group of
+    # every non-pull_request run of the workflow at that SHA, on any branch
+    # (push postsubmit, schedule, other dispatches), and cancels them.
+    out = run_cmd(
+        [
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            REPO,
+            "--workflow",
+            workflow_file,
+            "--commit",
+            sha,
+            "--limit",
+            "50",
+            "--json",
+            "databaseId,status,event,headBranch",
+        ]
+    )
+    runs = json.loads(out) if out else []
+    return [
+        run
+        for run in runs
+        if run["status"] != "completed"
+        and run["event"] not in ("pull_request", "pull_request_target")
+    ]
+
+
+def check_reuse_baseline(run_id, workflow_file, ref, head_sha):
     run = json.loads(
         run_cmd(
             [
@@ -310,7 +345,6 @@ def check_reuse_baseline(run_id, workflow_file, ref):
             ]
         )
     )
-    head_sha = run_cmd(["gh", "api", f"repos/{REPO}/commits/{ref}", "--jq", ".sha"])
     problems = []
     # The path can carry a "@ref" suffix, so compare only the file part.
     if run["path"].split("@")[0] != f".github/workflows/{workflow_file}":
@@ -375,13 +409,25 @@ def cmd_dispatch(args):
         )
         sys.exit(1)
     ref = resolve_branch(args)
+    # A dispatch on a postsubmit branch shares the concurrency group of that
+    # commit's push run and cancels it on shared CI.
+    if (
+        ref == "develop" or ref.startswith("release/")
+    ) and not args.allow_shared_branch:
+        print(
+            f"error: dispatching on '{ref}' can cancel its postsubmit run; use a "
+            "user branch, or pass --allow-shared-branch",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    head_sha = ref_head_sha(ref)
     inputs = {}
     for field in wf["fields"]:
         value = getattr(args, field, "") or ""
         if value:
             inputs[INPUT_MAP[field]] = value
     if args.reuse_build:
-        check_reuse_baseline(args.reuse_build, wf["file"], ref)
+        check_reuse_baseline(args.reuse_build, wf["file"], ref, head_sha)
         # Copy every build stage from the baseline run; only tests run.
         inputs["prebuilt_stages"] = "all"
     pinned = checkout_therock_ref()
@@ -392,6 +438,31 @@ def cmd_dispatch(args):
             f"files at {pinned} before relying on them",
             file=sys.stderr,
         )
+    doomed = runs_cancelled_by_dispatch(wf["file"], head_sha)
+    if doomed:
+        print(
+            f"warning: this dispatch cancels {len(doomed)} active run(s) of "
+            f"{wf['file']} at {head_sha[:11]} (shared concurrency group):",
+            file=sys.stderr,
+        )
+        for run in doomed:
+            print(
+                f"  {run['databaseId']}  {run['status']}  {run['event']}  "
+                f"{run['headBranch']}",
+                file=sys.stderr,
+            )
+        if args.yes and not args.cancel_active:
+            print(
+                "error: pass --cancel-active to dispatch anyway, after the user "
+                "approved cancelling the runs above",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.dry_run:
+            print(
+                "  after approval, the --yes run also needs --cancel-active",
+                file=sys.stderr,
+            )
     print(f"Dispatching '{args.workflow}' on '{ref}':")
     dispatch_workflow(wf["file"], ref, inputs, dry_run=args.dry_run)
 
@@ -547,6 +618,20 @@ hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_m
         metavar="RUN_ID",
         help="Skip the build and copy its artifacts from this completed multi-arch "
         "run of the same commit (multi-arch only)",
+    )
+    dispatch.add_argument(
+        "--cancel-active",
+        dest="cancel_active",
+        action="store_true",
+        help="Allow --yes to cancel the active runs of the workflow at the same "
+        "commit that the dry-run lists",
+    )
+    dispatch.add_argument(
+        "--allow-shared-branch",
+        dest="allow_shared_branch",
+        action="store_true",
+        help="Allow dispatching on develop or release/*, which can cancel "
+        "their postsubmit runs",
     )
     # A real dispatch needs --yes, so it cannot happen by leaving a flag out.
     mode = dispatch.add_mutually_exclusive_group(required=True)
