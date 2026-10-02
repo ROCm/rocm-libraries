@@ -30,12 +30,16 @@
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/conv/problem_description.hpp>
+#include <miopen/convolution.hpp>
+#include <miopen/tensor.hpp>
 #include <string>
 #include <map>
 #include <optional>
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
@@ -85,6 +89,19 @@ std::string FormatMissingFiles(const std::vector<miopen::fs::path>& missing_file
     for(const auto& file : missing_files)
         os << "\n  " << file.string();
     return os.str();
+}
+
+// Build a minimal 2D conv ProblemDescription for use as a cache key in tests.
+miopen::conv::ProblemDescription
+MakeTestProblem(int n = 1, int c = 4, int h = 8, int w = 8, int k = 8, int y = 3, int x = 3)
+{
+    miopen::TensorDescriptor in_desc(miopenFloat, {n, c, h, w});
+    miopen::TensorDescriptor wei_desc(miopenFloat, {k, c, y, x});
+    miopen::TensorDescriptor out_desc(miopenFloat, {n, k, h - y + 1, w - x + 1});
+    miopen::ConvolutionDescriptor conv_desc(
+        2, miopenConvolution, miopenPaddingDefault, {0, 0}, {1, 1}, {1, 1});
+    return miopen::conv::ProblemDescription(
+        in_desc, wei_desc, out_desc, conv_desc, miopen::conv::Direction::BackwardWeights);
 }
 
 std::vector<std::vector<std::string>> GenerateValidKernelParams(
@@ -330,8 +347,10 @@ TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+    auto problem             = MakeTestProblem();
     auto result              = ModelSelectBestCandidate(params.arch,
                                            params.solver,
+                                           problem,
                                            features,
                                            valid_kernel_params,
                                            /*use_split_k=*/false,
@@ -1023,6 +1042,149 @@ TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
     ASSERT_EQ(encoded.size(), 1u) << "static kernel candidate was unexpectedly skipped";
     EXPECT_EQ(encoded[0].size(),
               meta.output_params().size() - meta.GetConstantOutputIndices().size());
+}
+
+// === CACHE TESTS ===
+
+// Calling ModelSelectBestCandidate twice with the same arguments must return
+// identical results. The second call hits the in-process RAM cache.
+TEST_P(GPU_CandidateSelection_FP32, CandidateSelectionRamCache_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+    auto problem             = MakeTestProblem();
+
+    const auto t0 = std::chrono::high_resolution_clock::now();
+    auto result1  = ModelSelectBestCandidate(params.arch,
+                                            params.solver,
+                                            problem,
+                                            features,
+                                            valid_kernel_params,
+                                            /*use_split_k=*/false,
+                                            accept_all_combinations);
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    auto result2  = ModelSelectBestCandidate(params.arch,
+                                            params.solver,
+                                            problem,
+                                            features,
+                                            valid_kernel_params,
+                                            /*use_split_k=*/false,
+                                            accept_all_combinations);
+    const auto t2 = std::chrono::high_resolution_clock::now();
+
+    ASSERT_FALSE(result1.IsEmpty()) << "First call returned empty result";
+    ASSERT_FALSE(result2.IsEmpty()) << "Second call (cache hit) returned empty result";
+    ASSERT_EQ(result1.kernel_indices, result2.kernel_indices) << "Cache returned different indices";
+    ASSERT_EQ(result1.split_k_values, result2.split_k_values)
+        << "Cache returned different split_k values";
+
+    const auto first_ms  = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    const auto second_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    std::cout << "[CandidateSelectionRamCache] first=" << first_ms << " ms, second=" << second_ms
+              << " ms\n";
+}
+
+// Kernel-config embeddings are cached per row via GetOrComputeKernelEmbeddings,
+// which is exercised through ModelSelectBestCandidate. Two calls with identical
+// features and kernel params but different problems bypass the B-RAM cache yet
+// share the per-row embedding cache. Because both inputs to the scorer are then
+// identical (same Tower 1 output, same cached Tower 2 embeddings), the rankings
+// must be deterministically the same.
+TEST_P(GPU_CandidateSelection_FP32, KernelEmbeddingCache_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+
+    // Call 1: populates the B-RAM cache (keyed on problem_a) and the per-row
+    // embedding cache for all kernel rows.
+    auto problem_a = MakeTestProblem(1, 4, 8, 8, 8, 3, 3);
+    auto result_a  = ModelSelectBestCandidate(params.arch,
+                                             params.solver,
+                                             problem_a,
+                                             features,
+                                             valid_kernel_params,
+                                             /*use_split_k=*/false,
+                                             accept_all_combinations);
+
+    // Call 2: different N → different B-RAM key → B-RAM cache miss.
+    // Same features and same kernel params → embedding cache hit for all rows.
+    // Identical scorer inputs must produce identical rankings.
+    auto problem_b = MakeTestProblem(2, 4, 8, 8, 8, 3, 3);
+    auto result_b  = ModelSelectBestCandidate(params.arch,
+                                             params.solver,
+                                             problem_b,
+                                             features,
+                                             valid_kernel_params,
+                                             /*use_split_k=*/false,
+                                             accept_all_combinations);
+
+    ASSERT_FALSE(result_a.IsEmpty()) << "First call returned empty result";
+    ASSERT_FALSE(result_b.IsEmpty())
+        << "Second call returned empty result (embedding cache may be corrupt)";
+    ASSERT_EQ(result_a.kernel_indices, result_b.kernel_indices)
+        << "Rankings differ despite identical features and kernel set";
+    ASSERT_EQ(result_a.split_k_values, result_b.split_k_values);
+}
+
+// use_split_k=false and use_split_k=true must produce independent cache entries.
+TEST_P(GPU_CandidateSelection_FP32, CandidateSelectionRamCacheIsolation_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+    auto problem             = MakeTestProblem();
+
+    auto result_no_splitk = ModelSelectBestCandidate(params.arch,
+                                                     params.solver,
+                                                     problem,
+                                                     features,
+                                                     valid_kernel_params,
+                                                     /*use_split_k=*/false,
+                                                     accept_all_combinations);
+    auto result_splitk    = ModelSelectBestCandidate(params.arch,
+                                                  params.solver,
+                                                  problem,
+                                                  features,
+                                                  valid_kernel_params,
+                                                  /*use_split_k=*/true,
+                                                  accept_all_combinations);
+
+    ASSERT_FALSE(result_no_splitk.IsEmpty()) << "use_split_k=false returned empty";
+    ASSERT_FALSE(result_splitk.IsEmpty()) << "use_split_k=true returned empty";
+
+    auto result_no_splitk_cached = ModelSelectBestCandidate(params.arch,
+                                                            params.solver,
+                                                            problem,
+                                                            features,
+                                                            valid_kernel_params,
+                                                            /*use_split_k=*/false,
+                                                            accept_all_combinations);
+    auto result_splitk_cached    = ModelSelectBestCandidate(params.arch,
+                                                         params.solver,
+                                                         problem,
+                                                         features,
+                                                         valid_kernel_params,
+                                                         /*use_split_k=*/true,
+                                                         accept_all_combinations);
+
+    ASSERT_EQ(result_no_splitk.kernel_indices, result_no_splitk_cached.kernel_indices)
+        << "Cache isolation failed: use_split_k=false entry was overwritten";
+    ASSERT_EQ(result_splitk.kernel_indices, result_splitk_cached.kernel_indices)
+        << "Cache isolation failed: use_split_k=true entry was overwritten";
+
+    EXPECT_NE(result_no_splitk.split_k_values, result_splitk.split_k_values)
+        << "Expected use_split_k=false and use_split_k=true to produce different split_k_values";
 }
 
 // === INSTANTIATION ===
