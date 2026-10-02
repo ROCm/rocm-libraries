@@ -58,6 +58,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -4765,9 +4766,21 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     heuristicResults.resize(solutions.size());
 
+    // findAllSolutions() returns a std::set of solution pointers, whose iteration order is not
+    // stable across processes. Callers index into the returned vector, so flatten the set by
+    // durable solution index to keep the result reproducible.
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> orderedSolutions(
+        solutions.begin(), solutions.end());
+    std::sort(orderedSolutions.begin(),
+              orderedSolutions.end(),
+              [](const std::shared_ptr<TensileLite::ContractionSolution>& lhs,
+                 const std::shared_ptr<TensileLite::ContractionSolution>& rhs) {
+                  return lhs->index < rhs->index;
+              });
+
     int i                 = 0;
     int duplicated_counts = 0;
-    for(auto solution : solutions)
+    for(auto solution : orderedSolutions)
     {
         // Custom kernels don't support general batched mode (pointer arrays)
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
