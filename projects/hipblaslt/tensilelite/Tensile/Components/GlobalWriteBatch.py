@@ -1047,7 +1047,7 @@ class GlobalWriteBatchWriter:
     store's address a function of how many stores ran before it, so the drain
     can be spread out but never reordered -- which is what disabled the
     last-partition weave, and what stands between a partition's store and its
-    own last k-subiter. See FINDINGS F25.
+    own last k-subiter.
 
     The row is uniform, so it fits soffset, which every one of these stores
     leaves at 0. Recomputing it per store costs one s_mul against the row

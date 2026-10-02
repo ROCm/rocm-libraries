@@ -6271,8 +6271,7 @@ class LogicalScheduler:
             # read them.
             #
             # The count is how many of those loads may stay in flight past the
-            # barrier, and _tailEntryInflightBound derives it. The knob
-            # overrides it; see FINDINGS F22 for the sweep behind the bound.
+            # barrier, and _tailEntryInflightBound derives it.
             from rocisa.instruction import SWaitCnt, SBarrier
             self._tail_uid_sync_slot = self._tailUidSyncSlot(nll_ft_3d)
             # Split entry: give the in-flight half its own wait and barrier at
