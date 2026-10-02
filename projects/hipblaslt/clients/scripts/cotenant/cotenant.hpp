@@ -5,7 +5,11 @@
 
 #include <hip/hip_runtime.h>
 
+#include <unistd.h>
+
+#include <algorithm>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <exception>
 #include <stdexcept>
@@ -18,6 +22,18 @@ namespace hipblaslt_cotenant
     {
         if(status != hipSuccess)
             throw std::runtime_error(std::string("cotenant: ") + hipGetErrorString(status));
+    }
+
+    // Unbuffered stderr write; the clients poison stdio stream identifiers.
+    inline void log(const char* fmt, ...)
+    {
+        char    buf[512];
+        va_list args;
+        va_start(args, fmt);
+        const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        if(n > 0)
+            (void)!::write(STDERR_FILENO, buf, std::min<size_t>(n, sizeof(buf) - 1));
     }
 
     template <bool Stoppable>
@@ -95,16 +111,15 @@ namespace hipblaslt_cotenant
             throw std::runtime_error("cotenant: reported occupancy is outside the requested cap");
 
         if(verbose)
-            std::fprintf(stderr,
-                         "cotenant: device=%d (%s) grid=%d block=256 max_occupancy=%d "
-                         "max_blocks_per_cu=%d lds_reserved=%d/%d\n",
-                         dev,
-                         prop.gcnArchName,
-                         n_cus,
-                         max_occupancy,
-                         blocks_per_cu,
-                         reserve,
-                         lds_per_cu);
+            log("cotenant: device=%d (%s) grid=%d block=256 max_occupancy=%d "
+                "max_blocks_per_cu=%d lds_reserved=%d/%d\n",
+                dev,
+                prop.gcnArchName,
+                n_cus,
+                max_occupancy,
+                blocks_per_cu,
+                reserve,
+                lds_per_cu);
         busy_spin<Stoppable><<<dim3(n_cus), dim3(256), reserve, stream>>>(ready, stop);
         check(hipGetLastError());
     }
@@ -122,8 +137,7 @@ namespace hipblaslt_cotenant
         }
         if(verbose)
         {
-            std::fprintf(stderr, "cotenant: READY %d/%d workgroups resident\n", count, count);
-            std::fflush(stderr);
+            log("cotenant: READY %d/%d workgroups resident\n", count, count);
         }
     }
 
@@ -142,8 +156,7 @@ namespace hipblaslt_cotenant
                 const auto status = hipGetLastError();
                 if(status != hipSuccess)
                 {
-                    std::fprintf(
-                        stderr, "cotenant: stop launch failed: %s\n", hipGetErrorString(status));
+                    log("cotenant: stop launch failed: %s\n", hipGetErrorString(status));
                     std::terminate();
                 }
             }
@@ -151,7 +164,7 @@ namespace hipblaslt_cotenant
             {
                 const auto status = hipStreamSynchronize(stream_);
                 if(status != hipSuccess)
-                    std::fprintf(stderr, "cotenant: stop failed: %s\n", hipGetErrorString(status));
+                    log("cotenant: stop failed: %s\n", hipGetErrorString(status));
                 (void)hipStreamDestroy(stream_);
             }
             if(stop_)
