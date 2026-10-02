@@ -628,6 +628,13 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
 
+        # Exact-size custom kernels record the M/N/K window they won. Without
+        # it, a multi-solution lookup also accepts the neighboring tile.
+        size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
+        if size_bounds:
+            for bound in size_bounds:
+                rv += [cls(bound["tag"], index=bound["index"], value=bound["value"])]
+
         if state.get('ReuseAcrossPersistent', 0):
             # A lives in VGPRs for the whole persistent loop, so the kernel is only
             # correct for problems where every tile a workgroup visits reads the

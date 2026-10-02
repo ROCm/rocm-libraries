@@ -39,8 +39,140 @@ from sys import stdout
 import array
 import csv
 import os
+import re
 import time
 import math
+
+# rocRoller turns workgroup mapping off below this K (solution_selection.cpp).
+_ROCROLLER_WGM_K = 4096
+_CUSTOM_TILE_RE = re.compile(r"WGT_(\d+)x(\d+)x(\d+)")
+_SIX_BIT_PAIR_RE = re.compile(r"(?:FP6|BF6)_(?:FP6|BF6)")
+# Sizes rocRoller distinguishes for these MX tiles. GridBased snaps a query up
+# to the next table M, so each of these must be its own exact row when the
+# winning tile changes.
+_EXACT_CUSTOM_SMALL_MN = (64, 96, 128)
+_EXACT_CUSTOM_LARGE = ((3072, 3072, 16384), (4096, 4096, 16384))
+# MI355X is 75a3; 75a2 is the other gfx950 id this library must name. An
+# unsupported list (gfx942 0049/0050) would otherwise be dropped and the
+# master library would load only through the empty-DeviceNames fallback.
+_GFX950_DEVICE_NAMES = ["Device 75a3", "Device 75a2"]
+
+
+def _solutionField(solution, key, default=None):
+  """Read a solution field from a dict or a Solution (state via __getitem__)."""
+  if isinstance(solution, dict):
+    return solution.get(key, default)
+  try:
+    return solution[key]
+  except (KeyError, IndexError, TypeError):
+    return getattr(solution, key, default)
+
+
+def isCustomKernelSolution(solution) -> bool:
+  if _solutionField(solution, "CustomKernelName"):
+    return True
+  custom = _solutionField(solution, "CustomKernel")
+  return isinstance(custom, dict) and bool(custom.get("name") or custom.get("macrotile"))
+
+
+def customKernelTile(solution):
+  """(macroM, macroN, macroK, usesWorkgroupMapping) from a rocRoller custom kernel."""
+  name = _solutionField(solution, "CustomKernelName") or ""
+  custom = _solutionField(solution, "CustomKernel")
+  if not name and isinstance(custom, dict):
+    name = custom.get("name") or ""
+  match = _CUSTOM_TILE_RE.search(name)
+  if match:
+    macroM, macroN, macroK = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+  elif isinstance(custom, dict) and custom.get("macrotile"):
+    macroM, macroN, macroK = (int(x) for x in custom["macrotile"][:3])
+  else:
+    return None
+  return (macroM, macroN, macroK, "_WGM" in name)
+
+
+def _sixBitPair(solutions) -> bool:
+  for solution in solutions:
+    name = _solutionField(solution, "CustomKernelName") or ""
+    if _SIX_BIT_PAIR_RE.search(name):
+      return True
+  return False
+
+
+def preferredExactCustomKernel(m, n, k, solutions):
+  """Pick the custom kernel rocRoller launches for this exact size.
+
+  Cpu-only logic scores every candidate at the same GFLOPS. rocRoller's
+  selector still has a single launch: non-WGM 32x32x64 on the small MX
+  sizes, 16x16x128 at 256x256x256, and a WGM tile once K is large enough
+  for workgroup mapping (256x256, except 3072 FP8xFP4 which launches
+  128x128).
+  """
+  tiled = []
+  for solution in solutions:
+    tile = customKernelTile(solution)
+    if tile is not None:
+      tiled.append((solution, tile))
+  if not tiled:
+    return solutions[0] if solutions else None
+
+  useWgm = k >= _ROCROLLER_WGM_K
+  pool = [item for item in tiled if item[1][3] == useWgm] or tiled
+
+  def find(macroM, macroN, macroK=None):
+    for solution, tile in pool:
+      if tile[0] == macroM and tile[1] == macroN and (macroK is None or tile[2] == macroK):
+        return solution
+    return None
+
+  if useWgm:
+    want256 = m >= 4096 or n >= 4096 or (min(m, n) >= 3072 and _sixBitPair(solutions))
+    if want256:
+      chosen = find(256, 256)
+      if chosen is not None:
+        return chosen
+    chosen = find(128, 128)
+    if chosen is not None and m < 4096 and n < 4096:
+      return chosen
+    chosen = find(256, 256)
+    if chosen is not None:
+      return chosen
+  else:
+    if m <= 128 and n <= 128:
+      chosen = find(32, 32, 64)
+      if chosen is not None:
+        return chosen
+    if m >= 256 and n >= 256:
+      chosen = find(16, 16, 128)
+      if chosen is not None:
+        return chosen
+    chosen = find(32, 32, 64)
+    if chosen is not None:
+      return chosen
+
+  return max(pool, key=lambda item: (item[1][0] * item[1][1], item[1][0]))[0]
+
+
+def libraryDeviceNames(architectureName, deviceNames):
+  """Keep a gfx950 library on 75a3 and 75a2 when the config names no such id."""
+  if architectureName != "gfx950":
+    return deviceNames
+  from Tensile.Common.Architectures import GFX_CHIP_IDS
+  supported = {chipId.lower() for chipId in GFX_CHIP_IDS.get("gfx950", [])}
+  names = [] if deviceNames in (None, "", "fallback") else deviceNames
+  if isinstance(names, str):
+    names = [names]
+  found = False
+  for name in names:
+    token = str(name).replace("Device", "").replace("device", "").strip().lower()
+    if token in supported:
+      found = True
+      break
+  if found:
+    return deviceNames
+  printWarning("gfx950 DeviceNames %s name no supported chip id; using %s"
+               % (deviceNames, _GFX950_DEVICE_NAMES))
+  return list(_GFX950_DEVICE_NAMES)
 
 ################################################################################
 # Analyze Problem Type
@@ -354,6 +486,11 @@ class LogicAnalyzer:
 
     # Each entry in exactWinners is a 2D array [solutionIdx, perf]
     self.exactWinners = {}
+    # problemSize -> {solutionIdx: gflops} for every exact row, including ties.
+    self.exactScores = {}
+    # Custom kernels that tied an exact size. removeLeastImportantSolutions
+    # would otherwise drop every one of them except the first.
+    self.mustKeepSolutions = set()
 
     """
     # map problem sizes -> index
@@ -400,7 +537,7 @@ class LogicAnalyzer:
       self.addFromCSV(dataFileName, self.numSolutionsPerGroup[fileIdx], \
           self.solutionGroupMap[fileIdx])
 
-
+    self._retainTiedExactCustomKernels()
 
     #print self.data
     # map exact problem sizes to solutions
@@ -414,6 +551,8 @@ class LogicAnalyzer:
 
     # open file
     print("reading datafile", dataFileName)
+    if not hasattr(self, "exactScores"):
+      self.exactScores = {}
     try:
       dataFile = open(dataFileName, "r")
     except IOError:
@@ -484,6 +623,7 @@ class LogicAnalyzer:
             winnerGFlops = -1
             for i in range(solutionStartIdx, rowLength):
               gflops = float(row[i])
+              self.exactScores.setdefault(problemSize, {})[solutionMap[solutionIdx]] = gflops
               if gflops > winnerGFlops:
                 winnerIdx = solutionIdx
                 winnerGFlops = gflops
@@ -538,6 +678,132 @@ class LogicAnalyzer:
           printExit("Huh? %s has ProblemSize %s which isn't in its yaml" \
               % ( dataFileName, list(problemSize)) )
     #print self.data
+
+
+  def _exactSizeTuple(self, macroM, macroN, macroK):
+    """Packed GEMM exact key: [M, N, batch, K, M, N, K, K]."""
+    for size in self.exactWinners:
+      if (len(size) >= 8 and size[0] == macroM and size[1] == macroN
+          and size[3] == macroK):
+        return size
+    return (macroM, macroN, 1, macroK, macroM, macroN, macroK, macroK)
+
+
+  def _retainTiedExactCustomKernels(self):
+    """Keep every custom kernel that ties an exact size, and point the size at
+    the kernel rocRoller would launch.
+
+    addFromCSV keeps the first solution when GFLOPS are equal, then
+    removeLeastImportantSolutions drops the rest. Cpu-only custom-kernel
+    builds write the same synthetic GFLOPS for every solution, so that
+    tie used to leave one kernel per problem type.
+    """
+    if len(self.solutions) < 2:
+      return
+    if not all(isCustomKernelSolution(solution) for solution in self.solutions):
+      return
+
+    tiedAny = False
+    for problemSize, scores in self.exactScores.items():
+      if len(scores) < 2:
+        continue
+      best = max(scores.values())
+      if best <= 0:
+        continue
+      tied = [idx for idx, gflops in scores.items() if gflops == best]
+      if len(tied) < 2:
+        continue
+      tiedAny = True
+      self.mustKeepSolutions.update(tied)
+      m, n, k = problemSize[0], problemSize[1], problemSize[3]
+      chosen = preferredExactCustomKernel(
+          m, n, k, [self.solutions[idx] for idx in tied])
+      chosenIdx = tied[[self.solutions[idx] for idx in tied].index(chosen)]
+      metric = self.exactWinners.get(problemSize, [chosenIdx, best])[1]
+      self.exactWinners[problemSize] = [chosenIdx, metric]
+
+    if not tiedAny:
+      return
+
+    # Sizes rocRoller selects that are not in the YAML. Without their own
+    # exact row, GridBased reuses the small-size survivor for 3072 and 4096.
+    selection = []
+    for size in self.exactWinners:
+      if len(size) > 3:
+        selection.append((size[0], size[1], size[3]))
+    for macroM in _EXACT_CUSTOM_SMALL_MN:
+      for macroN in _EXACT_CUSTOM_SMALL_MN:
+        selection.append((macroM, macroN, 128))
+    if any((customKernelTile(solution) or (0, 0, 0, False))[3]
+           for solution in self.solutions):
+      selection.extend(_EXACT_CUSTOM_LARGE)
+
+    seen = set()
+    for macroM, macroN, macroK in selection:
+      if (macroM, macroN, macroK) in seen:
+        continue
+      seen.add((macroM, macroN, macroK))
+      full = self._exactSizeTuple(macroM, macroN, macroK)
+      if full in self.exactWinners and full in self.exactScores and len(self.exactScores[full]) >= 2:
+        continue
+      chosen = preferredExactCustomKernel(macroM, macroN, macroK, self.solutions)
+      if chosen is None or chosen not in self.solutions:
+        continue
+      chosenIdx = self.solutions.index(chosen)
+      self.mustKeepSolutions.add(chosenIdx)
+      if full not in self.exactWinners:
+        metric = 1000.0
+        if self.exactWinners:
+          metric = next(iter(self.exactWinners.values()))[1]
+        self.exactWinners[full] = [chosenIdx, metric]
+        self.exactProblemSizes.add(full)
+
+    if self.mustKeepSolutions:
+      self._assignCustomKernelSizePredicates()
+      print1("# Keeping %u tied exact-size custom kernels" % len(self.mustKeepSolutions))
+
+
+  def _assignCustomKernelSizePredicates(self):
+    """Limit each exact-size winner to the sizes it won.
+
+    GridBased can return a neighboring exact row when a benchmark asks for
+    more than one solution. A 32x32 kernel that won 64..128 would then be
+    timed at 256 and replace the 16x16 row. The bounds are strict
+    SizeGreaterThan / SizeLessThan predicates, read back when the library
+    is written.
+    """
+    wins = {}
+    for size, winner in self.exactWinners.items():
+      if len(size) < 4:
+        continue
+      wins.setdefault(winner[0], []).append((size[0], size[1], size[3]))
+
+    k_index = 3
+    problem_type = getattr(self, "problemType", None)
+    if problem_type is not None:
+      try:
+        k_index = int(problem_type["NumIndicesC"])
+      except (KeyError, TypeError, ValueError):
+        k_index = 3
+
+    def _bound(index, sizes):
+      lo = min(sizes)
+      hi = max(sizes)
+      preds = []
+      if lo > 0:
+        preds.append({"tag": "SizeGreaterThan", "index": index, "value": lo - 1})
+      preds.append({"tag": "SizeLessThan", "index": index, "value": hi + 1})
+      return preds
+
+    for idx, solution in enumerate(self.solutions):
+      chosen = wins.get(idx)
+      if not chosen:
+        continue
+      preds = []
+      preds += _bound(0, [size[0] for size in chosen])
+      preds += _bound(1, [size[1] for size in chosen])
+      preds += _bound(k_index, [size[2] for size in chosen])
+      solution["CustomKernelSizePredicate"] = preds
 
 
   ##############################################################################
@@ -636,6 +902,8 @@ class LogicAnalyzer:
       winnerIdx = self.exactWinners[exactProblem][0]
       #print "keepWinnerSolution adding exact", exactProblem, winnerIdx
       winners.add(winnerIdx)
+
+    winners.update(getattr(self, "mustKeepSolutions", ()))
 
     print("Winners", winners)
     self.pruneSolutions(winners)
@@ -1078,6 +1346,8 @@ class LogicAnalyzer:
     for i in range(0, self.numSolutions):
       solutionIdx = solutionImportance[i][0]
       canRemove = not solutionImportance[i][4] # don't remove if is only win for any size
+      if solutionIdx in getattr(self, "mustKeepSolutions", ()):
+        canRemove = False
       for exactProblem in self.exactWinners:
         winnerIdx = self.exactWinners[exactProblem][0]
         if solutionIdx == winnerIdx: # exact winners are important
@@ -1140,6 +1410,13 @@ class LogicAnalyzer:
       if self.exactWinners[problemSize][0] >= removeSolutionIdx:
         self.exactWinners[problemSize][0] -= 1
 
+    if getattr(self, "mustKeepSolutions", None):
+      self.mustKeepSolutions = {
+          idx - 1 if idx > removeSolutionIdx else idx
+          for idx in self.mustKeepSolutions
+          if idx != removeSolutionIdx
+      }
+
 
   ##############################################################################
   # Prune a list of solutions, keeping only the indices specified in
@@ -1193,6 +1470,13 @@ class LogicAnalyzer:
         print(("warning: exactWinner[", problemSize, "] == -1"))
       if self.exactWinners[problemSize][0] >= self.numSolutions:
         print(("warning: exactWinner[", problemSize, "] "))
+
+    if getattr(self, "mustKeepSolutions", None):
+      self.mustKeepSolutions = {
+          solutionMapOldToNew[idx]
+          for idx in self.mustKeepSolutions
+          if solutionMapOldToNew[idx] != -1
+      }
 
 
   ##############################################################################
@@ -1469,6 +1753,9 @@ def generateLogic(
   for parameter in defaultAnalysisParameters:
     assignParameterWithDefault(analysisParameters, parameter, config, \
         defaultAnalysisParameters)
+
+  analysisParameters["DeviceNames"] = libraryDeviceNames(
+      analysisParameters["ArchitectureName"], analysisParameters["DeviceNames"])
 
   print1("")
   print1(HR)
