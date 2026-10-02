@@ -3,9 +3,9 @@
 ################################################################################
 """StreamK cluster multicast -- gfx1250 characterization (CPU-only).
 
-Exercises the StreamK ForceDPOnly cluster cooperative-load path added to
-``Tensile/Components/StreamK.py`` + ``Tensile/Components/ClusterLoad.py``, which
-a ``ClusterDim`` other than ``[1, 1]`` on StreamK=3 turns on.
+Exercises the DataParallel cluster cooperative-load path in
+``Tensile/Components/WorkAssignment.py`` + ``Tensile/Components/ClusterLoad.py``.
+It uses StaticGrid assignment and a ``ClusterDim`` other than ``[1, 1]``.
 
 Each arm is a (PrefetchGlobalRead, ClusterDim) pair and is pinned separately.
 
@@ -29,7 +29,7 @@ The PrefetchGlobalRead variants:
     double-buffered ("LDS1") cooperative multicast prefetch load. That load sits
     inside the single-iteration guard branch, past the generic per-load
     cluster-barrier bracketing boundary, so
-    ``StreamK.streamKMulticastProloguePrefetchHandshake`` has to bracket it with
+    ``WorkAssignment.persistentMulticastProloguePrefetchHandshake`` has to bracket it with
     a dedicated cluster-scope split-barrier handshake of its own -- otherwise a
     peer can issue the prefetch while another peer is still behind the guard.
 
@@ -87,12 +87,12 @@ def _skip_prefetch_handshake_brackets_load(src):
 
     The double-buffered prologue prefetch load sits in the ``skipPGR2`` guard
     segment. The dedicated handshake elects wave 0 (branch to
-    ``SKMC_SkipPrefetchSignal``), signals ``-3``, then all waves wait ``-3``
+    ``PersistentMC_SkipPrefetchSignal``), signals ``-3``, then all waves wait ``-3``
     immediately before the LDS1 ``tensor_load_to_lds`` group.
     """
     lines = src.splitlines()
     for i, ln in enumerate(lines):
-        if "label_SKMC_SkipPrefetchSignal:" not in ln:
+        if "label_PersistentMC_SkipPrefetchSignal:" not in ln:
             continue
         # A cluster-scope wait must follow the skip label, before the LDS1 load.
         window = lines[i : i + 6]
@@ -104,6 +104,42 @@ def _skip_prefetch_handshake_brackets_load(src):
         if has_wait and has_load and has_signal:
             return True
     return False
+
+
+@pytest.mark.parametrize("missing", [None, "signal", "wait", "load"])
+def test_prefetch_handshake_matcher_uses_emitted_label(missing):
+    """Check the matcher without a gfx1250 assembler or a complete kernel.
+
+    Use the label from the real assignment emitter and synthetic barrier/load
+    text, so label renames cannot silently break the hardware-gated assertion.
+    Each barrier and the following load must still be present.
+    """
+    from types import SimpleNamespace
+
+    from rocisa.code import Label
+    from Tensile.Component import Component
+
+    writer = SimpleNamespace(
+        labels=SimpleNamespace(getNameInc=lambda name: name),
+        sgprPool=SimpleNamespace(checkOut=lambda size, tag: 40, checkIn=lambda reg: None),
+        states=SimpleNamespace(asmCaps={"HasClusterBarrier": True}),
+    )
+    kernel = {
+        "TileProcessingStrategy": "DataParallel", "WorkAssignment": "StaticGrid",
+        "ClusterDim": [4, 1], "Multicast": True,
+    }
+    handshake = Component.WorkAssignment.StaticGrid().persistentMulticastProloguePrefetchHandshake(
+        writer, kernel)
+    labels = [str(item).strip() for item in handshake.flatitems() if isinstance(item, Label)]
+    assert len(labels) == 1
+    parts = {
+        "signal": "s_barrier_signal -3",
+        "label": labels[0],
+        "wait": "s_barrier_wait -3",
+        "load": "tensor_load_to_lds v0, s[0:3], 0",
+    }
+    src = "\n".join(text for kind, text in parts.items() if kind != missing)
+    assert _skip_prefetch_handshake_brackets_load(src) is (missing is None)
 
 
 @pytest.mark.parametrize("pgr, cluster_dim", _ARMS, ids=_ARM_IDS)
@@ -119,7 +155,7 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
         assert "DP fold: WorkGroup1 * nWG0 (N-tile row)" in src, (
             f"Kernel {base!r} missing the N-tile-row fold (WorkGroup1*nWG0)"
         )
-        assert "DP fold: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M" in src, (
+        assert "DP fold: PersistentWorkGroupIndex = batch*(nWG0*nWG1) + N*nWG0 + M" in src, (
             f"Kernel {base!r} missing the linear tile-index fold"
         )
         # The grid is rounded up to the cluster, so padded peers must exit before
@@ -150,7 +186,7 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
             f"Kernel {base!r} emitted the runtime multicast selection guard"
         )
         # Ck is a spatial N-tiling axis: no K-split decode or maskB shift.
-        assert "k = StreamKIdx & (Ck-1)" not in src, (
+        assert "k = PersistentWorkGroupIndex & (Ck-1)" not in src, (
             f"Kernel {base!r} wrongly emitted a K-slice reduction decode"
         )
         if pgr >= 2:

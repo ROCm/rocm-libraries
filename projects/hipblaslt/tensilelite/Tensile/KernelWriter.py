@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
@@ -37,7 +38,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
-  MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
+  MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from rocisa.instruction import SSchedulingFence
@@ -48,10 +49,11 @@ from .KernelWriterModules import *
 
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
+from .Components.PersistentLoop import PersistentKernelState
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
-from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
@@ -60,14 +62,14 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, \
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, persistentMulticast, \
   swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.Toolchain.Component import Assembler
+from .SolutionStructs.Naming import getKernelNameMin
+from .Toolchain.Component import Assembler
 
 import rocisa
 import math
@@ -117,7 +119,6 @@ class MatrixInfo:
   tileInfo: object = field(init=False)  # TileInfo for all tile types
 
 
-
 @dataclass
 class ABMatrixInfo(MatrixInfo):
   numVgprValuPerBlock: int       = -1
@@ -157,7 +158,7 @@ class ABMatrixInfo(MatrixInfo):
 
 # States
 @dataclass(frozen=True)
-class StreamKSettings:
+class TileProcessingSettings:
   """Snapshot of variant feature flags for the kernel being emitted.
   Populated once at _initKernel time from the StreamK* variant class.
   Frozen so consumers cannot mutate it mid-codegen."""
@@ -304,6 +305,7 @@ class StateValues:
   combineLocalAddresses: bool            = False # Debug
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
+  useAtomicPkAddBF16: bool               = False
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
@@ -331,7 +333,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprSKConsts: int                 = -1
+  startVgprPersistentConsts: int                 = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
 
@@ -379,8 +381,8 @@ class StateValues:
   numStoreSgprInstExt: int               = 0 # For pose-loop kernel args
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
-  numSgprStreamK: int                    = 0
-  streamK: StreamKSettings               = field(default_factory=StreamKSettings)
+  numSgprPersistent: int                    = 0
+  tileProcessing: TileProcessingSettings               = field(default_factory=TileProcessingSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
@@ -565,7 +567,7 @@ class ExternClasses:
 ################################################################################
 # Kernel Writer
 ################################################################################
-class KernelWriter(metaclass=abc.ABCMeta):
+class KernelWriter(PersistentKernelState, metaclass=abc.ABCMeta):
   #__metaclass__=abc.ABCMeta
 
   ##############################################################################
@@ -2928,7 +2930,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tPM = tensorParametersB["tpsMetadata"]
       tPMRef = tensorParametersB
 
-    if kernel["StreamK"] != 0:
+    if isPersistent(kernel):
       if not kernel["UseSubtileImpl"]:
         module.add(self.localReadAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
         module.add(self.localWriteAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
@@ -3217,10 +3219,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
           module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
-        if kernel["StreamK"] > 0:
-          module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+        if isPersistent(kernel):
+          module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-            module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
@@ -3358,14 +3360,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         usePrimedSkip = self.isPrefetchAcrossPersistentEnabled(kernel)
         lbl_prefetchPrimedMerge = Label(self.labels.getNameInc("SK_PrefetchPrimedMerge"), "")
         if usePrimedSkip:
-          module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="tail prefetch already issued first PGR group?"))
+          module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="tail prefetch already issued first PGR group?"))
           module.add(SCBranchSCC0(labelName=lbl_prefetchPrimedMerge.getLabelName(), comment="skip first PGR group if primed"))
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
         module.add(self.globalReadDo(kernel, 0, tensorParameters1st, tPM=tPM))
         # PAP+MX keeps MX G2L in the durable read range, so scale loads are part
-        # of the same first-PGR handoff as main A/B. When SkPrefetchPrimed is
+        # of the same first-PGR handoff as main A/B. When PersistentPrefetchState is
         # already set, the branch above skips this whole first-PGR group.
         if "MX" in tensorParameters1st:
           moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"], skipWait=True)
@@ -3386,7 +3388,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.globalReadDo(kernel, 0, tPM))
         if usePrimedSkip:
           module.add(lbl_prefetchPrimedMerge)
-          module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="clear after first PGR group merge"))
+          module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
         tPA = tensorParametersA
         tPB = tensorParametersB
         if kernel["PrefetchGlobalRead"] == 2:
@@ -3434,7 +3436,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # PAP borrows the current descriptor registers long enough to compute and
     # issue next-tile first-PGR loads. Restore them before current-tail code
-    # resumes; only the issued loads and SkPrefetchPrimed are durable.
+    # resumes; only the issued loads and PersistentPrefetchState are durable.
     def checkpointDescriptorState(tP, tmpSgpr):
       tc = tP["tensorChar"]
       module.addComment0("PAP: snapshot current %s descriptor" % tc)
@@ -3593,7 +3595,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # StreamK PAP contract:
     #   Durable state: issued first-PGR loads for the next persistent iteration,
-    #   SkPrefetchPrimed, and the saved PAP TDM/DTL LDS-bank bits encoded there.
+    #   PersistentPrefetchState, and the saved PAP TDM/DTL LDS-bank bits encoded there.
     #   Borrowed state: current tile identity, descriptors/shadow limits,
     #   StaggerU registers, and LDS bank/descriptor state needed when current
     #   NLL or tail code resumes. Each borrowed group must be restored before
@@ -3633,7 +3635,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         restoreBorrowedStaggerState(tmpSgprInfo.idx, staggerState)
     else:
       emitPrefetchGroup()
-    module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=1, comment="first PGR group for next persistent iter prefetched"))
+    module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="first PGR group for next persistent iter prefetched"))
     if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
         and not (kernel["enableTDMA"] and kernel["enableTDMB"])):
       module.add(self.papDtlSaveLdsBank(kernel, tensorParametersA, tensorParametersB))
@@ -3648,51 +3650,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # Setup next-tile PAP loads for Subtile scheduler kernels.
   ##############################################################################
-  def papCheckpointCurrentTileIdentityVgprs(self, kernel, prevTile):
-    module = Module("papCheckpointCurrentTileIdentityVgprs")
-    for name in self.papTileIdentityNames(kernel):
-      module.add(VMovB32(dst=vgpr(prevTile[name]), src=sgpr(name),
-                         comment="checkpoint %s for Subtile PAP restore" % name))
-    return module
 
-  def papRestoreCurrentTileIdentityVgprs(self, kernel, prevTile):
-    module = Module("papRestoreCurrentTileIdentityVgprs")
-    for name in self.papTileIdentityNames(kernel):
-      module.add(VReadfirstlaneB32(dst=sgpr(name), src=vgpr(prevTile[name]),
-                                   comment="restore current %s after Subtile PAP" % name))
-    return module
 
   def prefetchAcrossPersistentSubtile(self, kernel, tensorParametersA, tensorParametersB, preloopGrModule=None, skipBarrier=False):
-    module = Module("prefetchAcrossPersistentSubtile")
-    if not (kernel.get("UseSubtileImpl") and self.isPrefetchAcrossPersistentEnabled(kernel)):
-      return module
-    if tensorParametersA is None or tensorParametersB is None:
-      return module
-
-    skipLabel = Label(self.labels.getNameInc("SK_SkipNllSubtilePAP"), "")
-    # Under StreamKForceDPOnly the reduction is always forced to the tree path
-    # (AddressFlags != 0 invariant), so this parallel-reduction skip never fires;
-    # fold it out and keep only the StreamKIter >= StreamKIterEnd (last-tile) check.
-    if not kernel["StreamKForceDPOnly"]:
-      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
-      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    if not skipBarrier:
-      module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch"))
-
-    skComponent = Component.StreamK.find(self)
-    tileIdentityNames = self.papTileIdentityNames(kernel)
-    prevTileBase = self.vgprPool.checkOutAligned(len(tileIdentityNames), 1, "Subtile PAP tile identity")
-    prevTile = {name: prevTileBase + i for i, name in enumerate(tileIdentityNames)}
-    module.add(self.papCheckpointCurrentTileIdentityVgprs(kernel, prevTile))
-    module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
-    module.add(self.setupPrefetchAcrossPersistentSubtileLoads(kernel, tensorParametersA, tensorParametersB, preloopGrModule))
-    module.add(self.papRestoreCurrentTileIdentityVgprs(kernel, prevTile))
-    self.vgprPool.checkIn(prevTileBase)
-
-    module.add(skipLabel)
-    return module
+    return Component.PersistentLoop.find(self).prefetch(self, kernel, tensorParametersA, tensorParametersB,
+        subtile=True, preloopGrModule=preloopGrModule, skipBarrier=skipBarrier)
 
   def setupPrefetchAcrossPersistentSubtileLoads(self, kernel, tensorParametersA, tensorParametersB, preloopGrModule=None):
     module = Module("setupPrefetchAcrossPersistentSubtileLoads")
@@ -3726,7 +3688,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         emitTensorLoad(tensorParametersA["MX"])
       if kernel["ProblemType"].get("MXBlockB", 0) and "MX" in tensorParametersB:
         emitTensorLoad(tensorParametersB["MX"])
-    module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=1, comment="Subtile PAP: first PRELOOP GR group prefetched"))
+    module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="Subtile PAP: first PRELOOP GR group prefetched"))
 
     module.addComment2("End setupPrefetchAcrossPersistentSubtileLoads")
     return module
@@ -3877,6 +3839,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.localWriteMXSA = Module()
             self.codes.localWriteMXSB = Module()
           self.codes.globalReadMetadata = StructuredModule() # empty
+
+        # The gl2 prefetch modules are built for the unroll loop (_loopBody) and
+        # would otherwise be re-emitted here by makeSchedule, since nothing else
+        # rebuilds them. There is no load left for this workgroup to run ahead of
+        # once it reaches a no-load loop, and the address is only kept in range by
+        # the guards on the sites that do have one: the pre-loop skips itself when
+        # counterL <= PGR, and the unroll loop is only entered above that. Emitting
+        # them here reaches the start address without either guard, which for a
+        # short GSU chunk is PGR iterations past the end of K.
+        self.codes.gl2PrefetchIncrement = Module()
+        self.codes.gl2Prefetch = Module()
 
         callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL) or \
@@ -5326,17 +5299,46 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(self.defineAndResources(kernel, tensorParametersA, tensorParametersB, tPM))
 
     # Initialize stream-k loop
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.preLoop(self, kernel))
+    module.add(Component.PersistentLoop.find(self).initialize(self, kernel))
     if self.isPrefetchAcrossPersistentEnabled(kernel):
-      module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
+      module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Should check for is swizzled instead of usesubtileimpl
+    # Swizzled layouts only; Solution.py rejects NoSwizzle under UseSubtileImpl.
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
-      module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
-      module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
+      # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
+      # must hold that group's byte span, roundUp(ceil(K/mxBlock), 8) * 32.  Both
+      # numbers are properties of the swizzled layout: preSwizzleScalesGFX950 pads
+      # the K blocks to a multiple of 8 and groups 32 rows of the free dim.  The
+      # span is therefore derived from K on every layout rather than read back out
+      # of Strides<tc>+0, which only equals paddedKBlocks when the free dim is the
+      # slow one and the host did pad -- an assumption this code cannot check and
+      # which NoSwizzle breaks.  Costs four SALU in the prologue, once.
+      SWIZZLE_GROUP_ROWS = 32   # free-dim rows per scale group
+      K_BLOCK_PAD        = 8    # K blocks the host pads up to
+      for tc in ("MXSA", "MXSB"):
+        mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
+        if not mxBlock:
+          # No scales on this operand, so Strides<tc> is not a scale stride --
+          # and may not be allocated at all.
+          continue
+        # The ceil-divides below are shifts, so both have to be powers of two.
+        assert mxBlock & (mxBlock - 1) == 0, \
+               "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
+        module.addComment("%s group span = roundUp(ceil(K/%u), %u) * %u"
+                          % (tc, mxBlock, K_BLOCK_PAD, SWIZZLE_GROUP_ROWS))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
+                           comment="K + %u - 1"%mxBlock))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="ceil(K/%u) = K blocks"%mxBlock))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=(K_BLOCK_PAD - 1),
+                           comment="+ %u - 1"%K_BLOCK_PAD))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), K_BLOCK_PAD.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="roundUp(K blocks, %u) / %u"%(K_BLOCK_PAD, K_BLOCK_PAD)))
+        module.add(SLShiftLeftB32(sgpr("Strides%s"%tc),
+                                  (K_BLOCK_PAD * SWIZZLE_GROUP_ROWS).bit_length() - 1,
+                                  sgpr("Strides%s"%tc),
+                                  comment="* %u blocks * %u bytes"%(K_BLOCK_PAD, SWIZZLE_GROUP_ROWS)))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -5416,7 +5418,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
 
 
-
     # List of tiles that need to be read form
     readtileInfoList = [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]
 
@@ -5460,9 +5461,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Apply StreamK K-offset to TDM global addresses.
     # calculateLoopNumIter sets StreamKLocalStart; offset Address{A,B} so
     # TDM reads from the correct K-slice when StreamK splits K across WGs.
-    if hasTDM and kernel["StreamK"]:
-      module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
-      module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
+    if hasTDM and isPersistent(kernel):
+      module.add(tdmApplyTileKOffsetSubtile(self, kernel, tensorParametersA))
+      module.add(tdmApplyTileKOffsetSubtile(self, kernel, tensorParametersB))
 
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
@@ -5489,7 +5490,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseSubtileImpl"]:
       # Remove SrdWS from the free pool before defineSgprIdx calls below,
       # otherwise checkOutAligned can grab registers overlapping SrdWS.
-      if not self.states.doShadowInit and kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
+      if not self.states.doShadowInit and isStreamK(kernel) and kernel["StreamKAtomic"] == 0:
         self.removeSgprVarFromPool("SrdWS")
 
       result = self.undefineSubtileMainLoopSgprs(kernel)
@@ -5538,7 +5539,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ####################################
       # NOT LocalSplitU
       ####################################
-
 
 
       # global write indices
@@ -5604,8 +5604,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Mirror functionEnd's StreamK kernelEnd on the deferred-blocks epilogue.
       # Single-hop next-neighbor work stealing self-resets its per-queue counters via the
       # atomic_inc auto-reset bounds, so kernelEnd emits no explicit reset.
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.kernelEnd(self, kernel))
+      if isPersistent(kernel):
+        processingComponent = Component.TileProcessingStrategy.find(self)
+        module.add(processingComponent.kernelEnd(self, kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
@@ -5642,108 +5643,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     return (error, str(moduleKernelBody))
 
-
-  ##############################################################################
-  # StreamK Constants In VGPRs
-  ##############################################################################
-  def isStreamKConstantsToVgprEnabled(self, kernel):
-    # Variants that mark keepsConstantsInSgpr=True (the dynamic
-    # per-XCD path references SK kernarg constants directly) cannot
-    # cache them in VGPRs on gfx1250.
-    return kernel["ISA"] == IsaVersion(12,5,0) and not self.states.streamK.keepsConstantsInSgpr
-
-  def acquireStreamKConstSgpr(self, kernel, name):
-    if self.isStreamKConstantsToVgprEnabled(kernel):
-      idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
-      if idx + 1 > self.states.regCaps["MaxSgpr"]:
-        self.states.overflowedResources = 2
-      return idx
-    return name
-
-  def releaseStreamKConstSgpr(self, nameOrIdx):
-    if isinstance(nameOrIdx, int):
-      self.sgprPool.checkIn(nameOrIdx)
-
-  def skUsesRawQueueRank(self, kernel):
-    """True when the per-XCD work-queue index must come from the RAW pre-remap
-    launch WG rank, captured once into the reused persistent ``StreamKTileIdx``
-    carrier (KernelWriterAssembly prologue) and read back in
-    StreamK.graWorkGroup.
-
-    The auto-reset wrap bound (tiles_q + W_q) assumes each queue's home-workgroup
-    count equals distribute(skGrid, q), i.e. that the value feeding % numQueues
-    densely covers [0, skGrid). Once WorkGroup0 has been remapped, its
-    % numQueues is NOT count-preserving when the grid does not block evenly, so
-    it skews the per-queue count and the counter drifts off 0. We therefore
-    snapshot the raw launch id (== physical XCD rank) BEFORE any remap.
-
-    ZERO additional persistent SGPRs are spent: the raw rank is stashed in the
-    already-allocated ``StreamKTileIdx`` slot, which is provably dead in the
-    [prologue, queue-read) window (see StreamK.usesRawQueueRank). A dedicated
-    ``StreamKQueue`` SGPR was rejected because these SK4/SK5 kernels sit at the
-    register ceiling and it overflowed the SGPR file on the tuned high-register
-    SKXCC kernels (the unaligned-pool parity shift can cost up to 4 SGPRs).
-
-    Two disjoint remap regimes need the raw rank:
-
-      * WorkGroupMappingXCC == -1 -- the dynamic auto-WGM path, where the host
-        picks WGMXCC = NUM_XCD > 1 at runtime and the wgmXCC CU-count remap skews
-        the per-queue count.
-      * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 -- the SKXCC path,
-        where the StreamKXCCMapping chiplet remap (plus the fixed WGMXCC > 1
-        remap) rewrites WorkGroup0 non-count-preservingly. (SKXCC with WGMXCC ==
-        1 is already count-preserving -- it stays on the cheap StreamKIdx %
-        numQueues else-branch -- and WGMXCC == -1 is mutually exclusive with
-        SKXCC, so the two disjuncts never overlap.)
-
-    Fixed non-SKXCC WGMXCC solutions (== 1 no-op, or a tuned power-of-two > 1
-    without SKXCC) are excluded: == 1 needs no fix (StreamKIdx already equals the
-    raw rank). Single-XCD arches are trivially balanced; gfx12
-    (WorkGroupIdFromTTM) re-reads the raw id from ttmp9. Kept in sync with
-    StreamK.usesRawQueueRank."""
-    return (kernel["StreamK"] in (4, 5)
-            and self.states.archCaps["NumXCD"] > 1
-            and not self.states.archCaps["WorkGroupIdFromTTM"]
-            and (kernel["WorkGroupMappingXCC"] == -1
-                 or (kernel["StreamKXCCMapping"] != 0
-                     and kernel["WorkGroupMappingXCC"] > 1)))
-
-  ##############################################################################
-  # Move StreamK Constants to VGPRs
-  ##############################################################################
-  def moveStreamKConstantsToVgpr(self, kernel):
-    """Move StreamK constant SGPRs (kernel args) to VGPRs to reduce SGPR pressure.
-
-    Uses statically allocated VGPRs (startVgprSKConsts) that don't overlap with
-    MXS/ValuAB/ValuC regions. At usage sites, v_readfirstlane_b32 brings values
-    back to temp SGPRs as needed.
-    """
-    module = Module("Move StreamK constants to VGPRs")
-    self.states.skConstVgprs = {}
-
-    consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-    if kernel["StreamK"] == 3:
-      consts += ["skGrid", "skTiles"]
-
-    baseVgpr = self.states.startVgprSKConsts
-    for i, name in enumerate(consts):
-      v = baseVgpr + i
-      self.states.skConstVgprs[name] = v
-      module.add(VMovB32(dst=vgpr(v), src=sgpr(name), comment="Save %s to VGPR v%u" % (name, v)))
-
-    # Fully free the SGPR slots so defineVariableSgprs can reuse them.
-    # undefineSgpr checks them back into sgprPool (Available) AND emits
-    # .set UNDEF so the assembler catches any stale references.
-    # addSgprVarToPool would only put them in freeSgprVarPool which
-    # defineSgpr intentionally blocks from reuse (see defineSgpr lines 514-518).
-    for name in consts:
-      module.add(self.undefineSgpr(name))
-
-    # StreamKIdx is a var (not kernel arg) — value set later in preLoop
-    v = baseVgpr + len(consts)
-    self.states.skConstVgprs["StreamKIdx"] = v
-
-    return module
 
   ##############################################################################
   # Persistent Compute Section
@@ -5790,7 +5689,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # These cases loop back and run the prefetch loop again
       # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
       # have finished before we generate the prefetch for the next summation index.
-      if kernel["StreamK"] > 0 or self.states.actualSummationLoops>1:
+      if isPersistent(kernel) or self.states.actualSummationLoops>1:
         module.add(SBarrier(comment="For stream-k / persistent loop"))
 
       # local write
@@ -5848,11 +5747,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # past the generic per-load cluster-barrier bracketing boundary.
           # Bracket them with a self-contained cluster-scope handshake so every
           # multicast load stays synchronized and signal/wait counts stay
-          # balanced. Gated on streamKMulticast (cluster + TDM broadcast):
-          # gfx1250v0 has the cluster launch but no peer ld_bcst to keep in lockstep.
-          if streamKMulticast(kernel):
-            skComponent = Component.StreamK.find(self)
-            module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
+          # balanced. Gated on persistentMulticast (cluster + TDM broadcast):
+          # gfx1250-strict has the cluster launch but no peer ld_bcst to keep in lockstep.
+          if persistentMulticast(kernel):
+            assignment = Component.WorkAssignment.find(self)
+            module.add(assignment.persistentMulticastProloguePrefetchHandshake(self, kernel))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -6106,6 +6005,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
       module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+      module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
       module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
       if kernel["PrefetchGL2"] == 2:
         module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
@@ -6476,10 +6376,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # freed SGPR slots can be reused before defineVariableSgprs runs.
 
     # Initialize stream-k loop
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.preLoop(self, kernel))
+    module.add(Component.PersistentLoop.find(self).initialize(self, kernel))
     if self.isPrefetchAcrossPersistentEnabled(kernel):
-      module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
+      module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
     # MFMA F32XEmulation negative identity matrix
     if kernel["UseMFMAF32XEmulation"]:
@@ -6489,80 +6388,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     loopComponent = Component.PersistentLoop.find(self)
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
-    if kernel["ReuseAcrossPersistent"]:
-      # Peel the compute section in two: the first tile runs a copy that fills the
-      # resident A registers, every later tile re-enters at the second copy and
-      # reuses them. Only the compute half is duplicated -- the store is the bulk
-      # of the kernel and stays shared, which keeps the instruction cache footprint
-      # roughly unchanged.
-      skComponent = Component.StreamK.find(self)
-      # Record which batch the fill below loads A for. Read here, at the loop head,
-      # because graWorkGroup advances StreamKIter past this tile and PAP goes on to
-      # overwrite WorkGroup2 with the next tile's, so neither survives the section.
-      module.add(skComponent.rapTileBatch(self, kernel, "RAPResidentBatch"))
-      snapshot = self.rapSnapshotEmitterState(kernel, tensorParametersA, tensorParametersB)
-      self.states.rapDeferSgprUndef = True
-      pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
-
-      storeJoin = Label("RAP_StoreJoin", "")
-      # Conditional, not s_branch: the CFG builder gives an unconditional branch no
-      # fall-through edge, so iterN would have no predecessor, the backend would
-      # skip it, and it would come out with no waitcnts and no barriers at all --
-      # which a functional simulator still reports as PASSED.
-      module.add(SCmpEQU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIter"),
-                           comment="RAP: always true; keeps a CFG edge into iterN"))
-      module.add(SCBranchSCC1(labelName=storeJoin.getLabelName(),
-                              comment="RAP: first tile skips the reuse copy"))
-      module.add(Label("RAP_IterN", ""))
-      # A is indexed by the batch, so the resident copy only serves tiles in the
-      # batch it was filled from. This copy has no A loads to supply any other, so
-      # send a tile that crossed a batch boundary through the fill copy instead --
-      # it pays one tile's worth of reloads and leaves A resident for the tiles
-      # after it. Ahead of everything else in the section: StreamKIter still names
-      # this tile and nothing has claimed WorkGroup* for it, so the loop head can
-      # take it from the top.
-      with self.allocTmpSgpr(1, tag="RAPBatchGuard") as sBatch:
-        module.add(skComponent.rapTileBatch(self, kernel, sBatch.idx))
-        module.add(SCmpEQU32(src0=sgpr(sBatch.idx), src1=sgpr("RAPResidentBatch"),
-                             comment="RAP: is the resident A this tile's batch?"))
-        module.add(self.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
-                                       comment="RAP: batch changed, refill A"))
-      module.add(loopComponent.reinitWaveIdx(self, kernel))
-      self.rapRestoreEmitterState(kernel, tensorParametersA, tensorParametersB, snapshot)
-      # From here on A and its scales come from the resident registers, so the
-      # reuse copy issues neither their LDS reads nor their global transfers.
-      # numReadsPerIter* feeds the analytically computed s_wait_dscnt immediate
-      # and the scheduler's latency budget, so it has to shrink with them.
-      self.states.rapDropAResidentLoads = True
-      self.states.numReadsPerIterA = 0
-      self.states.numReadsPerIterMXSA = 0
-      with self.rapIterNLabels():
-        pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
-      module.add(storeJoin)
-      # Drain the local reads a small-K exit left in flight, before the store
-      # reuses their registers.
-      #
-      # A section reads one k-tile ahead. When K does not fill the block, the
-      # section that takes the early exit has already issued that lookahead for a
-      # successor this K never runs, so those ds_reads are still outstanding with
-      # nothing to consume them. The store then borrows the value registers as
-      # scratch -- the MX scale blocks sit at the bottom of the register file, so
-      # computeStoreVgprs writes v36/v37 while a pending read of ValuMXSB targets
-      # v34-v37 -- and a read landing late puts LDS data over the wave offset the
-      # store is about to compute with. It is a write-after-write, so a functional
-      # simulator retires the read at issue, always sees the VALU win, and cannot
-      # fail on it.
-      #
-      # Here rather than at the loop exit for two reasons. This is where every path
-      # into the store converges, so one wait covers both copies and every K. And
-      # it is late: the tile-mapping and store setup run in between, so the reads
-      # have long landed and the wait is normally already satisfied. Only the
-      # exit that skips the PAP block -- a workgroup's last tile -- actually needs
-      # it; the PAP block drains before its own LDS writes.
-      module.add(SWaitCnt(dscnt=0,
-                          comment="RAP: drain a small-K exit's unconsumed local reads"))
-    else:
-      pack = self._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
+    pack = loopComponent.compute(self, kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
 
     self.postMainLoopBarrierCheckAndReset(kernel, module)
 
@@ -6936,7 +6762,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Main-loop pointer swaps can leave LROs in the Blk half. Reset before
         # tail MACs for every scheduler; localReadResetOffsets is empty for
         # 1LDSBuffer / DirectToVgpr cases.
-        if needResetLROffsets or kernel["StreamK"]:
+        if needResetLROffsets or isPersistent(kernel):
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
@@ -6960,7 +6786,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
 
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          if needResetLROffsets or kernel["StreamK"]:
+          if needResetLROffsets or isPersistent(kernel):
             module.addComment1("local read reset offsets metadata")
             module.add(self.localReadResetOffsets(kernel, tPM))
           module.addComment1("local read init pointers metadata")
@@ -7290,7 +7116,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       swpRelEnable, swpAbsEnable = resolveSwInstructionPrefetch(
           kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
           self.states.version == (12, 5, 0),
-          bool(kernel.get("StreamK", 0)),
+          bool(isPersistent(kernel)),
           kernel["ProblemType"]["DataType"].isDouble())
 
       # Token-based DCP requires wait-count insertion at every optimization level.
@@ -7340,8 +7166,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # an `s_wait_tensorcnt 0` is emitted after the cooperative
                                # tensor_load group so the broadcast retires before the back edge.
                                # Requires TDM multicast, not just a cluster: without a peer
-                               # ld_bcst that wait has nothing to retire (gfx1250v0).
-                               "StreamKMulticast": bool(streamKMulticast(kernel)),
+                               # ld_bcst that wait has nothing to retire (gfx1250-strict).
+                               "StreamKMulticast": bool(persistentMulticast(kernel)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
                                # Off by default.
@@ -7477,18 +7303,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
-    # Snapshot the StreamK variant's feature flags onto self.states
-    # so downstream emitters can query them by name instead of
-    # branching on the integer kernel["StreamK"] value.
-    _skVariantCls = streamKVariantClass(kernel.get("StreamK", 0))
-    self.states.streamK = StreamKSettings(
-      emitsParallelReductionSgprAliases=_skVariantCls.emitsParallelReductionSgprAliases,
-      borrowsSrdWsInEpilogue=_skVariantCls.borrowsSrdWsInEpilogue,
-      emitsWorkspaceReductionBpe=_skVariantCls.emitsWorkspaceReductionBpe,
-      requiresWorkspaceReductionStorePath=_skVariantCls.requiresWorkspaceReductionStorePath,
-      keepsConstantsInSgpr=_skVariantCls.keepsConstantsInSgpr,
-      supportsSubtileImpl=_skVariantCls.supportsSubtileImpl,
-    )
+    # Allocation capabilities stay fixed even when a GSU store branch temporarily
+    # uses the ordinary policy. Execution hooks resolve that branch's policy.
+    self.states.tileProcessing = TileProcessingSettings(supportsSubtileImpl=True)
+    if isPersistent(kernel):
+      _processingCls = type(Component.TileProcessingStrategy.find(self))
+      self.states.tileProcessing = TileProcessingSettings(
+        emitsParallelReductionSgprAliases=_processingCls.emitsParallelReductionSgprAliases,
+        borrowsSrdWsInEpilogue=_processingCls.borrowsSrdWsInEpilogue,
+        emitsWorkspaceReductionBpe=_processingCls.emitsWorkspaceReductionBpe,
+        requiresWorkspaceReductionStorePath=_processingCls.requiresWorkspaceReductionStorePath,
+        keepsConstantsInSgpr=_processingCls.keepsConstantsInSgpr,
+        supportsSubtileImpl=_processingCls.supportsSubtileImpl,
+      )
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
     self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
@@ -7526,96 +7353,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
-    def selectGRSubtileShape(tc):
-      """Select GR subtile shape based on wave cooperation level.
-
-      The GR tile shape represents the effective coverage per GR load round.
-      When multiple waves cooperate on a single GR load (waves_coop >= 4),
-      the GR tile expands from (1,2) to (2,2) MMA tiles.
-
-      For A: waves_coop = numWaves / MIWaveGroup[0]
-      For B: waves_coop = numWaves / MIWaveGroup[1]
-
-      Wave config → GR shape:
-        1x4 WG: A=(2,2), B=(1,2)   — A has 4 cooperating waves
-        4x1 WG: A=(1,2), B=(2,2)   — B has 4 cooperating waves
-        2x2 WG: A=(1,2), B=(1,2)   — 2 cooperating waves each
-        1x1 WG: A=(1,2), B=(1,2)   — 1 wave each
-
-      LR subtile shape is always (1,2) regardless of wave config.
-      """
-      mi = kernel["MIWaveGroup"]
-      numWaves = mi[0] * mi[1]
-      wg_idx = 0 if tc == 'A' else 1
-      wg_m = mi[wg_idx]
-      waves_coop = numWaves // wg_m
-      return (2, 2) if waves_coop >= 4 else (1, 2)
-
-    def initSubTileInfo(tc):
-      tileMap = {
-        'A' : self.states.a,
-        'B' : self.states.b,
-        'D' : self.states.d,
-        'MXSA' : self.states.mxsa,
-        'MXSB' : self.states.mxsb,
-      }
-      matrixInfo = tileMap[tc]
-      if tc == 'D':
-        geometry = selectDGeometry(kernel)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('A', 'B'):
-        grShape = selectGRSubtileShape(tc)
-        matrixInfo.grSubtileShape = grShape
-        geometry = selectABGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-      elif tc in ('MXSA', 'MXSB'):
-        geometry = selectMXScaleGeometry(kernel, tc)
-        matrixInfo.tileInfo = TileInfo(geometry, tc, self, kernel)
-
-
     if kernel["UseSubtileImpl"]:
-      initSubTileInfo('A')
-      initSubTileInfo('B')
-      initSubTileInfo('D')
-
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0:
-        initSubTileInfo('MXSA')
-      if kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        initSubTileInfo('MXSB')
-
-      self.ldsStartOffsetA = 0
-      aTileInfo = self.states.a.tileInfo
-      bTileInfo = self.states.b.tileInfo
-      numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
-      numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
-      readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads.
-      # TDM-based solution use padding per row. Take that into account for size calculation.
-      mtA = kernel["MacroTile0"]
-      mtB = kernel["MacroTile1"]
-      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
-      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
-      self.ldsStartOffsetB = sizeA
-      sizeMXSA = 0
-      sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
-        mxsaTileInfo = self.states.mxsa.tileInfo
-        mxsbTileInfo = self.states.mxsb.tileInfo
-
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
-        numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-        sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        self.ldsStartOffsetMXSA = sizeA + sizeB
-        self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
-
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-
-      kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
-      if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
-        self.states.overflowedResources = 8
+      applyLdsLayout(self, kernel)
 
 
     #print(self.states.a.tileInfo.getLocalSubtileId(1,0))
@@ -7640,7 +7379,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
-       (kernel["StreamK"] and \
+       (isPersistent(kernel) and \
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
        kernel["UseSubtileImpl"] or \
@@ -8184,6 +7923,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ProblemType"]["Sparse"] and not (kernel["DirectToVgprSparseMetadata"] or kernel["DirectToLdsMetadata"]):
       kernel["LocalWriteUseSgprMetadata"] = False
+
+    # GSU whose atomic target is the BF16 D tensor itself rather than an fp32
+    # staging workspace (GlobalSplitUAlgorithm AtomicDest). Accumulation is done
+    # by buffer_atomic_pk_add_bf16 on packed element pairs.
+    self.states.useAtomicPkAddBF16 = kernel["GlobalSplitUAlgorithm"] == "AtomicDest"
 
     # The inst HasAtomicAdd is using is not compatible with int32.
     self.states.useAtomicAdd = (self.states.asmCaps["HasAtomicAdd"] and kernel["ProblemType"]["ComputeDataType"].isSingle()) and \
@@ -9762,11 +9506,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.b.startVgprCvt = vgprIdx
         vgprIdx += numVgprsEmuB # for vgpr 32XEmulation B
 
-      if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] == 3:
+      if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
+        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
+        if hasStaticAssignment(kernel):
           numSKConsts += 2  # skGrid, skTiles
-        self.states.startVgprSKConsts = vgprIdx
+        self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
 
@@ -9824,11 +9568,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #self.states.c.startVgprValu = vgprIdx;
 
       #vgprIdx += self.states.c.numVgprValu
-      if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] == 3:
+      if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
+        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
+        if hasStaticAssignment(kernel):
           numSKConsts += 2  # skGrid, skTiles
-        self.states.startVgprSKConsts = vgprIdx
+        self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
 
@@ -9854,7 +9598,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.totalVgprs = vgprIdx
 
       return
-
 
 
     # Dispatch to different VGPR allocation logic for subtile-based impl
@@ -9956,7 +9699,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #   on gfx950, cannot spare.
       mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
                         and not kernel["UseSubtileImpl"]
-      if kernel["StreamK"] and (not self.states.staggerUCode):
+      if isPersistent(kernel) and (not self.states.staggerUCode):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
             # use const GR Inc
@@ -10151,34 +9894,34 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # -4 SGPRs). The .kd metadata (Components/Signature.py) and the host kernarg builder
     # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
     # layout stays consistent host<->device.
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel):
       if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
         self.defineSgpr("AddressWS", numSgprAddressWS)
         self.defineSgpr("AddressFlags", numSgprAddressFlags)
-        self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
+        self.states.numSgprPersistent += numSgprAddressWS + numSgprAddressFlags
       else:
         # ver3 keeps Flags here but moves WS to after alpha/beta, so the pre-Alpha
         # SGPR count stays 4-aligned.
         self.defineSgpr("AddressFlags", numSgprAddressFlags)
-        self.states.numSgprStreamK += numSgprAddressFlags
+        self.states.numSgprPersistent += numSgprAddressFlags
 
-    # StreamK args
-    if kernel["StreamK"] == 4:
+    # Persistent scheduling uses the existing six-word ABI.
+    if hasDynamicAssignment(kernel):
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("TotalItems", 1)
       self.defineSgpr("skTiles", 1)
       self.defineSgpr("SKSplit", 1)
       self.defineSgpr("SKItersPerWI", 1)
       self.defineSgpr("skGrid", 1)
-      self.states.numSgprStreamK += 6
-    elif kernel["StreamK"] == 5:
+      self.states.numSgprPersistent += 6
+    elif hasHybridAssignment(kernel):
       # Hybrid SK3+SK4: define exactly the 6 SK3-named SGPRs that hold the
       # kernarg slots; the SK4 reader names (TotalItems, SKTiles, SKSplit,
       # SKItersPerWI, SKGrid) are emitted as RegSet aliases in
       # KernelWriterAssembly.py (SK5 block guarded by emitsParallelReductionSgprAliases).
       # This collapse matches the host's per-mode 6-arg pack
       # (ContractionSolution.cpp SK5 branch). The runtime mode bit
-      # (bit 30 of MagicShiftItersPerTile) is extracted into StreamKHybridMode
+      # (bit 30 of MagicShiftItersPerTile) is extracted into WorkAssignmentMode
       # at preLoop, after which _emitModeExtraction also clears that bit so
       # the SK4 path's read via the SKTiles alias sees a clean value.
       self.defineSgpr("ItersPerTile", 1)
@@ -10187,8 +9930,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWG", 1)
       self.defineSgpr("skGrid", 1)
       self.defineSgpr("skTiles", 1)
-      self.states.numSgprStreamK += 6
-    elif kernel["StreamK"] == 3: # SK3 two-tile ABI
+      self.states.numSgprPersistent += 6
+    elif hasStaticAssignment(kernel): # SK3 two-tile ABI
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("MagicNumberItersPerTile", 1)
@@ -10196,7 +9939,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWG", 1)
       self.defineSgpr("skGrid", 1)
       self.defineSgpr("skTiles", 1)
-      self.states.numSgprStreamK += 6
+      self.states.numSgprPersistent += 6
 
     self.defineSgpr("Alpha", numSgprAlpha, numSgprAlpha)
     self.states.numSgprAlpha = numSgprAlpha
@@ -10204,10 +9947,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.numSgprBeta = numSgprBeta
 
     # ver3 places AddressWS after alpha/beta, see the StreamK block above.
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"] \
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel) \
        and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
       self.defineSgpr("AddressWS", numSgprAddressWS)
-      self.states.numSgprStreamK += numSgprAddressWS
+      self.states.numSgprPersistent += numSgprAddressWS
 
     # D/C output buffers
     self.defineSgpr("AddressD", numSgprAddressD)
@@ -10276,130 +10019,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     requiredUnalignedSgprVar = []
     requiredAligned4SgprVar = []
 
-    # Per-XCD work-queue index comes from the RAW pre-remap launch WG rank
-    # (see skUsesRawQueueRank). It is snapshotted once, before wgmXCC / the
-    # SKXCC XCCMapping rewrite WorkGroup0, into the ALREADY-allocated persistent
-    # StreamKTileIdx SGPR (provably dead in the [prologue, queue-read) window)
-    # and read back in StreamK.graWorkGroup. Reusing that slot as the raw-rank
-    # carrier costs ZERO additional persistent SGPRs -- a dedicated StreamKQueue
-    # SGPR overflowed the SGPR file on tuned high-register SKXCC kernels -- so no
-    # dedicated queue SGPR is declared here.
-    if kernel["StreamK"] == 4:
-      requiredUnalignedSgprVar += [
-        "StreamKIdx",
-        "StreamKTileIdx",
-        "StreamKPartialIdx",
-        "StreamKLocalStart",
-        "StreamKLocalEnd",
-      ]
-      if kernel.get("PrefetchAcrossPersistent"):
-        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-        self.states.numSgprStreamK += 1
-        # SK4 PAP pops the next tile's work item once, in the prior persistent
-        # iteration's NLL window, and stashes the global work-item index here so
-        # the persistent back-edge's graWorkGroup reuses it instead of popping
-        # again (a second atomic pop would double-consume a queue slot).
-        requiredUnalignedSgprVar.append("SkNextWorkItem")
-        self.states.numSgprStreamK += 1
-      # Work stealing: per-WG sticky-empty flag. Persists across the persistent
-      # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
-      # its home counter for its valid dispenses + exactly one empty fetch.
-      if kernel["StreamKWorkStealing"]:
-        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
-      if kernel["StreamKAtomic"] == 0:
-        requiredAligned4SgprVar.append("SrdWS")
-    elif kernel["StreamK"] == 5:
-      # Hybrid SK3+SK4: the SK3 and SK4 code paths are mutually exclusive at
-      # runtime (selected by StreamKHybridMode), so their path-specific
-      # persistent SGPRs overlap. Only allocate the shared SGPRs, the
-      # SK4-only pair (StreamKTileIdx/StreamKPartialIdx) and the dedicated
-      # StreamKHybridMode bit (extracted from bit 30 of MagicShiftItersPerTile
-      # at preLoop entry). The SK3-only pair (StreamKIter/StreamKIterEnd) is
-      # NOT defined here: it is RegSet-aliased onto the SK4-only
-      # StreamKTileIdx/StreamKPartialIdx slots in KernelWriterAssembly.py
-      # (SK5 block), mirroring the kernarg-slot aliasing, so SK5 allocates
-      # the same persistent SGPR count as SK4 plus the single mode bit.
-      requiredUnalignedSgprVar += [
-        "StreamKIdx",
-        "StreamKTileIdx",
-        "StreamKPartialIdx",
-        "StreamKLocalStart",
-        "StreamKLocalEnd",
-        "StreamKHybridMode",
-        # No persistent SGPR for the USO selector; it is tested in place.
-        # Protocol and SGPR-budget rationale: StreamK.py header.
-      ]
-      # SK5 keeps StreamKHybridMode holding ONLY the mode bit (its SCmpEQU32==0
-      # dispatch must stay a plain compare). The per-XCD queue index reuses the
-      # already-allocated persistent StreamKTileIdx slot as the raw-rank carrier
-      # (dead in the [prologue, queue-read) window: for SK5 it aliases
-      # StreamKIter, whose only in-window writes live on the mutually-exclusive
-      # SK3-static path), so no dedicated queue SGPR is declared.
-      # Work stealing: per-WG sticky-empty flag (see SK4 note above). Only the
-      # SK4 sub-path uses it, but it must persist for the whole persistent loop.
-      if kernel["StreamKWorkStealing"]:
-        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
-      if len(kernel["SpaceFillingAlgo"]):
-        requiredUnalignedSgprVar.append("StreamKTileID")
-      if kernel.get("PrefetchAcrossPersistent"):
-        # SK5 PAP mirrors SK3 (static sub-path) and SK4 (dynamic sub-path):
-        # SkPrefetchPrimed marks that the next-tile work item was already popped
-        # in the prior persistent iteration's NLL window; the dynamic sub-path
-        # stashes the popped global work-item index in SkNextWorkItem so the
-        # persistent back-edge's graWorkGroup reuses it instead of popping again
-        # (a second atomic pop would double-consume a queue slot). Both are dead
-        # on the static sub-path (mode==0) but allocated unconditionally because
-        # the mode bit is a runtime value.
-        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-        self.states.numSgprStreamK += 1
-        requiredUnalignedSgprVar.append("SkNextWorkItem")
-        self.states.numSgprStreamK += 1
-      if kernel["StreamKAtomic"] == 0:
-        requiredAligned4SgprVar.append("SrdWS")
-    elif kernel["StreamK"]:
-      if not self.isStreamKConstantsToVgprEnabled(kernel):
-        requiredUnalignedSgprVar.append("StreamKIdx")
-      requiredUnalignedSgprVar += [
-        "StreamKIter",
-        "StreamKIterEnd",
-        # No persistent SGPR for the USO selector (protocol: StreamK.py header).
-        # On the gfx1250 VGPR-cache path the readfirstlane target is a transient
-        # released before skTiles/skGrid are acquired, so the peak count at those
-        # sites is unchanged.
-      ]
-      # Under StreamKForceDPOnly every WG processes complete tiles, so the
-      # per-tile local iteration bounds are compile-time constants
-      # (StreamKLocalStart == 0, StreamKLocalEnd == ItersPerTile). Skip these
-      # two persistent SGPRs; all readers are constant-folded/removed under
-      # DP-only (see StreamK.py Common methods, graWorkGroup, and the TDM
-      # StreamK-offset helpers, all gated on StreamKForceDPOnly).
-      if not kernel["StreamKForceDPOnly"]:
-        requiredUnalignedSgprVar += [
-          "StreamKLocalStart",
-          "StreamKLocalEnd",
-        ]
-      if len(kernel["SpaceFillingAlgo"]):
-        requiredUnalignedSgprVar.append("StreamKTileID")
-      if self.isPrefetchAcrossPersistentEnabled(kernel):
-        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-      # The batch the resident A registers were filled from. A is indexed by the
-      # batch as well as by M and K, so a tile in another batch needs a different
-      # A and the reuse copy carries no loads to supply it. Persistent because one
-      # persistent iteration writes it and a later one reads it.
-      if kernel["ReuseAcrossPersistent"]:
-        requiredUnalignedSgprVar.append("RAPResidentBatch")
-      # SrdWS is the 4-aligned StreamK workspace SRD, used only by the
-      # partials/fixup reduction path. Under StreamKForceDPOnly there are no
-      # partials/fixup: computeStoreSrdStartCommon and storeBranchesCommon
-      # early-return, computeWorkspaceSrd (the sole AddressWS->SrdWS init) and
-      # the tc=='WS' workspace store are never emitted, and the epilogue SrdWS
-      # borrow is guarded by "SrdWS" in self.sgprs. So skip these 4 aligned
-      # SGPRs (plus any alignment padding) for DP-only kernels. AddressWS and
-      # AddressFlags are likewise dropped for DP-only (see the kernarg define
-      # above): all their runtime readers are constant-folded/removed, and the
-      # .kd metadata + host kernarg builder are gated to match.
-      if kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
-        requiredAligned4SgprVar.append("SrdWS")
+    if isPersistent(kernel):
+      Component.WorkAssignment.find(self).registerRequirements(
+          self, kernel, requiredUnalignedSgprVar, requiredAligned4SgprVar)
 
     if kernel["UseSubtileImpl"]:
       # DTL addressing SGPRs not needed when TDM handles global-to-LDS
@@ -10438,10 +10060,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # These SGPRs aren't used right away, add them to sgpr pool temporarily
     if self.states.doShadowInit and kernel["BufferStore"]:
       self.addSgprVarToPool("SrdC")
-    if kernel["StreamK"] and kernel["StreamKAtomic"] == 0:
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0:
       self.addSgprVarToPool("SrdWS")
 
-    # gfx1250 frees the SK constant SGPRs later in moveStreamKConstantsToVgpr
+    # gfx1250 frees the SK constant SGPRs later in movePersistentConstantsToVgpr
     # after their values have been copied to VGPRs. Freeing them here would let
     # temp allocs clobber kernel arguments before they are copied.
     #------------------------
@@ -10456,13 +10078,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # With PrefetchAcrossPersistent, loop counters must survive the
     # post-loop store phase so setupNewTile can use them in the
     # prefetch tail.
-    keepLoopCounters = kernel["StreamK"] and self.isPrefetchAcrossPersistentEnabled(kernel)
+    keepLoopCounters = isPersistent(kernel) and self.isPrefetchAcrossPersistentEnabled(kernel)
     if not keepLoopCounters:
       for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
         self.states.nonPostLoopSgpr.remove(self.loopCounterName(kernel,i))
       self.states.nonPostLoopSgpr.remove("OrigLoopCounter")
 
-    if not kernel["StreamK"]:
+    if not isPersistent(kernel):
       # Persistent loop requires arguments to remain for next tile
       self.states.nonPostLoopSgpr.remove("WGM")
       self.states.nonPostLoopSgpr.remove("AddressA")
@@ -10498,7 +10120,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.d.numSgprStrides + self.states.c.numSgprStrides + self.states.a.numSgprStrides + self.states.b.numSgprStrides + self.states.m.numSgprStrides + \
       (self.states.mxsa.numSgprStrides if kernel["ProblemType"]["MXBlockA"] else 0) + \
       (self.states.mxsb.numSgprStrides if kernel["ProblemType"]["MXBlockB"] else 0) + \
-      self.states.numSgprStreamK + \
+      self.states.numSgprPersistent + \
       len(kernel["PackedC0IdxChars"][:-1])*2 + len(kernel["PackedC1IdxChars"][:-1])*2
     # Get kernel argument end here
     ###################################
@@ -10533,9 +10155,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     swpAbsRequested = resolveSwInstructionPrefetch(
         kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
         self.states.version == (12, 5, 0),
-        bool(kernel.get("StreamK", 0)),
+        bool(isPersistent(kernel)),
         kernel["ProblemType"]["DataType"].isDouble())[1]
-    if swpAbsRequested and not kernel["StreamK"] \
+    if swpAbsRequested and not isPersistent(kernel) \
        and self.states.version == (12, 5, 0):
       # Force the base past the live-in kernarg preload region when preloading is enabled.
       prefetchPreloadGuard = []
@@ -11423,367 +11045,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # PAP helpers
   ##############################################################################
-  def halfPlrPrefetchAcrossPersistentLabel(self):
-    if not hasattr(self.states, "halfPlrPapLabel"):
-      self.states.halfPlrPapLabel = Label(
-          self.labels.getNameInc("HalfPlrPrefetchAcrossPersistent"), "")
-    return self.states.halfPlrPapLabel
-
-  def halfPlrPrefetchAcrossPersistentReturnLabel(self, loopCopy):
-    if not hasattr(self.states, "halfPlrPapReturnLabels"):
-      self.states.halfPlrPapReturnLabels = {}
-    if loopCopy not in self.states.halfPlrPapReturnLabels:
-      self.states.halfPlrPapReturnLabels[loopCopy] = Label(
-          self.labels.getNameInc("ReturnFromHalfPlrPAP_%u" % loopCopy), "")
-    return self.states.halfPlrPapReturnLabels[loopCopy]
-
-  def halfPlrPrefetchAcrossPersistentEntryLabel(self, loopCopy):
-    if not hasattr(self.states, "halfPlrPapEntryLabels"):
-      self.states.halfPlrPapEntryLabels = {}
-    if loopCopy not in self.states.halfPlrPapEntryLabels:
-      self.states.halfPlrPapEntryLabels[loopCopy] = Label(
-          self.labels.getNameInc("HalfPlrPAPEntry_%u" % loopCopy), "")
-    return self.states.halfPlrPapEntryLabels[loopCopy]
-
-  def callHalfPlrPrefetchAcrossPersistent(self, kernel, loopCopy):
-    """Jump to the shared PAP block before the final HalfPLR loop trip."""
-    module = Module("callHalfPlrPrefetchAcrossPersistent")
-    if not (kernel["HalfPLR"] and kernel["PrefetchAcrossPersistent"]):
-      return module
-
-    module.add(SCmpEQU32(
-        src0=self.loopCounter(kernel, self.states.unrollIdx),
-        src1=1,
-        comment="HalfPLR PAP before final unrolled-loop trip"))
-    module.add(SCBranchSCC1(
-        labelName=self.halfPlrPrefetchAcrossPersistentEntryLabel(loopCopy).getLabelName(),
-        comment="short branch to out-of-line PAP entry when LoopCounter == 1"))
-    module.add(self.halfPlrPrefetchAcrossPersistentReturnLabel(loopCopy))
-    return module
-
-  def emitHalfPlrPrefetchAcrossPersistentBlock(
-      self, kernel, tensorParametersA, tensorParametersB):
-    """Emit one PAP body shared by all three rotating HalfPLR loop copies."""
-    module = Module("halfPlrPrefetchAcrossPersistentBlock")
-    if not (kernel["HalfPLR"] and kernel["PrefetchAcrossPersistent"]):
-      return module
-
-    afterLabel = Label(self.labels.getNameInc("AfterHalfPlrPAPBlock"), "")
-    module.add(SBranch(
-        labelName=afterLabel.getLabelName(),
-        comment="normal loop-exit path skips out-of-line HalfPLR PAP block"))
-    entryLabels = getattr(self.states, "halfPlrPapEntryLabels", {})
-    returnLabels = getattr(self.states, "halfPlrPapReturnLabels", {})
-    assert entryLabels, "no HalfPLR loop copy registered a PAP entry"
-    assert set(entryLabels) == set(returnLabels), \
-        "every HalfPLR PAP entry needs its own return label"
-    # The selector is live from an entry trampoline, through the shared body, to the
-    # return dispatch, so hold it across all of them; nested PAP code then cannot
-    # reuse it.
-    with self.allocTmpSgpr(1, tag="HalfPlrPAPReturnSelector") as selector:
-      returnSelector = selector.idx
-      for loopCopy in sorted(entryLabels):
-        module.add(entryLabels[loopCopy])
-        module.add(SMovB32(
-            dst=sgpr(returnSelector),
-            src=loopCopy,
-            comment="select branch-back label for HalfPLR loop copy %u" % loopCopy))
-        module.add(SBranch(
-            labelName=self.halfPlrPrefetchAcrossPersistentLabel().getLabelName(),
-            comment="join shared HalfPLR PAP body"))
-      module.add(self.halfPlrPrefetchAcrossPersistentLabel())
-      module.add(self.prefetchAcrossPersistent(
-          kernel, tensorParametersA, tensorParametersB, skipBarrier=False))
-
-      returnIds = sorted(returnLabels)
-      for loopCopy in returnIds[:-1]:
-        module.add(SCmpEQU32(
-            src0=sgpr(returnSelector),
-            src1=loopCopy,
-            comment="return to HalfPLR loop copy %u" % loopCopy))
-        module.add(SCBranchSCC1(
-            labelName=returnLabels[loopCopy].getLabelName(),
-            comment="return to matching HalfPLR loop copy"))
-      module.add(SBranch(
-          labelName=returnLabels[returnIds[-1]].getLabelName(),
-          comment="return to one-trip HalfPLR loop entry"))
-    module.add(afterLabel)
-    return module
-
-  def isPrefetchAcrossPersistentEnabled(self, kernel):
-    """Return True when PAP is enabled for this kernel."""
-    # Suppressing the NLL normally takes PAP's out-of-line path with it, because
-    # that is where the next-tile prefetch lived. HalfPLR and RAP each re-emit it
-    # somewhere else, so they keep PAP.
-    return (kernel["StreamK"] in (3, 4, 5)
-            and kernel.get("PrefetchAcrossPersistent", 0)
-            and (not kernel.get("SuppressNoLoadLoop", False)
-                 or kernel["HalfPLR"]
-                 or kernel["ReuseAcrossPersistent"])
-            and kernel["PrefetchGlobalRead"] >= 1
-            and not kernel.get("UseCustomMainLoopSchedule", 0))
-
-  # ReuseAcrossPersistent has no predicate of its own: emitters read
-  # kernel["ReuseAcrossPersistent"] the way they read kernel["HalfPLR"]. Every
-  # precondition RAP has is a reject in Solution.assignDerivedParameters -- or,
-  # when Stream-K is off, a clear of the flag itself -- so a solution that
-  # reaches codegen with the flag set has already been checked.
-  #
-  # RAP is deliberately independent of PrefetchAcrossPersistent. They share a
-  # persistent loop and nothing else: PAP overlaps the next tile's loads with
-  # this tile's compute, RAP holds A across tiles, and RAP 1 with PAP 0 is a
-  # supported combination. RAP is the narrower of the two -- it needs StreamK 3
-  # with DP-only tiles, where PAP also takes 4 and 5.
-
-  def rapResidentKTiles(self, kernel):
-    """How many k-tiles of A/MXSA are held resident; 1 (i.e. no residency) when RAP is off."""
-    if not kernel["ReuseAcrossPersistent"]:
-      return 1
-    return kernel["_RAPNumResidentKTiles"]
-
-  # Suffix worn by the labels of the reuse copy of the compute section. Empty
-  # everywhere else, so every other kernel -- and RAP's own fill copy -- keeps the
-  # names it had before this feature existed.
-  RAP_ITERN_SUFFIX = "_RAPIterN"
-  rapLabelSuffix = ""
-
-  @contextmanager
-  def rapIterNLabels(self):
-    """Suffix every label built in this block, for the reuse copy of the section."""
-    self.rapLabelSuffix = self.RAP_ITERN_SUFFIX
-    try:
-      yield
-    finally:
-      self.rapLabelSuffix = ""
-
-  def rapLabel(self, name):
-    """Disambiguate a label built from a literal across the two emissions.
-
-    Labels from labels.getNameInc are already unique: the counter keeps running
-    across both copies. The ones that collide are built from literals, which is
-    deliberate -- it is what lets a branch emitted at one site agree with a target
-    emitted at another. Emitting the section twice then defines the same label
-    twice, which the CFG builder rejects outright.
-    """
-    return name + self.rapLabelSuffix
-
-  def unrollLoopEndLabelName(self, kernel, loopIdx, nta=0, ntb=0):
-    """Name of the unroll loop's end label.
-
-    Built in one place because closeLoop defines it and anything leaving the loop
-    early has to name the same thing. Two independent constructions of one label
-    name is how the reuse copy's "do not enter LoopL" escape came to point at the
-    fill copy's end.
-    """
-    loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
-    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
-    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
-    return self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb))
-
-  def rapGetName(self, name):
-    """labels.getName with the reuse copy's suffix applied.
-
-    getName deliberately returns the same string every time so a branch and its
-    target agree, which is exactly what collides when the section is emitted
-    twice, so the suffix goes on top.
-    """
-    return self.rapLabel(self.labels.getName(name))
-
-  def rapPersistentLoopEntryLabel(self, kernel):
-    """Label the persistent loop branches back to.
-
-    With the compute section peeled, only the very first tile runs the copy that
-    fills the resident A registers; every later tile re-enters at the second copy.
-    """
-    return "RAP_IterN" if kernel["ReuseAcrossPersistent"] else "PersistentLoopStart"
-
-  # Per-tensor emitter state that advances as the compute section is emitted.
-  # Cannot go through saveLocalPointers: these keys are created during emission,
-  # so at snapshot time (before the first copy) they do not exist yet.
-  _RAP_TENSOR_KEYS = ("localReadOffset", "localReadSwapByteOffset", "localWriteSwapByteOffset")
-
-  def _rapTensorParams(self, kernel, tPA, tPB):
-    params = [tPA, tPB]
-    if kernel["ProblemType"]["MXBlockA"]:
-      params.append(tPA["MX"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      params.append(tPB["MX"])
-    return params
-
-  def rapSnapshotEmitterState(self, kernel, tPA, tPB):
-    """Capture the emitter state that emitting the compute section once mutates.
-
-    Containers are deep-copied: the section mutates several of them in place
-    (freeSgprVarPool, lraTileProperties, the per-iteration local-write skip list),
-    so keeping a reference would "restore" an object that had already been
-    changed, and the second copy would silently allocate different temporaries.
-    """
-    states = {}
-    for name, value in vars(self.states).items():
-      states[name] = deepcopy(value) if isinstance(value, (dict, list, set)) else value
-    tensors = [{key: tp[key] for key in self._RAP_TENSOR_KEYS if key in tp}
-               for tp in self._rapTensorParams(kernel, tPA, tPB)]
-    # The register pools and the SGPR definition table go along: the section
-    # checks registers out and in and undefines SGPRs, so without this the second
-    # copy would release what the first already released. This is the same
-    # deepcopy-and-swap-back the OptNLL alternative path uses.
-    pools = (deepcopy(self.vgprPool), deepcopy(self.sgprPool), deepcopy(self.sgprs))
-    return states, tensors, pools
-
-  def rapRestoreEmitterState(self, kernel, tPA, tPB, snapshot):
-    states, tensors, pools = snapshot
-    for name, value in states.items():
-      setattr(self.states, name, value)
-    for tp, saved in zip(self._rapTensorParams(kernel, tPA, tPB), tensors):
-      for key in self._RAP_TENSOR_KEYS:
-        if key in saved:
-          tp[key] = saved[key]
-        elif key in tp:
-          del tp[key]
-    savedVgprPool, savedSgprPool, savedSgprs = pools
-    # Keep whatever peak the first copy reached; allocation is driven by pool size.
-    savedVgprPool.appendPool(self.vgprPool.size())
-    savedSgprPool.appendPool(self.sgprPool.size())
-    self.vgprPool = savedVgprPool
-    self.sgprPool = savedSgprPool
-    self.sgprs = savedSgprs
-
-  def rapUnrolledLoopCopies(self, kernel):
-    """How many copies of the unroll loop body RAP emits inside the loop shell.
-
-    One per resident k-tile: each must live in a section that is emitted once,
-    because the register set it addresses is a codegen-time constant, and under RAP
-    the loop shell owns all of them.
-
-    The NGLL and NLL sections used to own the last PrefetchGlobalRead of them, but
-    their k-tile indices are absolute (numKTiles-1-remainPgr and numKTiles-1), so
-    they only ever fit a K that uses every resident k-tile. Owning the whole range
-    here is what lets one kernel serve a range of K. What the drain sections did is
-    now done inside the body: not issuing global reads near the end is the
-    branchless TDM disable, and not issuing the lookahead local reads is replaced by
-    draining them at the exit.
-    """
-    if not kernel["ReuseAcrossPersistent"]:
-      return 1
-    return self.rapResidentKTiles(kernel)
-
-  def rapStoreWithheldVgprs(self, kernel):
-    """Registers RAP keeps out of the store's hands: the resident A plus its scales.
-
-    Derived from the same ranges the reclaim sites use, so the guard and the
-    reclaim cannot drift apart.
-    """
-    if not kernel["ReuseAcrossPersistent"]:
-      return 0
-    abStart, _ = self.rapReclaimableValuABRange(kernel)
-    mxsStart, _ = self.rapReclaimableValuMXSABRange(kernel)
-    return (abStart - self.states.a.startVgprValu) + mxsStart
-
-  def rapResidentBufferIdx(self, kernel, tc, unwrappedIdx, defaultIdx):
-    """Buffer-set index for an A/MXSA access, or None when it leaves the resident block.
-
-    Without RAP the buffer index wraps every LoopIters (`u % numVgprBuffer`),
-    because only the PLR window is held. With RAP the whole K extent is held, so
-    the index is absolute: the section's own k-tile times LoopIters, plus the
-    iteration within it.
-
-    Returning None means "do not emit this access". That happens for local reads,
-    which run one iteration ahead of the MFMAs: on the last resident k-tile the
-    lookahead addresses the k-tile after the block. That access is the prefetch
-    of the *next* tile's A -- exactly the transfer RAP exists to remove -- and
-    without the guard the index would wrap onto resident k-tile 0 and overwrite
-    it.
-    """
-    if tc not in ("A", "MXSA") or not kernel["ReuseAcrossPersistent"]:
-      return defaultIdx
-    if self.rapLookaheadLeavesBlock(kernel, unwrappedIdx):
-      return None
-    return self.states.rapKTileIdx * kernel["LoopIters"] + unwrappedIdx
-
-  def rapIsLastResidentSection(self, kernel):
-    """Is the section being emitted the last one of the resident block?
-
-    Work whose only consumer is the next section is dead here. Two things qualify:
-    the local-read address swaps, which select the buffer the next section would
-    read from, and the loop counter decrement, whose readers were the next
-    section's silencing gate and this section's own early exit -- and the last
-    section has no early exit, while after the loop the counter is written before
-    it is read again.
-
-    Leaving the addresses unswapped does not leak into the next persistent
-    iteration: every tile entry resets them with v_and 0xffff.
-    """
-    if not kernel["ReuseAcrossPersistent"]:
-      return False
-    return self.states.rapKTileIdx == self.rapResidentKTiles(kernel) - 1
-
-  def rapTdmPrefetchIsDead(self, kernel):
-    """Is this section's TDM prefetch silenced on every path that reaches it?
-
-    The runtime gate in globalReadDo zeroes the descriptor when the loop counter
-    has PrefetchGlobalRead or fewer k-tiles left. Section i (1-based) only runs
-    when K covers it, and it sees the counter at (K / DepthU) - (i - 1), so it is
-    silenced exactly when i >= K / DepthU - PrefetchGlobalRead + 1. K / DepthU
-    ranges up to the count the kernel holds, so the sections silenced for *every*
-    K it serves are the last PrefetchGlobalRead of the block, and only those: with
-    8 resident k-tiles and PGR 2, section 6 is live at K = 8 tiles and cannot go.
-
-    For those last sections the descriptor writes and the transfer are dead weight
-    rather than a runtime decision, so the load need not be issued at all. This is
-    what the NGLL/NLL drain used to achieve by not containing a prefetch.
-
-    Callers must also be in the unroll loop (mode 1). The pre-loop prologue issues
-    the first PrefetchGlobalRead transfers and has to keep them, and rapKTileIdx
-    does not describe a section there -- it still holds whatever the previous
-    section left.
-    """
-    if not kernel["ReuseAcrossPersistent"] or not kernel["PrefetchGlobalRead"]:
-      return False
-    return self.states.rapKTileIdx >= \
-        self.rapResidentKTiles(kernel) - kernel["PrefetchGlobalRead"]
-
-  def rapLookaheadLeavesBlock(self, kernel, unwrappedIdx):
-    """Does this access run past the last resident k-tile?
-
-    Local reads run an iteration ahead of the MFMAs, so on the last section the
-    lookahead addresses a k-tile that is not there. For A that would wrap onto
-    resident k-tile 0 and overwrite it, which is why rapResidentBufferIdx refuses
-    the access. B and its scales cannot wrap -- they are re-read every tile from
-    a PLR window, so their buffer index is unaffected -- but the read is still
-    pointless: nothing consumes it, because the section it was fetched for does
-    not exist. Skipping it saves the LDS traffic and, more importantly, stops
-    handing the exit path loads that are still in flight with no consumer.
-
-    Only the section's own position decides this, so B asks the same question
-    without going through the A-only buffer-index path.
-    """
-    if not kernel["ReuseAcrossPersistent"]:
-      return False
-    idx = self.states.rapKTileIdx * kernel["LoopIters"] + unwrappedIdx
-    return idx >= self.rapResidentKTiles(kernel) * kernel["LoopIters"]
-
-  def rapReclaimableValuABRange(self, kernel):
-    """(start, size) of the ValuA/B block that may be lent out as scratch.
-
-    Under RAP the ValuA half stays live across the whole persistent loop -- that
-    is the feature -- so only the ValuB half is lendable. ValuA and ValuB are
-    allocated contiguously, so the B half is [b.startVgprValu, lastValuAB).
-    """
-    start = self.states.b.startVgprValu if kernel["ReuseAcrossPersistent"] \
-            else self.states.a.startVgprValu
-    return start, self.states.lastValuAB - start
-
-  def rapReclaimableValuMXSABRange(self, kernel):
-    """(start, size) of the ValuMXSA/B block that may be lent out as scratch.
-
-    MXSA is pinned at the bottom of the register file (s_set_vgpr_msb has no
-    field for the WMMA scale operands, so scales must live in v0-v255), so the
-    resident MXSA block is a prefix and the lendable part starts after it.
-    """
-    start = (self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu) \
-            if kernel["ReuseAcrossPersistent"] else 0
-    return start, self.states.lastValuMXSAB - start
-
   ##############################################################################
   # Function End
   ##############################################################################
@@ -12343,7 +11604,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("address", "AddressMXScaleB")
     if kernel["ProblemType"]["Sparse"]:
       _reg("address", "AddressMetadata")
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0:
       _reg("address", "AddressWorkspace")
       _reg("address", "AddressFlags")
 
@@ -12384,12 +11645,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("float64" if numSgprBeta > 1 else "uint32", "Beta")
 
     # -- StreamK scalar args ---------------------------------------------------
-    if kernel["StreamK"]:
+    if isPersistent(kernel):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "MagicNumberItersPerTile")
       _reg("uint32", "MagicShiftItersPerTile")
       _reg("uint32", "SKItersPerWG")
-      if kernel["StreamK"] >= 2:
+      if isPersistent(kernel):
         _reg("uint32", "SKGrid")
         _reg("uint32", "SKTilesAndSplit")
 
@@ -12459,8 +11720,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self._registerKernelArgs(kernel)
     gridX = "TilesXYBatchGSU"
-    if kernel["StreamK"]:
-      gridX = "StreamKWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "StreamKNoBatch"
+    if isPersistent(kernel):
+      gridX = "PersistentGrid" if isPersistentDataParallel(kernel) else ("PersistentWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "PersistentNoBatch")
     kernel["CustomKernel"] = {
       "name": self.states.kernelName,
       "args": self.kernelArgDefs,
@@ -12586,7 +11847,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmGlobalOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+  def tdmApplyTileKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
@@ -12653,6 +11914,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
     return ""
 
   def _nextLdsToken(self, idx: int) -> int:

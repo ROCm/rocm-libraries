@@ -26,6 +26,8 @@ def _gemm_row(**overrides):
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
     row.update(overrides)
     return row

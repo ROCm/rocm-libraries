@@ -25,8 +25,7 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef ROCBLASLT_UTILS_HPP
-#define ROCBLASLT_UTILS_HPP
+
 #include "auxiliary.hpp"
 #include "handle.h"
 #include "utility.hpp"
@@ -562,5 +561,3 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {0.0, 0.0};
     }
 }
-
-#endif

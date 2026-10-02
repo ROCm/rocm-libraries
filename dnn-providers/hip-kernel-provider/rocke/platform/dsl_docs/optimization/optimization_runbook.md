@@ -289,8 +289,10 @@ from cheapest to most expensive:
    — MoE / Block-scale / MX and non-attention extended kernels.
    FMHA / sage / sparse attention coverage moved to the library:
    `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
-6. `python python/rocke/examples/gfx950/attention/parity_unified_attention.py`
-   — attention parity (Triton + ref vs CK DSL paths).
+6. `PYTHONPATH=python:../library python -m builders.gfx950.attention.prefill.parity_unified_attention`
+   — attention parity (Triton + ref vs rocKE paths). The gfx942 sibling
+   `builders.gfx942.attention.prefill.parity_unified_attention` checks
+   against a torch reference only.
 7. `python python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit (non-attention specs).
    Attention lowering audit:
@@ -299,7 +301,7 @@ from cheapest to most expensive:
 References do not have to be torch. The conv and GEMM bake-offs use
 NumPy fp32 accumulation in `run_manifest.py`. Attention has a
 deliberate per-shape `ref_paged_attn` in
-`examples/gfx950/attention/parity_unified_attention.py`.
+`library/builders/gfx950/attention/prefill/parity_unified_attention.py`.
 
 ### 2.2 Performance Baselines
 
@@ -3276,7 +3278,7 @@ export PYTHONPATH=python
 ### 19.2 The single validation block
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
@@ -3291,8 +3293,7 @@ python python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+python -m builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 
