@@ -73,6 +73,7 @@ def main():
             *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
             "hipkittens-backend",
             "hipkittens-gemm",
+            "hipkittens-bench",
             "hipkittens-install",
             "disabled-api",
         ),
@@ -421,7 +422,7 @@ def main():
     # Built only with HIPBLASLT_JIT_ENABLE_HIPKITTENS; the kernels need gfx950.
     hipkittens_test = staging / "hipblaslt-jit-hipkittens-test"
     skipped = {}
-    for name in ("hipkittens-backend", "hipkittens-gemm", "hipkittens-install"):
+    for name in ("hipkittens-backend", "hipkittens-gemm", "hipkittens-bench", "hipkittens-install"):
         if not hipkittens_test.exists():
             skipped[name] = "the build has no HipKittens backend"
         elif args.architecture != "gfx950":
@@ -437,6 +438,18 @@ def main():
             "hipkittens-gemm",
             [str(hipkittens_test), "gpu"],
             {"HIPBLASLT_JIT_LIBRARY_PATH": str(output / "hipkittens-library")},
+            900,
+        ),
+        (
+            "hipkittens-bench",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_bench.py"),
+                str(hipkittens_test),
+                str(build / "clients/hipblaslt-bench"),
+                str(output / "hipkittens-bench"),
+            ],
+            {},
             900,
         ),
         (
