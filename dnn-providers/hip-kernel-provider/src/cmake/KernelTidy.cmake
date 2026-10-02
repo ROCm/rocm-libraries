@@ -95,6 +95,9 @@ endfunction()
 #   Each file gets its own command, so the generator runs them in parallel and re-checks
 #   only what changed: a per-file stamp under the build tree records the last successful
 #   run, and a file is re-checked when it, the prelude or the .clang-tidy config is newer.
+#
+#   Requires HIPRTC_RUNTIME_HEADER (see hiprtc_runtime_header()); no target is created
+#   when it is unset.
 function(add_kernel_tidy_target)
     set(options "")
     set(oneValueArgs NAME PRELUDE)
@@ -138,6 +141,17 @@ function(add_kernel_tidy_target)
         return()
     endif()
     get_filename_component(KERNEL_TIDY_PRELUDE "${KERNEL_TIDY_PRELUDE}" ABSOLUTE)
+
+    # Without the hipRTC pre-include header the kernels are missing the declarations the
+    # real hipRTC compile gives them, so clang-tidy would drown in bogus diagnostics
+    # instead of reporting anything useful. Skip the check rather than report noise.
+    if(NOT HIPRTC_RUNTIME_HEADER)
+        message(WARNING
+                "hipRTC runtime header not available; skipping kernel tidy target "
+                "${KERNEL_TIDY_NAME}")
+        return()
+    endif()
+
     set(_tidy_config "${PROJECT_SOURCE_DIR}/.clang-tidy")
 
     # Absolute, de-duplicated list of the directories the kernels include each other from.
@@ -155,15 +169,6 @@ function(add_kernel_tidy_target)
     list(REMOVE_DUPLICATES _kernel_files)
     list(REMOVE_DUPLICATES _kernel_include_flags)
 
-    # The hipRTC pre-include header is dumped out of libhiprtc-builtins.so at build time;
-    # when it is unavailable the kernels are still checked, just without it.
-    set(_hiprtc_header_flags "")
-    set(_hiprtc_header_depends "")
-    if(HIPRTC_RUNTIME_HEADER)
-        set(_hiprtc_header_flags -include "${HIPRTC_RUNTIME_HEADER}")
-        set(_hiprtc_header_depends "${HIPRTC_RUNTIME_HEADER}")
-    endif()
-
     # Flags after `--` replace the compile database, which has no entry for these files.
     set(_kernel_tidy_compiler_flags
         -x hip
@@ -173,7 +178,7 @@ function(add_kernel_tidy_target)
         -nogpuinc
         -D__HIPCC_RTC__
         -include "${KERNEL_TIDY_PRELUDE}"
-        ${_hiprtc_header_flags}
+        -include "${HIPRTC_RUNTIME_HEADER}"
         ${_kernel_include_flags}
     )
     
@@ -198,7 +203,7 @@ function(add_kernel_tidy_target)
                     -- ${_kernel_tidy_compiler_flags}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
             DEPENDS ${_kernel_file}  ${KERNEL_TIDY_PRELUDE} ${_tidy_config}
-                    ${_hiprtc_header_depends}
+                    ${HIPRTC_RUNTIME_HEADER}
             COMMENT "Running clang-tidy on embedded kernel ${_kernel_relative}"
             VERBATIM
         )
