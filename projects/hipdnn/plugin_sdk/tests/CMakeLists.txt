@@ -68,6 +68,14 @@ target_link_libraries(
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
 
+# Fault the HIP boundary without adding hooks to the installed SDK.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES)
+    target_link_options(hipdnn_plugin_sdk_tests PRIVATE
+        "LINKER:--wrap=hipStreamWaitValue32"
+        "LINKER:--wrap=hipDeviceGetAttribute")
+endif()
+
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 

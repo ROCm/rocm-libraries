@@ -1,0 +1,96 @@
+# hipccl-config.cmake
+#
+# NOTE(hipccl3): mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust]
+# [CUB] [libcudacxx]) entry point. This does NOT redefine rocprim/hipcub/
+# rocthrust's targets - it delegates to each component's own already-existing
+# <component>-config.cmake (installed alongside this file, one directory up,
+# by each sub-project's own rocm_export_targets() call) via
+# find_package(), then exposes a combined hipccl::hipccl INTERFACE target
+# for convenience. find_package(rocprim)/find_package(hipcub)/
+# find_package(rocthrust) keep working standalone, unchanged, exactly like
+# CCCL keeps find_package(Thrust)/find_package(CUB)/find_package(libcudacxx)
+# working for backward compatibility.
+#
+# Usage:
+#   find_package(hipccl)                          # all components
+#   find_package(hipccl COMPONENTS rocprim hipcub) # just these two
+#
+# libhipcxx is not yet a supported component - see HIPCCL_BUILD_LIBHIPCXX in
+# the root CMakeLists.txt.
+
+@PACKAGE_INIT@
+
+set(_hipccl_supported_components rocprim hipcub rocthrust)
+
+# find_package(hipccl) with no COMPONENTS given still populates
+# <package>_FIND_COMPONENTS as empty, not "all" - default to everything,
+# matching CCCL's plain `find_package(CCCL)` pulling in every component.
+if(NOT hipccl_FIND_COMPONENTS)
+  set(hipccl_FIND_COMPONENTS ${_hipccl_supported_components})
+  # "All of them" also means all of them are required: check_required_components()
+  # below keys off hipccl_FIND_REQUIRED_<comp>, which CMake only sets for
+  # components the caller named explicitly. Without this, a missing component
+  # would leave hipccl_FOUND TRUE for a plain find_package(hipccl REQUIRED).
+  foreach(_hipccl_comp ${_hipccl_supported_components})
+    set(hipccl_FIND_REQUIRED_${_hipccl_comp} TRUE)
+  endforeach()
+endif()
+
+foreach(_hipccl_comp ${hipccl_FIND_COMPONENTS})
+  if(NOT _hipccl_comp IN_LIST _hipccl_supported_components)
+    set(hipccl_${_hipccl_comp}_FOUND FALSE)
+    if(hipccl_FIND_REQUIRED_${_hipccl_comp})
+      set(hipccl_NOT_FOUND_MESSAGE
+        "hipccl: unsupported component \"${_hipccl_comp}\" requested (supported: ${_hipccl_supported_components})")
+    endif()
+    continue()
+  endif()
+
+  # Plain find_package(QUIET), NOT find_dependency(): find_dependency is a
+  # macro whose failure path calls return(), which returns from *this config
+  # file* rather than just this loop iteration - so one missing component would
+  # abort the rest of the file, leaving later components unqueried and the
+  # combined target uncreated. It also forwards the outer REQUIRED, which would
+  # turn a component the caller explicitly listed under OPTIONAL_COMPONENTS
+  # into a hard error.
+  #
+  # HINTS covers being located via an explicit -Dhipccl_DIR=... where the
+  # install prefix is not otherwise on CMAKE_PREFIX_PATH; each component's own
+  # config sits one directory up, alongside this one.
+  find_package(${_hipccl_comp} QUIET CONFIG HINTS "${CMAKE_CURRENT_LIST_DIR}/..")
+  set(hipccl_${_hipccl_comp}_FOUND ${${_hipccl_comp}_FOUND})
+
+  if(NOT ${_hipccl_comp}_FOUND AND hipccl_FIND_REQUIRED_${_hipccl_comp})
+    list(APPEND _hipccl_missing_components ${_hipccl_comp})
+  endif()
+endforeach()
+
+# The component lookups above are QUIET, so surface which ones were actually
+# missing rather than letting CMake report a bare "hipccl not found".
+if(_hipccl_missing_components AND NOT hipccl_NOT_FOUND_MESSAGE)
+  set(hipccl_NOT_FOUND_MESSAGE
+    "hipccl: required component(s) not found: ${_hipccl_missing_components}")
+endif()
+
+# --- Combined convenience target ---
+# NOTE(hipccl3): only created once all three real components have been
+# found/requested together - mirrors CCCL::CCCL, which similarly aggregates
+# CCCL::Thrust/CCCL::CUB/CCCL::libcudacxx.
+if(hipccl_rocprim_FOUND AND hipccl_hipcub_FOUND AND hipccl_rocthrust_FOUND
+   AND NOT TARGET hipccl::hipccl)
+  add_library(hipccl::hipccl INTERFACE IMPORTED)
+  target_link_libraries(hipccl::hipccl INTERFACE
+    roc::rocprim
+    hip::hipcub
+    roc::rocthrust
+  )
+endif()
+
+unset(_hipccl_supported_components)
+unset(_hipccl_comp)
+unset(_hipccl_missing_components)
+
+# Sets hipccl_FOUND FALSE if any *required* requested component is missing,
+# while allowing OPTIONAL_COMPONENTS entries to be absent. CMake then raises
+# the error itself when the caller passed REQUIRED.
+check_required_components(hipccl)

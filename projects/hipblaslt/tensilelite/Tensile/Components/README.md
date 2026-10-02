@@ -1,5 +1,41 @@
 # TensileLite Components
 
+## Persistent DataParallel clusters
+
+`TileProcessingStrategy: DataParallel` with `WorkAssignment: StaticGrid` lets each
+workgroup compute several complete output tiles. On gfx1250, `ClusterDim: [Cs, Ck]`
+and `TDMInst: 3` let neighboring workgroups share input loads through the tensor
+memory hardware. `Cs` peers along M share B; `Ck` peers along N share A. Both axes
+must be powers of two, with 2 through 16 workgroups per cluster.
+
+Each cluster walks whole `Cs × Ck` blocks of output tiles. The host launches
+`(Cs * clusters, Ck, 1)` workgroups; `PersistentGrid` contains their total count,
+including peers beyond a matrix edge. The kernel folds batch into the block
+index. Edge peers load the last valid tile on that axis and suppress their stores,
+so all peers execute the same number of cluster barriers. The padded tile count,
+including batch, must fit in 32 bits; oversized schedules are rejected at launch.
+
+Before a cluster starts another block, every workgroup finishes reading its local
+shared memory and signals the cluster barrier. The next block waits before issuing
+loads into that memory. Empty summations (`K=0` or `alpha=0`) still consume the
+barrier signal before writing `beta * C`. Multicast masks, including sparse metadata
+masks, stay allocated for every tile that refreshes the load descriptors.
+
+`PrefetchAcrossPersistent` currently launches one block per cluster: prefetching
+another block could overwrite memory still used by a peer. `ReuseAcrossPersistent`
+and `SpaceFillingAlgo` are rejected for spatial clusters because their load order
+and tile remapping do not preserve this synchronization. Existing StreamK clustered
+reduction keeps its own scheduling rules.
+
+The common tests `data_parallel_static_mxf{4,8}[_pap]_cluster_multicast_ext.yaml`
+cover numeric output across cluster shapes and prefetch modes.
+`data_parallel_cluster_multicast_boundaries.yaml` adds empty sums, default shadow
+initialization, and uneven batched boundaries. Run them with:
+
+```bash
+tox -e py3 -- Tensile/Tests -m common -k 'cluster_multicast'
+```
+
 ## Signature
 
 The signature for each KernArgsVersion is described here.
