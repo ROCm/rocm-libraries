@@ -426,19 +426,20 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
     auto getBufSize = [](TreeNode* node, bool input) {
-        auto outputLen = node->GetBluesteinFuseType() == BFT_NONE
-                             ? node->GetOutputLength()
-                             : std::vector<size_t>{node->blue->get_transform_length()};
-
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-        else
+
+        auto outLen    = node->UseOutputLengthForPadding() ? node->GetOutputLength() : node->length;
+        auto outStride = node->outStride;
+        // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
+        if(node->GetBluesteinFuseType() == BFT_INV_CHIRP_MUL
+           && node->scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
         {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
-                                   node->outStride,
-                                   node->batch,
-                                   node->oDist);
+            outLen.erase(outLen.begin(), outLen.begin() + 2);
+            outLen.insert(outLen.begin(), node->blue->get_transform_length());
+            outStride.erase(outStride.begin() + 1);
         }
+        return compute_ptrdiff(outLen, outStride, node->batch, node->oDist);
     };
 
     size_t sizeBufIn  = 0;
