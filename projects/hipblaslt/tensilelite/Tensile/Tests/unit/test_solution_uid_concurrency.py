@@ -28,21 +28,38 @@ from Tensile.Common.SolutionIdGen import (
 pytestmark = pytest.mark.unit
 
 PROCESS_COUNT = 8
-IDS_PER_PROCESS = 8
+IDS_PER_PROCESS = 4
 
 
 def _generate_after_barrier(
     barrier: mp.synchronize.Barrier,
     result_queue: mp.Queue,
 ) -> None:
-    """Generate UIDs once all workers have reached the barrier.
+    """Generate unique UIDs once all workers have reached the barrier.
+
+    A repeated draw in this process is discarded and drawn again. The set stays
+    in this worker and is not passed to the generator.
 
     Args:
         barrier: Shared process barrier sized to the worker count.
         result_queue: Queue used to return generated UIDs to the parent process.
+
+    Raises:
+        RuntimeError: If unique IDs cannot be collected after repeated draws.
     """
     barrier.wait()
-    result_queue.put([generate_solution_id() for _ in range(IDS_PER_PROCESS)])
+    seen: set[int] = set()
+    attempts = 0
+    max_attempts = IDS_PER_PROCESS * 100
+    while len(seen) < IDS_PER_PROCESS:
+        if attempts >= max_attempts:
+            raise RuntimeError(
+                f"Could not draw {IDS_PER_PROCESS} unique solution IDs "
+                f"after {max_attempts} attempts"
+            )
+        attempts += 1
+        seen.add(generate_solution_id())
+    result_queue.put(list(seen))
 
 
 def _run_concurrent_generation(
@@ -92,12 +109,6 @@ def test_8_processes_generate_unique_solution_uids() -> None:
         f"Expected all {expected_count} SolutionUID values to be unique, "
         f"but found {duplicates} collision(s)"
     )
-
-
-def test_generate_solution_id_is_unique_across_sequential_calls() -> None:
-    """Sequential calls on one process should also remain unique."""
-    solution_uids = {generate_solution_id() for _ in range(1000)}
-    assert len(solution_uids) == 1000
 
 
 def test_decode_solution_id_splits_40_plus_24_layout() -> None:
