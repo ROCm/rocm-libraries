@@ -231,6 +231,23 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
     EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
 }
 
+// openGraph() throwing ends the body before any outcome exists. GTest fails the test
+// on the escaping exception; the body must still report one verifier, NONE, so the
+// summary tally counts it.
+TEST_F(TestVerificationModePathsFixture, OpenGraphThrowStillReportsNoVerifier)
+{
+    using ::testing::_;
+    ON_CALL(_mocks.engineRunner, openGraph(_, _))
+        .WillByDefault(::testing::Throw(std::runtime_error("stub: graph build threw")));
+
+    ::testing::TestPartResultArray results;
+    EXPECT_THROW(runCapturing(loadBundle("open_graph_throws", /*includeGoldenOutput=*/true),
+                              VerificationMode::AUTO,
+                              &results),
+                 std::runtime_error);
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
+}
+
 // The other GPU miss form: a real runtime error, not a capability miss. AUTO
 // still falls through to CPU and passes, but unlike a plain capability miss it
 // must be loud about it — a reference error naming the GPU failure is published

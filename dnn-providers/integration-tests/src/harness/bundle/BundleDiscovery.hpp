@@ -92,41 +92,50 @@ inline bool isDescendantOf(const std::filesystem::path& path, const std::filesys
     return ancestorIt == normalizedAncestor.end();
 }
 
-// True when the directory symlink at `link` points at itself or at one of its own
-// ancestors, so descending into it would revisit the same tree forever.
-inline bool linksToAncestor(const std::filesystem::path& link)
+// The directory `path` resolves to, or the path itself when it cannot be resolved,
+// for comparing the directories a walk has descended through.
+inline std::filesystem::path canonicalDirectory(const std::filesystem::path& path)
 {
     std::error_code error;
-    const auto target = std::filesystem::canonical(link, error);
-    if(error)
-    {
-        return false;
-    }
-    const auto parent = std::filesystem::canonical(link.parent_path(), error);
-    return !error && isDescendantOf(parent, target);
+    auto canonical = std::filesystem::canonical(path, error);
+    return error ? path.lexically_normal() : canonical;
 }
 
 // Visits every entry at or under `root`, the one walk every discovery scan uses.
 // Directory symlinks are followed at any depth, so a bundle root assembled from
 // links (for example quick/SdpaFwd linked to an installed tree) is discovered like
 // the same tree copied. Entries keep their path through the link, which is what
-// test names are derived from. A link to its own ancestor is skipped rather than
-// descended, so a cycle cannot recurse until the path is too long.
+// test names are derived from.
+//
+// The walk keeps the canonical directory of every level it is currently inside. A
+// directory that resolves to one of them is a cycle (a link to its own ancestor, or
+// a/to_b -> b next to b/to_a -> a), so it is skipped rather than descended. Two
+// links to the same directory from different branches are not a cycle; both are
+// walked, as a copied tree would be.
 template <typename Visit>
 void forEachBundleTreeEntry(const std::filesystem::path& root, Visit&& visit)
 {
     namespace fs = std::filesystem;
+    // ancestry[d] is the directory that holds the entries at iterator depth d.
+    std::vector<fs::path> ancestry{canonicalDirectory(root)};
     for(auto it
         = fs::recursive_directory_iterator(root, fs::directory_options::follow_directory_symlink);
         it != fs::recursive_directory_iterator();
         ++it)
     {
-        if(it->is_symlink() && it->is_directory() && linksToAncestor(it->path()))
+        ancestry.resize(static_cast<size_t>(it.depth()) + 1);
+        if(it->is_directory())
         {
-            HIPDNN_PLUGIN_LOG_WARN(
-                "Not following bundle directory link to its own ancestor: " << it->path());
-            it.disable_recursion_pending();
-            continue;
+            auto directory = canonicalDirectory(it->path());
+            if(std::find(ancestry.begin(), ancestry.end(), directory) != ancestry.end())
+            {
+                HIPDNN_PLUGIN_LOG_WARN(
+                    "Not following bundle directory that is already being walked (cycle): "
+                    << it->path());
+                it.disable_recursion_pending();
+                continue;
+            }
+            ancestry.push_back(std::move(directory));
         }
         visit(*it);
     }

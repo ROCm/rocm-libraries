@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -373,6 +374,34 @@ TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAnAncestorIsNotFollowed)
     const auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 1u);
     EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A cycle can span siblings: a/to_b -> b and b/to_a -> a. Neither link points at its
+// own ancestor, but following both returns to a directory the walk is already
+// inside. Discovery must stop there and still find what a copied tree holds: each
+// bundle under its own folder and once more behind the link that reaches it.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkCycleAcrossSiblingsIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "a" / "good", "good");
+    createMinimalBundle(_tempDir / "b" / "fine", "fine");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir / "b", _tempDir / "a" / "to_b");
+        std::filesystem::create_directory_symlink(_tempDir / "a", _tempDir / "b" / "to_a");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    std::vector<std::string> suites;
+    for(const auto& bundle : result)
+    {
+        suites.push_back(bundle.suiteName);
+    }
+    std::sort(suites.begin(), suites.end());
+    EXPECT_EQ(suites, (std::vector<std::string>{"a_good", "a_to_b_fine", "b_fine", "b_to_a_good"}));
 }
 
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)

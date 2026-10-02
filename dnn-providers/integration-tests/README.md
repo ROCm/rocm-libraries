@@ -235,7 +235,7 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
 
-Each test body that reaches an outcome prints the oracle that graded it, between its
+Each verification test body prints the oracle that graded it, between its
 `[ RUN ]` and result lines, and the coverage summary totals them:
 
 ```

@@ -95,7 +95,8 @@ public:
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
 
     /// The oracle that graded this test body's outputs, NONE when nothing was
-    /// compared. Called once per body that reached an outcome.
+    /// compared. Called once per verification body, including one that throws
+    /// before it reaches an outcome. Support-claim authoring runs do not call it.
     virtual void recordVerifier(const std::string& bundlePath, Verifier verifier) = 0;
 };
 

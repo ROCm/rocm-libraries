@@ -169,7 +169,21 @@ public:
         // One from_binary, one ranked query, one applicability answer. Everything
         // below takes the session as an argument, so nothing re-derives it and
         // nothing caches it on the harness.
-        GraphSession session = openGraph();
+        //
+        // A throw here leaves before any outcome exists. GTest still fails the test,
+        // so it gets its verifier line too (NONE: nothing was compared), or the
+        // summary tally would be short a body that failed.
+        GraphSession session = [this] {
+            try
+            {
+                return openGraph();
+            }
+            catch(...)
+            {
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                throw;
+            }
+        }();
 
         if(TestConfig::get().writeSupportClaims())
         {
