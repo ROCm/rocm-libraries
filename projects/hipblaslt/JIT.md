@@ -411,12 +411,18 @@ only for what is still missing from `requestedAlgoCount`:
 5. The `getAllSolutions` fill.
 
 JIT results count toward the request, so a query that the Equality results
-fill does not consult JIT and returns what it returns with JIT off. The sources
-after JIT skip the kernels its results use. When the override entry names a
-JIT solution, the JIT results do not repeat its kernel. The Equality pass
-covers every hardware branch of the pre-tuned library before the other rows are
-searched, so an Equality result of the generic branch can come before a result
-that a CU-specific branch would put first with JIT off. When neither pre-tuned
+fill does not consult JIT. Its results can still differ from those with JIT
+off. The pre-tuned library walks its hardware branches in order, a branch that
+names a device or CU count before the generic one. With JIT off, a single walk
+takes each branch's Equality rows and then its other rows, and stops when the
+request is full. The fallback-mode Equality pass takes the Equality rows of
+every branch first, so when the first matching branch's Equality rows do not
+fill the request, an Equality result of the generic branch can take a place
+that, with JIT off, goes to a result of the specific branch's other rows. The
+results are those of JIT off when only one branch matches or when the first
+matching branch's Equality rows fill the request. The sources after JIT skip
+the kernels its results use. When the override entry names a JIT solution, the
+JIT results do not repeat its kernel. When neither pre-tuned
 pass finds a solution for an xf32 problem, both repeat with FP32 math; JIT runs
 once for the query. When rocRoller's early path applies, its results come first
 and JIT fills only what is still missing after the `getAllSolutions` fill.
@@ -597,7 +603,7 @@ TensileLite.
 | Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| HipKittens, other backends | Future extension points behind the same interface. HipKittens is explicitly deferred in this pass. |
+| HipKittens, other backends | Future extension points behind the same interface. A HipKittens backend is planned: it instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It is not implemented. |
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
@@ -707,7 +713,7 @@ override them. Step 5 implements this; see
 
 | `HIPBLASLT_JIT` | Behavior |
 | --- | --- |
-| `0` or unset (default) | JIT is off. Heuristic queries behave as they do today. |
+| `0` or unset (default) | JIT is off. Heuristic queries and `hipblasLtMatmul` behave as in a build without JIT. |
 | `1` | Fallback. JIT is a source after the Equality results and before the other pre-tuned libraries. |
 | `2` | Forced. JIT is the only source: the query skips the override file, Equality, Origami (Prediction), all other pre-tuned libraries, rocRoller's early path and the `getAllSolutions` fill. It looks up the JIT solution library first, then generates. |
 
@@ -719,8 +725,8 @@ In fallback mode, each source supplies only what is still missing from
 3. Generation: Jit asks the backend for as many new solutions as are needed to
    reach `requestedAlgoCount`, builds their code objects, publishes them into
    the JIT solution library and returns them.
-4. The other pre-tuned libraries (Range, Origami (Prediction), GridBased and
-   FreeSize), then the existing `getAllSolutions` shortfall fill.
+4. The other pre-tuned libraries (Range, Origami (Prediction), GridBased,
+   FreeSize and MLP), then the existing `getAllSolutions` shortfall fill.
 
 The retry that repeats an xf32 lookup with FP32 math covers both pre-tuned
 steps and does not generate again. When rocRoller's early path applies, its
@@ -788,7 +794,7 @@ The following work sits outside the six steps and remains future:
 | --- | --- |
 | Exact epilogue specialization | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
-| HipKittens and other backends | Implement the backend interface. HipKittens is deferred in this pass. |
+| HipKittens and other backends | Implement the backend interface. A HipKittens backend is planned: run-time instantiation through comgr, opt-in, in developer builds only. It is not implemented. |
 | KFA metadata convergence | Complete producer metadata, then prove argument, launch, helper, workspace and synchronization equivalence before sharing dispatch. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | Timing/progress | Independent `HIPBLASLT_JIT_DEBUG` categories `timing`, `progress`, or `timing,progress`. Unset/empty adds no collection, observer or files. See the [host](jit-design/timing-host-plan.md) and [Python](jit-design/timing-python-plan.md) plans. |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |
