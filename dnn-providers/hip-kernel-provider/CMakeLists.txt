@@ -354,6 +354,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
+    # pointwise_model is part authored, part generated (uhd_model_gen emits the .uhd.json
+    # with its model so `features_hash` cannot drift), so its source root is assembled in
+    # the build tree. The authored JSONs stay out of test_descriptors/ so the set is never
+    # wired directly, which would pack descriptors without their model.
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_SET "pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures/pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/hkp-pointwise-model-source")
+
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
@@ -445,6 +455,32 @@ else()
     message(STATUS "rocKE features disabled")
 endif()
 
+# ============================================================================
+# ASM SDPA engine heuristics
+# ============================================================================
+# AITER binds its L1 model by a UUID declared in provider code (RFC 0019 §4.1), so the
+# model has no pack and must be delivered into the production tree directly. Declared
+# ahead of descriptor-packaging because the production pack wipes that tree and stages
+# these files itself (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES); a separate copy would be
+# deleted on repack.
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/asm_sdpa_engine/descriptors")
+    # One list feeds staging and install, so the two cannot disagree about what ships.
+    set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES
+        predict_engine/gfx942/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx942/asm_sdpa_engine_tflops.bin
+        predict_engine/gfx950/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx950/asm_sdpa_engine_tflops.bin
+    )
+    set(HIPKERNELPROVIDER_PRODUCT_STAGE_FILES)
+    foreach(_descriptor IN LISTS HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES)
+        list(APPEND HIPKERNELPROVIDER_PRODUCT_STAGE_FILES
+             "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+             "asm_sdpa/${_descriptor}")
+    endforeach()
+endif()
+
 # The kpack reader and the descriptor packer both ride the ingestor gate. (The ASM SDPA
 # engine is a separate kpack producer on its own gate; it packs but never reads.)
 #
@@ -459,6 +495,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
+    # Must precede descriptor-packaging: its staging rules depend on this target.
+    add_subdirectory(tools/uhd_model_gen)
     add_subdirectory(descriptor-packaging)
 endif()
 
@@ -587,4 +625,33 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
     endif()
+endif()
+
+# Production pack dormant: nothing stages or installs arch_content/, so copy the ASM SDPA
+# heuristics into the build tree and install them from the source tree.
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND NOT TARGET hkp_packaging_product)
+    set(_asm_sdpa_staged)
+    foreach(_descriptor IN LISTS HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES)
+        add_custom_command(
+            OUTPUT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                    "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            DEPENDS "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            COMMENT "Staging asm_sdpa heuristic ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _asm_sdpa_staged
+             "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}")
+
+        get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+        install(
+            FILES "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            DESTINATION
+                "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa/${_descriptor_subdir}"
+        )
+    endforeach()
+    add_custom_target(asm_sdpa_engine_descriptors ALL DEPENDS ${_asm_sdpa_staged}
+                      COMMENT "Staging asm_sdpa engine heuristics")
 endif()
