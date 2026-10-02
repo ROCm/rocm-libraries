@@ -27,7 +27,8 @@ cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-tensilelite-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-api-test \
   hipblaslt-jit-mock-backend-test \
-  hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-process-test \
+  hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-debug-child-test \
+  hipblaslt-jit-process-test \
   hipblaslt-jit-source-bundle-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
   hipblaslt-jit-bundle-freshness-test hipblaslt-jit-heuristic-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
@@ -72,8 +73,7 @@ to replay, publish or rebuild it.
 `source-bundle`, `jit-component`, `code-object`, `mock-backend`,
 `mock-backend-library`, `jit-library` and `jit-library-concurrency` check what
 the CTest tests of the same names with a `jit-` prefix check, as the
-[JIT test guide](README.md#what-each-test-checks) describes, and `jit-debug`
-also checks the child observer that relays a generator's event file. Each
+[JIT test guide](README.md#what-each-test-checks) describes. Each
 `heuristic-<route>` case checks what `jit-heuristic-<route>` checks, with the
 TensileLite generator: a Python wrapper that fails if it runs stands in for
 the backend that fails if it generates, `heuristic-report` causes its configure
@@ -85,6 +85,7 @@ times, `heuristic-debug-progress` the relayed generator events, and
 | Driver case | Behavior under test |
 | --- | --- |
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
+| `jit-debug-child` | The generator child's side of `HIPBLASLT_JIT_DEBUG`, without a GPU: the `--debug` value a child gets, its `timing.json` read or reported missing or invalid, and its event file relayed while it runs as `child.*` lines, with malformed, out-of-order, oversized and partial lines dropped, rejected candidates coalesced, the per-child cap, a child killed mid-line, and a heartbeat after 10 s of silence |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |

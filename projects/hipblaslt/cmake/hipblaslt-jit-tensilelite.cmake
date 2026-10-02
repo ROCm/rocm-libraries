@@ -24,6 +24,7 @@ target_compile_definitions(hipblaslt PRIVATE
 add_dependencies(hipblaslt _rocisa)
 target_sources(hipblaslt PRIVATE
     "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-tensilelite.cpp"
+    "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-debug-child.cpp"
     "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-gemm.cpp"
     "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-process.cpp")
 set(hipblaslt_jit_process_backend hipblaslt-jit-tensilelite-backend.cpp)
@@ -57,9 +58,22 @@ if(HIPBLASLT_BUILD_TESTING)
         "${hipblaslt_jit_tensilelite_source}")
     target_link_libraries(hipblaslt-jit-process-test PRIVATE Threads::Threads)
 
+    # The generator child's HIPBLASLT_JIT_DEBUG relay; runs without a GPU.
+    add_executable(hipblaslt-jit-debug-child-test
+        "${hipblaslt_jit_tensilelite_tests}/jit_debug_child_test.cpp"
+        "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-debug.cpp"
+        "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-debug-child.cpp"
+        "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-mode.cpp"
+        "${hipblaslt_jit_tensilelite_source}/hipblaslt-jit-process.cpp")
+    target_include_directories(hipblaslt-jit-debug-child-test PRIVATE
+        "${hipblaslt_jit_tensilelite_source}"
+        "${hipblaslt_jit_tensilelite_source}/rocblaslt/src/include")
+    target_compile_definitions(hipblaslt-jit-debug-child-test PRIVATE HIPBLASLT_ENABLE_JIT)
+    target_link_libraries(hipblaslt-jit-debug-child-test PRIVATE Threads::Threads)
+
     foreach(test_target hipblaslt-jit-tensilelite-api-test hipblaslt-jit-generic-api-test
                         hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test
-                        hipblaslt-jit-process-test)
+                        hipblaslt-jit-process-test hipblaslt-jit-debug-child-test)
         target_compile_features(${test_target} PRIVATE cxx_std_17)
         set_target_properties(${test_target} PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")

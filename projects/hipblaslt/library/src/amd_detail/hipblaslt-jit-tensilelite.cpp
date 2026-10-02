@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-debug-child.hpp"
 #include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-heuristic.hpp"

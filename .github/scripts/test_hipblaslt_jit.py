@@ -59,6 +59,7 @@ def main():
             "jit-library-concurrency",
             "jit-component",
             "jit-debug",
+            "jit-debug-child",
             "code-object",
             "code-object-gfx1250",
             "jit-gemm-gfx1250",
@@ -167,6 +168,12 @@ def main():
         (
             "jit-debug",
             [str(staging / "hipblaslt-jit-debug-test"), str(output / "jit-debug")],
+            {},
+            60,
+        ),
+        (
+            "jit-debug-child",
+            [str(staging / "hipblaslt-jit-debug-child-test"), str(output / "jit-debug-child")],
             {},
             60,
         ),

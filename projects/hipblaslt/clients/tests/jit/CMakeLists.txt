@@ -79,7 +79,7 @@ target_link_libraries(hipblaslt-jit-component-test PRIVATE
 hipblaslt_jit_test(jit-component jit-cpu
     $<TARGET_FILE:hipblaslt-jit-component-test> "${hipblaslt_jit_scratch}/component")
 
-# Compiles HIPBLASLT_JIT_DEBUG parsing, the line sink and the child observer directly.
+# Compiles HIPBLASLT_JIT_DEBUG parsing and the line sink directly.
 add_executable(hipblaslt-jit-debug-test
     jit_debug_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
