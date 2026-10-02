@@ -64,7 +64,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1 : DeviceOp
                   const StreamConfig& stream_config = StreamConfig{}) override
         {
             const auto* arg = dynamic_cast<const Argument*>(p_arg);
-            if(arg == nullptr || !IsSupportedArgument(*arg))
+            if(arg == nullptr || arg->k_batch_ != 1 || !ck::is_gfx125_supported())
             {
                 throw std::runtime_error("Unsupported gfx1250 scalar direct WRW argument");
             }
