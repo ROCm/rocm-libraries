@@ -4,6 +4,11 @@
 # Used for managing clang-tidy target for embedded kernel sources
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelTidy.cmake")
 
+# Dump the hipRTC pre-include header into the build tree so the kernel tidy targets in
+# engines/ can see the same declarations the hipRTC compile sees. Must run before
+# add_subdirectory(engines), which is where add_kernel_tidy_target() is called.
+hiprtc_runtime_header(HIPRTC_RUNTIME_HEADER)
+
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT

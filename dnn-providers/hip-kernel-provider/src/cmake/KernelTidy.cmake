@@ -25,6 +25,66 @@
 # List of kernel tidy targets created
 define_property(GLOBAL PROPERTY KERNELTIDY_TARGETS)
 
+# hiprtc_runtime_header(<out-var>)
+#
+#   Extract the hipRTC pre-include header from libhiprtc-builtins.so into the build tree
+#   and set <out-var> to its path. hipRTC embeds the header its online compiler prepends
+#   to every program in an ELF section; dumping it is how clang-tidy sees the same
+#   declarations the real compile sees, without checking in a copy that goes stale on
+#   every ROCm bump.
+#
+#   Linux only: the header lives in an ELF section, so there is nothing to dump elsewhere.
+#   <out-var> is left empty when the header cannot be produced; callers must handle that.
+function(hiprtc_runtime_header out_var)
+    set(${out_var} "" PARENT_SCOPE)
+
+    if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+        message(STATUS "hipRTC runtime header can only be extracted on Linux; skipping")
+        return()
+    endif()
+
+    find_library(HIPRTC_BUILTINS_LIBRARY
+                 NAMES hiprtc-builtins
+                 HINTS "${ROCM_PATH}/lib" /opt/rocm/lib
+                 DOC "libhiprtc-builtins.so, which carries the .hipRTC_header section")
+
+    # The ROCm llvm-objcopy is the one matched to the .so; CMAKE_OBJCOPY (GNU binutils)
+    # understands --dump-section too and is a fine fallback.
+    find_program(HIPRTC_OBJCOPY_EXE
+                 NAMES llvm-objcopy objcopy
+                 HINTS "${ROCM_PATH}/llvm/bin" /opt/rocm/llvm/bin)
+    if(NOT HIPRTC_OBJCOPY_EXE)
+        set(HIPRTC_OBJCOPY_EXE "${CMAKE_OBJCOPY}")
+    endif()
+
+    if(NOT HIPRTC_BUILTINS_LIBRARY OR NOT HIPRTC_OBJCOPY_EXE)
+        message(WARNING "libhiprtc-builtins.so or objcopy not found; "
+                        "the hipRTC runtime header will not be generated.")
+        return()
+    endif()
+
+    set(_header "${CMAKE_BINARY_DIR}/hiprtc/hiprtc_runtime.h")
+
+    # One generator for the whole build: the header is identical for every consumer, and a
+    # second OUTPUT rule for the same file is an error.
+    if(NOT TARGET hiprtc_runtime_header)
+        add_custom_command(
+            OUTPUT ${_header}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/hiprtc"
+            # objcopy always wants an output object; /dev/null discards it, we only want
+            # the dumped section.
+            COMMAND ${HIPRTC_OBJCOPY_EXE}
+                    --dump-section .hipRTC_header=${_header}
+                    ${HIPRTC_BUILTINS_LIBRARY} /dev/null
+            DEPENDS ${HIPRTC_BUILTINS_LIBRARY}
+            COMMENT "Extracting hipRTC runtime header from ${HIPRTC_BUILTINS_LIBRARY}"
+            VERBATIM)
+        add_custom_target(hiprtc_runtime_header DEPENDS ${_header})
+    endif()
+
+    set(${out_var} "${_header}" PARENT_SCOPE)
+endfunction()
+
 
 # add_kernel_tidy_target(NAME <target>  PRELUDE <header> FILES <kernel>...)
 #
@@ -95,6 +155,15 @@ function(add_kernel_tidy_target)
     list(REMOVE_DUPLICATES _kernel_files)
     list(REMOVE_DUPLICATES _kernel_include_flags)
 
+    # The hipRTC pre-include header is dumped out of libhiprtc-builtins.so at build time;
+    # when it is unavailable the kernels are still checked, just without it.
+    set(_hiprtc_header_flags "")
+    set(_hiprtc_header_depends "")
+    if(HIPRTC_RUNTIME_HEADER)
+        set(_hiprtc_header_flags -include "${HIPRTC_RUNTIME_HEADER}")
+        set(_hiprtc_header_depends "${HIPRTC_RUNTIME_HEADER}")
+    endif()
+
     # Flags after `--` replace the compile database, which has no entry for these files.
     set(_kernel_tidy_compiler_flags
         -x hip
@@ -104,7 +173,7 @@ function(add_kernel_tidy_target)
         -nogpuinc
         -D__HIPCC_RTC__
         -include "${KERNEL_TIDY_PRELUDE}"
-        -include "/workspaces/dev-container/rocm-libraries/hiprtc_runtime.h"
+        ${_hiprtc_header_flags}
         ${_kernel_include_flags}
     )
     
@@ -129,6 +198,7 @@ function(add_kernel_tidy_target)
                     -- ${_kernel_tidy_compiler_flags}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
             DEPENDS ${_kernel_file}  ${KERNEL_TIDY_PRELUDE} ${_tidy_config}
+                    ${_hiprtc_header_depends}
             COMMENT "Running clang-tidy on embedded kernel ${_kernel_relative}"
             VERBATIM
         )
@@ -136,6 +206,12 @@ function(add_kernel_tidy_target)
     endforeach()
 
     add_custom_target(${KERNEL_TIDY_NAME} DEPENDS ${_stamps})
+
+    # The header is generated in another directory scope, so the dependency has to be
+    # spelled out for generators that do not infer it from the stamp's DEPENDS.
+    if(TARGET hiprtc_runtime_header)
+        add_dependencies(${KERNEL_TIDY_NAME} hiprtc_runtime_header)
+    endif()
 
     set_property(GLOBAL APPEND PROPERTY KERNELTIDY_TARGETS ${KERNEL_TIDY_NAME})
 endfunction()
