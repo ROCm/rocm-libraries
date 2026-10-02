@@ -31,11 +31,11 @@ void add_device_grouped_conv2d_fwd_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwg
     add_device_operation_instances(
         instances,
         device_grouped_conv_fwd_wmma_large_tensor_bf16_gfx1250_instances<2,
-                                                                 NHWGC,
-                                                                 GKYXC,
-                                                                 Empty_Tuple,
-                                                                 NHWGK,
-                                                                 ConvFwdDefault>{});
+                                                                         NHWGC,
+                                                                         GKYXC,
+                                                                         Empty_Tuple,
+                                                                         NHWGK,
+                                                                         ConvFwdDefault>{});
 }
 
 } // namespace instance

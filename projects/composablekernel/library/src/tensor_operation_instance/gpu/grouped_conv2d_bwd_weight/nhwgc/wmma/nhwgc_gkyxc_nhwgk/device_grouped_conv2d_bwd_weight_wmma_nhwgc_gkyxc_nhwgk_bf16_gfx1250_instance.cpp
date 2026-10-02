@@ -31,11 +31,12 @@ void add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_gfx1250_in
     // 1. Default
     add_device_operation_instances(
         instances,
-        device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_gfx1250_instances<2,
-                                                                        NHWGC,
-                                                                        GKYXC,
-                                                                        NHWGK,
-                                                                        ConvBwdWeightDefault>{});
+        device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_gfx1250_instances<
+            2,
+            NHWGC,
+            GKYXC,
+            NHWGK,
+            ConvBwdWeightDefault>{});
 }
 
 } // namespace instance
