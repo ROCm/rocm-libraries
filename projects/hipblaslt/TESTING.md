@@ -54,14 +54,13 @@ a place most people do not look first: TensileLite, the Python code generator th
 
 **What gates a merge.** The build on both platforms, which quietly includes a validation pass over
 the library logic YAML; the client GTest suite on gfx90a, gfx942, gfx950 and gfx12; the TensileLite
-Python unit and characterization suites; a host-side AddressSanitizer build and quick test on gfx90a;
-and `pre-commit`.
+Python unit and characterization suites, and their coverage floor; and `pre-commit`.
 
-**What does not gate, despite appearances.** The coverage floors fail their own lane, but that lane
-is not a required check. Pull requests are not benchmarked, so there is no performance signal on a
-change to gate on. The gating job named `static-analysis` is a sensitive-word
-scan for disclosure rather than a code analyzer, and no static analysis runs on the C++ library on a
-pull request from any source.
+**What does not gate, despite appearances.** The AddressSanitizer lanes run on every hipBLASLt pull
+request, but none of them is a required check. Pull requests are not benchmarked, so there is no
+performance signal on a change to gate on. The gating job named `static-analysis` is a
+sensitive-word scan for disclosure rather than a code analyzer, and no static analysis runs on the
+C++ library on a pull request from any source.
 
 **The biggest gap is performance.** hipBLASLt exists for throughput, and pull requests are not
 benchmarked. What does exist is a nightly lane outside this repository that measures a build of the
@@ -197,8 +196,8 @@ Commits title, and a reference to the issue or ticket the work belongs to.
 
 **5. Watch the right checks.** A PR touching `projects/hipblaslt/**` triggers several independent
 lanes described in [Pre-submit / CI Gates](#pre-submit--ci-gates). The signal you need before
-asking for review is a green build plus a green quick-tier test run; the multi-architecture suites
-take considerably longer.
+asking for review is a green build plus a green client test run; the multi-architecture suites take
+considerably longer.
 
 ## Testing Strategy and Layers
 
@@ -321,13 +320,16 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
 
-All tiers exclude `*known_bug*`. There are currently no multi-GPU tests.
+All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases are built
+only with the fused GEMM plus all-to-all feature (`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, off by
+default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pull requests.
 
-**A caveat on how tiers are actually applied.** The TheRock test lane does not invoke CTest; it runs
-the `hipblaslt-test` binary directly with a GTest filter. In that lane, `quick` maps to `*smoke*`,
-and every tier above `quick` currently applies no filter at all and runs the entire binary. So the
-four-tier taxonomy above is honored by CTest but only half-honored by the lane that runs in CI. See
-[Known Risks and Gaps](#known-risks-and-gaps).
+**How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
+built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
+are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
+CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
+get `comprehensive`. The hipBLASLt ASAN lane is the exception: it still drives `hipblaslt-test`
+directly through `test/therock/test_hipblaslt.py` at the `quick` tier.
 
 **Test size and shape expectations.** The suite leans heavily on many small problem sizes rather
 than few large ones, which is the right default: most correctness bugs are in tiling, edge handling,
@@ -388,7 +390,8 @@ nothing to compare against a baseline and nothing to threshold at review time.
 Two files in the tree read as though a per-pull-request lane consumed them.
 `clients/scripts/performance/problems/matmul_probset1_bench.yaml` holds 35 shapes, NN only, with one
 mixed FP8 type, and the `ci_perf_job` suite is defined here as well. Neither has a caller in this
-repository today.
+repository today. Math CI used to call `ci_perf_job` from a `perfci` job that benchmarked a pull
+request against `develop`; that job was removed from hipBLASLt's Math CI configuration on 2026-08-06.
 
 #### The nightly measurement lane
 
@@ -397,16 +400,16 @@ otherwise have no way to find it. Benchmarking for hipBLASLt runs nightly from `
 AMD-internal repository owned by the performance tracking team. Nothing in this repository triggers
 it or reports its results.
 
-What it covers, as of 11 August 2026:
+What it covers, as of 2 October 2026:
 
-- **Architectures.** hipBLASLt is scheduled on two gfx950 devices, MI350 and MI350P. The MI350P leg
-  has been cancelled before starting on recent nights, so one device is measured in practice. Other
+- **Architectures.** hipBLASLt is scheduled on two gfx950 devices, MI350 and MI350P. Both legs failed
+  on most nights at the end of September 2026, so a given night may produce no number at all. Other
   architectures the library ships tuning data for are not benchmarked on a cadence.
-- **Sizes.** About 76,800 problems a night, from four suites that are version controlled in that
-  repository and reviewed like code. See [How many sizes we measure](#how-many-sizes-we-measure) for
-  the breakdown.
-- **Comparison.** Each result is compared against a rolling baseline of recent runs on the same
-  device, with a threshold and an alert to the lane's owners. Results are not surfaced on a pull
+- **Sizes.** About 76,800 problems a night on MI350, from four suites that are version controlled in
+  that repository and reviewed like code. Since September 2026, MI350P runs its own smaller set of
+  model shapes instead. See [How many sizes we measure](#how-many-sizes-we-measure) for the breakdown.
+- **Comparison.** Each result is compared against the median of the last 10 runs on the same device,
+  with a 5 percent threshold and an alert to the lane's owners. Results are not surfaced on a pull
   request.
 
 Two properties follow from how the lane is scheduled. It measures a nightly build of the whole
@@ -438,9 +441,10 @@ measure plateaus within five percent, and no lane uses it: `adaptive` defaults t
 turns it on. Iteration counts are fixed ahead of time rather than chosen by a stability criterion,
 and the output does not report whether a given number converged.
 
-The second concerns the machine. This repository contains no clock pinning, no performance-level
-setting, no CPU affinity or NUMA pinning, and nothing that keeps another workload off the GPU while
-a measurement runs. The only isolation is that measurement is scheduled onto dedicated benchmark
+The second concerns the machine. Nothing in the measurement path pins clocks, sets a performance
+level, sets CPU affinity or NUMA pinning, or keeps another workload off the GPU while a measurement
+runs. (The tuning tools can pin clocks, through TensileLite's opt-in `PinClocks` and QuickTune's
+`amd-smi --perf-determinism`, but the nightly lane uses neither.) The only isolation is that measurement is scheduled onto dedicated benchmark
 nodes. Performance level and clocks are recorded next to the results, and the harness can report
 achieved clocks when an environment variable is set, but no lane sets it, so clock drift enters the
 number as noise rather than being visible as a fact about the run. Whether those nodes are quiet in
@@ -456,18 +460,20 @@ how the sample was chosen and which axes it holds fixed.
 
 - **Pull requests.** Not benchmarked; see
   [Measurement on pull requests](#measurement-on-pull-requests).
-- **Nightly, gfx950** (the rocPTS lane): **76,768 problems** from four version-controlled suites. One
-  is a model-shape set of 3,085 problems, mostly bf16 with the rest fp32, spanning all four transpose
-  combinations and holding the only batched problems in the set. The other three are large TN sweeps
-  of a single data type each: 24,629 in bf16, 24,629 in FP8, and 24,425 in TF32. Counted on 7 August
-  2026, with no dataset change since. The set grew roughly fortyfold during July 2026, so the number
-  is a snapshot rather than a fixed fact.
+- **Nightly, gfx950 on MI350** (the rocPTS lane): **76,768 problems** from four version-controlled
+  suites. One is a model-shape set of 3,085 problems, mostly bf16 with the rest fp32, spanning all
+  four transpose combinations and holding the only batched problems in the set. The other three are
+  large TN sweeps of a single data type each: 24,629 in bf16, 24,629 in FP8, and 24,425 in TF32.
+  Counted on 7 August 2026 and unchanged as of 2 October. The set grew roughly fortyfold during July
+  2026, so the number is a snapshot rather than a fixed fact.
+- **Nightly, gfx950 on MI350P:** a separate set of about 840 problems taken from four language
+  models, in place since September 2026.
 
-**Two axes the sample holds fixed.** Of the 76,768 nightly problems, 200 have a batch count above
+**Two axes the sample holds fixed.** Of the 76,768 MI350 problems, 200 have a batch count above
 one, all of them in the model-shape set and all bf16 or fp32, because the three large sweeps are
-non-batched; no batched FP8 problems are measured at any cadence. Leading dimensions are the second
-axis: every problem uses the natural minimum stride for its layout, so measurement does not cover
-padded strides. Kernel performance is known to depend on leading dimensions, and the shipped tuning
+non-batched; neither device measures batched FP8 problems at any cadence. Leading dimensions are the
+second axis: every MI350 problem uses the natural minimum stride for its layout, so that set does not
+cover padded strides. The smaller MI350P set does include a few hundred padded-stride problems. Kernel performance is known to depend on leading dimensions, and the shipped tuning
 data keys on them for part of its coverage (see
 [Tuning coverage](#tuning-coverage-is-a-different-number-and-it-is-measured-by-hand)). Coverage is
 therefore broad along M, N and K for four data types in TN, and fixed along batch and stride.
@@ -478,7 +484,7 @@ therefore broad along M, N and K for four data types in TN, and fixed along batc
 | --- | --- | --- |
 | PR-level automated measurement | **No** | Pull requests are not benchmarked |
 | PR-level automated gate | **No** | No per-PR number exists to gate on |
-| Nightly measurement outside this repository | **Yes** | About 76,800 problems on gfx950 in the rocPTS lane, most nights |
+| Nightly measurement outside this repository | **Yes, when the lane is green** | About 76,800 problems on gfx950 (MI350) in the rocPTS lane, plus a smaller model-shape set on MI350P. Both legs failed on most nights at the end of September 2026 |
 | Automated regression alerting | **Yes, outside this repository** | The nightly compares against a rolling baseline and alerts its owners. Results are not surfaced on a pull request, are not attributed to a single change, and do not block a merge |
 | Release qualification | **No documented gate** | Performance is discussed at release time but there is no in-repo criterion |
 
@@ -511,8 +517,8 @@ kernels.
 that produced it; the nightly narrows it to a day of merges. No threshold or gate is applied in this
 repository, and there is no gate on library size, kernel count, or build time. Measurement runs
 without clock pinning or any machine-quieting step, and the harness's stability criteria are not
-enabled, so run-to-run noise is neither bounded nor reported. Leading dimensions are not varied and
-batched FP8 is not measured. Benchmark coverage is gfx950, narrower than the set of architectures the
+enabled, so run-to-run noise is neither bounded nor reported. Leading dimensions are varied only in
+MI350P's small model-shape set, and batched FP8 is not measured. Benchmark coverage is gfx950, narrower than the set of architectures the
 library ships tuned kernels for. Today a regression surfaces through the nightly alert, through
 someone reading the dashboard, or through a downstream consumer. What we would like to add is listed
 in the [Improvement Roadmap](#improvement-roadmap).
@@ -529,17 +535,17 @@ contributor reading this repository cannot see what it runs. For hipBLASLt it de
 job types, of which exactly three are configured as gating:
 
 - **`precheckin`** builds hipBLASLt from source and runs its client test suite on gfx90a, gfx942,
-  gfx950, and gfx12, plus a compile-only gfx1250 configuration. This is the broadest hardware
-  coverage hipBLASLt gets on a pull request, and it is the only per-PR signal on gfx950.
+  gfx950, and gfx12, plus a compile-only gfx1250 configuration and a two-GPU gfx950 node that runs
+  the multi-GPU cases. This is the broadest hardware coverage hipBLASLt gets on a pull request.
 - **`static-analysis`** is not what its name suggests. It scans the working tree and the git log for
   a list of sensitive words maintained in the CI system rather than in this repository, and fails on
   any match. It is a disclosure gate protecting a public repository, not a code-quality analyzer. See
   [Static Analysis](#static-analysis) for what that means in practice.
 - **`preliminary`** is the functional gate for TensileLite: two stages on gfx12, gfx90a, gfx942, and
   gfx950 (unit tests, then the GEMM-selection `common` suite, only if the unit stage passed), skipped
-  when nothing under `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` changed, with the
-  `common` stage further conditional on target branch, and droppable entirely when the same PR also
-  touches rocroller. The full stage order and trigger conditions are in
+  when nothing under `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` changed, and
+  droppable entirely when the same PR also touches rocroller. The full stage order and trigger
+  conditions are in
   [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates).
 
 Other Math CI jobs post checks without gating. The one worth knowing is
@@ -563,9 +569,9 @@ the C++ build and test.
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
-| Characterization goldens | Yes, when `tensilelite/` is touched and the PR targets `develop` | Component team | Asserted by the gating `preliminary` job. Review every golden diff; never bulk-regenerate |
-| HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
-| Code coverage floor and ratchet (TensileLite) | **No** | Component team / CI | Enforced, but only inside lanes that roll up to non-required checks. Floors move up only, on the honor system |
+| Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
+| AddressSanitizer build and quick test | **No** | Component team | The hipBLASLt ASAN lane runs on every hipBLASLt PR, but its summary check is not required. Keep it green anyway |
+| Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
 | Code-quality static analysis (C++) | No | Unowned | **Nothing runs.** No clang-tidy or cppcheck configuration exists for hipBLASLt, and CodeQL does not cover C++ |
@@ -577,29 +583,32 @@ the C++ build and test.
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
 
 A caveat on this table: the Math CI rows are taken from that system's gating configuration, which is
-authoritative but lives outside this repository. Which GitHub Actions checks are configured as
-*required* in branch protection is not documented anywhere a contributor can see, and the answer is
-not consistently understood even among the people working on the tests. Publishing the actual
-required-check list, in this repository, is tracked as a gap.
+authoritative but lives outside this repository. On the GitHub side, the required checks come from a
+repository ruleset rather than classic branch protection. As of this writing the `develop` ruleset
+requires `Math CI Summary`, `pre-commit`, `Multi-Arch CI Summary` and `Component CI Summary`, and
+anyone can read the current list with `gh api repos/ROCm/rocm-libraries/rules/branches/develop`. The
+hand-maintained list in [docs/gardening.md](../../docs/gardening.md) has drifted from it, which is
+tracked as a gap.
 
 ### PR Test Classification
 
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows)
-- The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12
+- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
+  through Multi-Arch CI
+- The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
+  gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
-  `preliminary`, and against installed artifacts via TheRock
-- HOST_ASAN build and quick test on gfx90a
+  `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
+- The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
 - `pre-commit`
 
 **Informational.** Worth reading, cannot block a merge.
 
-- HOST_ASAN on gfx942, opt-in via the `ci:asan` label and explicitly non-blocking
-- The TensileLite coverage floor and per-file ratchet, which fail their own lane but not a required
-  check
+- The hipBLASLt ASAN lane (full ASAN on gfx90a) and Multi-Arch CI ASAN (host-only ASAN on gfx94X and
+  gfx950). Both run on every pull request, and neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` check and the codecov reports
 
@@ -633,19 +642,20 @@ about "what do we currently know is broken" has to check all eight.
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
 | [`TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
-| Filename-driven marks in `Tensile/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
+| Filename-driven marks in `Tensile/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **Partly.** An `xfail` or `wip` path is strict, because `tensilelite/pytest.ini` sets `xfail_strict = True`, so an unexpected pass fails the run. A `disabled` path is a plain skip |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
-| Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
+| Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
 This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
 quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
 this precondition checks for never exists by design (see
-[CI visibility and gating](#ci-visibility-and-gating)), so the tests behind it (2 in
-`test_PlaceholderMerge.py`, 1 in `test_GpuRevisionTarget.py`) cannot execute for real in that lane,
-ever, independent of whether the underlying data is correct. [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
+[CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)), so the 2 tests behind
+it in `test_PlaceholderMerge.py` cannot execute for real in that lane, ever, independent of whether
+the underlying data is correct. (A third, in `test_GpuRevisionTarget.py`, was deleted along with
+the module it tested in [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).) [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
 narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
 the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
 intact.
@@ -657,14 +667,16 @@ the entry's removal. *Detectable*: something notices, but nothing fails. *Blind*
 runs at all, so the entry can outlive its bug indefinitely. The largest surface, the client
 quarantine list, is in the blind tier.
 
-**The best-governed example is already in the tree**, and is worth copying rather than redesigning.
-The `_ROCM3994_XFAIL` marker in
+**The best-governed example has already done its job**, and is worth copying rather than
+redesigning. The `_ROCM3994_XFAIL` marker that used to sit in
 [`test_amax_true16_activation.py`](tensilelite/Tensile/Tests/unit/test_amax_true16_activation.py)
-carries a ticket in its reason, `strict=True` so that a fix turns the unexpected pass into a hard
-failure, `raises=AssertionError` so an unrelated crash is not absorbed, a time-box comment naming
-when to re-evaluate, and an explicit instruction to delete the marker in the fixing PR. The test
-still executes; it is quarantined, not disabled. Everything a governance policy would ask for is in
-those few lines.
+carried a ticket in its reason, `strict=True` so that a fix would turn the unexpected pass into a
+hard failure, `raises=AssertionError` so an unrelated crash was not absorbed, a time-box comment
+naming when to re-evaluate, and an explicit instruction to delete the marker in the fixing PR. The
+test kept executing the whole time; it was quarantined, not disabled. When the fix landed in
+[PR #10052](https://github.com/ROCm/rocm-libraries/pull/10052), the marker was deleted exactly as
+instructed and the test became an ordinary assertion. Everything a governance policy would ask for
+was in those few lines.
 
 The two YAML quarantine files each have half of what the other needs. The client list has the better
 prose discipline: named entries, a ROCm ticket, a root-cause explanation, and a note to remove the
@@ -674,12 +686,12 @@ better structure: a real `ticket:` field, keys chosen so they survive library re
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
 **Known gaps.** Only one mechanism records its ticket somewhere a tool could read, and none records a
-review date. Nothing reports what is currently suppressed across all seven places, or for how long.
+review date. Nothing reports what is currently suppressed across all eight places, or for how long.
 The filename-driven marks in `config_helpers.py` are the weakest link by construction, since a path
-substring cannot carry a ticket or a reason at all, and the resulting mark is non-strict so a fix is
-invisible; they have no users in the tree
-today, which makes now the right time to decide whether to keep the machinery at all. Separately,
-`skip-<arch>` marks appear in around 395 config files with free-text justifications, and while most
+substring cannot carry a ticket or a reason at all. TensileLite's `xfail_strict = True` means a
+fix at least fails loudly, but the mechanism now has users (a few gfx1250 TDM-split configs), so
+retiring it is no longer free. Separately,
+`skip-<arch>` marks appear in more than 500 config files with free-text justifications, and while most
 are genuine capability statements ("not supported by arch"), some read "not supported yet", which is
 deferred work with nothing tracking it. Consolidating all of this under one policy is on the
 [roadmap](#improvement-roadmap).
@@ -710,14 +722,13 @@ enforced numbers cannot see the characterization-to-unit migration at all, is in
 
 Beyond PR validation, the following run on a nightly or postsubmit cadence rather than per PR:
 
-- **Additional hardware in the TheRock lane.** gfx950 runs there on postsubmit and nightly but not on
-  pull requests, due to runner capacity
-  ([ROCm/TheRock#3288](https://github.com/ROCm/TheRock/issues/3288)). Math CI does cover gfx950 per
-  PR, so this is a gap in one lane rather than in the whole gate. Additional gfx families (gfx90a,
-  gfx103X, gfx110X on Linux, gfx1151, gfx120X) are covered nightly.
+- **Additional hardware.** This repository's own nightly runs the same Linux families as a pull
+  request (gfx94X and gfx950) plus Windows gfx1151. TheRock's nightly, which tests rocm-libraries at
+  the commit TheRock pins, adds more families (gfx90a, gfx103X, gfx110X, gfx115X, gfx120X).
 - **Wider test tiers.** Nightly runs use the `comprehensive` tier; prerelease runs use `full`.
-- **Full ASAN.** TheRock's nightly ASAN lane runs device-side instrumented builds with tests, which
-  the per-PR hipBLASLt lane does not.
+- **Full ASAN on more architectures.** The nightly Multi-Arch ASAN lane builds full ASAN, with
+  device-side instrumentation, for gfx94X and gfx950. Per pull request, full ASAN runs only on gfx90a,
+  in the hipBLASLt ASAN lane.
 - **TensileLite GPU tests.** The `Component CI: TensileLite coverage` lane is CPU-only, so its
   GPU-guarded tests skip there by design. They do run per PR, on Math CI's `preliminary` job and
   in TheRock's installed-artifact lane, subject to the conditions on each. See
@@ -733,19 +744,21 @@ the set of architectures the library supports or builds for.
 
 | Configuration | Validation level | Frequency | Notes |
 | --- | --- | --- | --- |
-| Linux, gfx90a / gfx942 / gfx950 / gfx12 | Client test suite | PR, via Math CI `precheckin` | Broadest per-PR hardware coverage, and the only per-PR signal on gfx950. Also compiles for gfx1250 |
-| Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed. The second stage also needs the first to pass and a `develop` target. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
-| Linux, gfx94X-dcgpu | Full | PR (quick), nightly (comprehensive), via TheRock | Primary GitHub Actions test target. 6 shards |
-| Linux, gfx90a | Partial | PR (HOST_ASAN quick tier), nightly | Sanitizer lane's default architecture |
-| Linux, gfx950-dcgpu | Full | Postsubmit and nightly in the TheRock lane, **not PR** there | Runner capacity, ROCm/TheRock#3288. Covered per PR by Math CI |
-| Windows, gfx110X | Partial | PR (quick), nightly | 1 shard |
+| Linux, gfx90a / gfx942 / gfx950 / gfx12 | Client test suite | PR, via Math CI `precheckin` | Broadest per-PR hardware coverage. Also compiles for gfx1250 |
+| Linux, two gfx950 GPUs | Multi-GPU cases (`*multi_gpu*`) | PR, via Math CI `precheckin` | Fused GEMM plus all-to-all build only. Skipped on `develop` runs |
+| Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
+| Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
+| Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
+| Linux, gfx90a | Partial | PR (full ASAN, quick tier, not a required check), TheRock nightly | The hipBLASLt ASAN lane's only architecture |
+| Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
-| Linux, gfx103X / gfx120X | Partial | Nightly | |
+| Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
 
 **Explicitly not tested**, so that nothing is assumed at release time:
 
-- **Multi-GPU.** There are no multi-GPU tests at all.
+- **Multi-GPU, beyond one feature.** The only multi-GPU tests cover fused GEMM plus all-to-all, on
+  two gfx950 GPUs, in Math CI on pull requests.
 - **Windows beyond gfx110X and gfx1151.** No other Windows architecture runs hipBLASLt tests.
 - **HMM / managed memory**, except in the `full` tier, which requires a capable host and does not run
   in PR or nightly CI.
@@ -754,20 +767,23 @@ the set of architectures the library supports or builds for.
 ## Sanitizer Coverage
 
 hipBLASLt has a dedicated per-PR sanitizer lane, which is unusual among ROCm components and is one
-of the stronger parts of its story.
+of the stronger parts of its story. Its weakness is that no sanitizer lane is a required check, so a
+red sanitizer run does not block a merge.
 
 **What runs.** The `hipBLASLt ASAN CI` workflow
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on any pull request touching `projects/hipblaslt/**` or the hipBLASLt test driver. It builds
-hipBLASLt through TheRock with `HOST_ASAN` and then runs the quick tier of `hipblaslt-test` under
-the sanitizer runtime on real hardware.
+hipBLASLt through TheRock with full ASAN (`-DTHEROCK_SANITIZER=ASAN`, mirroring TheRock's
+`linux-release-asan` preset) for gfx90a, and then runs the quick tier of `hipblaslt-test` under the
+sanitizer runtime on real hardware. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
+request to this repository with host-only ASAN.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
-| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a | **Yes** |
-| **HOST_ASAN** | Same, second architecture | Opt-in via the `ci:asan` PR label, gfx942 | No, explicitly non-blocking |
-| **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | TheRock nightly and manual dispatch, gfx94X | No |
-| **TSAN** | Data races | **Nowhere.** Build options exist; no CI lane uses them | No |
+| **Full ASAN** (host plus device instrumentation) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer), plus device-side memory errors in kernels | Every PR touching hipBLASLt, gfx90a, quick tier | No. `hipBLASLt ASAN CI Summary` is not a required check |
+| **HOST_ASAN** (host-side AddressSanitizer) | Host-side memory errors and leaks only | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
+| **Full ASAN** | Same as the first row, on more architectures | Nightly Multi-Arch ASAN, gfx94X and gfx950 | No |
+| **TSAN** | Data races | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
 at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=1`
@@ -779,13 +795,14 @@ report appears that seems to come from outside hipBLASLt.
 library. Within a TheRock superbuild, `-DhipBLASLt_SANITIZER=HOST_ASAN` instead; hipBLASLt's own
 sanitizer options intentionally stand down when the superbuild is driving.
 
-**GPU-specific limitations.** Host ASAN does not instrument device code, so nothing in the generated
-kernels is checked by the gating lane. Device-side ASAN requires XNACK-capable configurations, is
-substantially slower, and is why full ASAN is nightly rather than per PR.
+**GPU-specific limitations.** Host ASAN does not instrument device code. Device-side ASAN requires
+XNACK-capable configurations and is substantially slower, which is why it runs per PR on one
+architecture and the wider sweep is nightly.
 
-**Explicitly not covered:** thread safety (no TSAN lane, despite the build option existing);
-undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and any test outside
-the quick tier, since the sanitized run uses the quick tier only.
+**Explicitly not covered:** thread safety (no TSAN lane yet, despite the build option existing);
+undefined behavior (no UBSAN); device-side memory errors on any architecture other than gfx90a on a
+pull request; and, in the hipBLASLt ASAN lane, any test outside the quick tier. None of these lanes
+can block a merge today.
 
 ## Static Analysis
 
@@ -810,8 +827,9 @@ bulk of the shipped product, receives no static analysis on a pull request from 
 **CodeQL exists but not where it would help.** Two separate things carry the name. The GitHub Actions
 workflow [`codeql.yml`](../../.github/workflows/codeql.yml) runs on a weekly schedule and analyzes
 only the `python` and `actions` languages, so it never runs on a pull request and never sees C++.
-Math CI also defines a `codeql` job for hipBLASLt that does a real compile, but it is not in the
-gating set. Between them, C++ CodeQL coverage on a pull request is zero.
+Math CI also defines a `codeql` job for hipBLASLt that does a real compile, but it runs only on pull
+requests labelled `ci:codeql`, posts no check, and is not in the gating set. Between them, C++
+CodeQL coverage on a pull request is effectively zero.
 
 **Python analysis is configured down to almost nothing, and unenforced.** `tox -e lint` runs flake8
 over `Tensile`, but the `[flake8]` section in
@@ -934,10 +952,11 @@ incorrect behavior into differently incorrect behavior.
 
 **Quarantine entries encode real incidents.** The entries in `known_bugs.yaml` are not test debt in
 the abstract; each is a concrete defect with a ticket, several of them numerical (TF32 with infinite
-inputs returning NaN, a bf16 output-store address overflow producing silent wrong results at large
-leading dimensions). The bf16 overflow entry is instructive: a bit-exact reproducer was landed
-*before* the fix, quarantined, with instructions to remove the quarantine once the fix lands so the
-reproducer becomes an enforced gate. That is the pattern worth generalizing.
+inputs returning NaN, for example). A former entry is instructive: for a bf16 output-store address
+overflow that produced silent wrong results at large leading dimensions (ROCM-26455), a bit-exact
+reproducer was landed *before* the fix, quarantined, with instructions to remove the quarantine once
+the fix landed. The fix landed, the entry was removed, and the reproducer is now an enforced gate.
+That is the pattern worth generalizing.
 
 **The current balance is defensible but lopsided.** Integration testing carries almost all of the
 correctness load; unit testing carries the generator; performance testing carries nothing that ever
@@ -970,7 +989,8 @@ real unit tests, which is the migration described in
 [tensilelite/TESTING.md#unit-testing-strategy](tensilelite/TESTING.md#unit-testing-strategy).
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
-inference processes. Validated by the per-PR HOST_ASAN gate on gfx90a and by nightly full ASAN.
+inference processes. Checked by the per-PR ASAN lanes (full ASAN on gfx90a, host-only ASAN on gfx94X
+and gfx950) and by nightly full ASAN, none of which blocks a merge today.
 Device-side memory errors are covered only nightly.
 
 **5. API and ABI compatibility.** hipBLASLt is consumed by frameworks; a breaking change is felt
@@ -1012,9 +1032,9 @@ Where confidence comes from and where ownership changes hands.
 | HIP, ROCr, compiler toolchain | Core ROCm teams | Consumed via TheRock; validated by their own CI | A toolchain regression surfaces here as a hipBLASLt test failure, and triage cost lands on this team |
 | **TensileLite** (embedded in this directory, also consumed by hipSPARSELt) | `@ROCm/hipblaslt-reviewers` (same team) | Own CI lanes, coverage floors, and library-logic validation; see [tensilelite/TESTING.md](tensilelite/TESTING.md) | Documented in that file rather than here; not a gap in itself |
 | `rocisa` (embedded in TensileLite) | Component team (in this repository) | Own tox environment and CI lane; see [tensilelite/TESTING.md#rocisa](tensilelite/TESTING.md#rocisa) | `Component CI: rocISA` only tests a `pip install`; the real suite runs alongside TensileLite's own lanes |
-| **Origami** (`shared/origami/`) — GEMM solution-selection analytical model, called directly from hipBLASLt's runtime dispatch (`origami::rank_configs` in `solution_selection.cpp`) | `@ROCm/origami-reviewers` | Own gating `precheckin`/`static-analysis` jobs in Math CI, triggered only on `shared/origami/**` (C++ `ctest` plus Python `pytest` via `tox`); an Origami-only change also retriggers hipBLASLt's own `precheckin`/`static-analysis`/`preliminary` (hipBLASLt's Math CI config lists `shared/origami/**` in its `additionalIncludedRegions`), and `preliminary`'s tests run for real rather than no-op, since Origami is one of the three paths its own diff check looks for | hipBLASLt-side integration code that calls it (`solution_selection.cpp`, `UtilsOrigami.hpp`) does not retrigger Origami's own suite, and Origami's suite does not exercise hipBLASLt's call site — the coupling only runs one direction |
-| **rocRoller** (`shared/rocroller/`) — GPU kernel generation backend hipBLASLt can build against (`HIPBLASLT_ENABLE_ROCROLLER`) | `@ROCm/rocroller-developers` | Own CI project in Math CI, with code-analysis gating, triggered on `shared/rocroller/**`; a rocRoller-only change also retriggers hipBLASLt's own `precheckin`/`static-analysis` (same `additionalIncludedRegions` mechanism as Origami and StinkyTofu) | `preliminary` fails to meaningfully validate a rocRoller change for two independent reasons: Math CI's `statusGate` explicitly drops it from hipBLASLt's required gating list whenever the same PR also touches rocRoller, and even without that rule, rocRoller is not one of the three paths `preliminary`'s own diff check looks for, so the job would silently no-op on a rocRoller-only change regardless (see [tensilelite/TESTING.md#ci-visibility-and-gating](tensilelite/TESTING.md#ci-visibility-and-gating)) |
-| **mxdatagenerator** (`shared/mxdatagenerator/`) — MX-format test data generation, shared with rocRoller | `@ROCm/rocroller-developers` | Own CI project in Math CI, triggered on `shared/mxdatagenerator/**`; hipBLASLt's `additionalIncludedRegions` also lists it, so an mxdatagenerator-only change retriggers hipBLASLt's own `precheckin`/`static-analysis` | Despite being shared with rocRoller, rocRoller's own project config does not list `shared/mxdatagenerator/**` in its `additionalIncludedRegions` (only in `sparseCheckoutPaths`, which affects checkout scope, not triggering), so an mxdatagenerator-only change does not retrigger rocRoller's own suite; and hipBLASLt's `preliminary` no-ops on it the same way it does on rocRoller, for the same reason |
+| **Origami** (`shared/origami/`) — GEMM solution-selection analytical model, called directly from hipBLASLt's runtime dispatch (`origami::rank_configs` in `solution_selection.cpp`) | `@ROCm/origami-reviewers` | Own gating `precheckin`/`static-analysis` jobs in Math CI, triggered only on `shared/origami/**` (C++ `ctest` plus Python `pytest` via `tox`); an Origami-only change also retriggers hipBLASLt's own `precheckin`/`static-analysis`/`preliminary` (the pull-request labeler in `.github/labeler.yml` applies `project: hipblaslt` to `shared/origami/**`, and Math CI schedules pull requests by that label), and `preliminary`'s tests run for real rather than no-op, since Origami is one of the three paths its own diff check looks for | hipBLASLt-side integration code that calls it (`solution_selection.cpp`, `UtilsOrigami.hpp`) does not retrigger Origami's own suite, and Origami's suite does not exercise hipBLASLt's call site — the coupling only runs one direction |
+| **rocRoller** (`shared/rocroller/`) — GPU kernel generation backend hipBLASLt can build against (`HIPBLASLT_ENABLE_ROCROLLER`) | `@ROCm/rocroller-developers` | Own CI project in Math CI, with code-analysis gating, triggered on `shared/rocroller/**`. A rocRoller-only pull request gets no hipBLASLt Math CI jobs at all: Math CI schedules pull requests by their `project:` label, and the labeler does not apply `project: hipblaslt` to `shared/rocroller/**`. (hipBLASLt's `additionalIncludedRegions` lists it, but that only affects branch builds.) TheRock Multi-Arch CI does select hipBLASLt's client suite for it | Math CI gives a rocRoller change no hipBLASLt signal on a pull request, and when a PR touches both, `statusGate` drops `preliminary` from hipBLASLt's required gating list (see [tensilelite/TESTING.md#ci-visibility-and-gating](tensilelite/TESTING.md#ci-visibility-and-gating)) |
+| **mxdatagenerator** (`shared/mxdatagenerator/`) — MX-format test data generation, shared with rocRoller | `@ROCm/rocroller-developers` | Own CI project in Math CI, triggered on `shared/mxdatagenerator/**`. As with rocRoller, the labeler does not apply `project: hipblaslt` to it, so an mxdatagenerator-only pull request gets no hipBLASLt Math CI jobs. TheRock Multi-Arch CI selects hipBLASLt and TensileLite for it | Despite being shared with rocRoller, rocRoller's own project config does not list `shared/mxdatagenerator/**` in its `additionalIncludedRegions` (only in `sparseCheckoutPaths`, which affects checkout scope, not triggering), so an mxdatagenerator-only change does not retrigger rocRoller's own suite either |
 | **StinkyTofu** (`shared/stinkytofu/`) — IR optimizer linked directly into rocisa's native extension | `@ROCm/stinkytofu-reviewers` | Own CI project in Math CI, triggered on `shared/stinkytofu/**`; because it's compiled straight into `_rocisa` (see [tensilelite/TESTING.md#rocisa](tensilelite/TESTING.md#rocisa)), a StinkyTofu-only change also retriggers hipBLASLt's own build and test — `precheckin` for real, and `preliminary` for real too, since StinkyTofu is one of the three paths its diff check looks for (Origami is the other; rocRoller and mxdatagenerator are not) | StinkyTofu's own dedicated suite still runs only in its own CI project, independent of the hipBLASLt-triggered run; the two are not linked to each other |
 | **hipblas-common** (`projects/hipblas-common/`) — shared type and enum definitions | `@ROCm/hipblas-common-reviewers` | Own CI project in Math CI; hipBLASLt is a downstream trigger | Validated by its own suite plus whatever of hipBLASLt's suite reruns as a downstream consumer; less a gap than a boundary worth knowing |
 | Downstream frameworks | Framework teams | Integration testing outside this repository | No pre-merge signal; regressions are found after the fact |
@@ -1035,19 +1055,20 @@ TensileLite, rocisa, and library-logic build-time validation have their own road
 larger structural items (the characterization-to-unit migration and mutation testing), in
 [tensilelite/TESTING.md#improvement-roadmap](tensilelite/TESTING.md#improvement-roadmap).
 
+Each item names the ticket that tracks it, for the same reason the
+[Known Risks and Gaps](#known-risks-and-gaps) table does.
+
 ### Near term, cheap and unblocking
 
-1. **Fix the tier filter in the TheRock test driver.** In TheRock's
-   [`build_tools/github_actions/test_executable_scripts/test_hipblaslt.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/test_hipblaslt.py),
-   only `test_type == "quick"` sets a `--gtest_filter`; `standard`, `comprehensive`, and `full` fall
-   through and run the entire binary. Small, well-scoped fix; makes the documented taxonomy real.
-2. **Publish the required-check list.** Document which checks actually block a merge, so contributors
-   and reviewers stop guessing. The lane tables in this document and in
-   [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, but
-   this belongs somewhere it cannot drift from the branch-protection settings themselves.
-3. **Govern known-bug entries as one thing.** Eight mechanisms suppress or record known-bad behavior
-   and none of them share a convention. The proposal, which needs team agreement before it becomes
-   policy, is four rules:
+1. **Publish the required-check list**
+   ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
+   block a merge, so contributors and reviewers stop guessing. The lane tables in this document and in
+   [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, and
+   [docs/gardening.md](../../docs/gardening.md) has a list, but it has already drifted. This belongs
+   somewhere it cannot drift from the repository ruleset itself.
+2. **Govern known-bug entries as one thing** (AIHPBLAS-5031). Eight mechanisms suppress or record
+   known-bad behavior and none of them share a convention. The proposal, which needs team agreement
+   before it becomes policy, is four rules:
 
    - Every entry names its ticket in a machine-readable field rather than a comment, so ownership and
      status live on the ticket where they can be kept current, instead of as a name in a file that
@@ -1060,26 +1081,24 @@ larger structural items (the characterization-to-unit migration and mutation tes
    Two mechanisms cannot satisfy the third rule today, so adopting this means changing them or
    accepting a stated exception. Start by splitting flaky from known-failing in the client quarantine
    list, which is the largest and blindest surface.
-4. **Rename or re-describe the Math CI job named `static-analysis`.** It is a disclosure/sensitive-word
-   scan, not a code analyzer (see [Static Analysis](#static-analysis)), and the name alone leads
-   readers to assume code-quality coverage that does not exist. A clearer job name, or a one-line
-   description surfaced in the checks UI, would close that gap without touching what the job does.
 
 ### Medium term, the structural unlock
 
-1. **Create a host-only link target for library internals**, resolving the include-path collision, so
-   C++ unit tests can reach validation, enum and string mapping, tuning-override parsing, and
-   workspace-sizing logic without linking the whole shared library. Everything in the C++ unit-test
-   backlog is blocked behind this one change.
-2. **Unify the three parallel enum-to-string tables** (client, library, and test-data YAML), or at
-   minimum add a test that asserts they agree. They can drift today, and a drift produces confusing
-   test-selection behavior rather than an obvious failure.
-3. **Extract validation ahead of dispatch** so argument-error paths are reachable without a GPU.
+1. **Create a host-only link target for library internals** (AIHPBLAS-5033), resolving the
+   include-path collision, so C++ unit tests can reach validation, enum and string mapping,
+   tuning-override parsing, and workspace-sizing logic without linking the whole shared library.
+   Everything in the C++ unit-test backlog is blocked behind this one change.
+2. **Unify the three parallel enum-to-string tables** (AIHPBLAS-3558), covering the client, library,
+   and test-data YAML tables, or at minimum add a test that asserts they agree. They can drift today,
+   and a drift produces confusing test-selection behavior rather than an obvious failure.
+3. **Extract validation ahead of dispatch** (AIHPBLAS-5034) so argument-error paths are reachable
+   without a GPU.
 
 ### Longer term, the real gap
 
-1. **Get a performance number onto the change.** Pull requests are not benchmarked today, so this
-   builds something new rather than repairing something. The nightly lane already has the pieces
+1. **Get a performance number onto the change** (AIHPBLAS-5029, with architecture and shape breadth
+   in AIHPBLAS-5030). Pull requests are not benchmarked today, so this builds something new rather
+   than repairing something. The nightly lane already has the pieces
    worth reusing: version-controlled datasets, a comparison against a baseline, and a runner pool.
    What we would like, roughly in order:
 
@@ -1098,9 +1117,9 @@ larger structural items (the characterization-to-unit migration and mutation tes
      breaks will stop working without anyone noticing.
    - A named owner for the signal.
 
-2. **Prune redundant numerical variants** in the client suite to buy back runtime, and spend it on
-   architecture breadth per PR.
-3. **Introduce real static analysis on the C++ library.** Add a `.clang-tidy` with a deliberately
+2. **Prune redundant numerical variants** (AIHPBLAS-5036) in the client suite to buy back runtime,
+   and spend it on architecture breadth per PR.
+3. **Introduce real static analysis on the C++ library** (AIHPBLAS-5032). Add a `.clang-tidy` with a deliberately
    small starting rule set, wire it into the build the way sibling projects in this repository
    already do, and ratchet it rather than trying to land a clean full-strength run. Adding `cpp` to
    the CodeQL language matrix is the cheaper first step and would at least produce a weekly signal.
@@ -1116,50 +1135,49 @@ their own gap inventory, including the entire coverage-and-verification theme, i
 **On the Tracking column.** This table names no owner. Per-gap ownership changes far more often than
 this document does, and a stale name in a repository file is worse than no name because it reads as
 authoritative. Instead each row points at a work item, which is where ownership, status and priority
-can actually be kept current. An empty cell is meaningful: it means the gap is real, acknowledged,
-and not yet tracked anywhere. Most of them are empty right now, and closing that is the first thing
-this table should drive.
+can actually be kept current. An empty cell would mean the gap is real, acknowledged, and not yet
+tracked anywhere. As of October 2026 every row has a ticket, and a new row should arrive with one.
+Gaps that had no better home are collected under the umbrella epic AIHPBLAS-5028.
 
 ### Performance
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| Pull requests are not benchmarked, so a regression cannot be attributed to the change that introduced it | High | High | A nightly lane measures a monorepo build, which narrows a regression to a day of merges rather than to a commit |  |
-| No performance gate, and no result surfaced in this repository | High | High | The nightly compares against a baseline and alerts its owners, so catching a regression depends on someone outside this repository reading it |  |
-| Benchmark coverage is one architecture family, gfx950 | Medium | Medium | Correctness coverage is broader; performance on the other architectures the library tunes for is not measured on a cadence |  |
+| Pull requests are not benchmarked, so a regression cannot be attributed to the change that introduced it | High | High | A nightly lane measures a monorepo build, which narrows a regression to a day of merges rather than to a commit | AIHPBLAS-5029 |
+| No performance gate, and no result surfaced in this repository | High | High | The nightly compares against a baseline and alerts its owners, so catching a regression depends on someone outside this repository reading it | AIHPBLAS-5029 |
+| Benchmark coverage is one architecture, gfx950, and that lane failed on most nights at the end of September 2026 | Medium | Medium | Correctness coverage is broader; performance on the other architectures the library tunes for is not measured on a cadence | AIHPBLAS-5030 |
 
 ### CI visibility and gating
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| What Math CI runs, and which of its jobs gate, is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift |  |
-| Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge |  |
-| Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is half-real | Medium | Medium | CTest honors the tiers correctly when used |  |
-| Submodule-bump pull requests run a reduced test set relative to source changes | Medium | Medium | Owned outside this component; noted because failures have been merged past |  |
+| What Math CI runs, and which of its jobs gate, is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift. The gap closes as hipBLASLt's testing moves to TheRock CI | ROCM-31467 |
+| The list of checks required to merge is maintained by hand in `docs/gardening.md`, and it has drifted from the repository ruleset | Medium | Medium | Anyone can read the ruleset with `gh api` (see [Validation Gates and Ownership](#validation-gates-and-ownership)) | [#12996](https://github.com/ROCm/rocm-libraries/issues/12996) |
+| No sanitizer lane is a required check, so an ASAN failure does not block a merge | Medium | High if hit | The ASAN lanes run on every hipBLASLt pull request, and reviewers can see their results | AIHPBLAS-1079 |
 
 ### Known bugs and flaky tests
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| No flaky-test tagging or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes |  |
-| Known-bad behavior is suppressed in seven places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
+| No flaky-test tagging or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | AIHPBLAS-5031 |
+| Known-bad behavior is suppressed in eight places with no shared convention, and the largest excludes the test entirely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total | AIHPBLAS-5031 |
 
 ### Static analysis and type checking
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| No code-quality static analysis on the C++ library at all: no clang-tidy or cppcheck, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lane, and the test suite absorb what an analyzer would catch earlier |  |
-| The gating job named `static-analysis` is a sensitive-word scan, so the gate list reads as though code analysis is covered | Medium | Medium | Documented here; the scan does its actual job well |  |
+| No code-quality static analysis on the C++ library at all: no clang-tidy or cppcheck, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lanes, and the test suite absorb what an analyzer would catch earlier | AIHPBLAS-5032 |
 
 ### Test surface gaps
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates, at the cost of slow feedback |  |
-| TSAN build options exist but no CI lane uses them, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream |  |
-| No multi-GPU tests | Low | High if hit | None in this repository |  |
-| Three parallel enum-to-string tables can drift | Low | Medium | None automated |  |
-| gfx950-dcgpu, hipBLASLt's own client test suite, is excluded from PR CI in the TheRock lane (postsubmit and nightly only there) | Low | Medium | Math CI's `precheckin` covers gfx950 per PR | [TheRock#3288](https://github.com/ROCm/TheRock/issues/3288) |
+| Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates, at the cost of slow feedback | AIHPBLAS-5033 |
+| Address, index, and launch-size arithmetic past 32-bit thresholds is not tested systematically. Several defects of this kind returned success with wrong or partly unwritten output | Medium | High | Targeted large-size regression tests for individual past defects | AIHPBLAS-4988 |
+| Nothing tests the public API itself: no test compiles the public headers from a C translation unit or with more than one toolchain, or checks public macro and type names, so several API breaks were found by users first | Medium | Medium | The client suite exercises the API through C++ only | AIHPBLAS-3579 |
+| No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
+| Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
+| Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
 
 ## Owners and Review Cadence
 
