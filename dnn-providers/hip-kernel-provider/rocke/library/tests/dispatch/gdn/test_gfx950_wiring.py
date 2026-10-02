@@ -57,14 +57,40 @@ class TestRegistration(unittest.TestCase):
 
 
 class TestStaticSelection(unittest.TestCase):
-    """Dispatcher auto must use one static default rather than batch winners."""
+    """Dispatcher auto must use one static default rather than batch winners.
 
-    def test_all_batch_anchors_select_the_default_tile(self):
-        for batch in (1, 16, 64, 256):
-            with self.subTest(batch=batch):
-                self.assertEqual(
-                    _TILE(dispatch_gdn_decode(_req(batch)).spec), DEFAULT_TILE
-                )
+    The shipped tile is pinned as a literal, not as ``DEFAULT_TILE``: a test
+    that follows the constant cannot notice the default moving. Changing a
+    pinned value here changes what every gfx950 GDN ``auto`` user runs, so it
+    needs GDN measurements (``tune.py --gate-kind gdn``) in the same change.
+    """
+
+    _SHIPPED_TILE = (2, 16, 8)
+    # Known limitation (see CONFIGURED_TILES): an illegal default falls back to
+    # the first legal tile in product order. Pinned so a change is deliberate.
+    _FALLBACK_TILE = (1, 1, 1)
+
+    def test_default_tile_is_the_shipped_tile(self):
+        self.assertEqual(DEFAULT_TILE, self._SHIPPED_TILE)
+
+    def test_selection_is_frozen_across_head_counts_and_batches(self):
+        # Sharded-head deployments see head counts other than the default
+        # geometry, so cover them, including Hk == Hv.
+        for num_k_heads, num_v_heads in (
+            (2, 4),
+            (4, 8),
+            (8, 16),
+            (16, 32),
+            (32, 64),
+            (16, 16),
+        ):
+            for batch in (1, 4, 5, 16, 32, 33, 64, 128, 129, 256):
+                with self.subTest(hk=num_k_heads, hv=num_v_heads, batch=batch):
+                    result = dispatch_gdn_decode(
+                        _req(batch, num_k_heads=num_k_heads, num_v_heads=num_v_heads)
+                    )
+                    self.assertEqual(_TILE(result.spec), self._SHIPPED_TILE)
+                    self.assertEqual(result.spec.gate_kind, "gdn")
 
     def test_selected_spec_is_always_buildable(self):
         for batch in (1, 4, 5, 16, 33, 64, 129, 256, 8192):
@@ -75,11 +101,14 @@ class TestStaticSelection(unittest.TestCase):
                 self.assertTrue(ok, why)
 
     def test_supported_geometry_falls_back_when_default_is_invalid(self):
-        result = dispatch_gdn_decode(_req(1, head_k_dim=64))
-        ok, why = is_valid_spec(result.spec, arch=ARCH)
-        self.assertTrue(ok, why)
-        self.assertEqual(result.spec.head_k_dim, 64)
-        self.assertNotEqual(_TILE(result.spec), DEFAULT_TILE)
+        for head_k_dim in (64, 192):
+            for batch in (1, 256):
+                with self.subTest(head_k_dim=head_k_dim, batch=batch):
+                    result = dispatch_gdn_decode(_req(batch, head_k_dim=head_k_dim))
+                    ok, why = is_valid_spec(result.spec, arch=ARCH)
+                    self.assertTrue(ok, why)
+                    self.assertEqual(result.spec.head_k_dim, head_k_dim)
+                    self.assertEqual(_TILE(result.spec), self._FALLBACK_TILE)
 
 
 class TestRequestRejection(unittest.TestCase):
