@@ -3,7 +3,8 @@
 Run `hipblaslt-bench` (or any command) with LDS contention from a background
 "cotenant" kernel.
 
-The standalone launcher is Linux only and is not built or installed on Windows.
+The standalone launcher and `hipblaslt-bench --cotenant-cus` are Linux only; the launcher is not
+built or installed on Windows, and the bench rejects `--cotenant-cus` there.
 
 ```bash
 hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096

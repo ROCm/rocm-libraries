@@ -893,6 +893,13 @@ try
         return 1;
     }
 
+#ifdef _WIN32
+    if(hipblaslt_bench_options::cotenant_cus() != 0)
+    {
+        hipblaslt_cerr << "cotenant-cus is not supported on Windows." << std::endl;
+        return 1;
+    }
+#endif
     if(hipblaslt_bench_options::cotenant_cus() < 0)
     {
         hipblaslt_cerr << "cotenant-cus must be >= 0." << std::endl;

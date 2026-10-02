@@ -6,10 +6,20 @@
 #include <hip/hip_runtime.h>
 
 #ifdef _WIN32
-#include <io.h>
+
+// POSIX-only; the bench rejects --cotenant-cus on Windows.
+namespace hipblaslt_cotenant
+{
+    class Scoped
+    {
+    public:
+        Scoped(int, int, hipStream_t) {}
+    };
+}
+
 #else
+
 #include <unistd.h>
-#endif
 
 #include <algorithm>
 #include <chrono>
@@ -37,14 +47,7 @@ namespace hipblaslt_cotenant
         const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
         va_end(args);
         if(n > 0)
-        {
-            const auto len = static_cast<unsigned>(std::min<size_t>(n, sizeof(buf) - 1));
-#ifdef _WIN32
-            (void)_write(2, buf, len);
-#else
-            (void)!::write(2, buf, len);
-#endif
-        }
+            (void)!::write(2, buf, std::min<size_t>(n, sizeof(buf) - 1));
     }
 
     template <bool Stoppable>
@@ -226,3 +229,5 @@ namespace hipblaslt_cotenant
         Scoped& operator=(const Scoped&) = delete;
     };
 }
+
+#endif // _WIN32
