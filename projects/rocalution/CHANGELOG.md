@@ -5,6 +5,11 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Resolved issues
+* Fixed `LocalMatrix::Sort()` on the accelerator ignoring errors when creating the identity permutation for CSR and COO matrices.
+
+## (Unreleased) rocALUTION 4.1.1
+
+### Resolved issues
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
 ## (Unreleased) rocALUTION 4.1.1
