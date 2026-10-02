@@ -64,10 +64,6 @@ Notes
   them and uses the boxes directly, so a kernel that misuses maxHoleW/H
   surfaces as a diff.
 */
-inline double grid_dropout_scalar(double v, DType dt, bool erased) {
-    return erased ? from_unit(0.0, dt) : v;
-}
-
 // Hole membership is tested against the ABSOLUTE source coordinate (x0 + i, y0 + j).
 template <typename T>
 void grid_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
@@ -75,6 +71,7 @@ void grid_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const Rppt
                             Rpp32u boxesInEachImage) {
     std::vector<RoiBounds> b(sd.n);
     for (Rpp32u n = 0; n < sd.n; ++n) b[n] = roi_bounds(roi[n], roiType);
+    const T black = from_double<T>(dtype_black(dt));
     for_each_roi_io(
         sd, dd, roi, roiType,
         [&](Rpp32u n, Rpp32u, Rpp32u j, Rpp32u i, std::size_t srcIdx, std::size_t dstIdx) {
@@ -85,7 +82,7 @@ void grid_dropout_reference(const T* src, const RpptDesc& sd, T* dst, const Rppt
                 const RpptRoiLtrb& bx = boxes[n * boxesInEachImage + k];
                 if (sx >= bx.lt.x && sx <= bx.rb.x && sy >= bx.lt.y && sy <= bx.rb.y) erased = true;
             }
-            dst[dstIdx] = from_double<T>(grid_dropout_scalar(to_double(src[srcIdx]), dt, erased));
+            dst[dstIdx] = erased ? black : src[srcIdx];
         });
 }
 
