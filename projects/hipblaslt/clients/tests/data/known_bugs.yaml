@@ -53,6 +53,16 @@ Known bugs:
   # and no platform is listed. REMOVE this entry in the PR that fixes ROCM-32062;
   # the test then becomes its regression gate. Review by 2026-11-01.
   - { name: matmul_fast_check_epilogue_padded_lda_ROCM32062, function: matmul }
+  # ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
+  # but never passes it to the kernel, so E is written unscaled on every GPU. Both
+  # fast_check and unit_check report it. REMOVE this entry in the PR that fixes
+  # ROCM-32138; the case then becomes its regression gate. Review by 2026-11-01.
+  - { name: matmul_fast_check_aux_scale_e_ROCM32138, function: matmul }
+  # ROCM-32139: the client CPU reference writes E with ldd instead of lde, so
+  # unit_check fails a correct GPU result when they differ; fast_check passes it.
+  # Host-side, so every platform is affected. REMOVE this entry in the PR that
+  # fixes ROCM-32139. Review by 2026-11-01.
+  - { name: matmul_fast_check_aux_padded_ldd_ROCM32139, function: matmul }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.

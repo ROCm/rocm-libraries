@@ -346,9 +346,9 @@ reference with an exact probe check of every element of D (see
 | --- | --- |
 | A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
 | B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
-| bias, scaleAlpha vector, E | not covered: the generic integer fill, 1 to 10 |
-| scaleA, scaleB, scaleC, scaleD | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`); fast_check does not accept them yet |
-| amaxD | not covered: starts at zero; fast_check does not accept it yet |
+| bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
 
 Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
 and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
