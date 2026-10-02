@@ -89,6 +89,7 @@ def main():
             "hipkittens-gemm",
             "hipkittens-bench",
             "hipkittens-install",
+            "hipkittens-heuristic",
             "disabled-api",
         ),
         help="Run only the selected regression routes (default: all)",
@@ -464,7 +465,13 @@ def main():
 
     # Built only with HIPBLASLT_JIT_ENABLE_HIPKITTENS; the kernels need gfx950.
     hipkittens_test = staging / "hipblaslt-jit-hipkittens-test"
-    for name in ("hipkittens-backend", "hipkittens-gemm", "hipkittens-bench", "hipkittens-install"):
+    for name in (
+        "hipkittens-backend",
+        "hipkittens-gemm",
+        "hipkittens-bench",
+        "hipkittens-install",
+        "hipkittens-heuristic",
+    ):
         if not hipkittens_test.exists():
             skipped[name] = "the build has no HipKittens backend"
         elif args.architecture != "gfx950":
@@ -502,6 +509,18 @@ def main():
                 str(build),
                 str(hipkittens_test),
                 str(output / "hipkittens-install"),
+            ],
+            {},
+            900,
+        ),
+        (
+            "hipkittens-heuristic",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_heuristic.py"),
+                str(hipkittens_test),
+                str(build / "clients/hipblaslt-bench"),
+                str(output / "hipkittens-heuristic"),
             ],
             {},
             900,
