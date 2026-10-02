@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 #include "test_utils_hipgraphs.hpp"
 
 // required rocprim headers
@@ -115,7 +116,22 @@ using Params = ::testing::Types<
     // Tests for when output's value_type is void
     params<int, int, 1, 1, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceRunLengthEncode, Params);
+struct RocprimDeviceRunLengthEncodeNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::key_type>() + "_"
+                        + type_tag<typename Params::count_type>() + "_"
+                        + std::to_string(Params::min_segment_length) + "_"
+                        + std::to_string(Params::max_segment_length);
+        if constexpr(Params::use_identity_iterator)
+            n += "_Ident";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceRunLengthEncode, Params, RocprimDeviceRunLengthEncodeNameGenerator);
 
 template <class T>
 T get_random_value_no_duplicate(const T duplicate, const std::vector<T> &source, const size_t start_index)
