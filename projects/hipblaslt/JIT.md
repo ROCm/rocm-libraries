@@ -931,7 +931,7 @@ The following work sits outside the seven steps and remains future:
 
 | Work | Remaining contract |
 | --- | --- |
-| Exact epilogue specialization | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
+| Activation specialization | Generated kernels already compile the requested bias (presence, type and source), aux output, scale vectors, amax and gate residual exactly. Only the activation stays generic: each kernel carries every activation kind and selects the requested one at run time. Compiling only the requested kind remains future work; it measured a gain of 0.7% or less on gfx950. This is separate from modeling epilogue cost. |
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
 | HipKittens and other backends | Implement the backend interface. A HipKittens backend is planned: run-time instantiation through comgr, opt-in, in developer builds only. It is not implemented. |
 | KFA metadata convergence | Complete the KFA metadata that JIT generators emit, then prove argument, launch, helper, workspace and synchronization equivalence before generated kernels share the custom-kernel dispatch path. This reuses the KFA path; it does not make the JIT load prebuilt kernels. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |

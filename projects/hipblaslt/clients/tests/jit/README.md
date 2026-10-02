@@ -279,5 +279,5 @@ ranked recipes lacking required subtile choices fail with candidate-specific
 reasons. Complex, zero-K, alpha-zero, and mixed MAC-type cases verify the absence
 of a usable ranking and the absence of generation. These are diagnostic checks,
 not successful numerical executions. Explicit supported recipes have their own
-builder/runtime coverage. None of these tests establishes the exact epilogue
+builder/runtime coverage. None of these tests establishes the activation
 specialization or tuning-blueprint behavior described in the roadmap.
