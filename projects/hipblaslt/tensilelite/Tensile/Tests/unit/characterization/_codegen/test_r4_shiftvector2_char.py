@@ -6,7 +6,6 @@
 
 Targets Tensile/Components/ShiftVectorComponents.py ranges:
   - 47-200  : ShiftVectorComponentsVALU.__call__ (VALU edge-shift sweep)
-  - 552-784 : ShiftVectorComponentsMFMAAllThread (dead-code analysis below)
 
 VectorWidth sweep [1,4] over the VALU path (EnableMatrixInstruction=False,
 AssertFree0ElementMultiple=1) drives all branches in the VALU arm:
@@ -15,23 +14,6 @@ AssertFree0ElementMultiple=1) drives all branches in the VALU arm:
   - VW=4 : wider per-element loops at lines 162-180; thread-tile0 stride
             differs; exercises the ``dst``/``src`` offset arithmetic with
             a 4-wide local-read vector.
-
-DEAD-CODE ANALYSIS — lines 552-784 (ShiftVectorComponentsMFMAAllThread):
-  The dispatch at line 237 routes to AllThread only when
-      glvw > allContOutCoal * numThreadInCoal.
-  For every valid MFMA config, ``glvwAlimit`` (computed at Solution time)
-  equals exactly (allContOutCoal * numThreadInCoal / VW) * VW ==
-  the AllThread threshold. Because Solution.py clips glvw DOWN to glvwAlimit
-  whenever partialA/partialB is True (the only case where ShiftVector runs),
-  the condition ``glvw > threshold`` is never satisfied:
-    - SourceSwap=0, A: glvwAlimit = MIOutputVW*(WS//matN) == threshold/VW
-    - SourceSwap=0, B: glvwBlimit = matN*VW == threshold (VW*matN)
-    - SourceSwap=1, A: glvwAlimit = matM*VW == threshold (VW*matM)
-    - SourceSwap=1, B: glvwBlimit = MIOutputVW*(WS//matM) == threshold/VW
-  All four cases: max-reachable glvw <= AllThread threshold.  AllThread is
-  dead code in the standard kernel-generation pipeline.  This is recorded as
-  P5 ceiling evidence at ShiftVectorComponents.py:237-238 (dispatch) and
-  552-784 (body).
 
 pytestmark = pytest.mark.unit per project convention.
 CPU-only; no GPU device required.
