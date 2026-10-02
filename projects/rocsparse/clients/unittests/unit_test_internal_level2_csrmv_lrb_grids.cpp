@@ -605,6 +605,16 @@ TEST_F(CsrmvLrbGrids, clamped_grid_stride_f64_i64)
     check_lrb<double, int64_t, int64_t>(handle, true);
 }
 
+TEST_F(CsrmvLrbGrids, clamped_grid_stride_f32_i64_i32)
+{
+    check_lrb<float, int64_t, int32_t>(handle, true);
+}
+
+TEST_F(CsrmvLrbGrids, clamped_grid_stride_f64_i64_i32)
+{
+    check_lrb<double, int64_t, int32_t>(handle, true);
+}
+
 // Control: the same problems with the real grid.x limit, which run the
 // straight-line variants. If this fails the clamped cases above prove nothing.
 TEST_F(CsrmvLrbGrids, unclamped_grid_matches_host)
@@ -613,6 +623,8 @@ TEST_F(CsrmvLrbGrids, unclamped_grid_matches_host)
     check_lrb<double, int32_t, int32_t>(handle, false);
     check_lrb<float, int64_t, int64_t>(handle, false);
     check_lrb<double, int64_t, int64_t>(handle, false);
+    check_lrb<float, int64_t, int32_t>(handle, false);
+    check_lrb<double, int64_t, int32_t>(handle, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -639,10 +651,22 @@ TEST_F(CsrmvAdaptiveGrids, partial_scale_y_clamped_f64_i64)
     check_adaptive_partial_scale_y<double, int64_t, int64_t>(handle, true);
 }
 
+TEST_F(CsrmvAdaptiveGrids, partial_scale_y_clamped_f32_i64_i32)
+{
+    check_adaptive_partial_scale_y<float, int64_t, int32_t>(handle, true);
+}
+
+TEST_F(CsrmvAdaptiveGrids, partial_scale_y_clamped_f64_i64_i32)
+{
+    check_adaptive_partial_scale_y<double, int64_t, int32_t>(handle, true);
+}
+
 TEST_F(CsrmvAdaptiveGrids, unclamped_grid_matches_host)
 {
     check_adaptive_partial_scale_y<float, int32_t, int32_t>(handle, false);
     check_adaptive_partial_scale_y<double, int32_t, int32_t>(handle, false);
     check_adaptive_partial_scale_y<float, int64_t, int64_t>(handle, false);
     check_adaptive_partial_scale_y<double, int64_t, int64_t>(handle, false);
+    check_adaptive_partial_scale_y<float, int64_t, int32_t>(handle, false);
+    check_adaptive_partial_scale_y<double, int64_t, int32_t>(handle, false);
 }
