@@ -32,11 +32,12 @@ FP32 = "float"
 FP16 = "half"
 
 
-def kern(dtA=FP4, dtB=FP4, dtD=BF16, subtile=True, mt0=256, mt1=256):
+def kern(dtA=FP4, dtB=FP4, dtD=BF16, subtile=True, mt0=256, mt1=256, plsin=True):
     return {
         "UseSubtileImpl": subtile,
         "MacroTile0": mt0,
         "MacroTile1": mt1,
+        "PostLoopStoreInNll": plsin,
         "ProblemType": {
             "DataTypeA": DataType(dtA),
             "DataTypeB": DataType(dtB),
@@ -114,6 +115,22 @@ def test_tile_scope(mt0, mt1, early, blockSched):
     assert plsinEarlyStoreTile(kernel) is early
     assert plsinBlockSchedTile(kernel) is blockSched
     assert plsinStagingEligible(kernel) is blockSched
+
+
+def test_block_scheduling_requires_plsin():
+    """Block scheduling is the staged *fused* store, so it needs the fused store.
+
+    The tile and the operand types can both be in scope while PostLoopStoreInNll
+    has been turned off for an unrelated reason -- StreamK atomic, a non-zero
+    StoreRemapVectorWidth, wave32, MultipleBuffer accumulation. Building the
+    partitioned schedule there would emit the NGLL/NLL arm split for a store
+    that is never fused. Early-store scope is tile-and-type only, so it still
+    answers True.
+    """
+    noPlsin = kern(plsin=False)
+    assert plsinEarlyStoreTile(noPlsin) is True
+    assert plsinBlockSchedTile(noPlsin) is False
+    assert plsinStagingEligible(noPlsin) is False
 
 
 def test_tile_scope_requires_the_type_scope():
