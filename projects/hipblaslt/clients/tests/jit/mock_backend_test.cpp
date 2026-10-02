@@ -3,7 +3,7 @@
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-mock.hpp"
-#include "hipblaslt-jit-tensilelite-artifacts.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -49,7 +49,7 @@ namespace
     // bundle's provenance manifest, which the backend itself never reads.
     std::string solutionField(const std::string& bundle, const std::string& key)
     {
-        namespace artifacts = jit::tensilelite::detail::artifacts;
+        namespace artifacts = hipblaslt_jit::source_bundle;
         const auto bytes    = artifacts::readArtifact(
             artifacts::artifact(std::filesystem::u8path(bundle), "manifest.json"));
         const std::string manifest(bytes.begin(), bytes.end());

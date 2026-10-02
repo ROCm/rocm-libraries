@@ -617,9 +617,9 @@ namespace
 
     void defaults()
     {
-        const auto        knowledge = hj::makeTensileLiteDefaults();
+        const auto        knowledge = hj::makeCatalogKnowledge();
         const ProbeRequest request;
-        require(knowledge->id() == "tensilelite-defaults.v1", "Unexpected knowledge id");
+        require(knowledge->id() == "catalog.v1", "Unexpected knowledge id");
         const std::vector<std::array<size_t, 4>> tiles{{32, 32, 2, 2},
                                                        {64, 32, 2, 2},
                                                        {32, 64, 2, 2},
@@ -647,9 +647,9 @@ namespace
                             && seeds[i].cacheHints == hints,
                         std::string(isa) + ": wrong seed " + std::to_string(i));
             require(knowledge->defaults(request, target, {}).empty(),
-                    "TensileLite defaults supplied parameter values");
+                    "Catalog knowledge supplied parameter values");
         }
-        std::cout << "PASS TensileLite defaults seed 11 tiles with per-architecture cache hints\n";
+        std::cout << "PASS catalog knowledge seeds 11 tiles with per-architecture cache hints\n";
     }
 
     // Runs in a child with HIPBLASLT_JIT_DEBUG=all; each scenario's lines follow its name.

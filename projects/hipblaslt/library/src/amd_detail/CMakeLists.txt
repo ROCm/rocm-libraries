@@ -24,7 +24,7 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-defaults.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-catalog-knowledge.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-origami-predictor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"

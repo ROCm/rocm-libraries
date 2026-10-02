@@ -131,7 +131,7 @@ namespace hipblaslt_jit
     };
 
     std::shared_ptr<const Predictor>       makeOrigamiPredictor();
-    std::shared_ptr<const TuningKnowledge> makeTensileLiteDefaults();
+    std::shared_ptr<const TuningKnowledge> makeCatalogKnowledge();
 
     // A header a HIP unit includes by name.
     struct IncludeFile

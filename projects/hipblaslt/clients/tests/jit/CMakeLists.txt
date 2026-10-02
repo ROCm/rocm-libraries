@@ -37,12 +37,12 @@ add_executable(hipblaslt-jit-heuristic-test heuristic_test.cpp)
 target_link_libraries(hipblaslt-jit-heuristic-test
     PRIVATE roc::hipblaslt hip::device Threads::Threads)
 
-add_executable(hipblaslt-jit-artifacts-test tensilelite_artifacts_test.cpp)
-target_include_directories(hipblaslt-jit-artifacts-test PRIVATE "${hipblaslt_jit_source}")
-target_link_libraries(hipblaslt-jit-artifacts-test PRIVATE ZLIB::ZLIB)
-hipblaslt_jit_test(jit-artifacts jit-cpu
-    $<TARGET_FILE:hipblaslt-jit-artifacts-test> "${hipblaslt_jit_scratch}/artifacts")
-hipblaslt_jit_stage(hipblaslt-jit-heuristic-test hipblaslt-jit-artifacts-test)
+add_executable(hipblaslt-jit-source-bundle-test source_bundle_test.cpp)
+target_include_directories(hipblaslt-jit-source-bundle-test PRIVATE "${hipblaslt_jit_source}")
+target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE ZLIB::ZLIB)
+hipblaslt_jit_test(jit-source-bundle jit-cpu
+    $<TARGET_FILE:hipblaslt-jit-source-bundle-test> "${hipblaslt_jit_scratch}/source-bundle")
+hipblaslt_jit_stage(hipblaslt-jit-heuristic-test hipblaslt-jit-source-bundle-test)
 
 if(NOT HIPBLASLT_ENABLE_JIT)
     add_executable(hipblaslt-jit-disabled-test disabled_api_test.cpp)
@@ -59,7 +59,7 @@ add_executable(hipblaslt-jit-component-test
     "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-process.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-tensilelite-defaults.cpp")
+    "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp")
 target_include_directories(hipblaslt-jit-component-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_compile_definitions(hipblaslt-jit-component-test PRIVATE HIPBLASLT_ENABLE_JIT)
@@ -102,7 +102,12 @@ if(HIPBLASLT_JIT_TESTING)
     target_include_directories(hipblaslt-jit-mock-backend-test PRIVATE
         "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/include")
     target_link_libraries(hipblaslt-jit-mock-backend-test PRIVATE roc::hipblaslt hip::device)
-    hipblaslt_jit_stage(hipblaslt-jit-mock-backend-test)
+
+    # The public C and C++ GEMM APIs on solutions replayed through the mock backend.
+    add_executable(hipblaslt-jit-api-test jit_api_test.cpp)
+    target_include_directories(hipblaslt-jit-api-test PRIVATE "${hipblaslt_jit_source}")
+    target_link_libraries(hipblaslt-jit-api-test PRIVATE roc::hipblaslt hip::device)
+    hipblaslt_jit_stage(hipblaslt-jit-mock-backend-test hipblaslt-jit-api-test)
 endif()
 
 # Compiles the JIT solution library directly; runs without a GPU.

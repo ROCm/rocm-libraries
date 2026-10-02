@@ -65,7 +65,7 @@ option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shar
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
-option(HIPBLASLT_ENABLE_JIT "Build direct TensileLite and generic JIT GEMM support." OFF)
+option(HIPBLASLT_ENABLE_JIT "Build experimental just-in-time (JIT) GEMM solution support." OFF)
 if(HIPBLASLT_ENABLE_JIT AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_JIT requires the host library")
 endif()

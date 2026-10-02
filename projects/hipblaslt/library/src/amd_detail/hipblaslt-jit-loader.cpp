@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-loader.hpp"
-#include "hipblaslt-jit-tensilelite-artifacts.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include <Tensile/Tensile.hpp>
 #include <stdexcept>
 
@@ -92,7 +92,7 @@ namespace hipblaslt_jit
 
     GeneratedSolution readTensileSourceBundle(const std::filesystem::path& bundle)
     {
-        namespace artifacts = hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts;
+        namespace artifacts = hipblaslt_jit::source_bundle;
         auto              sources = artifacts::readSourceBundle(bundle);
         GeneratedSolution result;
         result.entry       = std::move(sources.library);

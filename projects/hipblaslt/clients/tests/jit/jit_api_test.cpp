@@ -1,9 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt-jit-tensilelite.hpp"
-#ifdef HIPBLASLT_TEST_GENERIC_JIT
 #include "hipblaslt-jit.hpp"
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
+#include "hipblaslt-jit-tensilelite.hpp"
+#else
+#include "hipblaslt-jit-mock.hpp"
 #endif
 #include <algorithm>
 #include <cmath>
@@ -18,7 +20,12 @@
 #include <stdexcept>
 #include <vector>
 
-using TensileLiteOptions = hipblaslt_ext::experimental::jit::tensilelite::Options;
+// Without HIPBLASLT_JIT_API_TEST_TENSILELITE, solutions come from replayed bundles.
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
+using Generation = hipblaslt_ext::experimental::jit::tensilelite::Options;
+#else
+using Generation = hipblaslt_ext::experimental::jit::mock::Options;
+#endif
 
 namespace
 {
@@ -47,7 +54,11 @@ namespace
     bool        outputAmax             = false;
     bool        zeroAlphaInputs        = false;
     bool        allowWorkspaceFallback = false;
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
     std::string secondConfig, secondPython;
+#else
+    std::string secondReplay;
+#endif
     bool        expectHelperFailure = false;
     struct Problem
     {
@@ -280,13 +291,13 @@ namespace
             }
         }
     };
-    void runPublicGemm(Problem& p, const TensileLiteOptions& options)
+    void runPublicGemm(Problem& p, const Generation& options, const Generation& another)
     {
         using namespace hipblaslt_ext;
-#ifdef HIPBLASLT_TEST_GENERIC_JIT
+#if !defined(HIPBLASLT_JIT_API_TEST_TENSILELITE) || defined(HIPBLASLT_TEST_GENERIC_JIT)
         experimental::jit::Diagnostics   info;
         hipblasLtMatmulHeuristicResult_t selected;
-        auto                             generate = [&](const TensileLiteOptions& generation) {
+        auto                             generate = [&](const Generation& generation) {
             namespace jit = experimental::jit;
             selected      = {};
             jit::Request request;
@@ -307,7 +318,11 @@ namespace
             if(status != HIPBLAS_STATUS_SUCCESS)
                 return status;
             jit::Backend backend;
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
             status = jit::tensilelite::createBackend(generation, backend, info);
+#else
+            status = jit::mock::createBackend(generation, backend, info);
+#endif
             if(status != HIPBLAS_STATUS_SUCCESS)
                 return status;
             int device = -1;
@@ -322,7 +337,7 @@ namespace
 #else
         experimental::jit::tensilelite::Diagnostics info;
         hipblasLtMatmulHeuristicResult_t            selected;
-        auto generate = [&](const TensileLiteOptions& generation) {
+        auto generate = [&](const Generation& generation) {
             return experimental::jit::tensilelite::getGemmAlgo(p.handle,
                                                                p.desc,
                                                                &p.alpha,
@@ -341,11 +356,11 @@ namespace
                                                                info);
         };
 #endif
-        auto select = [&](const TensileLiteOptions& generation) {
+        auto select = [&](const Generation& generation) {
             auto status = generate(generation);
             require(status == HIPBLAS_STATUS_SUCCESS, ("JIT selection: " + info.message).c_str());
         };
-#ifndef HIPBLASLT_TEST_GENERIC_JIT
+#if defined(HIPBLASLT_JIT_API_TEST_TENSILELITE) && !defined(HIPBLASLT_TEST_GENERIC_JIT)
         auto missingRecipe = options;
         missingRecipe.configPath.clear();
         std::memset(&selected, 0xa5, sizeof(selected));
@@ -361,8 +376,10 @@ namespace
                 "Missing recipe invoked the generator");
 #endif
         select(options);
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
         std::cout << "Public GEMM API manifest: " << (options.outputPath + "/bundle/manifest.json")
                   << '\n';
+#endif
         hipblasLtMatmulAlgo_t algo;
         std::memcpy(&algo, &selected.algo, sizeof(algo));
         require(getIndexFromAlgo(algo) == -1, "JIT algorithm exposed a prebuilt index");
@@ -455,12 +472,6 @@ namespace
         }
         // Fresh bundles use the same symbols and basenames. The first retained
         // algorithm must remain runnable after a second private adapter is loaded.
-        auto another = options;
-        another.outputPath += "-second";
-        if(!secondConfig.empty())
-            another.configPath = secondConfig;
-        if(!secondPython.empty())
-            another.pythonExecutable = secondPython;
         select(another);
         require(selected.workspaceSize <= workspaceBytes,
                 "Second test recipe needs more workspace than the first");
@@ -552,16 +563,29 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if(argc < 8)
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
+    constexpr int first = 8;
+    if(argc < first)
     {
         std::cerr << "Usage: " << argv[0]
                   << " PYTHON TENSILE_SOURCE PYTHONPATH YAML FRESH_OUTPUT ARCH COMPILER "
                      "[--m M --n N --k K --trans-b N|T --amax 0|1]\n";
         return 2;
     }
+#else
+    constexpr int first = 3;
+    if(argc < first || std::string(argv[1]) != "--replay")
+    {
+        std::cerr << "Usage: " << argv[0]
+                  << " --replay BUNDLE [--second-replay BUNDLE --m M --n N --k K --trans-b N|T "
+                     "--amax 0|1]\n";
+        return 2;
+    }
+#endif
     try
     {
-        TensileLiteOptions options;
+        Generation options;
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
         options.pythonExecutable       = argv[1];
         options.tensileSourceDirectory = argv[2];
         options.pythonPath             = argv[3];
@@ -570,22 +594,30 @@ int main(int argc, char** argv)
         options.architecture           = argv[6];
         options.cxxCompiler            = argv[7];
         require(options.configPath != "-", "This sample requires an explicit YAML recipe");
+#else
+        options.replay = argv[2];
+#endif
         auto integer = [](const std::string& value) {
             size_t consumed = 0;
             int    result   = std::stoi(value, &consumed);
             require(consumed == value.size(), "Expected integer option value");
             return result;
         };
-        for(int i = 8; i < argc; i += 2)
+        for(int i = first; i < argc; i += 2)
         {
             require(i + 1 < argc, "Option requires a value");
             std::string key(argv[i]), value(argv[i + 1]);
             if(key == "--workspace-fallback")
                 allowWorkspaceFallback = integer(value) != 0;
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
             else if(key == "--second-yaml")
                 secondConfig = value;
             else if(key == "--second-python")
                 secondPython = value;
+#else
+            else if(key == "--second-replay")
+                secondReplay = value;
+#endif
             else if(key == "--expect-helper-failure")
                 expectHelperFailure = integer(value) != 0;
             else if(key == "--alpha-zero")
@@ -608,9 +640,20 @@ int main(int argc, char** argv)
         }
         require(M > 0 && N > 0 && K > 0 && M <= 1024 && N <= 1024 && K <= 8192,
                 "Sample dimensions must satisfy 0<M,N<=1024 and 0<K<=8192");
+        auto another = options;
+#ifdef HIPBLASLT_JIT_API_TEST_TENSILELITE
+        another.outputPath += "-second";
+        if(!secondConfig.empty())
+            another.configPath = secondConfig;
+        if(!secondPython.empty())
+            another.pythonExecutable = secondPython;
+#else
+        if(!secondReplay.empty())
+            another.replay = secondReplay;
+#endif
         Problem problem;
         problem.create();
-        runPublicGemm(problem, options);
+        runPublicGemm(problem, options, another);
         return 0;
     }
     catch(const std::exception& e)

@@ -30,16 +30,20 @@ set(hipblaslt_jit_process_backend hipblaslt-jit-tensilelite-backend.cpp)
 
 if(HIPBLASLT_BUILD_TESTING)
     find_package(Threads REQUIRED)
-    add_executable(hipblaslt-jit-api-test
-        "${hipblaslt_jit_tensilelite_tests}/public_gemm_test.cpp")
+    # jit_api_test.cpp generating with TensileLite, through the direct and the generic API.
+    add_executable(hipblaslt-jit-tensilelite-api-test
+        "${hipblaslt_jit_tensilelite_tests}/jit_api_test.cpp")
     add_executable(hipblaslt-jit-generic-api-test
-        "${hipblaslt_jit_tensilelite_tests}/public_gemm_test.cpp")
-    target_compile_definitions(hipblaslt-jit-generic-api-test PRIVATE HIPBLASLT_TEST_GENERIC_JIT)
+        "${hipblaslt_jit_tensilelite_tests}/jit_api_test.cpp")
+    target_compile_definitions(hipblaslt-jit-tensilelite-api-test PRIVATE
+        HIPBLASLT_JIT_API_TEST_TENSILELITE)
+    target_compile_definitions(hipblaslt-jit-generic-api-test PRIVATE
+        HIPBLASLT_JIT_API_TEST_TENSILELITE HIPBLASLT_TEST_GENERIC_JIT)
     add_executable(hipblaslt-jit-direct-gemm-test
         "${hipblaslt_jit_tensilelite_tests}/direct_gemm_test.cpp")
     add_executable(hipblaslt-jit-generic-gemm-test
         "${hipblaslt_jit_tensilelite_tests}/generic_gemm_test.cpp")
-    foreach(test_target hipblaslt-jit-api-test hipblaslt-jit-generic-api-test
+    foreach(test_target hipblaslt-jit-tensilelite-api-test hipblaslt-jit-generic-api-test
                         hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test)
         target_include_directories(${test_target} PRIVATE "${hipblaslt_jit_tensilelite_source}")
         target_link_libraries(${test_target} PRIVATE roc::hipblaslt hip::device)
@@ -53,7 +57,7 @@ if(HIPBLASLT_BUILD_TESTING)
         "${hipblaslt_jit_tensilelite_source}")
     target_link_libraries(hipblaslt-jit-process-test PRIVATE Threads::Threads)
 
-    foreach(test_target hipblaslt-jit-api-test hipblaslt-jit-generic-api-test
+    foreach(test_target hipblaslt-jit-tensilelite-api-test hipblaslt-jit-generic-api-test
                         hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test
                         hipblaslt-jit-process-test)
         target_compile_features(${test_target} PRIVATE cxx_std_17)

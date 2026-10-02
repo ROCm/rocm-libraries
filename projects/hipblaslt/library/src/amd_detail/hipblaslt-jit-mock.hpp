@@ -4,9 +4,9 @@
 
 #include "hipblaslt-jit.hpp"
 
-// Not installed. An in-process backend for JIT tests: it replays one source
-// bundle that Tensile.SingleSolution or Tensile.JitGemm wrote, without running a
-// generator; the solution is still built with comgr.
+// Not installed. An in-process backend for JIT tests: it replays a
+// pre-generated source bundle without running a generator; the solution is
+// still built with comgr.
 namespace hipblaslt_jit
 {
     class Backend;

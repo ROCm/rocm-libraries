@@ -27,9 +27,10 @@ cmake -S projects/hipblaslt -B "$project_build" \
   -DHIPBLASLT_ENABLE_CLIENT=ON
 cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
-  hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
+  hipblaslt-jit-tensilelite-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-api-test \
+  hipblaslt-jit-mock-backend-test \
   hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-process-test \
-  hipblaslt-jit-artifacts-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
+  hipblaslt-jit-source-bundle-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
   hipblaslt-jit-heuristic-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
@@ -79,8 +80,8 @@ to replay, publish or rebuild it.
 | Driver case | Behavior under test |
 | --- | --- |
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
-| `artifact-loader` | Source bundles read by directory convention: file ordering and roles, a missing `sources` or `library` directory, duplicate or corrupt library entries, missing main assembly, nested entries, empty or oversized files, the file-count cap, native Unicode paths, compressed library bytes, and path and symbolic-link containment |
-| `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
+| `source-bundle` | Source bundles read by directory convention: file ordering and roles, a missing `sources` or `library` directory, duplicate or corrupt library entries, missing main assembly, nested entries, empty or oversized files, the file-count cap, native Unicode paths, compressed library bytes, and path and symbolic-link containment |
+| `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the catalog knowledge seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
 | `jit-debug` | The `HIPBLASLT_JIT_DEBUG` line writer, without a GPU: value parsing and its warning, JSON escaping and truncation, the line size cap, per-process file names, lines from several threads and processes intact in one file, rate limiting with aggregate lines, and the relay of a child's event file |
 | `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |

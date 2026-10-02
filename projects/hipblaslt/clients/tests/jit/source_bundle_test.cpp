@@ -1,10 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "hipblaslt-jit-tensilelite-artifacts.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include <functional>
 #include <iostream>
 
-namespace a  = hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts;
+namespace a  = hipblaslt_jit::source_bundle;
 namespace fs = std::filesystem;
 
 void check(bool value, const char* message)

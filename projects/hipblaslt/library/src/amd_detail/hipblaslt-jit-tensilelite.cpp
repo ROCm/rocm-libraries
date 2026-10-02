@@ -535,7 +535,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
                     std::make_shared<const TensileLiteBackend>(options),
                     hipblaslt_jit::makeOrigamiPredictor(),
-                    hipblaslt_jit::makeTensileLiteDefaults(),
+                    hipblaslt_jit::makeCatalogKnowledge(),
                     hipblaslt_jit::makeComgrBuilder(),
                     hipblaslt_jit::makeTensileLoader(),
                     nullptr}));
@@ -596,7 +596,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         made.backend = std::make_shared<const TensileLiteBackend>(options);
         backendPhase.stop();
         made.predictor = hipblaslt_jit::makeOrigamiPredictor();
-        made.knowledge = hipblaslt_jit::makeTensileLiteDefaults();
+        made.knowledge = hipblaslt_jit::makeCatalogKnowledge();
         return {};
     }
 }

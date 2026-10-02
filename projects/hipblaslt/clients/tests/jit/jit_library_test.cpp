@@ -10,7 +10,7 @@
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
-#include "hipblaslt-jit-tensilelite-artifacts.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Tensile.hpp>
 #include <msgpack.hpp>
@@ -31,7 +31,7 @@
 
 namespace hj        = hipblaslt_jit;
 namespace fs        = std::filesystem;
-namespace artifacts = hipblaslt_ext::experimental::jit::tensilelite::detail::artifacts;
+namespace artifacts = hipblaslt_jit::source_bundle;
 using TensileLite::ContractionProblemGemm;
 
 namespace

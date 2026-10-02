@@ -66,7 +66,7 @@ def main():
             "amax-api",
             "alpha-zero-api",
             "process-runner",
-            "artifact-loader",
+            "source-bundle",
             "splitk-api",
             "bundle-failures",
             "helper-failures",
@@ -82,7 +82,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     tensile = source / "projects/hipblaslt/tensilelite"
     fixtures = tensile / "Tensile/Tests/unit/test_data"
-    api_test = build / "clients/staging/hipblaslt-jit-api-test"
+    api_test = build / "clients/staging/hipblaslt-jit-tensilelite-api-test"
     env = dict(os.environ)
     for key in tuple(env):
         if key.startswith(("HIPBLASLT_JIT", "TENSILE_PERSISTENT_", "TENSILE_STREAMK", "AMD_COMGR_")):
@@ -150,8 +150,8 @@ def main():
             60,
         ),
         (
-            "artifact-loader",
-            [str(staging / "hipblaslt-jit-artifacts-test"), str(output / "artifacts")],
+            "source-bundle",
+            [str(staging / "hipblaslt-jit-source-bundle-test"), str(output / "source-bundle")],
             {},
             60,
         ),
