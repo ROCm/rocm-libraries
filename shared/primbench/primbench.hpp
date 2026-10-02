@@ -208,6 +208,7 @@ struct settings
     uint32_t    spaces_per_indent       = 4; ///< JSON indentation spaces.
     double stream_blocking_timeout_secs = 10.0; ///< Max duration before stream blocking times out.
     bool   skip_header                  = false; //< Skip printing the header to output.
+    bool   skip_tests                   = false; //< Skip correctness tests
 
     using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
     std::map<std::string, custom_arg_value>
@@ -2501,6 +2502,7 @@ public:
         , m_index_column_width(index_column_width)
         , m_print_index(print_index)
         , m_cache(cache)
+        , m_skip_tests(settings.skip_tests)
     {}
 
     /// Sets the total number of items processed per iteration.
@@ -2652,6 +2654,7 @@ public:
     /// Define `PRIMBENCH_NO_TEST` to disable.
     void test(std::function<void()> test_lambda)
     {
+
         if(m_has_run)
         {
             std::cerr << "Error: Can't call test() after calling run()\n";
@@ -2840,8 +2843,8 @@ private:
         for(auto& event : events)
             PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
-        if(m_test_lambda)
-        {
+        if(m_test_lambda && !m_skip_tests)
+        {   
             primbench::log("Running tests");
             m_test_lambda();
         }
@@ -3043,6 +3046,7 @@ private:
     bool   m_has_set_items    = false;
     bool   m_has_set_writes   = false;
     bool   m_has_run          = false;
+    bool   m_skip_tests       = false;
     size_t m_items            = 0;
     size_t m_read_write_bytes = 0;
 
@@ -3855,6 +3859,9 @@ private:
 
         s.skip_header
             = cli.get<bool>("skip-header", s.skip_header, "Skip printing the header to output.");
+
+        s.skip_tests
+            = cli.get<bool>("skip-tests", s.skip_tests, "Skip running correctness tests.");
     }
 
     /// Only keep filtered specializations, based on their name.
