@@ -352,15 +352,8 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
     const unsigned int ldsidx =
         lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
 
-    // This ASM is supported only on GFX9 and requires legacy row broadcasts and
-    // 64-bit VCC. Other targets must use the shuffle reduction.
-#if defined(__GFX9__)
-    constexpr bool use_dpp = miopen::batchnorm::config::use_amdgcn;
-#else
-    constexpr bool use_dpp = false;
-#endif
-
-    if constexpr(!use_dpp)
+    // The DPP ASM needs GFX9 row broadcasts and 64-bit VCC; use_gfx9_dpp is false elsewhere.
+    if constexpr(!miopen::batchnorm::config::use_gfx9_dpp)
     {
         shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
         __builtin_amdgcn_sched_barrier(0);
