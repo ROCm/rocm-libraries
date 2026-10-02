@@ -43,8 +43,20 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process-backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-report.cpp")
+    # The one makeDefaultProcessBackend provider heuristic queries generate with.
+    option(HIPBLASLT_JIT_TENSILELITE "Serve HIPBLASLT_JIT with the TensileLite generator." ON)
+    if(HIPBLASLT_JIT_TENSILELITE)
+        set(hipblaslt_jit_process_backend hipblaslt-jit-tensilelite-backend.cpp)
+    elseif(HIPBLASLT_JIT_TESTING)
+        set(hipblaslt_jit_process_backend hipblaslt-jit-test-backend.cpp)
+    else()
+        set(hipblaslt_jit_process_backend hipblaslt-jit-no-backend.cpp)
+    endif()
+    target_sources(hipblaslt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/${hipblaslt_jit_process_backend}")
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)

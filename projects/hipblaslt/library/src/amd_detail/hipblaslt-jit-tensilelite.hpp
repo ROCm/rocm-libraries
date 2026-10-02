@@ -12,6 +12,12 @@ namespace hipblaslt_ext::experimental::jit
     struct Diagnostics;
 }
 
+namespace hipblaslt_jit
+{
+    struct ProcessBackend;
+    struct Status;
+}
+
 namespace hipblaslt_ext::experimental::jit::tensilelite
 {
     // Explicit single-solution generation options.
@@ -66,4 +72,13 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
     HIPBLASLT_EXPORT hipblasStatus_t createBackend(const Options&    options,
                                                    jit::Backend&     backend,
                                                    jit::Diagnostics& diagnostics);
+}
+
+namespace hipblaslt_ext::experimental::jit::tensilelite::detail
+{
+    // The process backend: TensileLite with the tool paths configured when
+    // hipBLASLt was built, each replaced by HIPBLASLT_JIT_PYTHON,
+    // HIPBLASLT_JIT_TENSILE_SOURCE, HIPBLASLT_JIT_PYTHONPATH or
+    // HIPBLASLT_JIT_CXX when set. A Configure failure names a missing tool.
+    hipblaslt_jit::Status makeProcessBackend(hipblaslt_jit::ProcessBackend& made);
 }

@@ -98,6 +98,11 @@ namespace hipblaslt_ext::experimental::jit::mock
         };
     }
 
+    std::shared_ptr<const hipblaslt_jit::Backend> makeBackend(const Options& options)
+    {
+        return std::make_shared<const MockBackend>(options);
+    }
+
     hipblasStatus_t
         createBackend(const Options& options, Backend& backend, Diagnostics& diagnostics)
     {
@@ -107,7 +112,7 @@ namespace hipblaslt_ext::experimental::jit::mock
         {
             backend = detail::BackendAccess::make(
                 std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
-                    std::make_shared<const MockBackend>(options),
+                    makeBackend(options),
                     nullptr,
                     nullptr,
                     hipblaslt_jit::makeComgrBuilder(),

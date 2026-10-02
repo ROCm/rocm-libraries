@@ -7,6 +7,11 @@
 // Not installed. An in-process backend for JIT tests: it replays one source
 // bundle that Tensile.SingleSolution or Tensile.JitGemm wrote, without running a
 // generator; the solution is still built with comgr.
+namespace hipblaslt_jit
+{
+    class Backend;
+}
+
 namespace hipblaslt_ext::experimental::jit::mock
 {
     struct Options
@@ -20,6 +25,9 @@ namespace hipblaslt_ext::experimental::jit::mock
             Trap, // any generation aborts the process
         } fault = Fault::None;
     };
+
+    // The mock as a Jit backend; throws when the bundle cannot be read.
+    std::shared_ptr<const hipblaslt_jit::Backend> makeBackend(const Options& options);
 
     // Returns NOT_SUPPORTED from getJitAlgo for problems the replayed solution
     // does not solve.
