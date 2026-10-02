@@ -149,7 +149,19 @@ namespace TensileLite
         X_MACRO(ActivationArg) \
         X_MACRO(GSUSync) \
         /* Random seed args */ \
-        X_MACRO(RNDSeed)
+        X_MACRO(RNDSeed) \
+        /* rocRoller workgroup-mapping kernargs. Custom-kernel launch only. */ \
+        X_MACRO(WorkgroupMapping) \
+        X_MACRO(MagicMultipleWgm) \
+        X_MACRO(MagicShiftAndSignWgm) \
+        X_MACRO(MagicMultipleNumTilesN) \
+        X_MACRO(MagicShiftAndSignNumTilesN) \
+        X_MACRO(QuotientTilesMByWgm) \
+        X_MACRO(MagicMultipleWgmTail) \
+        X_MACRO(MagicShiftAndSignWgmTail) \
+        X_MACRO(QuotientTilesByBlock) \
+        X_MACRO(MagicMultipleWgmMainBlock) \
+        X_MACRO(MagicShiftAndSignWgmMainBlock)
 
     enum class CustomArgSemantic
     {

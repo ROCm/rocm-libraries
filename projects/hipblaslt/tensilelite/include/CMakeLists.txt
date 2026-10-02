@@ -57,6 +57,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PredictionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ProblemKey.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/RocRollerWgmKernargs.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"

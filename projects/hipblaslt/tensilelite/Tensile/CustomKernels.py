@@ -277,6 +277,13 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
         idx = INDEX_CHARS.index(m.group(2))
         return {"type": argType, "semantic": m.group(1), "index": idx}
 
+    # rocRoller suffixes (Subtract_21, MagicMultiple_26, WGM_18) are not
+    # stable. The expression tree selects the launch semantic.
+    from Tensile.RocRollerWgm import custom_arg_for_metadata
+    wgmArg = custom_arg_for_metadata(metaArg)
+    if wgmArg is not None:
+        return wgmArg
+
     where = f" in kernel '{kernelName}'" if kernelName else ""
     raise RuntimeError(
         f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
