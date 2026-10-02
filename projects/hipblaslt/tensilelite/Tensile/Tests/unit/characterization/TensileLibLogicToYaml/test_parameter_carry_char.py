@@ -6,7 +6,7 @@
 # validParameters, values are judged by Tensile's own validator, and the
 # problem type is reduced by rebuilding it. These tests pin that contract,
 # including a round trip through the config-driven solution path. See
-# DECISIONS D47 / ADR 0031.
+# DECISIONS D48 / ADR 0031.
 ################################################################################
 import copy
 import importlib
@@ -226,13 +226,16 @@ def test_fork_handwritten_custom_kernel_becomes_custom_kernels_entry():
     data = M.formForkParams(sol, skipMI=False)
     assert data["ForkParameters"] is None
     assert data["CustomKernels"] == ["Custom_Handwritten"]
-    assert data["InternalSupportParams"] == support
+    # The recorded entries, completed the way Tensile's reader normalizes them.
+    assert support.items() <= data["InternalSupportParams"].items()
+    assert data["InternalSupportParams"] == M.normalize_execution_policy(sol)["InternalSupportParams"]
 
 
-def test_fork_handwritten_custom_kernel_without_support_params():
-    data = M.formForkParams({"CustomKernel": {"name": "Custom_B"}}, skipMI=False)
+def test_fork_handwritten_custom_kernel_without_recorded_support_params():
+    sol = {"CustomKernel": {"name": "Custom_B"}}
+    data = M.formForkParams(sol, skipMI=False)
     assert data["CustomKernels"] == ["Custom_B"]
-    assert "InternalSupportParams" not in data
+    assert data["InternalSupportParams"] == M.normalize_execution_policy(sol)["InternalSupportParams"]
 
 
 def test_fork_warns_when_recorded_support_params_cannot_be_carried(capsys):

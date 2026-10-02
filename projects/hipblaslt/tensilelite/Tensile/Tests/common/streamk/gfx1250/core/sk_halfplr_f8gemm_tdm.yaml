@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Positive validation for HalfPLR on StreamK (SK3) with ScheduleIterAlg=4
+# Positive validation for HalfPLR on StreamK (StreamK/StaticGrid) with ScheduleIterAlg=4
 # (StinkyTofu) on gfx1250, pure F8 (F8/F8/S) GEMM with TDM.
 #
 # This mirrors the non-StreamK HalfPLR pure-F8 coverage
@@ -86,7 +86,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - PrefetchAcrossPersistent: [0]
         - UseSubtileImpl: [False]
         - StaggerU: [0]
@@ -162,7 +163,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - PrefetchAcrossPersistent: [0]
         - UseSubtileImpl: [False]
         - StaggerU: [0]

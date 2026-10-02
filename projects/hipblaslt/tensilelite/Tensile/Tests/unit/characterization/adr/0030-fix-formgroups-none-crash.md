@@ -33,7 +33,7 @@ Context/Decision/Consequences prose is untouched, per the append-only rule.
 - `--skipMI` and MI-disabled solutions now produce a usable config instead of
   crashing, so the flag is exercisable for the first time.
 - The suite no longer documents a latent bug here; D14's entry in `DECISIONS.md`
-  stays as the historical record and D46 records the flip.
+  stays as the historical record and D47 records the flip.
 - A solution dict with neither `MatrixInstruction` nor `WorkGroup` still fails,
   now with `KeyError` rather than `AttributeError`. That is a genuinely
   unusable input, and the companion test pins it so the difference is recorded

@@ -39,6 +39,7 @@ from .Common.ValidParameters import (
 )
 from .Common.GlobalParameters import globalParameters as globalParameterDefaults
 from .Common.Utilities import versionIsCompatible
+from .ExecutionPolicy import normalize_execution_policy
 
 import argparse
 import ast
@@ -454,6 +455,10 @@ def formForkParams(
     Values a config would get anyway are left out, and so is any value Tensile's
     validator rejects for `architectureName`; Tensile re-derives those.
     """
+    # Library logic may contain legacy selectors. Translate the raw solution
+    # before filtering against canonical tuning defaults, or persistence and
+    # work-queue controls would be silently discarded during extraction.
+    currentIndexSolution = normalize_execution_policy(currentIndexSolution)
     data = {}
     data["InitialSolutionParameters"] = None
     kernelLang = {}
@@ -740,8 +745,7 @@ class BenchmarkDataReader(SourceReader):
 
         # Benchmark data records the full state; this only covers keys an older
         # Tensile did not write, as Solution does when it builds one.
-        solution = dict(solution)
-        LibraryIO.fillSolutionDefaults(solution, None)
+        solution = LibraryIO.fillSolutionDefaults(solution, None)
 
         # Every size the benchmark ran is attributed to the requested solution.
         problemSizes = data[1].get("ProblemSizes") or []
@@ -828,8 +832,9 @@ class LibraryLogicReader(SourceReader):
 
         # Dict-format logic stores every value equal to the file's DefaultSolution
         # only there, so restore the solution the way Tensile reads it back.
-        solution = dict(solution)
-        LibraryIO.fillSolutionDefaults(solution, LibraryLogicReader._defaultSolution(otherFields))
+        solution = LibraryIO.fillSolutionDefaults(
+            solution, LibraryLogicReader._defaultSolution(otherFields)
+        )
 
         return SolutionSource(
             versionString=versionString,

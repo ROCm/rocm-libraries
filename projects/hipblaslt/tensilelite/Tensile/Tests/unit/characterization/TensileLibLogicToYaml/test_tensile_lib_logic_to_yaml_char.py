@@ -42,7 +42,7 @@ def test_set_global_params_non_i8():
 
 
 def test_set_global_params_replaces_a_version_tensile_refuses(capsys, monkeypatch):
-    # Tensile refuses a config from another major version (DECISIONS D47).
+    # Tensile refuses a config from another major version (DECISIONS D48).
     monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 1)
     for recorded in ("1.2.3", "1", None):
         res = M.setGlobalParams({"MinimumRequiredVersion": recorded}, {"DataType": "S"})
@@ -150,7 +150,7 @@ def test_form_fork_params_with_mi():
 
 def test_form_fork_params_includes_nondefault_fork_key():
     # A settable key whose value differs from the one a config would otherwise
-    # get is emitted (DECISIONS D47). MI enabled + skipMI=False keeps this on
+    # get is emitted (DECISIONS D48). MI enabled + skipMI=False keeps this on
     # the MI group path.
     sol = {
         "EnableMatrixInstruction": True,
@@ -239,7 +239,7 @@ def test_form_library_logic_unwraps_dict_architecture():
 def test_normalize_bias_type_args_flattens_nested():
     # LibraryIO._writeSolutionsHeader wrote "[{}]".format([7]) -> [[7]] for
     # years, so existing benchmark data files carry the nested shape while the
-    # benchmark config schema takes a flat list. See DECISIONS D44.
+    # benchmark config schema takes a flat list. See DECISIONS D45.
     assert M.normalizeBiasTypeArgs([[7]]) == [7]
     assert M.normalizeBiasTypeArgs([[0, 4]]) == [0, 4]
 

@@ -652,23 +652,39 @@ newer baseline through every conflict. The rebased run passed at 84.14%; use its
 report to raise 38 per-file floors without lowering any, and raise the exact
 whole-project floor from 75% to 82%.
 
-## D44 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+## D44 — Canonical persistent execution policy in generated names and schemas
+
+[ADR 0014](adr/0014-canonical-persistent-policy-names.md) records the intended
+policy-field migration in generated names, derived solution state, parameter
+registries, and serialized defaults. The scoped codegen updates preserve
+fixture membership, kernel counts, and emission return codes. Explicit names
+for prebuilt kernels remain part of the compatibility contract.
+
+## D30 — DataParallel scheduling arguments
+
+[ADR 0015](adr/0015-data-parallel-scheduling-arguments.md) supersedes ADR 0014's
+retained six-word payload for generated DataParallel kernels. Generated DP uses
+two scheduling words and a tile cursor; prebuilt version-zero layouts retain
+their recorded argument contract. ABI, emitted-control-flow, and numerical
+tests carry the evidence for this change.
+
+## D45 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
 
 **ADR:** [`adr/0029-flatten-biastypeargs-solutions-header.md`](adr/0029-flatten-biastypeargs-solutions-header.md)
 
 **Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded, and the nested-shape assertion in `test_write_solutions_cache_forwards_bias_header` (added on `develop` by #11966) flipped to the flat line. Intended behavior change, not a pinned bug.
 
-## D45 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+## D46 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
 
-**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D44; no golden changes.
+**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D45; no golden changes.
 
-## D46 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+## D47 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
 
 **ADR:** [`adr/0030-fix-formgroups-none-crash.md`](adr/0030-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
 
 **Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.
 
-## D47 — TensileLibLogicToYaml: carry every settable parameter, reduced by Tensile's own rules
+## D48 — TensileLibLogicToYaml: carry every settable parameter, reduced by Tensile's own rules
 
 **ADR:** [`adr/0031-carry-every-settable-parameter.md`](adr/0031-carry-every-settable-parameter.md)
 
