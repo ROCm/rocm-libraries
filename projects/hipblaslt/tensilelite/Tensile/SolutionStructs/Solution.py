@@ -1216,16 +1216,15 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            # Same contract as the fp4 arm below, at this dtype's width: the GR
-            # chunk is one 16B load, which is 8 bf16, so pinning the free dim to
-            # a multiple of 8 keeps the last workgroup's numToEnd load-aligned
-            # and lets computeLoadSrd drop the partial-load round-up that would
-            # otherwise lose a DTL write.  Both rungs load 8 elements along M
-            # (AB_B16_TLU1_4x1 and _2x1 share loadShape m=8), so one value
-            # covers the whole ladder.  Without this the unit-stride K-window
-            # branch in computeLoadSrd asserts instead of rejecting.
-            key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
-            state[key] = max(state[key], 8)
+            # Deliberately *no* AssertFree{0,1}ElementMultiple raise here, unlike
+            # the fp4 arm below.  The free-dim multiple becomes a
+            # Free0SizeMultiple solution predicate (see Contractions.py), so
+            # pinning it to the 8-element GR chunk would make these kernels
+            # inapplicable to every size with M % 8 != 0 -- exactly the odd-M
+            # edge sizes the bf16 subtile suite exists to cover, and silently,
+            # since DID_NOT_SATISFY_ASSERTS is a skip rather than a failure.
+            # computeLoadSrd instead rounds numToEnd up to a whole load at
+            # runtime so the last workgroup's partial load keeps its DTL write.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
             mtTiles = mtFree // state["MatrixInstM"]
             stack = subtileStackForB16TLU1(state, tc, mtTiles)
