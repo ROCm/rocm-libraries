@@ -52,8 +52,9 @@ public:
         const auto& doDims = oDims;
         const auto& doStrides = oStrides;
 
-        // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides.
-        const std::vector<int64_t> statsDims{tc.qDims[0], tc.qDims[1], tc.qDims[2]};
+        // Stats (LSE) dims: [B, H_q, S_q, 1], the shape the frontend infers for the forward
+        // stats output and the one the CPU reference requires.
+        const std::vector<int64_t> statsDims{tc.qDims[0], tc.qDims[1], tc.qDims[2], 1};
         const auto statsStrides = generateStrides(statsDims);
 
         auto q = std::make_shared<graph::TensorAttributes>(
