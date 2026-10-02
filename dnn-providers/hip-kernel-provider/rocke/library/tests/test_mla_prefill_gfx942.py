@@ -85,8 +85,8 @@ class TestMlaPrefillGate(unittest.TestCase):
         self.assertIn("d_rope", reason)
 
     def test_n_tiles_must_cover_every_wave(self):
-        # d_nope/16 = 8 n-tiles cannot be split across 16 waves.
-        ok, reason = supports_mla_prefill(_spec(num_warps=8, d_nope=64), arch="gfx942")
+        # d_v/16 = 4 epilogue n-tiles cannot be split across 8 waves.
+        ok, reason = supports_mla_prefill(_spec(num_warps=8, d_v=64), arch="gfx942")
         self.assertFalse(ok)
         self.assertIn("n-tiles", reason)
 
@@ -183,29 +183,27 @@ class TestMlaPrefillFwdLowering(unittest.TestCase):
         self.assertIn(self.kernel.name, self.ir)
 
     def test_lds_slot_is_shared(self):
-        # Eight buffers, 115712 B if none aliased, packed by the lowerer's
-        # liveness pass into 63104 B -- under gfx942's 65536 B workgroup
-        # limit. This is a hard gate, not a size preference: the kernel
-        # cannot launch above 65536.
+        # Seven buffers, 80928 B if none aliased, packed by the lowerer's
+        # liveness pass into 31488 B. That is under gfx942's 65536 B workgroup
+        # limit -- a hard gate, the kernel cannot launch above it -- and, the
+        # point of the layout, under 32768 B, so two workgroups fit per CU.
         #
         # The achieved layout, by phase (bf16, so 2 B/elem):
         #
-        #   offset  buffer                       shape            bytes
-        #        0  q_lds / kv_lds / accl_lds    three phases alias the base
-        #     6144  wq_lds                       [64, 128+8]      17408
-        #    23552  qa_lds / wt_lds              [16, 576+4]      18560
-        #    42112  ct_lds                       [512, 16+4]      20480
-        #    62592  p_lds                        [16, 16]           512
-        #                                                 total = 63104
+        #   offset  buffer                       bytes
+        #        0  q_lds / p_lds / wt_lds       4224 / 512 / 9216
+        #     4224  wq_lds / kv_lds              8704 / 23200
+        #    12928  qa_lds / accl_lds            18560 / 16512
+        #                                 total = 31488 (prologue peak)
         #
-        # ``q_lds`` (6144) + ``wq_lds`` (17408) die at the end of the
-        # prologue, and the packer folds ``kv_lds`` (18688) into the hole
-        # they leave at the base. The epilogue pair starts from the base
-        # again because nothing else is live by then. ``_fwd_lds_bytes``
-        # models exactly this so the admission check can predict it without
-        # lowering.
+        # Each phase packs from the base on its own: the prologue trio is dead
+        # before the k-loop (the score A operand is read into registers
+        # first), and everything is dead by the epilogue. The small buffer of
+        # each later phase is allocated first so it takes the base slot and
+        # the large one lands on the next dead slot. ``_fwd_lds_bytes`` models
+        # exactly this so the admission check can predict it without lowering.
         self.assertIn(f"@smem_pool.{self.kernel.name}", self.ir)
-        self.assertIn("[63104 x i8]", self.ir)
+        self.assertIn("[31488 x i8]", self.ir)
 
     def test_no_transpose_read(self):
         self.assertNotIn("ds_read_tr", self.ir)

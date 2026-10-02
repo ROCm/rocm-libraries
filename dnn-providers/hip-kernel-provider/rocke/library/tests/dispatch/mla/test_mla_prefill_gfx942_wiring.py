@@ -261,7 +261,7 @@ class TestDispatchResult(unittest.TestCase):
         spec = dispatch_mla(_req()).spec
         self.assertEqual(spec.block_q, 16)
         self.assertEqual(spec.block_k, 16)
-        self.assertEqual(spec.r_kv_tile, 64)
+        self.assertEqual(spec.r_kv_tile, 32)
         self.assertEqual(spec.num_warps, 4)
 
     def test_block_is_the_workgroup_the_spec_declares(self):
