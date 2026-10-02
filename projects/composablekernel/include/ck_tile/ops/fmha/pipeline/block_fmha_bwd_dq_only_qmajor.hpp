@@ -441,7 +441,22 @@ struct BlockFmhaBwdDQOnlyQMajor
             constexpr auto p_spans = decltype(p)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                auto row_lse = log2e_v<LSEDataType> * lse[i_idx];
+                // DQ-QMAJOR-LSE-VALIDATE-V1: a row with no unmasked key has lse == -inf.
+                // Use 0 (as the DKDV pipeline does) so its masked p is 0, not NaN.
+                const auto raw_lse = lse[i_idx];
+                auto row_lse       = log2e_v<LSEDataType> * [&]() {
+                    if constexpr(FmhaMask::IsMasking ||
+                                 BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                    {
+                        return raw_lse == -numeric<LSEDataType>::infinity()
+                                   ? type_convert<LSEDataType>(0.f)
+                                   : raw_lse;
+                    }
+                    else
+                    {
+                        return raw_lse;
+                    }
+                }();
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     p(i_j_idx) = exp2(scale * s_acc[i_j_idx] - row_lse);
