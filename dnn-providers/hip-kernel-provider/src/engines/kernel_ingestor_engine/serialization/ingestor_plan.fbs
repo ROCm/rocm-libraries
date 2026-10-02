@@ -1,0 +1,46 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// The body of a saved ingestor plan. A 48-byte header precedes it; see IngestorPlanPayload.hpp.
+// Regenerate ingestor_plan_generated.h after each edit, and keep it in the same commit.
+// A minor format version adds only optional fields. Any other change is a major version.
+
+namespace hip_kernel_provider.kernel_ingestor_engine.serialization.fb;
+
+enum SourceKind : ubyte { UNSET = 0, EMBEDDED_SOURCE = 1, KPACK = 2, HSACO_FILE = 3, ROCKE_BUILDER = 4 }
+
+struct Uuid { bytes: [ubyte:16]; }
+
+table KernelArgument { kind: string (required); size: uint; offset: uint; name: string; }
+
+table BoolValue      { value: bool; }
+table Int64Value     { value: long; }
+table DoubleValue    { value: double; }
+table StringValue    { value: string (required); }
+table Int64ListValue { values: [long] (required); }
+union LaunchValueData { BoolValue, Int64Value, DoubleValue, StringValue, Int64ListValue }
+
+table LaunchValue  { name: string (required); value: LaunchValueData; }
+table LaunchInputs { dispatch_symbol: string (required); values: [LaunchValue] (required); }
+
+table KernelImage {
+  source_kind: SourceKind;
+  symbol: string (required);
+  target: string (required);
+  sha256: string (required);
+  signature: [KernelArgument] (required);
+  code_object: [ubyte] (required, force_align: 16);
+}
+
+table IngestorPlan {
+  engine_id: long = null;
+  kernel_id: Uuid (required);
+  workspace_bytes: ulong = null;
+  runtime_pass_by_value_uids: [long] (required);
+  launch: LaunchInputs (required);
+  kernel: KernelImage (required);
+  provider_version: string;
+}
+
+root_type IngestorPlan;
+file_identifier "HKSP";

@@ -12,6 +12,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanCodec.cpp
 )
 
 # The census suites, which live in the binary that is never invoked bare because each
