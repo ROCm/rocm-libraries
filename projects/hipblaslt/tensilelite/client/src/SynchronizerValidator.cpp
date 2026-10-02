@@ -73,8 +73,7 @@ namespace TensileLite
             }
 
             auto const& sm      = solution->sizeMapping;
-            bool const  streamK = sm.streamK > 0 && sm.streamKAtomic == 0
-                                 && sm.streamKForceDPOnly == 0;
+            bool const  streamK = sm.requiresPartialReduction();
             bool const mbsk    = sm.globalAccumulation == 3;
             m_mayUseSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
         }

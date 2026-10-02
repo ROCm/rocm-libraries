@@ -80,16 +80,16 @@ namespace
 
     // The gate reads only sizeMapping. ContractionSolution is non-copyable, so
     // fill one in place rather than returning it.
+    using TensileLite::TileProcessingStrategy;
+
     void setSolution(TensileLite::ContractionSolution& s,
-                     int                               streamK,
+                     TileProcessingStrategy            strategy,
                      int                               globalAccumulation,
-                     int                               streamKAtomic      = 0,
-                     int                               streamKForceDPOnly = 0)
+                     int                               streamKAtomic = 0)
     {
-        s.sizeMapping.streamK            = streamK;
-        s.sizeMapping.globalAccumulation = globalAccumulation;
-        s.sizeMapping.streamKAtomic      = streamKAtomic;
-        s.sizeMapping.streamKForceDPOnly = streamKForceDPOnly;
+        s.sizeMapping.tileProcessingStrategy = strategy;
+        s.sizeMapping.globalAccumulation     = globalAccumulation;
+        s.sizeMapping.streamKAtomic          = streamKAtomic;
     }
 
 }
@@ -100,7 +100,7 @@ TEST(SynchronizerValidatorReporting, ValidatorNeverDrivesARun)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 3, 0); // a consumer, so this is not the gate talking
+    setSolution(solution, TileProcessingStrategy::StreamK, 0); // a consumer, so this is not the gate talking
 
     validator.preSolution(&solution);
     ASSERT_TRUE(validator.mayUseSynchronizer());
@@ -113,7 +113,7 @@ TEST(SynchronizerValidatorReporting, DisabledValidatorChecksNothing)
 {
     TestableSynchronizerValidator    validator(disabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 3, 0);
+    setSolution(solution, TileProcessingStrategy::StreamK, 0);
 
     validator.preSolution(&solution);
     EXPECT_TRUE(validator.mayUseSynchronizer());
@@ -125,7 +125,7 @@ TEST(SynchronizerValidatorReporting, StreamKSolutionIsChecked)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 3, 0);
+    setSolution(solution, TileProcessingStrategy::StreamK, 0);
 
     validator.preSolution(&solution);
     EXPECT_TRUE(validator.mayUseSynchronizer());
@@ -137,7 +137,7 @@ TEST(SynchronizerValidatorReporting, MbskSolutionIsChecked)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 0, 3);
+    setSolution(solution, TileProcessingStrategy::None, 3);
 
     validator.preSolution(&solution);
     EXPECT_TRUE(validator.mayUseSynchronizer());
@@ -158,7 +158,7 @@ TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 0, 0);
+    setSolution(solution, TileProcessingStrategy::None, 0);
     solution.problemType.outputAmaxD = true;
 
     validator.preSolution(&solution);
@@ -170,19 +170,19 @@ TEST(SynchronizerValidatorReporting, AtomicStreamKSolutionIsSkipped)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 3, 0, /*streamKAtomic=*/1);
+    setSolution(solution, TileProcessingStrategy::StreamK, 0, /*streamKAtomic=*/1);
 
     validator.preSolution(&solution);
     EXPECT_FALSE(validator.mayUseSynchronizer());
 }
 
-// StreamKForceDPOnly kernels drop AddressWS/AddressFlags from the SGPR define
-// entirely, so the buffer argument the check reads is never passed.
-TEST(SynchronizerValidatorReporting, ForceDPOnlyStreamKSolutionIsSkipped)
+// Persistent DataParallel kernels have neither the workspace nor the Flags
+// argument, so the buffer the check reads is never passed.
+TEST(SynchronizerValidatorReporting, DataParallelSolutionIsSkipped)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 3, 0, /*streamKAtomic=*/0, /*streamKForceDPOnly=*/1);
+    setSolution(solution, TileProcessingStrategy::DataParallel, 0);
 
     validator.preSolution(&solution);
     EXPECT_FALSE(validator.mayUseSynchronizer());
@@ -194,7 +194,7 @@ TEST(SynchronizerValidatorReporting, NonConsumerSolutionIsSkipped)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
-    setSolution(solution, 0, 0);
+    setSolution(solution, TileProcessingStrategy::None, 0);
 
     validator.preSolution(&solution);
     EXPECT_FALSE(validator.mayUseSynchronizer());
