@@ -128,6 +128,8 @@ def plsinBlockSchedTile(kernel) -> bool:
     """
     if not plsinEarlyStoreTile(kernel):
         return False
+    if not kernel.get("PostLoopStoreInNll"):
+        return False
     return kernel["MacroTile0"] == 256 and kernel["MacroTile1"] == 256
 
 
