@@ -1,6 +1,7 @@
 # gfx950 convolution kernel mining
 
-Builder: `kernels.common.conv_implicit_gemm.build_implicit_gemm_conv`.
+Builder: `kernels.common.conv_implicit_gemm.build_implicit_gemm_conv`; for the
+direct depthwise family see [below](#direct-depthwise-family).
 Packaging adapter: `builders.common.convolution_forward.build_gfx950_conv_fwd`.
 Base: `9285929e1de2ada46cc01e9054ff3ed5fa6c0456`.
 
@@ -37,6 +38,45 @@ here is an integration-contract gap, not evidence that rocKE cannot implement
 it.
 Likewise, a supported shape absent from the package is a catalog gap. The
 coverage report keeps these distinct from actual family predicate failures.
+
+## Direct depthwise family
+
+Builders: `kernels.common.conv_direct_grouped.build_direct_depthwise`
+(`DirectDepthwiseSpec`) and `build_direct_depthwise_spatial`
+(`DirectDepthwiseSpatialSpec`), reached through the same adapter entry point
+when `kernel_family` is 1. rocKE has no dispatcher for them;
+`gfx950_conv_fwd_direct_spec_for_request` applies the packaged default
+(spatial with `block_waves=1` below 64 channels, otherwise standard with
+`block_w=4` and `block_waves=1`) or an explicit arm.
+
+| Constraint | Verdict | Enforcement |
+|---|---|---|
+| Group structure | Pure depthwise, `groups == C == K` | Adapter `_direct_error`; native matcher. |
+| Stride, padding, dilation | One stride and one padding for both axes; no dilation | Adapter and native matcher; the builder takes a single `stride` and `PAD`. |
+| Row and column coverage | `floor((in - 1) / stride) == out - 1` on both axes | Adapter `_direct_rows_covered`; native `directRowsCovered`. Guards rocKE bugs instead of fixing them. |
+| Tuning | `block_waves` 1 to 16; standard `block_w > 0`; spatial only below 64 channels with `block_w` 0 | Adapter, then rocKE's own spec validators; native `directLaunchGeometry`. |
+| Grid bounds | All axes at most 65535; grid z is N | Adapter and native geometry. |
+| Placeholders | Implicit-GEMM tuning fields fixed (`tile_k=0`, `pipeline`/`epilogue` `none`) | Adapter and native matcher require them exactly. |
+| Workspace and LDS | Zero | The kernels take no scratch argument and use no LDS. |
+
+The ABI is the implicit-GEMM one: the same six arguments in the same order,
+with the same byte counts. The standard grid is
+`(ceil(Wo/block_w), ceil(groups/(64*block_waves)), N)` and the spatial grid
+`(ceil(Wo/(block_waves*(64/groups))), 1, N)`; both use a block of
+`64*block_waves` threads. These match rocKE's
+`benchmarks/common/benchmark_direct_conv.py`.
+
+The direct kernels' own names omit the filter size, padding and stride, so
+distinct kernels would share a symbol; the adapter names them
+`hkp_conv_fwd_dw_gfx950_` plus a digest over every spec field. The four family
+fields are left out of an implicit-GEMM spec's digest while they hold their
+defaults, so implicit-GEMM symbols and code objects are unchanged by them.
+Direct kernels are lowered with rocKE's Python backend, which `hkp_pack` pins;
+the C++ lowering slows down sharply as the unrolled kernel grows with
+`block_w`. When the fully unrolled kernel would exceed rocKE's size threshold
+(`_DW_UNROLL_THRESH`; the size grows with the input height and the filter
+area, and for the standard kernel with `block_w`), rocKE switches to a runtime row loop; the catalog covers that
+path for both variants.
 
 ## Default tuning and initial candidate pair
 

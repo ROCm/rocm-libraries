@@ -9,6 +9,7 @@
   "metadata": "fb2104d3-bae8-40b7-9a6f-4f7bc7ced8c7",
   "heuristic": "bca15e6d-a06a-41d3-83d8-8d26ccefa7ff",
   "knobs": [
-    "tile_k"
+    "tile_k",
+    "kernel_family"
   ]
 }

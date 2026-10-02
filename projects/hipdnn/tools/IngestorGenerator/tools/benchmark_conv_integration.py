@@ -13,7 +13,16 @@ process with ``--mode reuse`` and the same cache. Auto requires an uncached grap
 reuse requires an existing complete ranking and fails if another search occurs.
 Every mode checks the exact engine, selected descriptor UUID, and tuning metadata.
 
-Use ``--request-file`` with ``--tile-k`` for a different packaged convolution.
+Depthwise graphs can also be served by the direct depthwise family. ``--kernel-family
+0|1`` sets the engine's ``kernel_family`` knob: with ``--mode forced`` it measures
+the family's unbenchmarked default kernel (``--kernel-family 1`` is the direct
+default arm), and with auto/reuse it restricts the measured candidates to that
+family. Without it, auto/reuse rank every packaged kernel of both families.
+Candidates are discovered from the installed descriptors and each one's packaged
+metadata and symbol is checked against the adapter for its family.
+
+Use ``--request-file`` with ``--tile-k`` or ``--kernel-family`` for a different
+packaged convolution.
 The file contains one ConvGroupedRequest JSON object, optionally including the
 catalog's underscore-prefixed provenance annotations. These runs require forced
 mode and default to an independent PyTorch FP32 GPU reference; the smoke modes
@@ -60,6 +69,7 @@ from pathlib import Path
 
 ENGINE_NAME = "hipkernel:Gfx950ConvFwd"
 BENCHMARK_KNOB = "global.benchmarking"
+FAMILY_KNOB = "kernel_family"
 LOG_LEVELS = ("INFO", "WARN", "ERROR", "FATAL", "OFF")
 UUID_PATTERN = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
 SMOKE = {
@@ -146,6 +156,12 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--tile-k", type=int, choices=(64, 128))
     parser.add_argument(
+        "--kernel-family",
+        type=int,
+        choices=(0, 1),
+        help="Engine kernel_family knob: 0 implicit GEMM, 1 direct depthwise.",
+    )
+    parser.add_argument(
         "--mode",
         choices=("forced", "auto", "reuse"),
         help="Default: forced when tile-k is given, otherwise auto.",
@@ -158,10 +174,13 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", type=int, default=0)
     args = parser.parse_args(argv)
     args.mode = args.mode or ("forced" if args.tile_k is not None else "auto")
-    if (args.mode == "forced") != (args.tile_k is not None):
-        parser.error(
-            "--mode forced requires --tile-k; auto/reuse require it to be omitted"
-        )
+    if args.mode == "forced":
+        if (args.tile_k is None) == (args.kernel_family is None):
+            parser.error(
+                "--mode forced requires exactly one of --tile-k and --kernel-family"
+            )
+    elif args.tile_k is not None:
+        parser.error("auto/reuse require --tile-k to be omitted")
     if args.request_file is not None and args.request_file.resolve() in {
         args.log_file.resolve(),
         args.output.resolve(),
@@ -425,41 +444,91 @@ def kernel_objects(value):
             yield from kernel_objects(child)
 
 
-def packaged_candidates(root: Path, specs: dict) -> dict:
-    found: dict[int, dict] = {}
+def variant_label(spec) -> str:
+    """One packaged kernel's tuning, unique among a graph's candidates."""
+    if spec.kernel_family == 0:
+        return f"tile_k{spec.tile_k}"
+    if spec.direct_variant == "spatial":
+        # The spatial kernel derives its block width; block_w is a placeholder.
+        return f"direct_spatial_bwv{spec.block_waves}"
+    return f"direct_{spec.direct_variant}_bw{spec.block_w}_bwv{spec.block_waves}"
+
+
+def packaged_candidates(
+    root: Path, specs: dict, direct_spec, spec_type, problem_fields
+) -> dict:
+    """Installed descriptors for ``specs`` (label -> spec) and the graph's direct arms.
+
+    Implicit-GEMM descriptors must match a requested spec exactly. Every direct
+    descriptor with the request's geometry is a candidate: its metadata must
+    hydrate a spec the adapter rebuilds for the same arm (``direct_spec``), so a
+    descriptor the adapter would not package fails here rather than being
+    measured. Metadata omitting a field the KMD defaults reads as that default.
+    """
+    defaults = {
+        name: field.default
+        for name, field in spec_type.__dataclass_fields__.items()
+        if name in ("kernel_family", "direct_variant", "block_w", "block_waves")
+    }
+    found: dict[str, dict] = {}
     for path in sorted(root.rglob("*.json")):
         value = json.loads(path.read_text(encoding="utf-8"))
         for kernel in kernel_objects(value):
-            metadata = kernel["metadata"]
-            tile_k = metadata.get("tile_k")
-            if tile_k not in specs or any(
-                metadata.get(k) != v for k, v in asdict(specs[tile_k]).items()
-            ):
-                continue
+            metadata = {**defaults, **kernel["metadata"]}
+            if metadata["kernel_family"] == 1:
+                if direct_spec is None or any(
+                    metadata.get(k) != v for k, v in problem_fields.items()
+                ):
+                    continue
+                hydrated = spec_type(
+                    **{k: metadata[k] for k in spec_type.__dataclass_fields__}
+                )
+                spec = direct_spec(hydrated)
+                require(
+                    spec == hydrated,
+                    f"Packaged direct metadata disagrees with the adapter: {path}",
+                )
+            else:
+                spec = next(
+                    (
+                        candidate
+                        for candidate in specs.values()
+                        if all(
+                            metadata.get(k) == v for k, v in asdict(candidate).items()
+                        )
+                    ),
+                    None,
+                )
+                if spec is None:
+                    continue
+            label = variant_label(spec)
             source = kernel["kernel_source"]
             require(
                 source.get("kind") == "kpack", f"Descriptor is not packaged: {path}"
             )
             require(
-                source.get("symbol") == specs[tile_k].kernel_name(),
-                f"Packaged symbol disagrees with the adapter for tile_k={tile_k}",
+                source.get("symbol") == spec.kernel_name(),
+                f"Packaged symbol disagrees with the adapter for {label}",
             )
             item = {
                 "id": kernel["id"].lower(),
                 "name": kernel.get("name"),
-                "metadata": metadata,
+                "label": label,
+                "spec": spec,
+                "metadata": kernel["metadata"],
                 "source": source,
                 "descriptor": str(path),
                 "descriptor_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             }
             require(
-                tile_k not in found or found[tile_k]["id"] == item["id"],
-                f"Multiple packaged descriptors have the same requested configuration: {tile_k}",
+                label not in found or found[label]["id"] == item["id"],
+                f"Multiple packaged descriptors have the same requested configuration: {label}",
             )
-            found[tile_k] = item
+            found[label] = item
+    missing = sorted(set(specs) - set(found))
     require(
-        set(found) == set(specs),
-        f"Installed catalog is missing requested tile_k variants: {sorted(set(specs) - set(found))}",
+        not missing,
+        f"Installed catalog is missing requested tile_k variants: {missing}",
     )
     require(
         len({item["id"] for item in found.values()}) == len(found),
@@ -559,8 +628,12 @@ def build_graph(
     capture,
     stage: str,
     tile_k: int | None,
+    kernel_family: int | None,
     geometry: dict,
     *,
+    expected_tile_k: set[int] | None,
+    expected_families: set[int] | None,
+    forced: bool,
     smoke: bool,
 ):
     capture.stage = stage
@@ -603,29 +676,40 @@ def build_graph(
     engine_id = ids[0]
     knobs = {knob.knob_id: knob for knob in graph.get_knobs_for_engine(engine_id)}
     require(
-        "tile_k" in knobs and BENCHMARK_KNOB in knobs,
+        all(name in knobs for name in ("tile_k", FAMILY_KNOB, BENCHMARK_KNOB)),
         "Required engine knobs are missing",
     )
     choices = set(knobs["tile_k"].constraint.valid_values)
-    if smoke:
+    families = set(knobs[FAMILY_KNOB].constraint.valid_values)
+    # Direct kernels carry the tile_k placeholder 0, so a depthwise graph the
+    # direct family serves offers {0, 64, 128}.
+    if expected_tile_k is not None:
         require(
-            choices == {64, 128},
-            "Catalog does not expose exactly the two packaged tile_k choices",
+            choices == expected_tile_k,
+            f"Catalog offers tile_k {sorted(choices)}; the installed descriptors "
+            f"for this graph give {sorted(expected_tile_k)}",
         )
-    elif tile_k is None:
+    if expected_families is not None:
         require(
-            choices == {64, 128},
-            f"Auto/reuse need both packaged tile_k variants; this request offers {sorted(choices)}",
+            families == expected_families,
+            f"Catalog offers kernel_family {sorted(families)}; the installed "
+            f"descriptors for this graph give {sorted(expected_families)}",
         )
-    else:
+    if tile_k is not None:
         require(
             tile_k in choices, f"Requested tile_k={tile_k} is not offered: {choices}"
         )
-    settings = [hipdnn.KnobSetting(BENCHMARK_KNOB, 0 if tile_k is not None else 1)]
-    if tile_k is not None:
-        setting = hipdnn.KnobSetting("tile_k", tile_k)
-        check(knobs["tile_k"].validate(setting), "tile_k validation")
-        settings.append(setting)
+    if kernel_family is not None:
+        require(
+            kernel_family in families,
+            f"Requested kernel_family={kernel_family} is not offered: {families}",
+        )
+    settings = [hipdnn.KnobSetting(BENCHMARK_KNOB, 0 if forced else 1)]
+    for name, value in (("tile_k", tile_k), (FAMILY_KNOB, kernel_family)):
+        if value is not None:
+            setting = hipdnn.KnobSetting(name, value)
+            check(knobs[name].validate(setting), f"{name} validation")
+            settings.append(setting)
     check(
         graph.create_execution_plan_ext(engine_id, settings),
         "exact engine/knob selection",
@@ -654,6 +738,8 @@ def build_graph(
         "requested_knobs": {s.knob_id: s.value for s in settings},
         "tile_k_default": knobs["tile_k"].default_value,
         "tile_k_choices": sorted(choices),
+        "kernel_family_default": knobs[FAMILY_KNOB].default_value,
+        "kernel_family_choices": sorted(families),
     }
 
 
@@ -789,13 +875,19 @@ def run(args: argparse.Namespace, report: dict) -> dict:
 
     import hipdnn_frontend as hipdnn
     from builders.common.convolution_forward import (
+        Gfx950ConvFwdSpec,
         build_gfx950_conv_fwd,
+        gfx950_conv_fwd_direct_spec_for_request,
         gfx950_conv_fwd_spec_for_request,
     )
     from dispatch.grouped_convolution import ConvGroupedRequest
     from rocke import compile_kernel
     from rocke.core.ir_print import print_ir
     from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_grouped import (
+        build_direct_depthwise,
+        build_direct_depthwise_spatial,
+    )
     from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
     from rocke.runtime.comgr import resolved_lib_path
     from rocke.runtime.launcher import (
@@ -823,16 +915,78 @@ def run(args: argparse.Namespace, report: dict) -> dict:
         }
     )
     smoke = args.request_file is None
-    # A forced request builds only its own spec; auto/reuse rank every packaged variant.
-    tiles = (64, 128) if (smoke or args.tile_k is None) else (args.tile_k,)
+    forced = args.mode == "forced"
+    # A forced tile builds only its own spec; otherwise both packaged implicit-GEMM
+    # tiles are required, except when only the direct family is forced.
+    if args.tile_k is not None:
+        tiles = (args.tile_k,)
+    elif forced and args.kernel_family == 1:
+        tiles = ()
+    else:
+        tiles = (64, 128)
     specs = {
-        tile: gfx950_conv_fwd_spec_for_request(request, tile_k=tile) for tile in tiles
+        f"tile_k{tile}": gfx950_conv_fwd_spec_for_request(request, tile_k=tile)
+        for tile in tiles
     }
-    report["requested_specs"] = {tile: asdict(spec) for tile, spec in specs.items()}
-    problem = next(iter(specs.values())).to_problem()
+    try:
+        default_direct = gfx950_conv_fwd_direct_spec_for_request(request)
+    except ValueError as error:
+        default_direct = None
+        report["direct_family_declined"] = str(error)
+
+    def direct_arm(spec):
+        # The adapter's own spec for the arm a descriptor names: spatial is block_w 0.
+        return gfx950_conv_fwd_direct_spec_for_request(
+            request,
+            block_w=spec.block_w if spec.direct_variant == "std" else 0,
+            block_waves=spec.block_waves,
+        )
+
+    require(
+        args.kernel_family != 1 or default_direct is not None,
+        "--kernel-family 1: the direct depthwise family declines this graph: "
+        f"{report.get('direct_family_declined')}",
+    )
+    base = default_direct or next(iter(specs.values()))
+    problem_fields = {
+        key: value
+        for key, value in asdict(base).items()
+        if key in SMOKE or key in ("dtype", "layout")
+    }
+    installed = packaged_candidates(
+        args.descriptor_root,
+        specs,
+        direct_arm if default_direct is not None else None,
+        Gfx950ConvFwdSpec,
+        problem_fields,
+    )
+    direct_installed = any(
+        item["spec"].kernel_family == 1 for item in installed.values()
+    )
+    require(
+        args.kernel_family != 1 or direct_installed,
+        "--kernel-family 1 needs installed direct depthwise kernels for this graph",
+    )
+    if args.tile_k is not None:
+        candidates = {f"tile_k{args.tile_k}": installed[f"tile_k{args.tile_k}"]}
+    else:
+        candidates = {
+            label: item
+            for label, item in installed.items()
+            if args.kernel_family is None
+            or item["spec"].kernel_family == args.kernel_family
+        }
+    report["requested_specs"] = {
+        label: asdict(item["spec"]) for label, item in candidates.items()
+    }
+    problem = base.to_problem()
     geometry = tensor_geometry(problem)
-    candidates = packaged_candidates(args.descriptor_root, specs)
     candidate_ids = {candidate["id"] for candidate in candidates.values()}
+    # Every installed kernel for the graph is what the engine's knobs offer.
+    expected_tile_k = expected_families = None
+    if not forced:
+        expected_tile_k = {64, 128} | ({0} if direct_installed else set())
+        expected_families = {0} | ({1} if direct_installed else set())
     before = cached_ranking(args.cache_dir, candidate_ids)
     report.update(
         {
@@ -848,7 +1002,10 @@ def run(args: argparse.Namespace, report: dict) -> dict:
             "problem": {key: getattr(problem, key) for key in SMOKE},
             "tensor_geometry": geometry,
             "cache_before": before,
-            "catalog": candidates,
+            "catalog": {
+                label: {key: value for key, value in item.items() if key != "spec"}
+                for label, item in candidates.items()
+            },
             "toolchain": {
                 "lowering_backend": "python",
                 "llvm_flavor": args.llvm_flavor,
@@ -917,7 +1074,11 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                 capture,
                 "build",
                 args.tile_k,
+                args.kernel_family,
                 geometry,
+                expected_tile_k=expected_tile_k,
+                expected_families=expected_families,
+                forced=forced,
                 smoke=smoke,
             )
             report["plan_build_wall_ms"] = (time.perf_counter() - build_start) * 1000
@@ -937,8 +1098,10 @@ def run(args: argparse.Namespace, report: dict) -> dict:
             )
             if args.mode == "auto":
                 require(
-                    "will benchmark 2 candidate(s)" in capture.text("build"),
-                    "The first plan did not prepare exactly two benchmark candidates",
+                    f"will benchmark {len(candidates)} candidate(s)"
+                    in capture.text("build"),
+                    f"The first plan did not prepare exactly {len(candidates)} "
+                    "benchmark candidates",
                 )
                 winner = selected_uuid(capture.text("first_execute"), benchmark=True)
             else:
@@ -948,27 +1111,35 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                     "Unexpected new search",
                 )
             matching = [
-                tile
-                for tile, candidate in candidates.items()
+                label
+                for label, candidate in candidates.items()
                 if candidate["id"] == winner
             ]
             require(
                 len(matching) == 1,
                 "Selected UUID does not identify an installed requested variant",
             )
-            winner_tile = matching[0]
+            winner_label = matching[0]
+            spec = candidates[winner_label]["spec"]
             require(
-                args.tile_k is None or winner_tile == args.tile_k,
+                args.tile_k is None or spec.tile_k == args.tile_k,
                 "The selected descriptor does not implement the forced tile_k",
             )
+            require(
+                args.kernel_family is None or spec.kernel_family == args.kernel_family,
+                "The selected descriptor is not of the requested kernel family",
+            )
             report["selected_kernel_id"] = winner
-            report["selected_tile_k"] = winner_tile
+            report["selected_variant"] = winner_label
+            report["selected_kernel_family"] = spec.kernel_family
+            report["selected_tile_k"] = spec.tile_k if spec.kernel_family == 0 else None
             after = cached_ranking(args.cache_dir, candidate_ids)
             if args.mode != "forced":
                 require(after is not None, "No complete measured ranking was persisted")
                 entries = after["record"]["entries"]
                 require(
-                    len(entries) == 2 and entries[0]["kernel_id"].lower() == winner,
+                    len(entries) == len(candidates)
+                    and entries[0]["kernel_id"].lower() == winner,
                     "Selected kernel differs from the cached winner",
                 )
                 times = [entry["time_ms"] for entry in entries]
@@ -999,10 +1170,19 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                 "The same plan benchmarked again on its second execution",
             )
             capture.stage = "direct_compile"
-            spec = specs[winner_tile]
-            direct_kernel = build_implicit_gemm_conv(
-                spec.to_instance_spec(), arch="gfx950"
-            )
+            # The original rocKE builder for the winner's family, without the adapter.
+            if spec.kernel_family == 0:
+                direct_kernel = build_implicit_gemm_conv(
+                    spec.to_instance_spec(), arch="gfx950"
+                )
+            elif spec.direct_variant == "spatial":
+                direct_kernel = build_direct_depthwise_spatial(
+                    spec.to_direct_spec(), arch="gfx950"
+                )
+            else:
+                direct_kernel = build_direct_depthwise(
+                    spec.to_direct_spec(), arch="gfx950"
+                )
             adapter_ir = print_ir(build_gfx950_conv_fwd(spec, arch="gfx950"))
             require(
                 print_ir(direct_kernel) == adapter_ir,
@@ -1086,7 +1266,11 @@ def run(args: argparse.Namespace, report: dict) -> dict:
                     capture,
                     "recreated_plan",
                     None,
+                    args.kernel_family,
                     geometry,
+                    expected_tile_k=expected_tile_k,
+                    expected_families=expected_families,
+                    forced=False,
                     smoke=smoke,
                 )
                 require(
@@ -1134,6 +1318,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": args.mode,
         "dtype": args.dtype,
         "requested_tile_k": args.tile_k,
+        "requested_kernel_family": args.kernel_family,
         "pid": os.getpid(),
     }
     exit_code = 1

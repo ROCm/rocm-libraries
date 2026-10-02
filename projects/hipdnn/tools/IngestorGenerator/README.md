@@ -451,6 +451,12 @@ kmd_fields:                       # the KMD's fields[] -- one per axis this engi
   - name: block_size              # kernels vary along
     type: int                     # bool | int | float | string | int_list
     default_value: 64             # omit entirely for a MANDATORY field
+    builder_default: false        # optional, generator-only: true lets a kernel
+                                  # state this field in neither metadata nor
+                                  # kernel_source.spec because the builder's spec
+                                  # dataclass defaults it to default_value too
+                                  # (adding a field to a shipped engine without
+                                  # changing its descriptors). Needs default_value.
   - name: dtype
     type: string
 

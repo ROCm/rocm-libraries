@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string_view>
 
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
 {
@@ -174,6 +175,156 @@ inline std::optional<LaunchGeometry> launchGeometry(const Problem& problem,
                           static_cast<unsigned int>(gridY),
                           static_cast<unsigned int>(problem.groups),
                           static_cast<unsigned int>(warpM * warpN * waveSize)};
+}
+
+/// The kernel_family metadata value, also the engine knob that forces a family.
+/// Mirrors KERNEL_FAMILY_* in rocke/library/builders/common/convolution_forward.py.
+enum class KernelFamily : int64_t
+{
+    IMPLICIT_GEMM = 0,
+    DIRECT_DEPTHWISE = 1,
+};
+
+/// The direct_variant metadata value: "none" for implicit GEMM, "std" for
+/// DirectDepthwiseSpec and "spatial" for DirectDepthwiseSpatialSpec.
+enum class DirectVariant
+{
+    NONE,
+    STD,
+    SPATIAL,
+};
+
+/// A closed value set: any other integer, including a future family this build does not
+/// know how to launch, is refused.
+inline std::optional<KernelFamily> parseKernelFamily(int64_t value)
+{
+    switch(value)
+    {
+    case static_cast<int64_t>(KernelFamily::IMPLICIT_GEMM):
+        return KernelFamily::IMPLICIT_GEMM;
+    case static_cast<int64_t>(KernelFamily::DIRECT_DEPTHWISE):
+        return KernelFamily::DIRECT_DEPTHWISE;
+    default:
+        return std::nullopt;
+    }
+}
+
+inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
+{
+    if(value == "none")
+    {
+        return DirectVariant::NONE;
+    }
+    if(value == "std")
+    {
+        return DirectVariant::STD;
+    }
+    if(value == "spatial")
+    {
+        return DirectVariant::SPATIAL;
+    }
+    return std::nullopt;
+}
+
+/// rocKE's direct depthwise kernels launch 64-lane waves only.
+constexpr int64_t DIRECT_WAVE_SIZE = 64;
+constexpr int64_t DIRECT_MAX_BLOCK_WAVES = 16;
+/// rocKE's grid bound for the direct kernels, applied to every axis.
+constexpr int64_t DIRECT_MAX_GRID_DIM = 65535;
+/// The default direct arm, gfx950_conv_fwd_direct_spec_for_request with no overrides:
+/// spatial with one wave below 64 groups, otherwise std with this block width.
+constexpr int64_t DEFAULT_DIRECT_BLOCK_W = 4;
+constexpr int64_t DEFAULT_DIRECT_BLOCK_WAVES = 1;
+
+/// Mirrors _direct_rows_covered in convolution_forward.py for one spatial axis (dilation
+/// 1). Both direct kernels stream input rows and flush output row floor(p / stride) only
+/// for input rows p < extent, so the last row they write is floor((extent - 1) / stride).
+/// When the output has fewer rows than that, the runtime H loop writes into the next
+/// image; when it has more, the trailing rows are never written. Either is a wrong
+/// answer, so a direct kernel is accepted only where the two agree.
+inline bool directRowsCovered(int64_t extent, int64_t pad, int64_t filter, int64_t stride)
+{
+    const auto output = outputExtent(extent, filter, stride, pad, 1);
+    // outputExtent already bounded every operand, so the division below is safe.
+    return output.has_value() && (extent - 1) / stride == *output - 1;
+}
+
+/// Both axes of @p problem; the direct kernels compile one stride and one padding, which
+/// kernelFits requires to be equal across H and W before calling this.
+inline bool directRowsCovered(const Problem& problem)
+{
+    return directRowsCovered(problem.hi, problem.padH, problem.y, problem.strideH)
+           && directRowsCovered(problem.wi, problem.padW, problem.x, problem.strideW);
+}
+
+/// The problem-side half of _direct_error in convolution_forward.py: pure depthwise
+/// (cpg == kpg == 1), one compiled stride and padding (the kernels read neither sW nor
+/// pW), no dilation, and both axes covered by the input stream. Everything this declines
+/// stays on implicit GEMM.
+inline bool directProblemSupported(const Problem& problem)
+{
+    return problem.groups == problem.c && problem.c == problem.k
+           && problem.strideH == problem.strideW && problem.padH == problem.padW
+           && problem.dilationH == 1 && problem.dilationW == 1 && directRowsCovered(problem);
+}
+
+/// Grid and block for a direct depthwise kernel. Mirrors Gfx950ConvFwdSpec.grid()/block()
+/// in convolution_forward.py, which follow the kernel spec properties in
+/// rocke/library/kernels/common/conv_direct_grouped.py (block_ch, n_w_per_wave,
+/// threads_per_block) and the launch in benchmarks/common/benchmark_direct_conv.py:
+///   std:     (ceil(Wo / block_w), ceil(groups / (64 * block_waves)), N)
+///   spatial: (ceil(Wo / (block_waves * (64 / groups))), 1, N), groups < 64, block_w 0
+/// Both launch 64 * block_waves threads. Refuses any axis above 65535.
+inline std::optional<LaunchGeometry> directLaunchGeometry(const Problem& problem,
+                                                          const Geometry& geometry,
+                                                          DirectVariant variant,
+                                                          int64_t blockW,
+                                                          int64_t blockWaves,
+                                                          int64_t waveSize)
+{
+    if(waveSize != DIRECT_WAVE_SIZE || blockWaves < 1 || blockWaves > DIRECT_MAX_BLOCK_WAVES
+       || problem.groups <= 0 || problem.n <= 0 || geometry.wo <= 0)
+    {
+        return std::nullopt;
+    }
+
+    int64_t columnsPerBlock = 0;
+    int64_t gridY = 1;
+    switch(variant)
+    {
+    case DirectVariant::STD:
+        if(blockW <= 0 || blockW > std::numeric_limits<int32_t>::max())
+        {
+            return std::nullopt;
+        }
+        columnsPerBlock = blockW;
+        // Subtract before division so the bounded operands cannot overflow.
+        gridY = 1 + (problem.groups - 1) / (blockWaves * waveSize);
+        break;
+    case DirectVariant::SPATIAL:
+        // The spatial kernel derives its block width; at groups == 64 a wave would cover
+        // one column, which rocKE's validator admits but its own benchmark never runs.
+        if(blockW != 0 || problem.groups >= waveSize)
+        {
+            return std::nullopt;
+        }
+        columnsPerBlock = blockWaves * (waveSize / problem.groups);
+        break;
+    case DirectVariant::NONE:
+    default:
+        return std::nullopt;
+    }
+
+    const auto gridX = 1 + (geometry.wo - 1) / columnsPerBlock;
+    if(gridX > DIRECT_MAX_GRID_DIM || gridY > DIRECT_MAX_GRID_DIM
+       || problem.n > DIRECT_MAX_GRID_DIM)
+    {
+        return std::nullopt;
+    }
+    return LaunchGeometry{static_cast<unsigned int>(gridX),
+                          static_cast<unsigned int>(gridY),
+                          static_cast<unsigned int>(problem.n),
+                          static_cast<unsigned int>(blockWaves * waveSize)};
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd

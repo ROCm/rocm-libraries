@@ -178,7 +178,12 @@ KernelDefinition smokeKernel(int64_t tileK = 64, const std::string& dtype = "fp1
                        {"pipeline", std::string("mem")},
                        {"epilogue", std::string("cshuffle")},
                        {"layout", std::string("NHWC")},
-                       {"groups", int64_t{1}}};
+                       {"groups", int64_t{1}},
+                       // The descriptor loader completes these from their KMD defaults.
+                       {"kernel_family", int64_t{0}},
+                       {"direct_variant", std::string("none")},
+                       {"block_w", int64_t{0}},
+                       {"block_waves", int64_t{0}}};
     return kernel;
 }
 
@@ -200,6 +205,120 @@ KernelDefinition groupedKernel(int64_t k, int64_t groups)
     kernel.metadata["K"] = k;
     kernel.metadata["groups"] = groups;
     return kernel;
+}
+
+/// A complete forward problem, so one description yields a graph and the kernels
+/// compiled for it. groups divides c and k; the filter holds c / groups channels.
+struct ConvShape
+{
+    int64_t n = 2;
+    int64_t c = 32;
+    int64_t k = 32;
+    int64_t groups = 32;
+    int64_t h = 14;
+    int64_t w = 14;
+    int64_t y = 3;
+    int64_t x = 3;
+    int64_t sH = 1;
+    int64_t sW = 1;
+    int64_t pH = 1;
+    int64_t pW = 1;
+    int64_t dH = 1;
+    int64_t dW = 1;
+};
+
+ConvShape depthwiseShape(
+    int64_t groups, int64_t h, int64_t w, int64_t filter, int64_t stride, int64_t pad)
+{
+    ConvShape shape;
+    shape.c = shape.k = shape.groups = groups;
+    shape.h = h;
+    shape.w = w;
+    shape.y = shape.x = filter;
+    shape.sH = shape.sW = stride;
+    shape.pH = shape.pW = pad;
+    return shape;
+}
+
+GraphSpec convSpec(const ConvShape& shape)
+{
+    const auto cpg = shape.c / shape.groups;
+    const auto ho = (shape.h + 2 * shape.pH - ((shape.y - 1) * shape.dH + 1)) / shape.sH + 1;
+    const auto wo = (shape.w + 2 * shape.pW - ((shape.x - 1) * shape.dW + 1)) / shape.sW + 1;
+    GraphSpec spec;
+    spec.tensors[0].dims = {shape.n, shape.c, shape.h, shape.w};
+    spec.tensors[0].strides = {shape.h * shape.w * shape.c, 1, shape.w * shape.c, shape.c};
+    spec.tensors[1].dims = {shape.k, cpg, shape.y, shape.x};
+    spec.tensors[1].strides = {shape.y * shape.x * cpg, 1, shape.x * cpg, cpg};
+    spec.tensors[2].dims = {shape.n, shape.k, ho, wo};
+    spec.tensors[2].strides = {ho * wo * shape.k, 1, wo * shape.k, shape.k};
+    spec.stride = {shape.sH, shape.sW};
+    spec.dilation = {shape.dH, shape.dW};
+    spec.prePadding = spec.postPadding = {shape.pH, shape.pW};
+    return spec;
+}
+
+/// An implicit-GEMM kernel compiled for exactly @p shape; cshuffle serves any K / groups.
+KernelDefinition implicitKernel(const ConvShape& shape, int64_t tileK = 64)
+{
+    auto kernel = smokeKernel(tileK);
+    for(const auto& [field, value] :
+        std::vector<std::pair<const char*, int64_t>>{{"N", shape.n},
+                                                     {"C", shape.c},
+                                                     {"K", shape.k},
+                                                     {"groups", shape.groups},
+                                                     {"Hi", shape.h},
+                                                     {"Wi", shape.w},
+                                                     {"Y", shape.y},
+                                                     {"X", shape.x},
+                                                     {"sH", shape.sH},
+                                                     {"sW", shape.sW},
+                                                     {"pH", shape.pH},
+                                                     {"pW", shape.pW},
+                                                     {"dH", shape.dH},
+                                                     {"dW", shape.dW}})
+    {
+        kernel.metadata[field] = value;
+    }
+    return kernel;
+}
+
+/// A direct depthwise kernel compiled for exactly @p shape, with the exact placeholders
+/// gfx950_conv_fwd_direct_spec_for_request writes into the implicit-GEMM fields.
+KernelDefinition directKernel(const ConvShape& shape,
+                              const std::string& variant,
+                              int64_t blockW,
+                              int64_t blockWaves)
+{
+    auto kernel = implicitKernel(shape, 0);
+    for(const auto* field : {"tile_m",
+                             "tile_n",
+                             "tile_k",
+                             "warp_m",
+                             "warp_n",
+                             "warp_tile_m",
+                             "warp_tile_n",
+                             "warp_tile_k"})
+    {
+        kernel.metadata[field] = int64_t{0};
+    }
+    kernel.metadata["pipeline"] = std::string("none");
+    kernel.metadata["epilogue"] = std::string("none");
+    kernel.metadata["kernel_family"] = int64_t{1};
+    kernel.metadata["direct_variant"] = variant;
+    kernel.metadata["block_w"] = blockW;
+    kernel.metadata["block_waves"] = blockWaves;
+    return kernel;
+}
+
+KernelDefinition spatialKernel(const ConvShape& shape, int64_t blockWaves = 1)
+{
+    return directKernel(shape, "spatial", 0, blockWaves);
+}
+
+KernelDefinition stdKernel(const ConvShape& shape, int64_t blockW = 4, int64_t blockWaves = 1)
+{
+    return directKernel(shape, "std", blockW, blockWaves);
 }
 
 TEST(TestGfx950ConvFwdGraphMatcher, AcceptsBothStorageTypesAndBindsActualTensorUids)
@@ -643,6 +762,424 @@ TEST(TestGfx950ConvFwdScore, FallbackPrefersDispatcherDefault)
         swept.metadata[change.first] = change.second;
         EXPECT_GT(scoreKernel(GFX950_CONV_FWD, fixture.context(), smokeKernel(128)),
                   scoreKernel(GFX950_CONV_FWD, fixture.context(), swept));
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsMatchTheGuardedDepthwiseCatalogShapes)
+{
+    // Every direct arm of the synthetic catalog, for both storage types, beside the two
+    // implicit-GEMM arms that serve the same graph.
+    struct Case
+    {
+        ConvShape shape;
+        std::vector<KernelDefinition> kernels;
+    };
+    const auto g32 = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const auto g32s2 = depthwiseShape(32, 17, 17, 3, 2, 1);
+    const auto g5 = depthwiseShape(5, 9, 9, 7, 1, 3);
+    const auto g96 = depthwiseShape(96, 14, 14, 3, 1, 1);
+    const auto g96odd = depthwiseShape(96, 17, 17, 3, 2, 1);
+    const auto g96even = depthwiseShape(96, 16, 18, 3, 2, 1);
+    const auto g64 = depthwiseShape(64, 70, 40, 3, 1, 1);
+    const auto g64s2 = depthwiseShape(64, 70, 40, 3, 2, 1);
+    const auto g5large = depthwiseShape(5, 56, 24, 17, 1, 8);
+    const std::vector<Case> cases{{g32, {spatialKernel(g32), stdKernel(g32)}},
+                                  {g32s2, {spatialKernel(g32s2), stdKernel(g32s2)}},
+                                  {g5, {spatialKernel(g5), stdKernel(g5)}},
+                                  {g96, {stdKernel(g96), stdKernel(g96, 3, 2)}},
+                                  {g96odd, {stdKernel(g96odd)}},
+                                  {g96even, {stdKernel(g96even)}},
+                                  {g64, {stdKernel(g64), stdKernel(g64, 32, 1)}},
+                                  {g64s2, {stdKernel(g64s2), stdKernel(g64s2, 32, 1)}},
+                                  {g5large, {spatialKernel(g5large)}}};
+    for(size_t i = 0; i < cases.size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        for(const auto dtype : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+        {
+            auto spec = convSpec(cases[i].shape);
+            for(auto& tensor : spec.tensors)
+            {
+                tensor.dtype = dtype;
+            }
+            const std::string name = dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
+            const std::string otherName = name == "fp16" ? "bf16" : "fp16";
+            const GraphFixture fixture(buildGraph(spec), gfx950Properties());
+            ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD, fixture.context()));
+            auto kernels = cases[i].kernels;
+            kernels.push_back(implicitKernel(cases[i].shape, 64));
+            kernels.push_back(implicitKernel(cases[i].shape, 128));
+            for(auto kernel : kernels)
+            {
+                kernel.metadata["dtype"] = name;
+                EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+                kernel.metadata["dtype"] = otherName;
+                EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+            }
+        }
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsMustMatchEveryBakedShapeAttribute)
+{
+    const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    for(const auto& base : {spatialKernel(shape), stdKernel(shape)})
+    {
+        ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), base));
+        for(const auto* field :
+            {"N", "C", "K", "Hi", "Wi", "Y", "X", "sH", "sW", "pH", "pW", "dH", "dW", "groups"})
+        {
+            SCOPED_TRACE(field);
+            auto kernel = base;
+            kernel.metadata[field] = kernel.getIntMetadata(field) + 1;
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+        for(const auto& field : base.metadata)
+        {
+            SCOPED_TRACE(field.first);
+            auto kernel = base;
+            kernel.metadata.erase(field.first);
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+            kernel.metadata[field.first] = std::vector<int64_t>{1};
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsDeclineEveryGraphOutsideTheGuardedContract)
+{
+    // Each graph is valid and served by implicit GEMM; a direct kernel compiled for the
+    // exact same metadata is still refused, so the guard is what declines it.
+    const auto base = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const std::vector<std::pair<const char*, std::function<void(ConvShape&)>>> cases{
+        // Wrong-answer path 1: the runtime H loop writes past Ho into the next image.
+        {"pad 0", [](auto& s) { s.pH = s.pW = 0; }},
+        {"pad 0 stride 2",
+         [](auto& s) {
+             s.h = s.w = 16;
+             s.pH = s.pW = 0;
+             s.sH = s.sW = 2;
+         }},
+        // Wrong-answer path 2: output rows the input stream never reaches stay unwritten.
+        {"pad 2", [](auto& s) { s.pH = s.pW = 2; }},
+        {"pad 2 stride 2",
+         [](auto& s) {
+             s.h = s.w = 16;
+             s.pH = s.pW = 2;
+             s.sH = s.sW = 2;
+         }},
+        {"width only uncovered",
+         [](auto& s) {
+             s.w = 15;
+             s.x = 1;
+         }},
+        // Contract refusals. Apart from dilation, which the guard does not model, each
+        // shape is row-covered on both axes.
+        {"sH != sW",
+         [](auto& s) {
+             s.w = 15;
+             s.sW = 2;
+         }},
+        {"pH != pW",
+         [](auto& s) {
+             s.x = 1;
+             s.pW = 0;
+         }},
+        {"dilation 2",
+         [](auto& s) {
+             s.dH = s.dW = 2;
+             s.pH = s.pW = 2;
+         }},
+        {"dilation H only",
+         [](auto& s) {
+             s.dH = 2;
+             s.pH = 2;
+         }},
+        {"channel multiplier", [](auto& s) { s.k = 64; }},
+        {"grouped, not depthwise", [](auto& s) { s.groups = 4; }},
+        {"grouped with one output per group",
+         [](auto& s) {
+             s.groups = 8;
+             s.k = 8;
+         }},
+        {"dense", [](auto& s) { s.groups = 1; }}};
+    for(const auto& [name, change] : cases)
+    {
+        SCOPED_TRACE(name);
+        auto shape = base;
+        change(shape);
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD, fixture.context()));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), implicitKernel(shape)));
+        for(const auto& kernel : {spatialKernel(shape), stdKernel(shape)})
+        {
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsDeclineAGridZPastTheImageLimit)
+{
+    // z carries N for both direct variants; implicit GEMM carries groups there instead.
+    for(const auto n : {int64_t{65535}, int64_t{65536}})
+    {
+        SCOPED_TRACE(n);
+        auto shape = depthwiseShape(2, 3, 3, 3, 1, 1);
+        shape.n = n;
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), implicitKernel(shape)));
+        EXPECT_EQ(matchesKernel(GFX950_CONV_FWD, fixture.context(), spatialKernel(shape)),
+                  n == 65535);
+        EXPECT_EQ(matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(shape)), n == 65535);
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectKernelsRequireExactImplicitGemmPlaceholders)
+{
+    const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    const std::vector<std::pair<const char*, MetadataValue>> violations{
+        {"tile_m", int64_t{64}},
+        {"tile_n", int64_t{64}},
+        {"tile_k", int64_t{64}},
+        {"tile_k", int64_t{128}},
+        {"tile_k", int64_t{-1}},
+        {"warp_m", int64_t{1}},
+        {"warp_n", int64_t{1}},
+        {"warp_tile_m", int64_t{32}},
+        {"warp_tile_n", int64_t{32}},
+        {"warp_tile_k", int64_t{16}},
+        {"wave_size", int64_t{32}},
+        {"pipeline", std::string("mem")},
+        {"pipeline", std::string("")},
+        {"epilogue", std::string("cshuffle")},
+        {"epilogue", std::string("default")},
+        {"layout", std::string("NCHW")}};
+    for(const auto& base : {spatialKernel(shape), stdKernel(shape)})
+    {
+        for(const auto& [field, value] : violations)
+        {
+            SCOPED_TRACE(field);
+            auto kernel = base;
+            kernel.metadata[field] = value;
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, FamilyAndVariantFieldsMustAgree)
+{
+    const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    const auto implicit = implicitKernel(shape);
+    ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), implicit));
+
+    // Unknown families and variants are refused whatever the other fields say.
+    for(const auto family : {int64_t{-1}, int64_t{2}, int64_t{100}})
+    {
+        SCOPED_TRACE(family);
+        for(auto kernel : {implicit, spatialKernel(shape), stdKernel(shape)})
+        {
+            kernel.metadata["kernel_family"] = family;
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+    }
+    for(const auto* variant : {"", "STD", "direct_depthwise", "implicit_gemm"})
+    {
+        SCOPED_TRACE(variant);
+        for(auto kernel : {implicit, stdKernel(shape)})
+        {
+            kernel.metadata["direct_variant"] = std::string(variant);
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        }
+    }
+    // A string-typed family is never parsed.
+    auto stringFamily = stdKernel(shape);
+    stringFamily.metadata["kernel_family"] = std::string("1");
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), stringFamily));
+
+    // An implicit-GEMM kernel must leave every direct field at its KMD default.
+    for(const auto& [field, value] : std::vector<std::pair<const char*, MetadataValue>>{
+            {"direct_variant", std::string("std")},
+            {"direct_variant", std::string("spatial")},
+            {"block_w", int64_t{4}},
+            {"block_w", int64_t{-1}},
+            {"block_waves", int64_t{1}}})
+    {
+        SCOPED_TRACE(field);
+        auto kernel = implicit;
+        kernel.metadata[field] = value;
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+    }
+    // A direct kernel needs a direct variant, and a direct arm cannot pose as family 0.
+    auto noVariant = stdKernel(shape);
+    noVariant.metadata["direct_variant"] = std::string("none");
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), noVariant));
+    for(auto kernel : {spatialKernel(shape), stdKernel(shape)})
+    {
+        kernel.metadata["kernel_family"] = int64_t{0};
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+    }
+    // Nor can an implicit-GEMM tuning pose as family 1.
+    auto relabeled = implicit;
+    relabeled.metadata["kernel_family"] = int64_t{1};
+    relabeled.metadata["direct_variant"] = std::string("std");
+    relabeled.metadata["block_w"] = int64_t{4};
+    relabeled.metadata["block_waves"] = int64_t{1};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), relabeled));
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, DirectVariantTuningBounds)
+{
+    const auto g32 = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(g32)), gfx950Properties());
+    for(const auto blockWaves : {int64_t{1}, int64_t{16}})
+    {
+        SCOPED_TRACE(blockWaves);
+        EXPECT_TRUE(
+            matchesKernel(GFX950_CONV_FWD, fixture.context(), spatialKernel(g32, blockWaves)));
+        EXPECT_TRUE(
+            matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(g32, 4, blockWaves)));
+    }
+    for(const auto blockWaves : {int64_t{0}, int64_t{-1}, int64_t{17}})
+    {
+        SCOPED_TRACE(blockWaves);
+        EXPECT_FALSE(
+            matchesKernel(GFX950_CONV_FWD, fixture.context(), spatialKernel(g32, blockWaves)));
+        EXPECT_FALSE(
+            matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(g32, 4, blockWaves)));
+    }
+    // std needs a positive block width; spatial derives its own and must carry 0.
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(g32, 1)));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(g32, 0)));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), stdKernel(g32, -4)));
+    EXPECT_FALSE(
+        matchesKernel(GFX950_CONV_FWD, fixture.context(), directKernel(g32, "spatial", 2, 1)));
+
+    // Spatial serves G < 64 only; std serves either side of it.
+    for(const auto groups : {int64_t{63}, int64_t{64}, int64_t{96}})
+    {
+        SCOPED_TRACE(groups);
+        const auto shape = depthwiseShape(groups, 14, 14, 3, 1, 1);
+        const GraphFixture wide(buildGraph(convSpec(shape)), gfx950Properties());
+        EXPECT_EQ(matchesKernel(GFX950_CONV_FWD, wide.context(), spatialKernel(shape)),
+                  groups < 64);
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, wide.context(), stdKernel(shape)));
+    }
+}
+
+TEST(TestGfx950ConvFwdKernelMatcher, ForcedKnobValuesSelectOnlyTheirFamily)
+{
+    // GenericPlanBuilder::applyKnobFilter keeps a kernel when each forced knob equals its
+    // completed integer metadata. Because kernelFits refuses every kernel whose
+    // kernel_family, direct fields and tile_k disagree, a forced value can only ever
+    // leave kernels of one family.
+    const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    std::vector<KernelDefinition> catalog{implicitKernel(shape, 64),
+                                          implicitKernel(shape, 128),
+                                          spatialKernel(shape),
+                                          stdKernel(shape)};
+    // Inconsistent descriptors that a filter could otherwise keep.
+    auto directTileK = stdKernel(shape);
+    directTileK.metadata["tile_k"] = int64_t{64};
+    auto implicitFamily1 = implicitKernel(shape, 64);
+    implicitFamily1.metadata["kernel_family"] = int64_t{1};
+    auto directFamily0 = spatialKernel(shape);
+    directFamily0.metadata["kernel_family"] = int64_t{0};
+    catalog.push_back(directTileK);
+    catalog.push_back(implicitFamily1);
+    catalog.push_back(directFamily0);
+
+    const auto survivors = [&](const char* knob, int64_t value) {
+        std::vector<std::string> variants;
+        for(const auto& kernel : catalog)
+        {
+            if(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel)
+               && kernel.getIntMetadata(knob) == value)
+            {
+                variants.push_back(std::get<std::string>(kernel.metadata.at("direct_variant")) + "/"
+                                   + std::to_string(kernel.getIntMetadata("tile_k")));
+            }
+        }
+        return variants;
+    };
+    using Names = std::vector<std::string>;
+    EXPECT_EQ(survivors("kernel_family", 0), (Names{"none/64", "none/128"}));
+    EXPECT_EQ(survivors("kernel_family", 1), (Names{"spatial/0", "std/0"}));
+    EXPECT_EQ(survivors("tile_k", 0), (Names{"spatial/0", "std/0"}));
+    EXPECT_EQ(survivors("tile_k", 64), (Names{"none/64"}));
+    EXPECT_EQ(survivors("tile_k", 128), (Names{"none/128"}));
+    EXPECT_TRUE(survivors("kernel_family", 2).empty());
+}
+
+TEST(TestGfx950ConvFwdScore, FallbackRanksTheDefaultDirectArmFirstThenOtherDirectArms)
+{
+    // G < 64: spatial with one wave is the default arm; G >= 64: std block_w 4, one wave.
+    const auto g32 = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture small(buildGraph(convSpec(g32)), gfx950Properties());
+    const auto scoreOf = [](const GraphFixture& fixture, const KernelDefinition& kernel) {
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD, fixture.context(), kernel));
+        return scoreKernel(GFX950_CONV_FWD, fixture.context(), kernel);
+    };
+    const auto defaultSmall = scoreOf(small, spatialKernel(g32));
+    for(const auto& other : {spatialKernel(g32, 2), stdKernel(g32), stdKernel(g32, 3, 2)})
+    {
+        const auto otherScore = scoreOf(small, other);
+        EXPECT_GT(defaultSmall, otherScore);
+        EXPECT_GT(otherScore, scoreOf(small, implicitKernel(g32, 64)));
+    }
+    EXPECT_GT(scoreOf(small, implicitKernel(g32, 64)), scoreOf(small, implicitKernel(g32, 128)));
+
+    const auto g96 = depthwiseShape(96, 14, 14, 3, 1, 1);
+    const GraphFixture large(buildGraph(convSpec(g96)), gfx950Properties());
+    const auto defaultLarge = scoreOf(large, stdKernel(g96));
+    for(const auto& other : {stdKernel(g96, 3, 2), stdKernel(g96, 4, 2), stdKernel(g96, 8, 1)})
+    {
+        const auto otherScore = scoreOf(large, other);
+        EXPECT_GT(defaultLarge, otherScore);
+        EXPECT_GT(otherScore, scoreOf(large, implicitKernel(g96, 64)));
+    }
+    EXPECT_GT(scoreOf(large, implicitKernel(g96, 64)), scoreOf(large, implicitKernel(g96, 128)));
+}
+
+TEST(TestGfx950ConvFwdDispatch, DirectKernelPassesTheContractAndReachesCodeLoading)
+{
+    const auto shape = depthwiseShape(96, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    const auto bound = matchesGraph(GFX950_CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound);
+    const auto& handler = dispatchHandler(GFX950_CONV_FWD);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, stdKernel(shape)), 0U);
+    try
+    {
+        // The descriptor names no archive, so loading is the first step that can fail.
+        handler.prepare(fixture.context(), *bound, stdKernel(shape));
+        FAIL() << "Preparation loaded a kernel from an empty archive path";
+    }
+    catch(const std::exception& error)
+    {
+        const std::string message = error.what();
+        EXPECT_EQ(message.find("convolution contract"), std::string::npos) << message;
+        EXPECT_EQ(message.find("packed NHWK output"), std::string::npos) << message;
+    }
+
+    // A guarded graph refuses the same arm before any code loads.
+    auto unpadded = shape;
+    unpadded.pH = unpadded.pW = 0;
+    const GraphFixture guarded(buildGraph(convSpec(unpadded)), gfx950Properties());
+    const auto guardedBound = matchesGraph(GFX950_CONV_FWD, guarded.context());
+    ASSERT_TRUE(guardedBound);
+    try
+    {
+        handler.prepare(guarded.context(), *guardedBound, stdKernel(unpadded));
+        FAIL() << "Preparation accepted a direct kernel outside the row-coverage guard";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("convolution contract"), std::string::npos)
+            << error.what();
     }
 }
 

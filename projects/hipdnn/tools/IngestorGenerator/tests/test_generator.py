@@ -250,6 +250,34 @@ class TestVariantDeduplication:
         with pytest.raises(ValueError, match="neither its metadata nor"):
             build_kdp(config, pack, mint_ids(config))
 
+    def test_a_builder_default_field_may_be_stated_in_neither_layer(
+        self, scale_add_config
+    ):
+        """A field declared ``builder_default`` shares its default with the builder's
+        dataclass, so a kernel stating it nowhere emits without it: the KMD default is
+        the catalog key and the binary is built from the same value. This is how an
+        existing engine gains a field without changing its shipped descriptors."""
+        import copy
+
+        config = copy.deepcopy(scale_add_config)
+        pack = config.packs[0]
+        optional = next((f for f in config.kmd_fields if not f.is_mandatory), None)
+        if optional is None:
+            pytest.skip("fixture engine declares no optional KMD field")
+        optional.builder_default = True
+
+        silent = copy.deepcopy(pack.kernels[0])
+        silent.name = pack.kernels[0].name + "_left_to_the_builder_default"
+        silent.metadata.pop(optional.name, None)
+        if silent.kernel_source.spec:
+            silent.kernel_source.spec.pop(optional.name, None)
+        pack.kernels = [silent]
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        (emitted,) = kdp["kernelDescriptors"]
+        assert optional.name not in emitted["metadata"]
+        assert "builder_default" not in json.dumps(build_kmd(config, mint_ids(config)))
+
     def test_a_knob_the_spec_pins_needs_no_metadata_entry(
         self, gfx950_attention_dense_config
     ):
