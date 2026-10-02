@@ -310,7 +310,13 @@ class FmhaFwdApiTrait:
     def scheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode spad always true*/"  # group mode only generate spad/skpad == true
-        if self.pipeline_tag in ["qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        if self.pipeline_tag == "qr_async_trload":
+            if self.spad != "f":
+                raise ValueError(
+                    "batch-mode qr_async_trload must not use seq-q padding"
+                )
+            return "true"
+        if self.pipeline_tag in ["qr_async", "qr_async_trload_v3", "qr_tdm"]:
             if self.spad == "t":
                 return "true"  # always support
             else:
@@ -335,6 +341,12 @@ class FmhaFwdApiTrait:
     def skcheck(self) -> str:
         if self.mode == "group":
             return "true/*group mode skpad always true*/"  # group mode only generate spad/skpad == true
+        if self.pipeline_tag == "qr_async_trload":
+            if self.skpad != "f":
+                raise ValueError(
+                    "batch-mode qr_async_trload must not use seq-k padding"
+                )
+            return "true"
         if self.pipeline_tag == "qr_async":
             if self.skpad == "t":
                 return f"(a.cu_seqlen_k_ptr != nullptr) || (a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0)"
@@ -345,7 +357,7 @@ class FmhaFwdApiTrait:
                 return f"true /*a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
-        elif self.pipeline_tag in ["qr_async_trload", "qr_async_trload_v3", "qr_tdm"]:
+        elif self.pipeline_tag in ["qr_async_trload_v3", "qr_tdm"]:
             if self.skpad == "t":
                 return "true"
             else:
@@ -891,6 +903,21 @@ class CompatibilityRuleFactoryGfx950(CompatibilityRuleFactoryGfx9):
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = CompatibilityRuleFactoryGfx9.get_rules()
 
+        # Batch-mode trload never needs seq padding: the unpadded variant has the same
+        # runtime predicates and precedes it in dispatch, so a padded one is unreachable.
+        # Group mode requires spad/skpad, so the padded variant is kept there.
+        def check_trload_seq_padding(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            if (
+                kernel_ctx.pipeline.tag != "qr_async_trload"
+                or problem_ctx.mode == "group"
+            ):
+                return True
+            return (
+                kernel_ctx.pipeline.F_spad == "f" and kernel_ctx.pipeline.F_skpad == "f"
+            )
+
         def check_tile_pipeline(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
@@ -915,7 +942,7 @@ class CompatibilityRuleFactoryGfx950(CompatibilityRuleFactoryGfx9):
             is_v3_pipeline = kernel_ctx.pipeline.tag == "qr_async_trload_v3"
             return is_v3_dedicated_tile == is_v3_pipeline
 
-        rules.extend([check_tile_pipeline])
+        rules.extend([check_trload_seq_padding, check_tile_pipeline])
         return rules
 
 
