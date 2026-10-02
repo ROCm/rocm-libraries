@@ -203,10 +203,10 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats
         }
     )
 
-    causal_mask_bottom_right = causal == "bottom_right"
-    diagonal_alignment = "BOTTOM_RIGHT" if causal_mask_bottom_right else "TOP_LEFT"
-    left_bound = -1 if causal_mask_bottom_right else None
-    right_bound = 0 if causal_mask_bottom_right else None
+    is_bottom_right = causal == "bottom_right"
+    diagonal_alignment = "BOTTOM_RIGHT" if is_bottom_right else "TOP_LEFT"
+    left_bound = -1 if is_bottom_right else None
+    right_bound = 0 if is_bottom_right else None
 
     graph = {
         "nodes": [
@@ -251,7 +251,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats
                     "alibi_mask": False,
                     "padding_mask": False,
                     "causal_mask": False,
-                    "causal_mask_bottom_right": causal_mask_bottom_right,
+                    "causal_mask_bottom_right": False,
                     "dropout_probability": None,
                     "attn_scale_value": None,  # null — scale is runtime, not baked
                     "left_bound": left_bound,

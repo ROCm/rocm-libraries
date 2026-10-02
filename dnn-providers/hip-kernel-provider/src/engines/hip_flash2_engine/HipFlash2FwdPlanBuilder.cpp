@@ -73,7 +73,16 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                "LSE stats output not supported");
     // K2: reject mask types the kernel does not implement
     {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
+        auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+            return false;
+        }
         HIP_KERNEL_RETURN_FALSE_IF(
             maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
                 && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
@@ -351,7 +360,8 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
 
     p.attnScale = attnScaleFor(attrs);
 
-    p.causal = attrs.causal_mask();
+    p.causal = asm_sdpa_engine::plan_utils::getMaskType(attrs)
+               == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 
     p.qStrideBatch = q->strides()->Get(0);
     p.qStrideHead = q->strides()->Get(1);

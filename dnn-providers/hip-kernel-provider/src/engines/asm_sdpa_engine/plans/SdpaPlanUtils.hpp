@@ -59,22 +59,17 @@ enum class MaskType : int
 //
 // Two sources can describe the mask: the modern left_bound / right_bound /
 // diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
+// causal_mask_bottom_right booleans. A deprecated boolean is only accepted on
+// its own; mixing the two sources is ambiguous and throws
+// HipdnnPluginException(INVALID_VALUE). Rejected combinations: both booleans,
+// either boolean with any bound, and causal_mask with BOTTOM_RIGHT alignment.
 //
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
+// causal_mask_bottom_right with TOP_LEFT alignment cannot be rejected: TOP_LEFT
+// is the schema default, so it is indistinguishable from an unset alignment.
 //
-// Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
-// fields as plain bool defaulting to false, with no has_*() accessor.
-// "Explicitly false" and "unset" are therefore indistinguishable; a false bool
-// is treated as "not requested". left_bound / right_bound are
-// flatbuffers::Optional, but an unset bound is treated as unbounded (-1) to
-// match the canonical convention used across the SDPA path, so a partially
-// specified trio (e.g. only right_bound = 0) still derives a mask rather than
-// silently falling back to NO_MASK.
+// An unset bound is treated as unbounded (-1), so a partially specified trio
+// (e.g. only right_bound = 0) still derives a mask rather than falling back to
+// NO_MASK.
 template <typename SdpaAttrsT>
 MaskType getMaskType(const SdpaAttrsT& attrs)
 {
@@ -83,7 +78,6 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
     const bool causalDeprecated = attrs.causal_mask();
     const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
 
-    // The two deprecated booleans are mutually exclusive.
     if(causalDeprecated && bottomRightDeprecated)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -92,8 +86,23 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
+    if(causalDeprecated && attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: causal_mask (deprecated) is incompatible with diagonal_alignment == "
+            "BOTTOM_RIGHT");
+    }
+
+    if((bottomRightDeprecated || causalDeprecated)
+       && (attrs.left_bound().has_value() || attrs.right_bound().has_value()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: causal_mask (deprecated) and causal_mask_bottom_right (deprecated) cannot be "
+            "used with left_bound or right_bound.");
+    }
+
     if(causalDeprecated)
     {
         return MaskType::TOP_LEFT_CAUSAL;
@@ -103,9 +112,6 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
         return MaskType::BOTTOM_RIGHT_CAUSAL;
     }
 
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
     const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
     const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
     if(left == -1 && right == -1) // both unbounded

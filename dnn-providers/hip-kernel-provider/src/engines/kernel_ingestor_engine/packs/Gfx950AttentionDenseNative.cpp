@@ -295,8 +295,9 @@ enum class MaskType : int
 /**
  * @brief Which mask the graph is asking for, or nullopt for one this engine lacks.
  *
- * A real bound wins over the deprecated booleans: a graph that sets a boolean AND
- * carries a bound is asking for a windowed mask.
+ * A deprecated boolean is only accepted on its own: combined with the other boolean,
+ * any bound, or (for causal_mask) BOTTOM_RIGHT alignment, the request is ambiguous
+ * and is declined.
  */
 std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
@@ -307,6 +308,18 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
                                << "causal_mask and causal_mask_bottom_right are both set");
+        return std::nullopt;
+    }
+
+    if((topLeftDeprecated || bottomRightDeprecated)
+       && (attributes.left_bound().has_value() || attributes.right_bound().has_value()))
+    {
+        return std::nullopt;
+    }
+
+    if(topLeftDeprecated
+       && attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT)
+    {
         return std::nullopt;
     }
 
@@ -327,9 +340,9 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return std::nullopt;
     }
 
-    // A bounded left edge is a window whatever the booleans say, and no shipped variant
-    // carries a non-zero sliding_window. Serving one on a causal binary would apply the
-    // wrong mask with no error.
+    // A bounded left edge is a window, and no shipped variant carries a non-zero
+    // sliding_window. Serving one on a causal binary would apply the wrong mask with no
+    // error.
     if(left != UNBOUNDED)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -721,6 +723,92 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
         << "Deprecated causal_mask_bottom_right=true should produce identical output to "
            "leftBound=-1, rightBound=0, BOTTOM_RIGHT alignment.";
 }
+
+namespace
+{
+
+struct DeprecatedCausalMaskRejectCase
+{
+    const char* name;
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    hipdnn_frontend::DiagonalAlignment alignment;
+};
+
+class TestSdpaFwdPlanBuilderDeprecatedCausalMask
+    : public TestWithParam<DeprecatedCausalMaskRejectCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestSdpaFwdPlanBuilderDeprecatedCausalMask, RejectsMixedWithModernMask)
+{
+    const auto& param = GetParam();
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    SdpaFwdTensorBundle<float> bundle(dims, dims, dims, getGlobalTestSeed());
+
+    auto graphTuple = buildSdpaFwdGraph(bundle,
+                                        DataType::FLOAT,
+                                        param.causalMask,
+                                        param.causalMaskBottomRight,
+                                        param.leftBound,
+                                        param.rightBound,
+                                        param.alignment);
+    auto& graph = std::get<0>(graphTuple);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_THROW(planBuilder.buildNodePlan(wrapper, wrapper.getNode(0)), std::invalid_argument);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaFwdPlanBuilderDeprecatedCausalMask,
+    Values(DeprecatedCausalMaskRejectCase{"CausalWithRightBoundOnly",
+                                          true,
+                                          false,
+                                          std::nullopt,
+                                          0,
+                                          hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+           DeprecatedCausalMaskRejectCase{"CausalWithLeftBoundOnly",
+                                          true,
+                                          false,
+                                          64,
+                                          std::nullopt,
+                                          hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+           DeprecatedCausalMaskRejectCase{"BottomRightWithRightBoundOnly",
+                                          false,
+                                          true,
+                                          std::nullopt,
+                                          64,
+                                          hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+           DeprecatedCausalMaskRejectCase{"BothDeprecated",
+                                          true,
+                                          true,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+           DeprecatedCausalMaskRejectCase{"BottomRightWithLeftBoundOnly",
+                                          false,
+                                          true,
+                                          64,
+                                          std::nullopt,
+                                          hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+           DeprecatedCausalMaskRejectCase{"CausalWithBottomRightAlignment",
+                                          true,
+                                          false,
+                                          std::nullopt,
+                                          std::nullopt,
+                                          hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT}),
+    [](const TestParamInfo<DeprecatedCausalMaskRejectCase>& info) {
+        return std::string(info.param.name);
+    });
 
 TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
 {
