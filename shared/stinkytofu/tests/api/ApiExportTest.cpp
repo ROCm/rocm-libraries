@@ -84,6 +84,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/TDMInflightGuardPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
@@ -294,6 +295,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
     EXPECT_NE(createInsertClusterBarrierPass(), nullptr);
     EXPECT_NE(createTDMLoadWaveSyncPass(), nullptr);
+    EXPECT_NE(createTDMInflightGuardPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
 }

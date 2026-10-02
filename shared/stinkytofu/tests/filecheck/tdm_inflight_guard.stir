@@ -1,0 +1,38 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --TDMInflightGuardPass --print-output 2>&1
+#
+# TDMInflightGuardPass (gfx1250): one wave may have at most 11 TDM ops in flight.
+# Twelve tensor_load_to_lds with no wait between them leave 11 in flight when the
+# last one issues, so exactly one `s_wait_tensorcnt 10` lands right before it and
+# the first eleven issues are left alone.
+#
+# CHECK-LABEL: @tdm_inflight_guard_straight_run
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 10
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @tdm_inflight_guard_straight_run() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+}
