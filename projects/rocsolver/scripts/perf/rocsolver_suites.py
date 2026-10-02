@@ -92,37 +92,106 @@ def get_mn(s_shape, s, mode):
     return m,n
 
 
-def get_size_configurations(case):
+def get_ops(s_ops, precision):
+    """
+    Gets the operation type -transposed or none (default is none)
+    """
+    tr = 'T' if precision == 's' or precision == 'd' else 'C'
+    if s_ops == 'trans': ops = tr
+    else: ops = 'N'
+    return ops
+
+
+def get_storev(s_storev):
+    """
+    Gets storev: column-wise or row-wise (default is colwise)
+    """
+    if s_storev == 'rowwise': storev = 'R'
+    else: storev = 'C'
+    return storev
+
+
+def get_side(s_side):
+    """
+    Gets side: left or right (default is right)
+    """
+    if s_side == 'left': side = 'L'
+    else: side = 'R'
+    return side
+
+
+def get_evect(s_evect, matvect):
+    """
+    Gets evect: with-vectors or without-vectors (default is with-vectors original matrix)
+    """
+    if s_evect == 'novect': evect = 'N'
+    else: evect = 'I' if matvect == 'tridiag' else 'V'
+    return evect
+
+
+def get_itype(s_itype):
+    """
+    Gets itype: AX, ABX, BAX (default is AX)
+    """
+    if s_itype == 'ABX': itype = 2
+    elif s_itype == 'BAX': itype = 3
+    else: itype = 1
+    return itype
+
+
+def get_upperid(per, s):
+    """
+    Gets upper index for the eigenvalue range depending on the percentage
+    """
+    iu = int(s * per / 100)
+    if iu == 0: iu = 1
+    return iu
+
+
+def get_alg(s_alg):
+    """
+    Gets algorithm mode: GPU or hybrid (default is GPU)
+    """
+    if s_alg == 'hybrid': alg = 1
+    else: alg = 0
+    return alg
+
+
+def get_size_configurations(case, mode):
     """
     Get size configurations for normal and batched tests.
-    Args:
-        case: a list with one or more of 'small', 'medium', 'large' or 'huge'
-    Returns:
-        tuple: (sizenormal, sizebatch) lists
+    Args: a list with one or more of 'small', 'medium', 'large' or 'huge' and the mode (default is normal)
+    Returns: sizenormal or sizebatch
     """
-    sizenormal = []
-    sizebatch = []
+    size = []
     for c in case:
         if c == 'small':
-            sizenormal += list(chain(range(2, 64, 8), range(64, 256, 32), range(256, 1024, 64)))
-            sizebatch += list(chain(zip(range(2, 64, 4), repeat(5000)), zip(range(72, 164, 8), repeat(2500))))
+            if mode == 'batched':
+                size += list(chain(zip(range(2, 64, 4), repeat(5000)), zip(range(72, 164, 8), repeat(2500))))
+            else:
+                size += list(chain(range(2, 64, 8), range(64, 256, 32), range(256, 1024, 64)))
         elif c == 'medium':
-            sizenormal += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
-            sizebatch += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
+            if mode == 'batched':
+                size += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
+            else:
+                size += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
         elif c == 'large':
-            sizenormal += list(chain(range(4096, 8192, 256), range(8192, 12800, 512)))
-            sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+            if mode == 'batched':
+                size += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+            else:
+                size += list(chain(range(4096, 8192, 256), range(8192, 12800, 512)))
         elif c == 'huge': # huge == large for batch cases
-            sizenormal += list(chain(range(12800, 23040, 2048), range(23040, 32768, 4096)))
-            if 'large' not in case:
-                sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
-    return sizenormal, sizebatch
+            if mode == 'batched' and 'large' not in case:
+                size += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+            else:
+                size += list(chain(range(12800, 23040, 2048), range(23040, 32768, 4096)))
+    return size
 
 
 # Benchmark suites
 ########################################
 
-def potrf_suite(*, suite, precision, sizenormal, sizebatch):
+def potrf_suite(*, suite, precision, case):
     """
     POTRF tests are run with the given precision and sizes, and for upper and lower cases
     Upper case uses:            | Lower case uses:  
@@ -132,7 +201,8 @@ def potrf_suite(*, suite, precision, sizenormal, sizebatch):
     <potf2_small_upper>         | <potf2_small_lower>
     """
     fn = 'potrf'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s in size:
@@ -141,7 +211,7 @@ def potrf_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def potrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def potrfBatch_suite(*, suite, precision, case):
     """
     POTRFBATCH tests are run with the given precision and sizes, and for upper and lower cases
     Upper case uses:            | Lower case uses:  
@@ -151,7 +221,8 @@ def potrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
     <potf2_small_upper>         | <potf2_small_lower>
     """
     fn = 'potrf_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s, bc in size:
@@ -160,7 +231,7 @@ def potrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def potrs_suite(*, suite, precision, sizenormal, sizebatch):
+def potrs_suite(*, suite, precision, case):
     """
     POTRS tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors.
     Tests run upper and lower cases.
@@ -169,7 +240,8 @@ def potrs_suite(*, suite, precision, sizenormal, sizebatch):
     trsm_upper_left_none        | trsm_lower_left_none
     """
     fn = 'potrs'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s_nrhs in ['one', 'half_n', 'n']:
@@ -180,7 +252,7 @@ def potrs_suite(*, suite, precision, sizenormal, sizebatch):
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def potrsBatch_suite(*, suite, precision, case):
     """
     POTRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
     Tests run upper and lower cases.
@@ -189,7 +261,8 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     trsm_upper_left_none        | trsm_lower_left_none
     """
     fn = 'potrs_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s_nrhs in ['one', 'half_n', 'n']:
@@ -200,7 +273,7 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def potri_suite(*, suite, precision, sizenormal, sizebatch):
+def potri_suite(*, suite, precision, case):
     """
     POTRI tests are run with the given precision and sizes, and for upper and lower cases.
     Upper case uses:            | Lower case uses:
@@ -208,7 +281,8 @@ def potri_suite(*, suite, precision, sizenormal, sizebatch):
     trmm_upper_right_transposed | trmm_lower_left_transposed 
     """
     fn = 'potri'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s in size:
@@ -217,13 +291,14 @@ def potri_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def sytrf_suite(*, suite, precision, sizenormal, sizebatch):
+def sytrf_suite(*, suite, precision, case):
     """
     SYTRF tests are run with the given precision and sizes, and for upper and lower cases.
     Upper or lower test different kernels.
     """
     fn = 'sytrf'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s in size:
@@ -232,13 +307,14 @@ def sytrf_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def sytrs_suite(*, suite, precision, sizenormal, sizebatch):
+def sytrs_suite(*, suite, precision, case):
     """
     SYTRS tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors.
     Tests run upper and lower cases. Upper or lower test different kernels.
     """
     fn = 'sytrs'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s_nrhs in ['one', 'half_n', 'n']:
@@ -249,61 +325,66 @@ def sytrs_suite(*, suite, precision, sizenormal, sizebatch):
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrf_suite(*, suite, precision, sizenormal, sizebatch):
+def getrf_suite(*, suite, precision, case):
     """
     GETRF tests are run with the given precision and sizes (only square case)
     """
     fn = 'getrf'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
 
-def getrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getrfBatch_suite(*, suite, precision, case):
     """
     GETRFBATCH tests are run with the given precision and sizes (only square case)
     """
     fn = 'getrf_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s, bc in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
 
-def getrfNpvt_suite(*, suite, precision, sizenormal, sizebatch):
+def getrfNpvt_suite(*, suite, precision, case):
     """
     GETRFNPVT tests are run with the given precision and sizes (only square case)
     """
     fn = 'getrf_npvt'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
 
-def getrfNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getrfNpvtBatch_suite(*, suite, precision, case):
     """
     GETRFNPVTBATCH tests are run with the given precision and sizes (only square case)
     """
     fn = 'getrf_npvt_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s, bc in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
 
-def getrs_suite(*, suite, precision, sizenormal, sizebatch):
+def getrs_suite(*, suite, precision, case):
     """
     GETRS tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
     The operation argument does not test any new path.
     """
     fn = 'getrs'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_nrhs in ['one', 'half_n', 'n']:
         for s in size:
             nrhs = get_nrhs(s_nrhs, s)
@@ -312,13 +393,14 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getrsBatch_suite(*, suite, precision, case):
     """
     GETRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
     The operation argument does not test any new path.
     """
     fn = 'getrs_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_nrhs in ['one', 'half_n', 'n']:
         for s, bc in size:
             nrhs = get_nrhs(s_nrhs, s)
@@ -327,13 +409,14 @@ def getrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsNpvt_suite(*, suite, precision, sizenormal, sizebatch):
+def getrsNpvt_suite(*, suite, precision, case):
     """
     GETRSNPVT tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
     The operation argument does not test any new path.
     """
     fn = 'getrs_npvt'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_nrhs in ['one', 'half_n', 'n']:
         for s in size:
             nrhs = get_nrhs(s_nrhs, s)
@@ -342,13 +425,14 @@ def getrsNpvt_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getrsNpvtBatch_suite(*, suite, precision, case):
     """
     GETRSNPVTBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
     The operation argument does not test any new path.
     """
     fn = 'getrs_npvt_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_nrhs in ['one', 'half_n', 'n']:
         for s, bc in size:
             nrhs = get_nrhs(s_nrhs, s)
@@ -357,31 +441,33 @@ def getrsNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getriBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getriBatch_suite(*, suite, precision, case):
     """
     GETRIBATCH tests are run with the given precision and sizes
     """
     fn = 'getri_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s, bc in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld}')
 
 
-def getriOOPBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def getriOOPBatch_suite(*, suite, precision, case):
     """
     GETRIOOPBATCH tests are run with the given precision and sizes
     """
     fn = 'getri_outofplace_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s, bc in size:
         ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
 
 
-def trtri_suite(*, suite, precision, sizenormal, sizebatch):
+def trtri_suite(*, suite, precision, case):
     """
     TRTRI tests are run with the given precision and sizes, and for upper and lower cases.
     Upper case uses:        | Lower case uses:   
@@ -392,7 +478,8 @@ def trtri_suite(*, suite, precision, sizenormal, sizebatch):
     <trti2_small_upper>     | <trti2_small_lower>
     """
     fn = 'trtri'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
         uplo = get_uplo(s_uplo)
         for s in size:
@@ -401,7 +488,7 @@ def trtri_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
+def geqrf_suite(*, suite, precision, case):
     """
     GEQRF tests are run, for the given precision and number of rows,
     with 160 columns and also for the square case (#rows = #columns)
@@ -410,17 +497,18 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_column_letf_transposed
     """
     fn = 'geqrf'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_shape in ['square', 'skinny']:
         for s in size:
-            m,n = get_mn(s_shape, s, 'normal')
+            m,n = get_mn(s_shape, s, mode)
             ld = get_ld(s)
             if m >= n:
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {m} --lda {ld}')
 
 
-def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def geqrfBatch_suite(*, suite, precision, case):
     """
     GEQRFBATCH tests are run, for the given precision and number of rows,
     with 26 columns and also for the square case (#rows = #columns)
@@ -429,55 +517,58 @@ def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_column_letf_transposed
     """
     fn = 'geqrf_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_shape in ['square', 'skinny']:
         for s, bc in size:
-            m,n = get_mn(s_shape, s, 'batched')
+            m,n = get_mn(s_shape, s, mode)
             ld = get_ld(s)
             if m >= n:
                 row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {m} --lda {ld}')
 
 
-def cholqr_suite(*, suite, precision, sizenormal, sizebatch):
+def cholqr_suite(*, suite, precision, case):
     """
     CHOLQR tests are run, for the given precision and number of rows,
     with 160 columns and also for the square case (#rows = #columns).
     Tests run for cholqr1 and cholqr2 variants.
     """
     fn = 'cholqr'
+    mode = 'normal'
     cshift = 'N'
-    size=sizenormal
+    size=get_size_configurations(case, mode)
     for s_shape in ['square', 'skinny']:
         for alg in [1, 2]:
             for s in size:
-                m,n = get_mn(s_shape, s, 'normal')
+                m,n = get_mn(s_shape, s, mode)
                 ld = get_ld(s)
                 if m >= n:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'algo': alg, 'n': s}
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --cholshift {cshift} --cholnum {alg} -n {n} -m {m} --lda {ld}')
 
 
-def cholqrBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def cholqrBatch_suite(*, suite, precision, case):
     """
     CHOLQRBATCH tests are run, for the given precision and number of rows,
     with 26 columns and also for the square case (#rows = #columns)
     Tests run for cholqr1 and cholqr2 variants.
     """
     fn = 'cholqr_batched'
+    mode = 'batched'
     cshift = 'N'
-    size = sizebatch
+    size = get_size_configurations(case, mode)
     for s_shape in ['square', 'skinny']:
         for alg in [1, 2]:
             for s, bc in size:
-                m,n = get_mn(s_shape, s, 'batched')
+                m,n = get_mn(s_shape, s, mode)
                 ld = get_ld(s)
                 if m >= n:
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'algo': alg, 'n': s}
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --cholshift {cshift} --cholnum {alg} -n {n} -m {m} --lda {ld}')
 
 
-def gels_suite(*, suite, precision, sizenormal, sizebatch):
+def gels_suite(*, suite, precision, case):
     """
     GELS tests are run, for the given precision and number of rows (columns), with 160 columns (rows) and with 1,
     n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
@@ -490,12 +581,13 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_row_left_none
     """
     fn = 'gels'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_shape in ['overdet', 'underdet']: 
         for s_nrhs in ['one', 'half_n', 'n']:
             for s in size:
                 nrhs = get_nrhs(s_nrhs, s)
-                m,n = get_mn(s_shape, s, 'normal')
+                m,n = get_mn(s_shape, s, mode)
                 ld_b = get_ld(s)
                 ld_a = get_ld(m)
                 ld_x = get_ld(n)
@@ -504,9 +596,9 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
-def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def gelsBatch_suite(*, suite, precision, case):
     """
-    GELSBATCH tests are run, for the given precision and number of rows (columns), with 160 columns (rows) and with 1,
+    GELSBATCH tests are run, for the given precision and number of rows (columns), with 26 columns (rows) and with 1,
     n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
     to actually test gelqf and ormlq/unmlq.
     gelqf uses:
@@ -517,12 +609,13 @@ def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_row_left_none
     """
     fn = 'gels_batched'
-    size = sizebatch
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
     for s_shape in ['overdet', 'underdet']:
         for s_nrhs in ['one', 'half_n', 'n']:
             for s in size:
                 nrhs = get_nrhs(s_nrhs, s)
-                m,n = get_mn(s_shape, s, 'batched')
+                m,n = get_mn(s_shape, s, mode)
                 ld_b = get_ld(s)
                 ld_a = get_ld(m)
                 ld_x = get_ld(n)
@@ -531,7 +624,7 @@ def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
-def xxgqr_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgqr_suite(*, suite, precision, case):
     """
     XXGQR (ORGQR or UNGQR) tests are run, for the given precision and number of rows,
     with 160 columns and also for the square case (#rows = #columns)
@@ -540,21 +633,18 @@ def xxgqr_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_column_left_none
     """
     fn = 'orgqr' if precision == 's' or precision == 'd' else 'ungqr'
-    size=sizenormal
-    for nc in [0, 160]:
-        if nc == 0: nn = 'sq'
-        else: nn = nc
+    mode = 'normal'
+    size=get_size_configurations(case, mode)
+    for s_shape in ['square', 'skinny']:
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nc == 0: n = s
-            else: n = nc
-            if s >= n:
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'cols': nn, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {s} --lda {ld}')
+            m,n = get_mn(s_shape, s, mode)
+            ld = get_ld(s)
+            if m >= n:
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {m} --lda {ld}')
 
 
-def xxmqr_suite(*, suite, precision, sizenormal, sizebatch):
+def xxmqr_suite(*, suite, precision, case):
     """
     XXMQR (ORMQR or UNMQR) tests are run with the given precision and sizes (only square case), from the right.
     Tests run ops = {transposed, none} cases.
@@ -563,56 +653,52 @@ def xxmqr_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_column_right_<ops>
     """
     fn = 'ormqr' if precision == 's' or precision == 'd' else 'unmqr'
-    tr = 'T' if precision == 's' or precision == 'd' else 'C'
-    size = sizenormal
-    for ops in ['none', 'trans']:
-        if ops == 'none': op = 'N'
-        else: op = tr
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_ops in ['none', 'trans']:
+        ops = get_ops(s_ops, precision)
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'trans': ops, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --side R --trans {op} -n {s} --lda {ld} --ldc {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'ops': s_ops, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --side R --trans {ops} -n {s} --lda {ld} --ldc {ld}')
 
 
-def larft_suite(*, suite, precision, sizenormal, sizebatch):
+def larft_suite(*, suite, precision, case):
     """
-    LARFT tests are run with the given precision and sizes, row-wise and
+    LARFT tests are run with the given precision and sizes, row-wise and col-wise in
     backward direction. Tests use 1, n/2 and n Householder vectors.
     """
     fn = 'larft'
-    size = sizenormal
-    for nk in ['one', 'half_n', 'n']:
-        k = 1
-        for s in size:
-            if nk == 'half_n': k = s//2
-            elif nk == 'n': k = s
-            if s < 4000: ld1 = s + 1
-            else: ld1 = s + 64
-            if k < 4000: ld2 = k + 1
-            else: ld2 = k + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nk': nk, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --storev R --direct B -k {k} -n {s} --ldv {ld1} --ldt {ld2}')
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_storev in ['colwise', 'rowwise']:
+        storev = get_storev(s_storev)
+        for s_nk in ['one', 'half_n', 'n']:
+            for s in size:
+                nk = get_nrhs(s_nk, s)
+                ld1 = get_ld(s)
+                ld2 = get_ld(nk)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'storev': s_storev, 'nk': s_nk, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --direct B --storev {storev} -k {nk} -n {s} --ldv {ld1} --ldt {ld2}')
 
 
-def xxtrd_suite(*, suite, precision, sizenormal, sizebatch):
+def xxtrd_suite(*, suite, precision, case):
     """
     XXTRD (SYTRD or HETRD) tests are run with the given precision and sizes.
     Tests run upper and lower cases. Upper or lower test different kernels.
     """
     fn = 'sytrd' if precision == 's' or precision == 'd' else 'hetrd'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
-        if s_uplo == 'upper': upl = 'U'
-        else: upl = 'L'
+        uplo = get_uplo(s_uplo)
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
+            ld = get_ld(s)
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
-def xxgtr_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgtr_suite(*, suite, precision, case):
     """
     XXGTR (ORGTR or UNGTR) tests are run with the given precision and sizes.
     Always upper to actually use orgql/ungql.
@@ -621,15 +707,15 @@ def xxgtr_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_backward_column_left_none
     """
     fn = 'orgtr' if precision == 's' or precision == 'd' else 'ungtr'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo U -n {s} --lda {ld}')
 
 
-def xxmtr_suite(*, suite, precision, sizenormal, sizebatch):
+def xxmtr_suite(*, suite, precision, case):
     """
     XXMTR (ORMTR or UNMTR) tests are run with the given precision and sizes (only square case).
     Always upper to actually use ormql/unmql.
@@ -640,38 +726,35 @@ def xxmtr_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_backward_column_<side>_<ops>    
     """
     fn = 'ormtr' if precision == 's' or precision == 'd' else 'unmtr'
-    tr = 'T' if precision == 's' or precision == 'd' else 'C'
-    size = sizenormal
-    for slr in ['left', 'right']:
-        if slr == 'left': lr = 'L'
-        else: lr = 'R'
-        for ops in ['none', 'trans']:
-            if ops == 'none': op = 'N'
-            else: op = tr
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_side in ['left', 'right']:
+        side = get_side(s_side)
+        for s_ops in ['none', 'trans']:
+            ops = get_ops(s_ops, precision)
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'side': slr, 'trans': ops, 'n': s}
-                if slr == 'right':
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo U --side {lr} --trans {op} -n {s} --lda {ld} --ldc {ld}')
-                if slr == 'left' and ops == 'trans':
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo U --side {lr} --trans {op} -m {s} --lda {ld} --ldc {ld}')
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'side': s_side, 'ops': s_ops, 'n': s}
+                if s_side == 'right':
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo U --side {side} --trans {ops} -n {s} --lda {ld} --ldc {ld}')
+                if s_side == 'left' and s_ops == 'trans':
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo U --side {side} --trans {ops} -m {s} --lda {ld} --ldc {ld}')
 
 
-def gebrd_suite(*, suite, precision, sizenormal, sizebatch):
+def gebrd_suite(*, suite, precision, case):
     """
     GEBRD tests are run with the given precision and sizes (only square case)
     """
     fn = 'gebrd'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
 
-def xxgbr_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgbr_suite(*, suite, precision, case):
     """
     XXGBR (ORGBR or UNGBR) tests are run with the given precision and sizes (only square case). 
     Always row-wise to actually test orglq/unglq.
@@ -680,243 +763,228 @@ def xxgbr_suite(*, suite, precision, sizenormal, sizebatch):
     larfb_forward_row_right_transposed
     """
     fn = 'orgbr' if precision == 's' or precision == 'd' else 'ungbr'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --storev R -m {s} --lda {ld}')
 
 
-def stedc_suite(*, suite, precision, sizenormal, sizebatch):
+def stedc_suite(*, suite, precision, case):
     """
     STEDC tests are run, for the given precision and sizes, with vectors and without vectors
     """
     fn = 'stedc' 
-    size = sizenormal
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'tridiag')
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {v} -n {s} --ldc {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {evect} -n {s} --ldc {ld}')
 
 
-def xxevd_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevd_suite(*, suite, precision, case):
     """
     XXEVD (SYEVD or HEEVD) tests are run, for the given precision and sizes, with vectors and without vectors. Upper case.
     """
     fn = 'syevd' if precision == 's' or precision == 'd' else 'heevd'
-    size = sizenormal
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {v} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {evect} -n {s} --lda {ld}')
 
 
-def xxgvd_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgvd_suite(*, suite, precision, case):
     """
     XXGVD (SYGVD or HEGVD) tests are run, for the given precision and sizes, with vectors.
     Tests run upper and lower case with AX and BAX forms. 
     """
     fn = 'sygvd' if precision == 's' or precision == 'd' else 'hegvd'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s_uplo in ['upper', 'lower']:
-        if s_uplo == 'upper': upl = 'U'
-        else: upl = 'L'
-        for ty in ['AX', 'BAX']:
-            if ty == 'AX': ity = 1
-            else: ity = 3
+        uplo = get_uplo(s_uplo)
+        for s_itype in ['AX', 'BAX']:
+            itype = get_itype(s_itype)
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'type': ty, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --uplo {uplo} --itype {ity} -n {s} --lda {ld} --ldb {ld}')
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'itype': s_itype, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --uplo {uplo} --itype {itype} -n {s} --lda {ld} --ldb {ld}')
 
 
-def xxevdBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevdBatch_suite(*, suite, precision, case):
     """
     XXEVDBATCH (SYEVDBATCH or HEEVDBATCH) tests are run, for the given precision and sizes, with vectors and without vectors
     """
     fn = 'syevd_strided_batched' if precision == 's' or precision == 'd' else 'heevd_strided_batched'
-    size = sizebatch
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {v} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {evect} -n {s} --lda {ld}')
 
 
-def xxevBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevBatch_suite(*, suite, precision, case):
     """
     XXEVBATCH (SYEVBATCH or HEEVBATCH) tests are run, for the given precision and sizes, with vectors and without vectors
     """
     fn = 'syev_strided_batched' if precision == 's' or precision == 'd' else 'heev_strided_batched'
-    size = sizebatch
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {v} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {evect} -n {s} --lda {ld}')
 
 
-def xxevdx_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevdx_suite(*, suite, precision, case):
     """
     XXEVDX (SYEVDX or HEEVDX) tests are run, for the given precision and sizes, with vectors and 
     computing 20 and 60 percent of the eigenvalues. Upper case.
     """
     fn = 'syevdx' if precision == 's' or precision == 'd' else 'heevdx'
-    size=sizenormal
+    mode = 'normal'
+    size=get_size_configurations(case, mode)
     for per in [20, 60]:
         for s in size:
-            p = int(s * per / 100)
-            if p == 0: p = 1
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
+            iu = get_upperid(per, s)
+            ld = get_ld(s)
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'range': per, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --erange I --il 1 --iu {p} -n {s} --lda {ld} --ldz {ld}')
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --erange I --il 1 --iu {iu} -n {s} --lda {ld} --ldz {ld}')
 
 
-def xxgvdx_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgvdx_suite(*, suite, precision, case):
     """
     XXGVDX (SYGVDX or HEGVDX) tests are run, for the given precision and sizes, with vectors and 
     computing 20 and 60 percent of the eigenvalues. Upper case, AX form. 
     """
     fn = 'sygvdx' if precision == 's' or precision == 'd' else 'hegvdx'
-    size=sizenormal
+    mode = 'normal'
+    size=get_size_configurations(case, mode)
     for per in [20, 60]:
         for s in size:
-            p = int(s * per / 100)
-            if p == 0: p = 1
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
+            iu = get_upperid(per, s)
+            ld = get_ld(s)
             row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'range': per, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --erange I --il 1 --iu {p} -n {s} --lda {ld} --ldz {ld}')
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V --erange I --il 1 --iu {iu} -n {s} --lda {ld} --ldz {ld}')
 
 
-def xxevj_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevj_suite(*, suite, precision, case):
     """
     XXEVJ (SYEVJ or HEEVJ) tests are run, for the given precision and sizes, with vectors and without vectors. Upper case.
     """
     fn = 'syevj' if precision == 's' or precision == 'd' else 'heevj'
-    size = sizenormal
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {v} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect {evect} -n {s} --lda {ld}')
 
 
-def xxgvj_suite(*, suite, precision, sizenormal, sizebatch):
+def xxgvj_suite(*, suite, precision, case):
     """
     XXGVJ (SYGVJ or HEGVJ) tests are run, for the given precision and sizes, with vectors. Upper case, AX form.
     """
     fn = 'sygvj' if precision == 's' or precision == 'd' else 'hegvj'
-    size = sizenormal
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --evect V -n {s} --lda {ld}')
 
 
-def xxevjBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def xxevjBatch_suite(*, suite, precision, case):
     """
     XXEVJBATCH (SYEVJBATCH or HEEVJBATCH) tests are run, for the given precision and sizes, with vectors and without vectors. Upper case.
     """
     fn = 'syevj_strided_batched' if precision == 's' or precision == 'd' else 'heevj_strided_batched'
-    size = sizebatch
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {v} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --evect {evect} -n {s} --lda {ld}')
 
 
-def gesvd_suite(*, suite, precision, sizenormal, sizebatch):
+def gesvd_suite(*, suite, precision, case):
     """
     GESVD tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     Tests are run with the hybrid approach as well. 
     """
     fn = 'gesvd'
-    size = sizenormal
-    for alg in [1 ,0]:
-        if alg == 0: hyb = 'normal'
-        else: hyb = 'hybrid'
-        for v in ['V', 'N']:
-            if v == 'V': vv = 'vect'
-            else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_alg in ['gpu' ,'hybrid']:
+        alg = get_alg(s_alg)
+        for s_evect in ['vect', 'novect']:
+            evect = get_evect(s_evect, 'orig')
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'hybrid': hyb, 'svect': vv, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --alg_mode {alg} --left_svect {v} --right_svect {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'algmode': s_alg, 'svect': s_evect, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --alg_mode {alg} --left_svect {evect} --right_svect {evect} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
 
-def gesdd_suite(*, suite, precision, sizenormal, sizebatch):
+def gesdd_suite(*, suite, precision, case):
     """
     GESDD tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesdd'
-    size = sizenormal
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'svect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --left_svect {v} --right_svect {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'svect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --left_svect {evect} --right_svect {evect} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
 
-def gesvdj_suite(*, suite, precision, sizenormal, sizebatch):
+def gesvdj_suite(*, suite, precision, case):
     """
     GESVDJ tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesvdj'
-    size = sizenormal
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'normal'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'svect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --left_svect {v} --right_svect {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'svect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --left_svect {evect} --right_svect {evect} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
 
-def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
+def gesvdjBatch_suite(*, suite, precision, case):
     """
     GESVDJBATCH tests are run, for the given precision and sizes, with vectors and without vectors (only square case).
     """
     fn = 'gesvdj_strided_batched'
-    size = sizebatch
-    for v in ['V', 'N']:
-        if v == 'V': vv = 'vect'
-        else: vv = 'novect'
+    mode = 'batched'
+    size = get_size_configurations(case, mode)
+    for s_evect in ['vect', 'novect']:
+        evect = get_evect(s_evect, 'orig')
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --left_svect {v} --right_svect {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': s_evect, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --left_svect {evect} --right_svect {evect} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
 
 # Registry of all available benchmark suites

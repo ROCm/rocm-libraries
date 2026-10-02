@@ -41,7 +41,7 @@ import shlex
 import sys
 from subprocess import Popen, PIPE
 
-from rocsolver_suites import SUITES, get_size_configurations
+from rocsolver_suites import SUITES
 
 
 #################################################
@@ -85,10 +85,8 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
     """
     init = False
     benchmark_generator = SUITES[suite]
-    sizenormal, sizebatch = get_size_configurations(case)
 
-    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision,
-                                                    sizenormal=sizenormal, sizebatch=sizebatch):
+    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision, case=case):
         # Run benchmark
         out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
         if exitcode != 0:
