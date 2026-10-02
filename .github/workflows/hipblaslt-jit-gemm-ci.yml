@@ -166,6 +166,9 @@ jobs:
           jobs="${jobs%.*}"
           (( jobs > 16 )) && jobs=16
           (( jobs < 1 )) && jobs=1
+          # The HipKittens backend builds only for gfx950.
+          hipkittens=()
+          [[ "$JIT_ARCHITECTURE" == gfx950 ]] && hipkittens=(hipblaslt-jit-hipkittens-test)
           cmake -S projects/hipblaslt -B "$JIT_BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$ROCM_PATH/bin/amdclang" \
@@ -174,7 +177,7 @@ jobs:
             -DPython_EXECUTABLE="$VENV_DIR/bin/python" \
             -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
             -DGPU_TARGETS="$JIT_ARCHITECTURE" \
-            -DHIPBLASLT_ENABLE_JIT=ON \
+            -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_ENABLE_HIPKITTENS=ON \
             -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
             -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON \
             -DHIPBLASLT_ENABLE_BLIS=OFF -DHIPBLASLT_ENABLE_SAMPLES=OFF \
@@ -187,6 +190,7 @@ jobs:
             --target _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
               hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-process-test hipblaslt-jit-artifacts-test \
               hipblaslt-jit-code-object-test hipblaslt-jit-library-test hipblaslt-jit-heuristic-test \
+              "${hipkittens[@]}" \
             2>&1 | tee jit-test-logs/build.log
       - name: Execute direct and generic public C/C++ GEMM regressions
         timeout-minutes: 60

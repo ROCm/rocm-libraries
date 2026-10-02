@@ -39,6 +39,7 @@
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "HIPBLASLT_ENABLE_JIT": "ON",
+        "HIPBLASLT_JIT_ENABLE_HIPKITTENS": "ON",
         "HIPBLASLT_ENABLE_HOST": "ON",
         "TENSILELITE_ENABLE_HOST": "ON",
         "HIPBLASLT_ENABLE_DEVICE": "OFF",
