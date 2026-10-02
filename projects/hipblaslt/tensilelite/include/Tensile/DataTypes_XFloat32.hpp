@@ -32,8 +32,6 @@
 
 #include <tensilelitehost/export.h>
 
-#define TENSILE_USE_XF32
-
 #ifndef __BYTE_ORDER__
 #define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
 #endif

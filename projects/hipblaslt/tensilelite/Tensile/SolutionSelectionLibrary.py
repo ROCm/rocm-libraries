@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 import csv
 
