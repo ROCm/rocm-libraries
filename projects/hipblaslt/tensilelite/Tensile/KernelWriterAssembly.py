@@ -18865,7 +18865,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Reuse the established cross-workgroup publication protocol and atomic
     # fallback. Output-amax solutions require GlobalSplitU=1.
-    memoryOrder = Component.StreamKMemoryOrdering.find(self)
+    memoryOrder = Component.DeviceMemoryOrdering.find(self)
     workspaceModifiers = MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV) \
         if self.states.archCaps["DefaultScopeIsCULocal"] else MUBUFModifiers(offen=True, glc=True, slc=True)
     mod = Module("output_result")

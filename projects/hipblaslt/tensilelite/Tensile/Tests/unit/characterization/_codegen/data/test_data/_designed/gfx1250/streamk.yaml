@@ -9,8 +9,8 @@
 # (methodology-A missing ranges: 78-153, 202-291, 316-409).
 #
 # Coverage targets:
-#   Lines 141-153: StreamKMemoryOrdering.preVolatileVmem (RequiresXCntForVolatileVMEM)
-#   Lines 206-246: StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True, gfx1250)
+#   DeviceMemoryOrdering.preVolatileVmem via StreamKMemoryOrdering (RequiresXCntForVolatileVMEM)
+#   DeviceMemoryOrderingDevScopeFences via StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True)
 #   Lines 276-287: StreamK.shiftSrd for gfx125x (version 12.5)
 #   Lines 315-318: computeTotalIters with isStreamKConstantsToVgprEnabled=True
 #   Lines 342-344: skTileIndex VReadfirstlane paths (isStreamKConstantsToVgprEnabled=True)
@@ -46,8 +46,8 @@ BenchmarkProblems:
   # MX-FP8 with TDMInst=3 is the validated working combination.
   #
   # Coverage of missing ranges through gfx1250 arch caps:
-  #   - HasInvWbDevFences=True -> StreamKMemoryOrderingDevScopeFences (lines 206-246)
-  #   - RequiresXCntForVolatileVMEM=True -> preVolatileVmem SWaitXCnt (lines 151-152)
+  #   - HasInvWbDevFences=True -> DeviceMemoryOrderingDevScopeFences via StreamK flag interface
+  #   - RequiresXCntForVolatileVMEM=True -> DeviceMemoryOrdering.preVolatileVmem SWaitXCnt
   #   - version[:2]==(12,5) -> shiftSrd gfx125x block (lines 276-287)
   #   - ISA=(12,5,0), StreamK=3 (keepsConstantsInSgpr=False) -> isStreamKConstantsToVgprEnabled=True
   ########################################

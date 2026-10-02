@@ -11,9 +11,9 @@ on ISA=(12,5,0) or arch-caps that only exist on gfx1250:
 
 Target missing ranges (methodology-A):
   78-79   XCCMappingOn non-power-of-2 branch (PersistentXCCMapping=3, divisor&(divisor-1)!=0)
-  141-153 StreamKMemoryOrdering.preVolatileVmem (RequiresXCntForVolatileVMEM=1, gfx1250)
+  DeviceMemoryOrdering.preVolatileVmem via StreamKMemoryOrdering (RequiresXCntForVolatileVMEM=1)
   202-203 StreamKMemoryOrderingDefault.flagBufferMubuf
-  206-246 StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True)
+  DeviceMemoryOrderingDevScopeFences via StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True)
   276-287 StreamK.shiftSrd for gfx125x (version[:2]==(12,5))
   315-318 computeTotalIters VReadfirstlane path (isPersistentConstantsToVgprEnabled=True)
   342-344 skTileIndex VReadfirstlane paths
