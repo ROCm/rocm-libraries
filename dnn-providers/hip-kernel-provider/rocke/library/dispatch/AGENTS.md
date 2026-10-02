@@ -18,7 +18,7 @@ passed from Python, it does not recompute it.
 
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
-`gfx950_dense.py::_base_spec` resolves tile geometry from the frozen variant plus persist /
+`gfx950_dense.py::_base_spec` resolves the default tile plus the candidate's persist /
 wide-DMA, and `gfx942_dense.py::_base_spec` resolves those plus `waves_per_eu`. Those specs
 are consumed only by their own builder and never enter the C++ parity identity. One
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
@@ -40,12 +40,9 @@ params). Correctness rests entirely on the key.
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
 | 3 | `attention_gfx942_dense` | gfx942 | `gfx942_dense.py` | bf16/fp16 D64/D128 dense prefill; grid and persistence are knobs (`spec_id=gfx942_dense`, opt-in) |
-| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950_dense.py` | dense grid, 256×64 tile (`spec_id=gfx950_dense_grid_default`, opt-in) |
-| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950_dense.py` | dense persist, 256×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_widedma_default` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, 256×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_grid_bm128` | gfx950 | `gfx950_dense.py` | dense grid, 128×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_bm128` | gfx950 | `gfx950_dense.py` | dense persist, 128×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_grid` | gfx950 | `gfx950_dense.py` | dense grid body (`algorithm=attention_dense_grid`, `spec_id=gfx950_dense_grid`, opt-in) |
+| 3 | `attention_gfx950_dense_persist` | gfx950 | `gfx950_dense.py` | dense persistent body (`algorithm=attention_dense_persist`, opt-in) |
+| 3 | `attention_gfx950_dense_persist_widedma` | gfx950 | `gfx950_dense.py` | persistent body + wide DMA, D128 (`algorithm=attention_dense_persist`, opt-in) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942_unified.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950_unified.py` | bf16 D256 2D prefill |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
@@ -92,7 +89,7 @@ an invalid point. This is deliberately separate from the heuristic production
 builders.
 
 Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, every `attention_gfx950_dense_*` variant, and
+`attention_gfx942_dense`, the three `attention_gfx950_dense_*` candidates, and
 `attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
 Registering a kernel makes it reachable; making it an
 arch's default is a separate decision that wants benchmark evidence, so none
@@ -108,9 +105,12 @@ the platform `ARCHITECTURE.md` section 11.1 has the full contract. Selection
 pins a spec on `AttentionRequest`:
 
 1. `algorithm` + `spec_id` name the candidate; an opt-in candidate admits a
-   request only when **both** match. The algorithm values are per family:
-   `attention_dense` for every dense variant, `unified_tuning` for every
-   unified tuning geometry, `wmma_attention_fwd` for the gfx1250 WMMA kernel.
+   request only when **both** match. The algorithm values name the kernel
+   body: `attention_dense` for gfx942 dense (persistence is a knob there),
+   `attention_dense_grid` and `attention_dense_persist` for the two gfx950
+   dense bodies (wide DMA is a candidate of the persistent one),
+   `unified_tuning` for every unified tuning geometry, `wmma_attention_fwd`
+   for the gfx1250 WMMA kernel.
 2. `tuning_knobs` (the knob dict recorded next to the id) rebuilds
    the configuration directly; it must reproduce `tuning_id` unless
    that is `auto`.
@@ -142,33 +142,43 @@ kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
 aliased Q). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
-gfx950 dense is six frozen `(tile × persist × wide-DMA)` variants. The gate is
-the kernel's own `supports_attention_dense`: dispatch adds no eligibility rule
-of its own, so wide DMA is offered on every shape the kernel accepts,
-including non-causal, sinks and sliding-window masks;
-`TestWideDmaFeatures` in `test_attention_dense_gfx950_numeric.py` checks those
-numerically.
+gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
+(`gfx950_dense_grid`) and `attention_dense_persist` (`gfx950_dense_persist`
+and `gfx950_dense_persist_widedma`). The grid and persistent bodies serve
+different requests (only the grid body runs a moving bottom-right diagonal),
+and wide DMA needs the persistent body, so those three are the only frozen
+choices. The tile is a knob. The gate is the kernel's own
+`supports_attention_dense`: dispatch adds no eligibility rule of its own, so
+wide DMA is offered on every shape the kernel accepts, including non-causal,
+sinks and sliding-window masks; `TestWideDmaFeatures` in
+`test_attention_dense_gfx950_numeric.py` checks those numerically. Wide DMA
+has no ragged path, so where the 256×64 tile is ragged its default is the
+128×64 tile, and it records `block_m` in every id.
 
-Each dense variant's `sweep_space` / `sample_space` walks the gfx950 dense knob
-space declared as `_GFX950_DENSE_AXES` in `axes.py` (registered as
+Each gfx950 dense candidate's `sweep_space` / `sample_space` walks the dense
+knob space declared as `_GFX950_DENSE_AXES` in `axes.py` (registered as
 `("gfx950", "dense")`): K/V LDS pads, lazy rescale and its threshold, the PV
 scheduling knobs (`iglp_mode`, the fence and its mask, the sched_group
 template and its DS-read count, each on its own axis), exp2 and PV-loop
-codegen, the O store width, `num_persistent` (symbolic policies such as
-`gqa_pair` and CU multiples, resolved per problem), `persist_decode`, and
-`interleave`. `production` sets every applicable knob to each legal value one
-at a time from the default spec, pairing a value with its prerequisite when it
-is illegal alone; `full` walks or samples the pruned product. The kernel's
+codegen, the tile (`block_m` 128/256, `block_n` 32/64/128; `ragged` follows
+it), the O store width, `num_persistent` (symbolic policies such as
+`gqa_pair` and CU multiples, resolved per problem and per `block_m`),
+`persist_decode`, and `interleave`. `production` sets every applicable knob
+to each legal value one at a time from the default spec, pairing a value with
+its prerequisite when it is illegal alone, and repeats that pass at each
+`block_m` (the query tile changes what every other knob does); `full` walks
+or samples the pruned product. The kernel's
 spec validator is the only legality gate. An explicit value equal to its
 policy, or a knob the body does not read for that spec, re-emits the same IR
 under a new symbol, so `_dense_redundant_knob` prunes it. The field-coverage
 test in `test_tuning_space.py` classifies every `Gfx950AttentionDenseSpec`
-field as problem, variant, WPE loop, untunable (`lds_num_buffers`), or swept.
+field as problem, candidate (`persistent`, `wide_lds_dma`), WPE loop,
+untunable (`lds_num_buffers`), or swept.
 
 gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
-(`("gfx942", "dense")`). It registers one candidate, so geometry
-(`persistent`, `block_m`, `block_n`) is swept rather than fixed by a variant,
-and the persistent-only knobs are pruned per spec. Its knobs are the K row and
+(`("gfx942", "dense")`). It registers one candidate, so `persistent` is a
+knob there alongside `block_m` and `block_n`, and the persistent-only knobs
+are pruned per spec. Its knobs are the K row and
 V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
 exp2, `iglp` / `iglp_mode`, the PV fence mask, `pv_priority`,
 `pv_loop_order`, the bf16 O store width, and `causal_diag_split`. The

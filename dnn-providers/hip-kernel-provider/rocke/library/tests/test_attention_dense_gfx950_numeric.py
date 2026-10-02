@@ -77,8 +77,8 @@ def _spec(
     factory rather than hand-rolled.
 
     Deriving the spec from the factory means a future gfx950 tuning change is picked
-    up here with no edit. The variant is pinned by ``spec_id``: the cohort
-    asserts BOTH grid variants at one fixed Sq, and the persistent row runs wide
+    up here with no edit. The candidate is pinned by ``spec_id``: the cohort
+    asserts BOTH bodies at one fixed Sq, and the persistent row runs wide
     DMA on aligned causal D128 without sinks/SWA (``TestWideDmaFeatures``
     covers the other masks).
     """
@@ -88,11 +88,11 @@ def _spec(
 
     wide = d == 128 and causal and not use_sinks and not sliding_window
     if not persistent:
-        spec_id = "gfx950_dense_grid_default"
+        spec_id = "gfx950_dense_grid"
     elif wide:
-        spec_id = "gfx950_dense_persist_widedma_default"
+        spec_id = "gfx950_dense_persist_widedma"
     else:
-        spec_id = "gfx950_dense_persist_default"
+        spec_id = "gfx950_dense_persist"
     return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
@@ -771,8 +771,8 @@ class TestDenseBottomRightNumeric:
         )
 
 
-# The wide-DMA variants admit every mask the persistent body implements, not
-# only the causal no-sinks no-SWA shapes the cohort above routes to them.
+# The wide-DMA candidate admits every mask the persistent body implements, not
+# only the causal no-sinks no-SWA shapes the cohort above routes to it.
 _WIDE_DMA_MASKS = [
     # (name, causal, sliding_window, use_sinks)
     ("non_causal", False, 0, False),
@@ -787,20 +787,17 @@ class TestWideDmaFeatures:
     @requires_gfx950_gpu
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ("bf16", "fp16"))
-    @pytest.mark.parametrize(
-        "spec_id",
-        ("gfx950_dense_persist_widedma_default", "gfx950_dense_persist_widedma_bm128"),
-    )
+    @pytest.mark.parametrize("block_m", (256, 128))
     @pytest.mark.parametrize("_name,causal,sliding_window,use_sinks", _WIDE_DMA_MASKS)
-    def test_wide_dma_variant_numeric(
-        self, _name, causal, sliding_window, use_sinks, spec_id, dtype
+    def test_wide_dma_numeric(
+        self, _name, causal, sliding_window, use_sinks, block_m, dtype
     ):
         import torch
 
-        from dispatch.attention import AttentionRequest, attention_tuning_spec
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
         B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
-        spec = attention_tuning_spec(
+        spec = tuning_spec_with_knobs(
             AttentionRequest(
                 batch=B,
                 nhead_q=Hq,
@@ -815,9 +812,11 @@ class TestWideDmaFeatures:
                 use_sinks=use_sinks,
                 sliding_window=sliding_window,
             ),
-            spec_id,
+            "gfx950_dense_persist_widedma",
+            {"block_m": block_m},
         ).kernel_spec
         assert spec.wide_lds_dma
+        assert spec.block_m == block_m
 
         tdt = getattr(torch, _TORCH_DT[dtype])
         torch.manual_seed(0)

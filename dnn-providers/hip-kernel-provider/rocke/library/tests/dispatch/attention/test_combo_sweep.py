@@ -25,7 +25,7 @@ from benchmarks.gfx950.attention.decode import decode_table_sweep
 from benchmarks.gfx950.attention.prefill import dense_prefill_table_sweep
 
 
-_DENSE = "attention_gfx950_dense_persist_widedma_default"
+_DENSE = "attention_gfx950_dense_persist_widedma"
 
 
 def _req(**kw) -> AttentionRequest:
@@ -80,7 +80,7 @@ def _args(**kw):
     return SimpleNamespace(**base)
 
 
-def _result(tuning_id="grid_default_wpe2@0123456789abcdef", knobs=()):
+def _result(tuning_id="grid_wpe2@0123456789abcdef", knobs=()):
     return SimpleNamespace(
         candidate=SimpleNamespace(name="candidate"),
         spec=SimpleNamespace(tuning_id=tuning_id, knobs=knobs),
@@ -362,9 +362,15 @@ class TestComboSweepLifecycle(unittest.TestCase):
             req, candidate.spec_id, {"pv_priority": 2, "o_store_width": 2}
         )
         self.assertNotEqual(tuned.tuning_id, shipped.tuning_id)
-        self.assertEqual(sweep._row_skeleton(req, candidate, shipped, 0)["knobs"], {})
+        # Wide DMA records its problem-dependent default tile.
+        recorded = {"block_m": 256}
+        self.assertEqual(
+            sweep._row_skeleton(req, candidate, shipped, 0)["knobs"], recorded
+        )
         row = sweep._row_skeleton(req, candidate, tuned, 0)
-        self.assertEqual(row["knobs"], {"pv_priority": 2, "o_store_width": 2})
+        self.assertEqual(
+            row["knobs"], {**recorded, "pv_priority": 2, "o_store_width": 2}
+        )
         stored = json.loads(json.dumps(row))
         replayed = attention_tuning_spec(
             req, stored["spec_id"], stored["tuning_id"], knobs=stored["knobs"]
@@ -380,7 +386,7 @@ class TestComboSweepLifecycle(unittest.TestCase):
     def test_run_spec_key_replays_a_full_level_sample(self):
         from dispatch.attention import iter_registered_attention_combos
 
-        name = "attention_gfx950_dense_grid_default"
+        name = "attention_gfx950_dense_grid"
         args = _args(
             candidate_prefix=name,
             sweep_level="full",

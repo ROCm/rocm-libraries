@@ -1356,7 +1356,7 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
         return attention_tuning_spec(req, "gfx942_dense").kernel_spec
 
     def _dense_spec_gfx950(req):
-        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
     # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
@@ -1474,7 +1474,7 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
         return attention_tuning_spec(req, "gfx942_dense").kernel_spec
 
     def _dense_spec_gfx950(req):
-        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
     # Pin the shared default: every assertion below is relative to it, so a silent
     # upstream change to the pad amount must fail loudly here rather than downstream.
@@ -1793,7 +1793,7 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
         return attention_tuning_spec(req, "gfx942_dense").kernel_spec
 
     def _dense_spec_gfx950(req):
-        return attention_tuning_spec(req, "gfx950_dense_grid_default").kernel_spec
+        return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
     def _req(sq, arch):
         return AttentionRequest(

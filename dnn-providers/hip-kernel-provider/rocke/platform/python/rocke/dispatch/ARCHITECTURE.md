@@ -1226,9 +1226,9 @@ library/dispatch/                         # library-owned kernels
     __init__.py        # registry assembly, dispatch / sweep entry points
     common.py          # request, AttentionTuningSpec, shared gates
     generic.py         # multi-arch unified_2d / unified_3d path labels, d256_decode
-    gfx942_dense.py    # attention_dense (geometry swept by its knob space)
+    gfx942_dense.py    # attention_dense (persistence and tile are knobs)
     gfx942_unified.py  # dense_pipe, unified tuning catalog
-    gfx950_dense.py    # attention_dense tile x persist x wide-DMA variants
+    gfx950_dense.py    # attention_dense_grid / attention_dense_persist (+ wide DMA)
     gfx950_unified.py  # d256 prefill, unified tuning catalog
     gfx1250.py         # wmma_attention_fwd
     axes.py            # attention knob axes and production stacks (data)
@@ -1499,16 +1499,23 @@ outer-knob hooks: it sets `outer_knob = "waves_per_eu"` and the
 names no kernel field. Each space still supplies its own `outer_values`: the
 unified tables in `waves.py`, or values derived from the dense base spec's WPE.
 
-The dense variants are the same shape with `DenseSpace` (whose `base` is the
-variant's default kernel spec for the request) and `make_dense_candidate`; it
-derives from `WavesPerEuSpace` too.
+The dense candidates are the same shape with `DenseSpace` (whose `base` is the
+candidate's default kernel spec for the request) and `make_dense_candidate`; it
+derives from `WavesPerEuSpace` too. A dense candidate fixes only what selects
+its kernel body: on gfx950 the grid and persistent bodies are separate
+algorithms (`attention_dense_grid`, `attention_dense_persist`) with wide DMA a
+second persistent candidate, and the tile is a knob; gfx942 has one
+`attention_dense` candidate with persistence as a knob. `DenseSpace` adds two
+hooks over `KnobSpace`: `derived` recomputes problem fields that follow a knob
+(gfx950 `ragged` follows the tile), and `production` repeats the
+one-knob-at-a-time pass at each `block_m`.
 
 ### 9.3 Attention coverage today
 
 | Candidate | Arch | dtype | Path / kernel | Priority | Registries |
 | --- | --- | --- | --- | --- | --- |
-| `attention_gfx942_dense` | gfx942 | bf16/fp16 | standalone dense prefill; geometry swept (opt-in) | 3 | route, execution |
-| `attention_gfx950_dense_*` (6) | gfx950 | bf16/fp16 | tile x persist x wide-DMA variants (opt-in) | 3 | route, execution |
+| `attention_gfx942_dense` | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs (opt-in) | 3 | route, execution |
+| `attention_gfx950_dense_{grid,persist,persist_widedma}` (3) | gfx950 | bf16/fp16 | grid body, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
 | `attention_gfx942_dense_pipe` | gfx942 | fp16 | transposed-x8 ring flash, 2D path | 5 | route |
 | `attention_gfx950_d256` | gfx950 | bf16 | D256 2D prefill | 5 | route |
 | `attention_d256_decode` | gfx942, gfx950 | bf16 | D256 3D split-KV decode | 5 | route |
@@ -1726,8 +1733,9 @@ config_key = sha256(json({v: TUNING_ID_VERSION, abi, arch, path, variant_id,
 - **Per-problem defaults are recorded.** Knobs are overrides of the
   variant's default spec. Where that default is resolved per problem (gfx942
   dense picks persistence from the work size and `waves_per_eu` from the
-  dtype), the field is always recorded with its effective value, so the same
-  knobs give the same `config_key` on every problem.
+  dtype; gfx950 wide DMA starts at 128×64 where 256×64 is ragged), the field
+  is always recorded with its effective value, so the same knobs give the same
+  `config_key` on every problem.
 - **Replay** is `(request, spec_id, tuning_id, knobs)`. The request carries
   `tuning_knobs`, validated when the request is built (`normalize_knobs`: a
   non-scalar value is a `TypeError` naming the knob). The candidate rebuilds
@@ -1967,7 +1975,7 @@ tuned `compv4` + `cshuffle` candidate at twice the tile. The test pins both the
 inequality and the specific knobs that differ.
 
 **Registering a kernel makes it reachable; it does not make it the default.**
-Both attention additions are opt-in, matching the `attention_gfx950_dense`
+Both attention additions are opt-in, matching the gfx950 dense
 precedent. gfx1250 fp16 prefill still routes to `unified_2d`, which is the path
 its benchmark exercises — flipping that on the strength of a registration would
 swap a measured path for an unmeasured one. Conv gfx1250 is the opposite case

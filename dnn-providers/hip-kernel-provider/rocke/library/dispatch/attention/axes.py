@@ -124,9 +124,9 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
 # from the request; variant fields are fixed by the registered dense candidate
-# (gfx950: tile x persist x wide-DMA; gfx942 registers one candidate and sweeps
-# its geometry); ``waves_per_eu`` is walked by its own loop, as on the unified
-# paths.
+# (gfx950: the grid or persistent body, and wide DMA under persistent; gfx942
+# registers one candidate and sweeps persistence too); ``waves_per_eu`` is
+# walked by its own loop, as on the unified paths. The tile is swept on both.
 DENSE_PROBLEM_FIELDS = frozenset(
     {
         "batch",
@@ -148,7 +148,7 @@ DENSE_PROBLEM_FIELDS = frozenset(
     }
 )
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"block_m", "block_n", "persistent", "wide_lds_dma"}),
+    "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
 }
 DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
@@ -182,6 +182,10 @@ _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
 _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
+# The gfx950 bodies implement 128- and 256-row query tiles (see
+# supports_attention_dense); the validator prunes block_n the tile cannot take.
+_GFX950_BLOCK_M = (128, 256)
+_GFX950_BLOCK_N = (32, 64, 128)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
@@ -193,13 +197,16 @@ def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
 # One axis per spec field. The PV scheduling knobs lead as enablers: IGLP needs
 # the manual fence and sched_group template off, and a manual one needs IGLP
 # off, so each can only be reached once the others are decided. Then
-# prerequisites-first: persist_decode's gqa_pair modes need an exact
+# prerequisites-first: the tile sets the query-block count the CTA counts and
+# decodes are exact for, persist_decode's gqa_pair modes need an exact
 # num_persistent, interleave is read only on the resolved qb_major decode, and
 # the fence mask / DS-read count / rescale threshold follow their parents.
 _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_sched_fence", None, (True, False), enabler=True),
     _values("pv_sched_group_template", None, (True, False), enabler=True),
     _values("iglp_mode", None, (-1, 0, 1), enabler=True),
+    _choices_axis("block_m", _GFX950_BLOCK_M),
+    _choices_axis("block_n", _GFX950_BLOCK_N),
     _num_persistent_axis(_GFX950_NUM_PERSISTENT_POLICIES),
     _values(
         "persist_decode",
@@ -223,8 +230,8 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("o_store_width", 4, (1, 2, 4)),
 )
 
-# gfx942 registers one dense candidate, so its geometry (persistent, block_m,
-# block_n) is swept here rather than fixed by a variant. The LDS-saving knobs
+# gfx942 registers one dense candidate, so persistent is a knob here as well
+# as the tile (block_m, block_n). The LDS-saving knobs
 # lead as enablers: they can bring an otherwise over-budget tile under the LDS
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
 # prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads

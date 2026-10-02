@@ -44,6 +44,11 @@ from . import (
     gfx950_unified,
     gfx1250,
 )
+from .candidate import (
+    DENSE_ALGORITHM,
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
+)
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -353,7 +358,7 @@ def dispatch_attention(
     Unpinned (``algorithm`` / ``spec_id`` left at ``auto``) it returns the
     unified 2D-tiled or 3D split-KV path, a pure function of the problem whose
     CTA geometry the instance builder resolves (see :mod:`.common`). A tuned
-    kernel -- a dense variant or a unified tuning geometry -- is selected only
+    kernel -- a dense candidate or a unified tuning geometry -- is selected only
     by pinning ``algorithm`` + ``spec_id``; ``tuning_id`` (with the knobs
     recorded next to it in ``tuning_knobs``) then names one configuration of
     it (``auto``: its default spec).
@@ -389,6 +394,9 @@ def dispatch_attention(
 
 
 __all__ = [
+    "DENSE_ALGORITHM",
+    "DENSE_GRID_ALGORITHM",
+    "DENSE_PERSIST_ALGORITHM",
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
     "ATTENTION_EXECUTION_REGISTRY",

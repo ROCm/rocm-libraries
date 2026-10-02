@@ -131,8 +131,15 @@ catalogs live in the arch modules.
 | Family | Registered candidates | Module | Fixed per candidate |
 |---|---|---|---|
 | Unified tiled tuning | `AttentionGeometryVariant` catalog: 109 on gfx950, 75 on gfx942 | `gfx{942,950}_unified.py` | path, codepath, builder, tile policy, warps, rows per warp, segments, compile backend |
-| gfx950 dense | six `Gfx950DenseVariant`s (tile x persist x wide DMA) | `gfx950_dense.py` | `block_m` / `block_n`, `persistent`, `wide_lds_dma` |
-| gfx942 dense | one candidate | `gfx942_dense.py` | nothing; its geometry is swept |
+| gfx950 dense | three `Gfx950DenseVariant`s under two algorithms: `attention_dense_grid` (grid) and `attention_dense_persist` (persist, persist + wide DMA) | `gfx950_dense.py` | `persistent`, `wide_lds_dma`; the tile is a knob |
+| gfx942 dense | one candidate (`attention_dense`) | `gfx942_dense.py` | nothing; persistence and the tile are knobs |
+
+The gfx950 grid and persistent bodies are separate algorithms because they
+serve different requests (only the grid body runs a moving bottom-right causal
+diagonal), and wide DMA exists only on the persistent body. Wide DMA has no
+ragged path, so where the 256×64 tile would be ragged its default starts at
+128×64; it records `block_m` in every id so one id names one tile on every
+problem.
 
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the
@@ -272,7 +279,8 @@ count is positive and `sweep_space(req)` otherwise.
 
 Selection pins a spec the same way for dense and unified:
 
-- `algorithm` (`attention_dense` or `unified_tuning`) plus `spec_id` pin a
+- `algorithm` (`attention_dense` on gfx942, `attention_dense_grid` or
+  `attention_dense_persist` on gfx950, `unified_tuning`) plus `spec_id` pin a
   candidate. An opt-in candidate admits a request only when both name it (its
   refusal names both), so an unpinned request always routes to the unified
   path.
@@ -363,8 +371,9 @@ candidate.sweep_space / sample_space
   inert rule there (it names the knob, so canonicalization can drop it). List
   it in `DENSE_UNTUNABLE_KNOBS` instead if it has nothing to sweep.
 - **New geometry:** add an `AttentionGeometryVariant` to the arch's unified
-  catalog, or a `Gfx950DenseVariant` to the gfx950 dense tuple. gfx942 dense
-  geometry values live in `_GFX942_BLOCK_M` / `_GFX942_BLOCK_N`.
+  catalog. Dense tile values are knobs: `_GFX950_BLOCK_M` / `_GFX950_BLOCK_N`
+  and `_GFX942_BLOCK_M` / `_GFX942_BLOCK_N`. A new gfx950 dense body is a
+  `Gfx950DenseVariant` with its own algorithm.
 
 In every case the coverage tests in
 `tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
@@ -454,8 +463,8 @@ from the gfx942 spec rather than from a free field.
   knob space).
 - `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
   flash path and the finite tuning geometry catalog.
-- `gfx950_dense.py` — gfx950 dense-kernel candidates (frozen tile × persist ×
-  wide-DMA variants).
+- `gfx950_dense.py` — gfx950 dense-kernel candidates (the grid body, the
+  persistent body, and the persistent body with wide DMA; the tile is a knob).
 - `gfx950_unified.py` — gfx950 unified-kernel candidates: the D256 prefill fast
   path and the finite tuning geometry catalog.
 - `axes.py` — the tuning space as data: knob axes, codepath knobs,

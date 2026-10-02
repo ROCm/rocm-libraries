@@ -187,8 +187,8 @@ spec = Gfx950AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
-Through the dispatcher (opt-in: pin the variant by `spec_id`, and optionally a
-swept point by `tuning_id`):
+Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
+and optionally a swept point by `tuning_id`):
 
 ```python
 from dispatch.attention import AttentionRequest, attention_tuning_spec
@@ -198,23 +198,31 @@ req = AttentionRequest(
     batch=1, nhead_q=128, nhead_k=8, seqlen_q=8192, seqlen_k=8192,
     hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
 )
-tuning = attention_tuning_spec(req, "gfx950_dense_persist_widedma_default")
+tuning = attention_tuning_spec(req, "gfx950_dense_persist_widedma")
 # tuning.tuning_id replays this point; tuning.kernel_spec is the dense spec.
 run_attention_dense_torch(spec=tuning.kernel_spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 ```
 
-The six variants are `gfx950_dense_{grid,persist,persist_widedma}_{default,bm128}`
-(256×64 or 128×64 tile). Nothing is chosen for the caller: an unpinned request
-keeps the unified 2D/3D path. Knobs such as `num_persistent`, `persist_decode`
-(`gqa_pair` / `gqa_pair_2phase`), `interleave` and `waves_per_eu` are spec
-fields; set them with `tuning_spec_with_knobs(req, spec_id, knobs)` or replay a
-swept `tuning_id`. The kernel name exposes the persistent decisions
-through `wdma`, `gqapair`, or `gqapair2` tokens.
+There are two algorithms, one per body, and three candidates:
+
+| `algorithm` | `spec_id` | Body |
+|---|---|---|
+| `attention_dense_grid` | `gfx950_dense_grid` | one CTA per query block and head |
+| `attention_dense_persist` | `gfx950_dense_persist` | persistent grid-stride |
+| `attention_dense_persist` | `gfx950_dense_persist_widedma` | persistent with wide LDS DMA (D128, `block_n=64`) |
+
+Nothing is chosen for the caller: an unpinned request keeps the unified 2D/3D
+path. The tile (`block_m` 128 or 256, `block_n`) and knobs such as
+`num_persistent`, `persist_decode` (`gqa_pair` / `gqa_pair_2phase`),
+`interleave` and `waves_per_eu` are spec fields of the candidate; set them with
+`tuning_spec_with_knobs(req, spec_id, knobs)` or replay a swept `tuning_id`.
+The kernel name exposes the persistent decisions through `wdma`, `gqapair`, or
+`gqapair2` tokens.
 
 For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
 (exported by `dispatch.attention`). With unequal Q/K lengths, only the grid
-variants of this standalone gfx950 dense path admit it; the persistent variants
-reject it. Equal lengths preserve the equivalent top-left path.
+algorithm of this standalone gfx950 dense path admits it; the persistent
+candidates reject it. Equal lengths preserve the equivalent top-left path.
 `algorithm="auto"` still uses the existing unified 2D/3D paths or their eligible
 dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
 each sequence's runtime KV/query length difference. The standalone gfx942 dense

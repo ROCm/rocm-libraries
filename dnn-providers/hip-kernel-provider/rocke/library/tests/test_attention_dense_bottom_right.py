@@ -207,7 +207,7 @@ def test_equal_length_dispatch_normalizes_to_top_left_body():
                 mask_type=mask_type,
                 dtype="bf16",
             ),
-            "gfx950_dense_grid_default",
+            "gfx950_dense_grid",
         ).kernel_spec
 
     top_left = dispatched(1)
