@@ -224,9 +224,10 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         do_validation,
                                         init_sink_value,
                                         pack_gqa,
-                                        block_mask_str,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr, // selected_kernel_name
+                                        block_mask_str);
 }
 
 int main(int argc, char* argv[])

@@ -272,10 +272,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int do_validation,
                         int init_sink_value,
                         int pack_gqa,
-                        std::string block_mask_str,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        // Defaulted and placed last on purpose: callers that predate block
+                        // sparsity, including new tests added upstream, keep compiling
+                        // without having to be updated.
+                        std::string block_mask_str = "none")
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 

@@ -222,7 +222,7 @@ const ck_tile::stream_config stream_config{
 // trailing args: do_validation, init_sink_value, pack_gqa, block_mask_str
 #define COMMON_ARGS_INIT(init)                                                               \
     init, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, 1, \
-        "none", stream_config
+        stream_config
 
 #define COMMON_ARGS COMMON_ARGS_INIT(init_method)
 
@@ -719,7 +719,6 @@ TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
         0,
         1,      // init_sink
         0,      // pack_gqa
-        "none", // block_mask_str
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -766,7 +765,6 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
         0,
         1,      // init_sink
         0,      // pack_gqa
-        "none", // block_mask_str
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -812,7 +810,6 @@ TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
         0,
         1,      // init_sink
         0,      // pack_gqa
-        "none", // block_mask_str
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -1773,9 +1770,11 @@ TEST_P(BlockSparsity, DataTypeConfig)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         1,              // do_validation
         0,              // init_sink_value
-        1,              // pack_gqa
-        block_mask_str, // block_mask_str
-        stream_config);
+        1, // pack_gqa
+        stream_config,
+        std::nullopt, // json
+        nullptr,      // selected_kernel_name
+        block_mask_str);
     CHECK_RESULT(result);
 }
 
@@ -1825,7 +1824,6 @@ TEST_P(SinkWindowMask, DataTypeConfig)
         1,         // do_validation
         init_sink, // init_sink_value
         1,         // pack_gqa
-        "none",    // block_mask_str
         stream_config);
     CHECK_RESULT(result);
 }
