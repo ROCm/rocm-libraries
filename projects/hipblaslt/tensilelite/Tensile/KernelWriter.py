@@ -7181,6 +7181,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # How many unrolled loop bodies were emitted
+                               # (states.unrollLoopCopies). HalfPLR sets this to 3.
+                               # SchedulingKnobHeuristics logs an optimistic ds-read
+                               # throttle from it; DsReadThrottleLatency is unchanged.
+                               "UnrollLoopCopies": int(self.states.unrollLoopCopies),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
                                "EnableSwInstructionPrefetchAbs": swpAbsEnable,

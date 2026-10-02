@@ -115,6 +115,11 @@ struct PassFeatureConfig {
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
+        /// Extra cycles kept between an after-barrier and the before-side
+        /// ds_loads when exclusive overlap uses gap placement. Converted to
+        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
+        int tensorLoadDsLoadGapCycles = 64;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).

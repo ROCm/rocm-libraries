@@ -101,6 +101,7 @@
     X(TDMLoadWaveSync, bool)                      \
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
+    X(UnrollLoopCopies, int)                      \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
@@ -126,7 +127,8 @@
     X(DsReadThrottleLatency, int, -1)                                 \
     X(DsReadPerCap, int, -1)                                          \
     X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                   \
+    X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
 /**
