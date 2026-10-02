@@ -35,6 +35,8 @@ Inclusive range for params tuning, edit these to adjust tuning grid range.
 BLOCK_SIZES = [64, 128, 256, 512, 1024]
 IPT = [1, 2, 4, 8, 16]
 THRESHOLD = [4, 8, 12, 16]
+COUNT_FUNC = ['count_equal_to', 'count_is_percent_of_size']
+COUNT = [1, 6, 10, 14, 25, 50, 100]
 
 class Tuner(BaseTuner):
     @classmethod
@@ -49,11 +51,16 @@ class Tuner(BaseTuner):
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         params['threshold'] = THRESHOLD
+        params['count_func'] = COUNT_FUNC
+        params['count'] = COUNT
         return params
 
-    def _get_restrictions(self, types):
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         def validate(params):
-            return True
+            count = params['count']
+            count_func = params['count_func']
+
+            return (count >= 50 and count_func == 'count_is_percent_of_size') or (count <= 25 and count_func == 'count_equal_to')
 
         return validate
 

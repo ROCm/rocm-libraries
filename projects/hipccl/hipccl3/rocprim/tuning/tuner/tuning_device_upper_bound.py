@@ -27,9 +27,9 @@ sys.path.append(f"{os.path.dirname(__file__)}/../")
 sys.path.append(f"{os.path.dirname(__file__)}")
 
 from tuner.base_tuner import TunerArgs
-from tuning_device_binary_search import Tuner as TunerDeviceBinarySearch
+from tuning_device_binary_search import Tuner
 
-class Tuner(TunerDeviceBinarySearch):
+class UpperBoundTuner(Tuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name='device_upper_bound')
@@ -38,5 +38,4 @@ class Tuner(TunerDeviceBinarySearch):
         super().__init__(args)
 
 if __name__ == "__main__":
-    Tuner.cli()
-    
+    UpperBoundTuner.cli()

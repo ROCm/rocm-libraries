@@ -4,6 +4,5 @@
 #include "benchmark_device_adjacent_difference.hpp"
 {% endblock %}
 
-{% block benchmark_type %}
-    using benchmark_type = device_adjacent_difference_benchmark<value_type, true, common::api_variant::in_place, config>;
+using benchmark_type = device_adjacent_difference_benchmark<value_type, true, common::api_variant::in_place, config>;
 {% endblock %}

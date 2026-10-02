@@ -31,10 +31,8 @@ from contextlib import contextmanager
 import re
 import traceback
 from utils import Parser
-from glob import glob
 
 from tuner.base_tuner import TunerArgs
-from utils.utils import BASE_DIR
 
 
 @contextmanager
@@ -66,16 +64,38 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
 
 def get_available_algorithms() -> List[str]:
     """Return list of supported tuning algorithms."""
-    exclude = {
-        'device_partition',
-        'device_select',
-    }
-    out = []
-    for f in glob(f'{BASE_DIR}/tuner/tuning_*'):
-        algo_name = re.sub(r'^tuning_|\.py', '', os.path.basename(f))
-        if algo_name not in exclude:
-            out.append(algo_name)
-    return sorted(out)
+    return sorted([
+        "device_merge",
+        "device_adjacent_find",
+        "device_adjacent_difference",
+        "device_adjacent_difference_inplace",
+        "device_binary_search",
+        "device_lower_bound",
+        "device_upper_bound",
+        "device_search_n",
+        "device_merge_sort_block_merge",
+        "device_merge_sort_block_sort",
+        "device_radix_sort_block_sort",
+        "device_partition_flag",
+        "device_partition_predicate",
+        "device_partition_three_way",
+        "device_partition_two_way_flag",
+        "device_partition_two_way_predicate",
+        "device_select_predicated_flag",
+        "device_select_unique_by_key",
+        "device_select_flag",
+        "device_select_predicate",
+        "device_select_unique",
+        "device_radix_sort_onesweep",
+        "device_segmented_radix_sort",
+        "device_scan",
+        "device_scan_by_key",
+        "device_reduce",
+        "device_segmented_reduce",
+        "device_reduce_by_key",
+        "device_histogram"
+        # Add new algorithms here
+    ])
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
     """Filter algorithms based on regex pattern."""

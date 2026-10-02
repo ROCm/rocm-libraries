@@ -27,9 +27,9 @@ sys.path.append(f"{os.path.dirname(__file__)}/../")
 sys.path.append(f"{os.path.dirname(__file__)}")
 
 from tuner.base_tuner import TunerArgs
-from tuning_device_adjacent_difference import Tuner as TunerDeviceAdjacentDifference
+from tuning_device_adjacent_difference import Tuner
 
-class Tuner(TunerDeviceAdjacentDifference):
+class InplaceTuner(Tuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name='device_adjacent_difference_inplace')
@@ -38,4 +38,4 @@ class Tuner(TunerDeviceAdjacentDifference):
         super().__init__(args)
 
 if __name__ == "__main__":
-    Tuner.cli()
+    InplaceTuner.cli()
