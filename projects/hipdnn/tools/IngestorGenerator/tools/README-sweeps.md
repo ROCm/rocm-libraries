@@ -90,8 +90,10 @@ probe_env: null
 ```
 
 Get the engine's ID from the installed tree, not from benchmark output:
-`<install>/bin/hipdnn_list_engines --plugin-dir <install>/lib/hipdnn_plugins/engines`
-prints one `  <UED name> (0x<unsigned hex ID>)` line per engine, for example
+`LD_LIBRARY_PATH=<install>/lib <install>/bin/hipdnn_list_engines --plugin-dir
+<install>/lib/hipdnn_plugins/engines` (without `LD_LIBRARY_PATH` it cannot load
+`libhipdnn_backend.so`; the driver sets it for its own discovery run) prints one
+`  <UED name> (0x<unsigned hex ID>)` line per engine, for example
 `hipkernel:Gfx950AttentionDense (0x89C9139111D7C3A5)`. dnn-benchmark labels a row with
 the registered name when its bindings resolve one, else `engine_<hex>` of the ID read as
 signed int64, so the same engine appears as `engine_-0x7636ec6eee283c5b`. The driver
@@ -157,8 +159,15 @@ against `min_served`; reference rows and other-engine rows cannot satisfy it. An
 row reporting `plugin_path` is attributed to the arm only when, with both paths
 resolved, it names the arm's `lib/hipdnn_plugins/engines`
 directory itself or a plugin directly inside it; a sibling tree or a deeper descendant
-makes that graph ambiguous. Failures stay in the outcome ledger, and benchmark
-`graph_name` is the graph JSON name or file stem.
+makes that graph ambiguous. Failures stay in the outcome ledger.
+
+Each graph's identity (`graph_name` in the ledger, and the `name` the driver writes into
+its staged copy, which the benchmark reports back) is the graph JSON `name`, or the file
+stem when there is none. When several files in one corpus share that name, for example
+two sources shipping the same shape, each of them is keyed by its corpus-relative path
+(`hipkittens/a.json`) instead; `source_name` keeps the original name. A corpus where a
+graph name equals another graph's relative path cannot be told apart and is refused as
+invalid configuration.
 
 With correctness enabled, every claimed served graph needs a real comparison against the
 declared independent reference with `passed: true`, `execution_success: true` and

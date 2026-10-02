@@ -309,7 +309,6 @@ def load_config(path):
 def corpus_inventory(corpus, exclusions):
     root = Path(corpus["path"])
     inventory = []
-    names = set()
     for path in sorted(root.rglob("*.json")):
         try:
             graph = read_json(path)
@@ -319,9 +318,6 @@ def corpus_inventory(corpus, exclusions):
                 raise ValueError("expected a graph mapping with tensors")
             name = graph.get("name", path.stem)
             _text(name, "graph name")
-            if name in names:
-                raise ValueError(f"ambiguous duplicate graph name {name!r}")
-            names.add(name)
             tensor_names = {str(t.get("name", "")).lower() for t in graph["tensors"]}
             if exclusions != "none" and tensor_names & set(exclusions):
                 raise ValueError(
@@ -335,6 +331,7 @@ def corpus_inventory(corpus, exclusions):
             inventory.append(
                 {
                     "graph_name": name,
+                    "source_name": name,
                     "source_path": str(path),
                     "relative_path": str(path.relative_to(root)),
                     "sha256": file_hash(path),
@@ -344,6 +341,21 @@ def corpus_inventory(corpus, exclusions):
             )
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             raise ConfigError(f"{path}: {exc}") from exc
+    # graph_name is the identity the benchmark reports back (staging writes it into
+    # each graph's `name`), so it has to be unique. Sources often reuse a name (two
+    # corpora shipping the same shape), so a name shared by several files is replaced
+    # by each file's corpus-relative path; a unique name is kept as is.
+    shared = Counter(g["source_name"] for g in inventory)
+    for graph in inventory:
+        if shared[graph["source_name"]] > 1:
+            graph["graph_name"] = Path(graph["relative_path"]).as_posix()
+    keys = Counter(g["graph_name"] for g in inventory)
+    clashes = sorted(g["relative_path"] for g in inventory if keys[g["graph_name"]] > 1)
+    if clashes:
+        raise ConfigError(
+            f"{root}: graphs {clashes} cannot be told apart: a graph name equals "
+            "another graph's corpus-relative path; rename one"
+        )
     if len(inventory) != corpus["expected_graphs"]:
         raise ConfigError(
             f"{root}: {len(inventory)} graphs, expected {corpus['expected_graphs']}"

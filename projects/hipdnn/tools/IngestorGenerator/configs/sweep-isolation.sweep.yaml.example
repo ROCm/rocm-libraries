@@ -28,7 +28,8 @@ arch: gfx950
 
 # engine_ued_name is what the INSTALLED ENGINE registry advertises; discovery resolves
 # it to a numeric engine ID. List both with
-#   <install>/bin/hipdnn_list_engines --plugin-dir <install>/lib/hipdnn_plugins/engines
+#   LD_LIBRARY_PATH=<install>/lib <install>/bin/hipdnn_list_engines \
+#     --plugin-dir <install>/lib/hipdnn_plugins/engines
 # which prints e.g. `hipkernel:Gfx950AttentionDense (0x89C9139111D7C3A5)`.
 # engine_name is a label of that engine, matched exactly (a prefix match would credit a
 # sibling engine's work to this one): the UED name, or engine_<hex ID> with the ID

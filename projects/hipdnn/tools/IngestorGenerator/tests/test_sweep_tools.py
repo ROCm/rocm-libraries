@@ -987,3 +987,63 @@ class TestRealBenchmarkRows:
             ]
 
         assert self.failed(self.evaluate(tmp_path, edit=mismatch)) == {"correctness"}
+
+
+class TestCorpusGraphIdentity:
+    """Graphs are keyed by a unique identity: the graph's own name, or its
+    corpus-relative path when several files in the corpus share that name."""
+
+    @staticmethod
+    def stage(root, graphs):
+        for relative, name in graphs.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(dict(_graph(0), name=name)))
+
+    def inventory(self, root, count):
+        corpus = {"name": "c", "path": str(root), "expected_graphs": count}
+        return _sweep_module().corpus_inventory(corpus, "none")
+
+    def test_two_sources_sharing_a_graph_name_are_two_graphs(self, tmp_path):
+        """942:S6-10: hipkittens and pytorch both ship
+        bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal."""
+        shared = "bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal"
+        self.stage(
+            tmp_path,
+            {
+                "hipkittens/a.json": shared,
+                "pytorch/a.json": shared,
+                "pytorch/b.json": "unique_graph",
+            },
+        )
+        inventory = self.inventory(tmp_path, 3)
+        assert {g["graph_name"]: g["source_name"] for g in inventory} == {
+            "hipkittens/a.json": shared,
+            "pytorch/a.json": shared,
+            "unique_graph": "unique_graph",
+        }
+
+    def test_graphs_that_cannot_be_told_apart_are_refused(self, tmp_path):
+        """A name equal to another graph's fallback key leaves two graphs one key."""
+        self.stage(
+            tmp_path,
+            {"x/g.json": "dup", "y/g.json": "dup", "z.json": "x/g.json"},
+        )
+        with pytest.raises(_sweep_module().ConfigError, match="cannot be told apart"):
+            self.inventory(tmp_path, 3)
+
+    @_needs_posix_exec
+    def test_a_sweep_measures_both_graphs_of_a_shared_name(self, sweep):
+        """End to end: the benchmark reports the key staging wrote, so each graph's
+        row is attributed to its own source."""
+        for source in ("hipkittens", "pytorch"):
+            (sweep.corpus / source).mkdir()
+            (sweep.corpus / source / "a.json").write_text(json.dumps(_graph(7)))
+        config = json.loads(sweep.config_path.read_text())
+        config["corpora"][0]["expected_graphs"] = 5
+        sweep.config_path.write_text(json.dumps(config))
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        ledger = json.loads((sweep.root / "results" / "outcomes.json").read_text())
+        served = {e["graph_name"] for e in ledger if e["outcome"] == "served"}
+        assert {"hipkittens/a.json", "pytorch/a.json"} <= served
