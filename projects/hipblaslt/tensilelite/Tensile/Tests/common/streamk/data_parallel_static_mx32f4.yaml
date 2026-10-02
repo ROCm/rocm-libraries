@@ -20,7 +20,7 @@ GlobalParameters:
   MXScaleFormat: 1
 
 BenchmarkProblems:
-  - # MXFP4 SGEMM, StreamK force DP-only persistent mode
+  - # MXFP4 SGEMM, DataParallel/StaticGrid persistent mode
     - # ProblemType
       OperationType: GEMM
       DataType: F4
@@ -39,7 +39,7 @@ BenchmarkProblems:
       UseBias: 1
       BiasDataTypeList: [s]
 
-    - # Force StreamK to use persistent DP only, with no SK region
+    - # Process complete tiles with DataParallel/StaticGrid
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -71,8 +71,8 @@ BenchmarkProblems:
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
         - SourceSwap: [True]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

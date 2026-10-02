@@ -45,7 +45,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - WorkGroupMapping: [1]
         - MIArchVgpr: [False]
         - UseSubtileImpl: [True, False]
