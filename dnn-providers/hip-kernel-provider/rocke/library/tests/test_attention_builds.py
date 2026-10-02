@@ -23,6 +23,7 @@ All tests are pure codegen (no GPU, no subprocess).
 
 from __future__ import annotations
 
+import re
 import unittest
 
 import pytest
@@ -141,57 +142,30 @@ _KERNEL_RESOURCE_BUDGETS = {
     },
 }
 
-# Kernels that fit with no spill on the toolchain they were tuned with but spill on
-# a newer comgr. Unlike ``_KERNEL_RESOURCE_BUDGETS`` this is not an accepted trade:
-# the spill costs measured time, so the kernel does not pass on that toolchain. It
-# is reported as an expected failure that names the toolchain and the cost, while
-# every older toolchain keeps the strict 0 B budget. The entry is strict: it fails
-# if the spill grows past ``max_scratch_bytes`` or if a toolchain at or above
-# ``first_rocm`` stops spilling (the entry is then stale and must be removed).
-#
-# gfx950 fp16/bf16 D128 tiled-2d (shipped geometry): the ROCm 10.1 comgr
-# (TheRock 10.1.0a20260822, LLVM 23 0bace190) builds it at 254 VGPR, 0 B scratch.
-# The ROCm 10.2.0 comgr (hipDNN image 2026-09-26, LLVM 24 4f43f474) builds the same
-# IR at 256 VGPR with 21 spilled VGPRs (88 B). On MI355X the LLVM 24 binary is about
-# 10% slower (bf16 S=8192 causal: 1.649 ms vs 1.494 ms; S=2048: 0.194 vs 0.179 ms).
-_TOOLCHAIN_SPILL_REGRESSIONS = {
-    name: {
-        "first_rocm": (10, 2),
-        "max_scratch_bytes": 96,
-        "reason": "LLVM 24 (ROCm 10.2 comgr) spills 88 B on this kernel, about "
-        "10% slower than the 0 B LLVM 23 build",
-    }
-    for name in (
-        "rocke_uattn2d_tiled_d128_b64_t128_h32kv8_fp16_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_ksb_smxil1",
-        "rocke_uattn2d_tiled_d128_b64_t128_h32kv8_bf16_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_ksb_smxil1",
-    )
-}
+# rocKE emits LLVM IR in one of ``rocke.core.lower_llvm.LLVM_FLAVORS``. A comgr
+# built from a newer LLVM still compiles that IR (flavor resolution clamps an
+# unknown newer ROCm release to the newest flavor), but rocKE does not support that
+# pairing yet: no flavor targets it and none of the budgets below were tuned with
+# it, so a budget result there says nothing about rocKE. The compiler's LLVM major
+# is read from the code object it produced, whose ``.comment`` section carries the
+# producer (``AMD clang version N...`` / ``Linker: AMD LLD N...``), so the check
+# follows the comgr that actually built the kernel, not a ROCm release number.
+_PRODUCER_LLVM_MAJOR_RE = re.compile(rb"(?:clang version|LLD) (\d+)\.")
 
 
-def _check_toolchain_spill_regression(kernel_name: str, scratch: int, arch: str):
-    """Apply ``_TOOLCHAIN_SPILL_REGRESSIONS`` to ``kernel_name``.
+def _unsupported_toolchain_reason(hsaco: bytes):
+    """Skip reason when ``hsaco`` was built by an LLVM newer than rocKE's newest
+    flavor, else ``None`` (including when the producer cannot be read)."""
+    from rocke.core.lower_llvm import LLVM_FLAVORS
 
-    Returns without effect when no entry applies to the resolved comgr, so the
-    caller's strict budget decides. Otherwise xfails a spill within the recorded
-    bound and fails a larger one or a vanished one."""
-    entry = _TOOLCHAIN_SPILL_REGRESSIONS.get(kernel_name)
-    if entry is None:
-        return
-    from rocke.runtime.comgr import resolved_lib_path, resolved_lib_rocm_version
-
-    rocm = resolved_lib_rocm_version()
-    if rocm is None or rocm < entry["first_rocm"]:
-        return
-    toolchain = f"comgr ROCm {rocm[0]}.{rocm[1]} ({resolved_lib_path()})"
-    assert scratch > 0, (
-        f"{kernel_name} no longer spills on {arch} with {toolchain}; remove its "
-        f"_TOOLCHAIN_SPILL_REGRESSIONS entry"
-    )
-    assert scratch <= entry["max_scratch_bytes"], (
-        f"{kernel_name} spills {scratch} B on {arch} with {toolchain}, past the "
-        f"{entry['max_scratch_bytes']} B recorded for this toolchain regression"
-    )
-    pytest.xfail(f"{kernel_name} on {arch} with {toolchain}: {entry['reason']}")
+    m = _PRODUCER_LLVM_MAJOR_RE.search(hsaco)
+    if m is None:
+        return None
+    newest = LLVM_FLAVORS[-1]
+    major = int(m.group(1))
+    if major <= int(newest[len("llvm") :]):
+        return None
+    return f"unsupported toolchain: comgr LLVM {major} > newest rocKE flavor {newest}"
 
 
 # Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
@@ -225,6 +199,10 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
       ``min_waves_per_simd`` we also assert the static multi-limiter occupancy stays
       at or above that floor.
 
+    The scratch and occupancy budgets are skipped when the code object was
+    built by an LLVM newer than rocKE's newest flavor (see
+    ``_unsupported_toolchain_reason``); the LDS cap is checked regardless.
+
     Resource fields come from ``group_segment_fixed_size`` /
     ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
     (present in any ROCm image; no GPU). Skips only if readelf is unavailable."""
@@ -254,6 +232,12 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
         f"-- comgr codegen rejection at larger tiles / seq"
     )
+    unsupported = _unsupported_toolchain_reason(hsaco)
+    if unsupported:
+        pytest.skip(
+            f"{unsupported}; {name} on {arch} not held to its resource budget "
+            f"(scratch {res.scratch_bytes} B, VGPR {res.vgpr_count})"
+        )
     budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
     # Register overflow does not fail the compile -- it spills. Scratch use above
     # the kernel's budget (0 unless it is a known occupancy-bound kernel) is a
@@ -261,7 +245,6 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     scratch = res.scratch_bytes
     if scratch is not None:
         max_scratch = budgets.get("max_scratch_bytes", 0)
-        _check_toolchain_spill_regression(kernel_name, scratch, arch)
         assert scratch <= max_scratch, (
             f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
             f"over its {max_scratch} B budget -- register over-subscription; kernel "
@@ -4101,21 +4084,81 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
 
 
+def _budget_check_with_producer(producer: bytes, *, scratch: int, kernel_name=""):
+    """Run ``_assert_resources_fit`` on a stand-in code object whose ``.comment``
+    names ``producer``, with the readelf analysis stubbed to report ``scratch``
+    bytes of scratch at 256 VGPR and no LDS."""
+    import sys
+    from types import SimpleNamespace
+    from unittest import mock
+
+    res = SimpleNamespace(lds_bytes=0, scratch_bytes=scratch, vgpr_count=256)
+    art = SimpleNamespace(hsaco=b"\x7fELF\x00" + producer + b"\x00")
+    with mock.patch(
+        "rocke.analysis.isa.analyze_hsaco",
+        return_value=SimpleNamespace(resources=res),
+    ), mock.patch.object(sys.modules[__name__], "_SEEN_KERNEL_NAMES", set()):
+        _assert_resources_fit(art, arch="gfx950", kernel_name=kernel_name)
+
+
+def _newest_flavor_and_major():
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    newest = LLVM_FLAVORS[-1]
+    return newest, int(newest[len("llvm") :])
+
+
+def test_resource_budget_skips_on_comgr_llvm_newer_than_newest_flavor():
+    """A code object from an LLVM newer than rocKE's newest flavor is an
+    unsupported pairing: its budget is skipped with a reason naming both."""
+    newest, major = _newest_flavor_and_major()
+    producer = f"Linker: AMD LLD {major + 1}.0.0 (https://github.com/ROCm/llvm-project.git 4f43f474)"
+    want = (
+        f"unsupported toolchain: comgr LLVM {major + 1} > newest rocKE flavor {newest}"
+    )
+    with pytest.raises(pytest.skip.Exception, match=re.escape(want)):
+        _budget_check_with_producer(producer.encode(), scratch=88)
+
+
+@pytest.mark.parametrize(
+    "producer",
+    [
+        "AMD clang version {major}.0.0git (https://github.com/ROCm/llvm-project.git 0bace190)",
+        "",
+    ],
+    ids=["newest_flavor_llvm", "producer_unreadable"],
+)
+def test_resource_budget_stays_strict_on_supported_or_unknown_comgr(producer):
+    """Up to the newest flavor's LLVM, or when the producer cannot be read, a
+    spill fails the budget. The comgr's ROCm release does not change that: the
+    gfx950 D128 tiled-2d kernel spilling 88 B under a ROCm 10.2 comgr fails."""
+    from unittest import mock
+
+    _, major = _newest_flavor_and_major()
+    with mock.patch(
+        "rocke.runtime.comgr.resolved_lib_rocm_version", return_value=(10, 2)
+    ), pytest.raises(AssertionError, match="spills 88 B"):
+        _budget_check_with_producer(
+            producer.format(major=major).encode(),
+            scratch=88,
+            kernel_name="rocke_uattn2d_tiled_d128_b64_t128_h32kv8_bf16_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_ksb_smxil1",
+        )
+
+
 # Module-level so it collects/runs after the class-based budget tests above.
 def test_every_declared_budget_was_exercised():
     """A budget key that matches no built kernel (name drift from a re-tuned
     selector -- these names carry tokens like wpe2 / persist256 / ksring that get
     re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
-    test: every ``_KERNEL_RESOURCE_BUDGETS`` and ``_TOOLCHAIN_SPILL_REGRESSIONS``
-    key must have been handed to ``_assert_resources_fit`` by some test in this run.
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
 
     Skips under a partial selection (``pytest -k``) that builds none of the
     budgeted kernels, so the check is meaningful on a full-file / CI run without
     false-failing an unrelated targeted run."""
     if not _SEEN_KERNEL_NAMES:
         pytest.skip("no budgeted kernels built in this selection")
-    declared = set(_KERNEL_RESOURCE_BUDGETS) | set(_TOOLCHAIN_SPILL_REGRESSIONS)
-    orphaned = declared - _SEEN_KERNEL_NAMES
+    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
     assert (
         not orphaned
     ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
