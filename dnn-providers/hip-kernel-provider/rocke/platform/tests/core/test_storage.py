@@ -63,6 +63,7 @@ def test_scales_use_common_bit_packing(count, block_k, word):
     assert scales.fragment.pack(list(range(1, count + 1))) == (word,)
     assert scales.packing == BitPacking(8)
     assert scales.word_bits == count * 8
+    assert scales.fragment.carrier_bits == count * 8
 
 
 @pytest.mark.parametrize(

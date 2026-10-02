@@ -115,9 +115,14 @@ namespace TensileLite
         return m_value & 0x100000;
     }
 
-    bool Debug::printStreamKLaunchSummary() const
+    bool Debug::printPersistentLaunchSummary() const
     {
         return m_value & 0x200000;
+    }
+
+    bool Debug::printStreamKLaunchSummary() const
+    {
+        return printPersistentLaunchSummary();
     }
 
     bool Debug::printNoSolutionUniformSummationOrder() const
@@ -227,7 +232,7 @@ namespace TensileLite
 
         // StreamK=5 hybrid-mode debug override (-1=respect API, 0=static, 1=dynamic).
         // Non-numeric or out-of-range values are ignored (not silently coerced to 0).
-        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        const char* sk5Force = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         if(sk5Force)
         {
             char* end = nullptr;
@@ -296,7 +301,7 @@ namespace TensileLite
         const char* db2 = std::getenv("TENSILE_DB2");
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
 
-        const char* sk5Force    = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         m_streamK5ForceMode     = -1;
         if(sk5Force)
         {

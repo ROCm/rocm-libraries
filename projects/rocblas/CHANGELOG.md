@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
+### Resolved issues
+
+* Fix incorrect results and out-of-bounds reads from Level 1 ILP64 `dot` and `dotc`, including batched, strided-batched, and `_ex` forms, when a negative increment is wide enough to take the 64-bit increment path and `n` fits the single-block reduction. That path shifted by `(n - 1)` before calling the launcher, which applies the same walk, and the `y` shift tested `incx` rather than `incy`. The offsets are now passed through unshifted.
+
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
