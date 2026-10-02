@@ -192,7 +192,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormBwd.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwd"));
+    _runnableKernels.push_back(_compiledProgram->getKernel("layernormBwd"));
     _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(_localSize),
                                       static_cast<unsigned int>(1),
                                       static_cast<unsigned int>(1));
@@ -204,7 +204,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         HIPDNN_PLUGIN_LOG_INFO("LayernormBwdPlan: parallel");
 
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBiasParallel"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("layernormBwdScaleBiasParallel"));
         _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
@@ -214,7 +214,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
             static_cast<unsigned int>(1),
             static_cast<unsigned int>(1));
 
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBiasReduceSum"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("layernormBwdScaleBiasReduceSum"));
         _runnableKernels[2]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
@@ -226,7 +226,7 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     {
         HIPDNN_PLUGIN_LOG_INFO("LayernormBwdPlan: not parallel");
 
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBias"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("layernormBwdScaleBias"));
         _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
                                           static_cast<unsigned int>(1),
                                           static_cast<unsigned int>(1));
