@@ -42,11 +42,10 @@ Data flow for one workgroup, which owns one ``(q-block, head)`` pair::
         qa_lds[:, r_slice] <- q_lds[:, :d_nope] @ wq_lds^T
     for k_tile in range(n_k_tiles):                          -- latent loop
         kv_lds[:, :r_kv] <- c_kv[page]        [Bk, r_KV]   paged latent
-        ct_lds           <- c_kv[page]^T      [r_KV, Bk]   same loads, scattered
         kv_lds[:, r_kv:] <- k_rope[page]      [Bk, 64]     head-shared RoPE
         S       <- scale * (qa_lds @ kv_lds^T)             one K=576 GEMM
         P       <- online_softmax(mask(S))
-        acc     += P @ ct_lds^T                            latent-space PV
+        acc     += P @ kv_lds[:, :r_kv]                    latent-space PV
     accl_lds <- acc                           [Bq, r_KV]
     for r_slice in range(r_KV / r_KV_tile):                  -- V absorb
         wt_lds <- transpose(W_UK[head, r_slice, d_nope:])  [d_v, r_tile]
@@ -57,15 +56,15 @@ gfx942 constraints that shape the emission:
 
   * **Narrow MFMA only.** CDNA3 has no wide-K ``mfma_f32_16x16x32`` bf16 atom,
     so every GEMM uses ``mfma_f32_16x16x16_bf16`` with a K-step of 16.
-  * **No transpose read.** ``ds_read_*_tr_*`` is gfx950-only, so any B operand
-    that is not already stored as ``[n][k]`` must be transposed on the
-    **store** path: read from global along its contiguous axis with vector
-    loads and scattered into LDS one element at a time. That is why ``ct_lds``
-    exists alongside ``kv_lds`` -- the score GEMM wants ``C`` as ``[key][r]``
-    and the PV GEMM wants it as ``[r][key]``, from the same global loads. The
-    ``W_UK`` V-half gets the same treatment in the epilogue. The Q-absorb
-    B operand needs **no** transpose: ``W_UK[head, r, :d_nope]`` is already
-    stored as ``[r][nope]``, which is exactly ``[n][k]`` for that GEMM.
+  * **No transpose read.** ``ds_read_*_tr_*`` is gfx950-only, so a B operand
+    that is not already stored as ``[n][k]`` must be transposed by hand. The
+    PV GEMM wants ``C`` as ``[r][key]`` while ``kv_lds`` holds it as
+    ``[key][r]`` for the score GEMM; its B operand is gathered from
+    ``kv_lds`` one bf16 per key (a read-path transpose), which beat keeping a
+    second, store-transposed copy. The ``W_UK`` V-half is transposed on the
+    store path in the epilogue. The Q-absorb B operand needs **no** transpose:
+    ``W_UK[head, r, :d_nope]`` is already stored as ``[r][nope]``, which is
+    exactly ``[n][k]`` for that GEMM.
   * **LDS round-trips between GEMMs are mandatory.** The MFMA C decode lands
     a result at ``[m = c_row(lane, reg)][n = n_tile*16 + lane%16]``, the
     transpose of what an A operand read wants, so a register-level handoff
@@ -90,12 +89,7 @@ from rocke.helpers.attention import (
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     safe_inv_l as _safe_inv_l,
 )
-from rocke.helpers.distribution import (
-    TileDistributionEncoding,
-    block_tile_reduce_sync,
-    make_static_distributed_tensor,
-    make_static_tile_distribution,
-)
+from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.spec import SignatureBuilder
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -179,42 +173,40 @@ _SGB_DS_READ = 0x100  # ds_read (LDS load)
 #
 # Emitting a (DS_READ x 2G, MFMA x G) pair every G steps asks the post-RA
 # scheduler for exactly that: a block of reads hoisted above the MFMAs they
-# feed, G steps deep. G must divide ``SCORE_K_ITERS`` evenly -- a remainder
-# leaves the tail steps unhinted and measured worse than any dividing value.
-# G = 12 (three blocks of 36) was the best of the divisors swept; it is a
-# scheduling hint only, so a wrong value costs speed and never correctness.
+# feed, G steps deep. G must divide the per-wave step count evenly -- a
+# remainder leaves the tail steps unhinted and measured worse than any dividing
+# value. The score K reduction is split across waves, so that count is
+# ``SCORE_K_ITERS / num_warps`` (9 at the default geometry), and G = 9 hoists
+# the whole wave's reads in one block. It is a scheduling hint only, so a wrong
+# value costs speed and never correctness.
 #
 # This is mutually exclusive with ``iglp_opt``, which owns the whole-loop
 # schedule. Both of its canned patterns were measured here and both regressed.
-SCORE_SGB_GROUP = 12
+SCORE_SGB_GROUP = 9
 
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
 )
 
-# Cross-lane row reduce matching the 16x16x16 MFMA C layout: within a 16-lane
-# group every lane holds a different column of the same row, so reducing a row
-# is an XOR butterfly over masks 1/2/4/8 (pure register, no LDS, no barrier).
-# ``rocke.helpers.mfma_attention`` has the same encoding but keeps it private,
-# and ``library`` must not import private ``platform`` symbols, so it is
-# re-declared here from the public ``helpers.distribution`` primitives.
-_ROW_REDUCE_ENC = TileDistributionEncoding(
-    Rs=(16,),
-    Hs=((1,),),
-    Ps2RHs_major=((0,),),  # the single (lane) P feeds R (major 0)
-    Ps2RHs_minor=((0,),),
-    Ys2RHs_major=(1,),  # one keep-row Y on the M H-dim (length 1)
-    Ys2RHs_minor=(0,),
-)
-_ROW_REDUCE_DIST = make_static_tile_distribution(_ROW_REDUCE_ENC)
-
 
 def _row_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
-    """Reduce ``scalar`` across the 16 lanes sharing an MFMA C row."""
-    dt = make_static_distributed_tensor(_ROW_REDUCE_DIST, F32)
-    dt.storage[0] = scalar
-    block_tile_reduce_sync(b, dt, combine=combine)
-    return dt.storage[0]
+    """Reduce ``scalar`` across the 16 lanes sharing an MFMA C row.
+
+    In the 16x16x16 C layout every lane of a 16-lane group holds a different
+    column of the same row, so the reduce is an XOR butterfly over masks
+    1/2/4/8 and leaves the result in every lane of the group. Masks 1 and 2 stay
+    inside a four-lane quad and run as ``quad_perm`` DPP on the VALU; masks 4
+    and 8 cross quads and stay on ``ds_swizzle``, which goes through the LDS
+    unit and costs an ``lgkmcnt`` wait. The mask order matches
+    ``block_tile_reduce_sync``, so the result is bit-identical to it.
+    """
+    fold = b.fadd if combine == "sum" else b.fmax
+    v = scalar
+    for mask in (1, 2):
+        v = fold(v, b.warp_shuffle_xor_quad(v, mask))
+    for mask in (4, 8):
+        v = fold(v, b.warp_shuffle_xor(v, mask))
+    return v
 
 
 def _mfma_16x16_c_row(b: IRBuilder, lane, reg: int):
@@ -243,40 +235,27 @@ def _shift(b: IRBuilder, offset: int, value: Value) -> Value:
     return value if offset == 0 else b.add(b.const_i32(offset), value)
 
 
-def _ct_swizzle(b: IRBuilder, row: Value, col: Value) -> Value:
-    """Permute ``ct_lds`` 4-column groups by ``(row >> 4) & 3``.
+def _wt_swizzle(b: IRBuilder, row: Value, col: Value, r_tile: int) -> Value:
+    """Permute ``wt_lds`` 4-column groups by ``(row >> 4) & mask``.
 
-    ``ct_lds`` is the transposed latent staging buffer, written one bf16 at a
-    time and read as the MFMA B operand. The write is what conflicts. Within a
-    wave the store's column is wave-uniform and its row is ``lane * 8 + e``, so
-    with a row stride of ``s`` dwords every lane lands on bank ``lane * 8 * s
-    (mod 32)``. ``gcd(8s, 32) >= 16`` for every even ``s``, so no pad can spread
-    the store past two banks -- the ``BK + WT_PAD`` pad already took it from one
-    bank to two and that is the end of what padding can do. Breaking further
-    needs the *column* to move with the row, which is this.
+    ``wt_lds`` is the epilogue's transposed ``W_UV`` slice, ``[d_v, r_tile]``,
+    written one bf16 at a time and read as the MFMA B operand. Within a 16-lane group
+    the store's column ``rl`` is uniform and its row is ``lane * 8 + e``, so at
+    the ``WT_PAD`` stride (2 mod 32 dwords) the row term ``lane * 16`` reaches
+    only two banks. XORing the column group with row bits 4 and up -- lane bits
+    1-3, disjoint from the stride's lane bit 0 -- spreads it across 16.
 
-    The permutation is an XOR on the column-group index, so it is an involution
-    and the same expression serves the store and the load. It is applied to
-    groups of four columns rather than single columns because the B-operand read
-    is ``smem_load_vN(..., n=4)`` at ``lane_kq in {0, 4, 8, 12}``: four
-    contiguous columns off a 4-aligned base. Permuting whole groups keeps those
-    four contiguous and keeps the base a multiple of four, so the vector read
-    stays a single ``ds_read_b64`` and its declared 8 B alignment still holds.
-
-    The shift is 4, not 3, and the distinction is the whole point. ``row >> 3``
-    is the store's lane index exactly (``r0 = lane * 8`` and ``e < 8`` never
-    carries), but its low bit is the *same* bit the row stride already spreads
-    on: at ``s = 10`` the stride term is ``lane * 80 = lane * 16 (mod 32)``,
-    which keys off ``lane & 1``. Twisting on a bit the stride has already used
-    re-collides the halves and buys one extra bank, not three. ``row >> 4``
-    takes lane bits 1-2 instead, disjoint from the stride's bit, so the two
-    spreadings compose: 2 banks from the pad x 4 group offsets = 8 distinct
-    banks per wave.
-
-    The 2-bit mask is safe for every supported ``block_k``: MFMA needs a
-    multiple of 16, so there are always at least four column groups to permute.
+    On the read side ``row >> 4`` is the MFMA n-tile, constant across the 16
+    lanes of one read, so the twist only relabels which groups a tile reads and
+    the read keeps its conflict-free bank pattern. Groups of four keep the
+    ``n=4`` read contiguous and 8 B-aligned. The mask is the widest power of two
+    (at most 8) dividing the group count, so the XOR never leaves the row.
     """
-    twist = b.land(b.lshr(row, b.const_i32(4)), b.const_i32(3))
+    groups = r_tile // 4
+    mask = 1
+    while mask < 8 and groups % (mask * 2) == 0:
+        mask *= 2
+    twist = b.land(b.lshr(row, b.const_i32(4)), b.const_i32(mask - 1))
     grp = b.xor(b.lshr(col, b.const_i32(2)), twist)
     return b.lor(b.shl(grp, b.const_i32(2)), b.land(col, b.const_i32(3)))
 
@@ -297,7 +276,10 @@ class MlaPrefillSpec:
     r_kv: int = 512
     block_q: int = 16
     block_k: int = 16
-    r_kv_tile: int = 64
+    # 32, not the bring-up 64: it is the widest slice that keeps the prologue,
+    # the LDS peak, under 32 KB, so two workgroups fit per CU -- which measured
+    # faster than 64 on every shape tried.
+    r_kv_tile: int = 32
     num_warps: int = 4
     page_block_size: int = 16
     dtype: str = "bf16"
@@ -382,48 +364,62 @@ class MlaPrefillSpec:
         )
 
 
+def _s_part_rows(spec: MlaPrefillSpec) -> int:
+    """Extra ``kv_lds`` rows that hold the per-wave score partials.
+
+    Each wave parks one f32 C fragment (``WAVE_SIZE * C_PER_LANE`` floats) per
+    score tile. They ride in their own rows at the tail of ``kv_lds`` rather than
+    in a buffer of their own: the packer reuses a dead slot only from its base
+    offset, so a separate allocation can never land in the gap ``kv_lds`` leaves
+    below ``qa_lds`` and would open a new slot above the 64 KB limit instead.
+    """
+    part_bytes = (
+        4
+        * spec.num_warps
+        * (spec.block_q // MFMA_M)
+        * (spec.block_k // MFMA_N)
+        * WAVE_SIZE
+        * C_PER_LANE
+    )
+    row_bytes = 2 * (spec.r_kv + spec.d_rope + WT_PAD)
+    return -(-part_bytes // row_bytes)
+
+
 def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     """Predict the LDS pool :func:`build_mla_prefill_fwd` will ask for.
 
-    The lowerer pools the eight buffers by liveness, so the pool is *not* their
+    The lowerer pools the seven buffers by liveness, so the pool is *not* their
     arithmetic sum -- see the LDS comment block in the builder for the achieved
-    layout. The packer is greedy in allocation order, which for this builder
-    plays out as: the prologue trio (``q_lds``, ``wq_lds``, ``qa_lds``) is laid
-    down first; ``q_lds`` + ``wq_lds`` then die and leave a hole at the base,
-    into which the packer folds *one* loop buffer -- ``kv_lds``, the first one
-    allocated -- after which everything else stacks above ``qa_lds``, which stays
-    live across the loop. The epilogue pair starts from the base again, since by
-    then nothing else is live, so it only matters when it is the widest phase.
+    layout. The three phases never share a live buffer: the prologue trio
+    (``q_lds``, ``wq_lds``, ``qa_lds``) is dead before the k-loop starts (the
+    score A operand is read into registers first), and by the epilogue
+    everything earlier is dead. Each phase therefore packs from the base on its
+    own and the pool is the widest phase.
 
-    Exact against the emitted pool at the default geometry, at ``block_q=32``,
-    and at ``r_kv_tile=128``; over by ``p_lds`` at ``block_k=32``, where the
-    packer finds one more hole than this credits it with. Erring high is the
-    point -- this gates admission, so it must never under-predict. It is still a
-    model of observed behaviour rather than a guarantee, so check the emitted
-    pool whenever a new geometry is introduced.
+    The packer reuses a dead slot only from its start offset. ``kv_lds`` takes
+    the base slot; ``p_lds`` then lands either directly above it or at the start
+    of the next dead slot, ``q_lds + wq_lds`` -- the loop bound covers both.
+    Erring high is the point: this gates admission, so it must never
+    under-predict. It is a model of observed behaviour rather than a guarantee,
+    so check the emitted pool whenever a new geometry is introduced.
     """
     elem = 2  # bf16
     qa_cols = spec.r_kv + spec.d_rope
-    q_lds = elem * spec.block_q * spec.head_dim_qk
+    q_lds = elem * spec.block_q * (spec.d_nope + WT_PAD)
     wq_lds = elem * spec.r_kv_tile * (spec.d_nope + V8_PAD)
     qa_lds = elem * spec.block_q * (qa_cols + WT_PAD)
-    loop = (
-        elem * spec.block_k * (qa_cols + WT_PAD),  # kv_lds
-        elem * spec.r_kv * (spec.block_k + WT_PAD),  # ct_lds
-        elem * spec.block_q * spec.block_k,  # p_lds
-    )
-    epilogue = elem * spec.block_q * (spec.r_kv + WT_PAD) + elem * spec.d_v * (
-        spec.r_kv_tile + WT_PAD
-    )
+    kv_lds = elem * (spec.block_k + _s_part_rows(spec)) * (qa_cols + WT_PAD)
+    p_lds = elem * spec.block_q * spec.block_k
+    accl_lds = elem * spec.block_q * (spec.r_kv + WT_PAD)
+    wt_lds = elem * spec.d_v * (spec.r_kv_tile + WT_PAD)
 
-    hole = q_lds + wq_lds
-    top = hole + qa_lds
-    folded = loop[0] <= hole
-    for size in loop[1:] if folded else loop:
-        top += size
-    # By the epilogue every earlier buffer is dead, so the pair starts again from
-    # the base and only matters when it is wider than everything before it.
-    return max(top, epilogue)
+    prologue = q_lds + wq_lds + qa_lds
+    # p_lds takes the base slot and kv_lds the wq_lds slot; wt_lds takes the
+    # base slot and accl_lds the qa_lds slot (see the allocation sites).
+    loop = max(q_lds, p_lds) + kv_lds
+    epilogue = max(wt_lds, q_lds + wq_lds) + accl_lds
+    # The lowerer rounds the pool up to 16 B.
+    return -(-max(prologue, loop, epilogue) // 16) * 16
 
 
 def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
@@ -462,11 +458,16 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     # Each of the three GEMMs whose n-axis is split across waves needs that
     # split to be exact -- a wave owns [w * per_wave, (w+1) * per_wave) with no
     # remainder lane.
+    # The query absorb is exempt when its slice is narrower than the
+    # workgroup: it then runs one n-tile on each of the first r_kv_tile / 16
+    # waves and gates the rest off.
     warp_splits = {
         "r_kv (PV latent n-tiles)": spec.r_kv,
-        "r_kv_tile (query-absorb n-tiles)": spec.r_kv_tile,
         "d_v (epilogue n-tiles)": spec.d_v,
     }
+    absorb_n_tiles = spec.r_kv_tile // MFMA_N
+    if absorb_n_tiles >= spec.num_warps:
+        warp_splits["r_kv_tile (query-absorb n-tiles)"] = spec.r_kv_tile
     for name, value in warp_splits.items():
         n_tiles = value // MFMA_N
         if n_tiles % spec.num_warps != 0:
@@ -474,13 +475,21 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
                 f"{name}: {value}/{MFMA_N} = {n_tiles} n-tiles must divide "
                 f"evenly across num_warps={spec.num_warps}"
             )
+    # The score GEMM splits its K reduction, not an n-axis: each wave owns an
+    # equal run of the (r_kv + d_rope) / MFMA_K k-steps.
+    score_k_steps = (spec.r_kv + spec.d_rope) // MFMA_K
+    if score_k_steps % spec.num_warps != 0:
+        return False, (
+            f"score K: {spec.r_kv + spec.d_rope}/{MFMA_K} = {score_k_steps} k-steps "
+            f"must divide evenly across num_warps={spec.num_warps}"
+        )
     # Every global->LDS staging loop below hands each thread a fixed number of
     # fixed-width vector chunks with no remainder handling, so the element
     # count must divide by threads * width -- not merely by threads.
     threads = spec.threads
     stages = {
-        "q tile": (spec.block_q * spec.head_dim_qk, 4),
-        "Q_rope copy": (spec.block_q * spec.d_rope, 4),
+        "Q_nope tile": (spec.block_q * spec.d_nope, 4),
+        "Q_rope tile": (spec.block_q * spec.d_rope, 4),
         "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
         "k_rope tile": (spec.block_k * spec.d_rope, 4),
         "W_UK absorb slice": (spec.r_kv_tile * spec.d_nope, 8),
@@ -493,7 +502,7 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
                 f"across {threads} threads at {width} elements per chunk"
             )
     # Register blocking is cheap in VGPRs and expensive in LDS: qa_lds scales
-    # with block_q and ct_lds with block_k, so the 64 KB budget -- not the
+    # with block_q and kv_lds with block_k, so the 64 KB budget -- not the
     # accumulator -- is what caps the tile here.
     lds = _fwd_lds_bytes(spec)
     if lds > LDS_BYTES_PER_WORKGROUP:
@@ -954,8 +963,12 @@ def _expand_latent(
             )
             v8 = b.global_load_vN(w_uk, idx, dtype, 8)
             for e in range(8):
+                row = b.add(n0, b.const_i32(e))
                 b.smem_store_vN(
-                    wt_lds, [b.add(n0, b.const_i32(e)), rl], b.vec_extract(v8, e), 1
+                    wt_lds,
+                    [row, _wt_swizzle(b, row, rl, r_tile)],
+                    b.vec_extract(v8, e),
+                    1,
                 )
         b.sync()
         for kk in range(exp_k_iters):
@@ -972,7 +985,13 @@ def _expand_latent(
                     b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
                 )
                 b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                b_v = b.smem_load_vN(wt_lds, b_row, b_col, dtype=dtype, n=4)
+                b_v = b.smem_load_vN(
+                    wt_lds,
+                    b_row,
+                    _wt_swizzle(b, b_row, b_col, r_tile),
+                    dtype=dtype,
+                    n=4,
+                )
                 for mt in range(m_tiles):
                     acc[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
     return acc
@@ -1000,6 +1019,7 @@ def _absorb_query(
     absorb_k_iters: int,
     n_tiles_per_wave: int,
     m_tiles: int,
+    active_waves: int | None = None,
 ):
     """``Qa[q, r] = sum_n Q_nope[q, n] * W_UK[head, r, n]``, written to ``qa_lds``.
 
@@ -1035,48 +1055,67 @@ def _absorb_query(
             )
             b.smem_store_vN(wq_lds, [rl, n0], b.global_load_vN(w_uk, idx, dtype, 8), 8)
         b.sync()
-        acc = [
-            [b.zero_vec_f32(4) for _ in range(n_tiles_per_wave)] for _ in range(m_tiles)
-        ]
-        for kk in range(absorb_k_iters):
-            col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            a_vs = [
-                b.smem_load_vN(
-                    q_lds, _shift(b, mt * MFMA_M, lane_row), col, dtype=dtype, n=4
-                )
-                for mt in range(m_tiles)
+
+        # With fewer n-tiles than waves (``active_waves``), only the first
+        # ``active_waves`` waves compute; the rest skip to the next slice's
+        # barrier. The gated region holds no barrier and its only outputs are
+        # qa_lds stores, so carrying no results out of the ``scf.if`` is fine.
+        def _slice_compute(r_base: int):
+            acc = [
+                [b.zero_vec_f32(4) for _ in range(n_tiles_per_wave)]
+                for _ in range(m_tiles)
             ]
+            for kk in range(absorb_k_iters):
+                col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
+                a_vs = [
+                    b.smem_load_vN(
+                        q_lds, _shift(b, mt * MFMA_M, lane_row), col, dtype=dtype, n=4
+                    )
+                    for mt in range(m_tiles)
+                ]
+                for t in range(n_tiles_per_wave):
+                    n_tile = b.add(
+                        b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
+                    )
+                    b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
+                    b_v = b.smem_load_vN(wq_lds, b_row, col, dtype=dtype, n=4)
+                    for mt in range(m_tiles):
+                        acc[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
+            # C decodes as [m = q][n = r - r_base]; scatter it into the latent query.
             for t in range(n_tiles_per_wave):
                 n_tile = b.add(
                     b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t)
                 )
-                b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                b_v = b.smem_load_vN(wq_lds, b_row, col, dtype=dtype, n=4)
+                col = _shift(
+                    b, r_base, b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
+                )
                 for mt in range(m_tiles):
-                    acc[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
-        # C decodes as [m = q][n = r - r_base]; scatter it into the latent query.
-        for t in range(n_tiles_per_wave):
-            n_tile = b.add(b.mul(wave, b.const_i32(n_tiles_per_wave)), b.const_i32(t))
-            col = _shift(b, r_base, b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row))
-            for mt in range(m_tiles):
-                packed = b.vec_trunc_f32_to_bf16(acc[mt][t])
-                for reg in range(C_PER_LANE):
-                    row = _shift(b, mt * MFMA_M, _mfma_16x16_c_row(b, lane, reg))
-                    b.smem_store_vN(qa_lds, [row, col], b.vec_extract(packed, reg), 1)
+                    packed = b.vec_trunc_f32_to_bf16(acc[mt][t])
+                    for reg in range(C_PER_LANE):
+                        row = _shift(b, mt * MFMA_M, _mfma_16x16_c_row(b, lane, reg))
+                        b.smem_store_vN(
+                            qa_lds, [row, col], b.vec_extract(packed, reg), 1
+                        )
+
+        if active_waves is None:
+            _slice_compute(r_base)
+        else:
+            with b.scf_if(b.cmp_lt(wave, b.const_i32(active_waves))):
+                _slice_compute(r_base)
 
 
 def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> KernelDef:
     """Emit the chunked MLA prefill forward kernel, with ``W_UK`` absorbed.
 
-    One workgroup owns one ``(query tile, head)`` pair and loops over the whole
-    key range, carrying ``(m, l, acc_latent)`` in ``scf.for`` iteration
+    One workgroup owns one ``(query tile, head)`` pair and loops over the key
+    tiles its causal window reaches, carrying ``(m, l, acc_latent)`` in ``scf.for`` iteration
     arguments. The per-head up-projection never enters that loop: it is folded
     into the query on the way in and into the output on the way out, so the
     k-loop only ever touches the compressed latent.
 
     Prologue, once per workgroup:
 
-    1. stage ``Q`` into ``q_lds`` and copy its rope half to ``qa_lds`` columns
+    1. stage ``Q_nope`` into ``q_lds`` and ``Q_rope`` into ``qa_lds`` columns
        ``[r_kv, r_kv + d_rope)``;
     2. absorb -- ``Qa[q, r] = sum_n Q_nope[q, n] * W_UK[head, r, n]`` -- into
        ``qa_lds`` columns ``[0, r_kv)``, staging ``W_UK`` r-slices through
@@ -1085,9 +1124,8 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
 
     Per key tile:
 
-    3. stage ``c_kv[page]`` into ``kv_lds`` columns ``[0, r_kv)`` **and**, from
-       the same global loads, transposed into ``ct_lds``; stage ``k_rope[page]``
-       into ``kv_lds`` columns ``[r_kv, r_kv + d_rope)``;
+    3. stage ``c_kv[page]`` into ``kv_lds`` columns ``[0, r_kv)`` and
+       ``k_rope[page]`` into columns ``[r_kv, r_kv + d_rope)``;
     4. score ``S = scale * (Qa @ [C | K_rope]ᵀ)`` -- one ``K = r_kv + d_rope``
        reduction -- then mask and online-softmax update;
     5. accumulate ``acc_latent[q, r] += sum_k P[q, k] * C[k, r]``.
@@ -1099,19 +1137,23 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
        commute with the projection, so applying ``1/l`` to the ``[q][v]`` result
        is exact.
 
-    ``ct_lds`` holds **Cᵀ** (``[r_kv, Bk]``) because the MFMA B operand is read
-    ``[n][k]``: for the latent PV GEMM ``n`` is the latent dim and ``k`` is the
-    key. gfx942 has no ``ds_read_tr``, so the transpose happens on the store
-    path -- the c_kv loads are scattered into ``ct_lds`` element-wise while the
-    same vectors go into ``kv_lds`` untransposed for the score GEMM. Computing
-    ``Sᵀ`` instead would not avoid this: the softmax row-reduce would then run
-    over ``q``, which is the wrong axis.
+    The MFMA B operand is read ``[n][k]``: for the latent PV GEMM ``n`` is the
+    latent dim and ``k`` is the key, the transpose of how ``kv_lds`` holds
+    ``C``. gfx942 has no ``ds_read_tr``, so the PV gathers its B operand from
+    ``kv_lds`` one bf16 per key. That read-path transpose measured faster than
+    the store-path alternative -- a second, transposed copy of the tile written
+    element-wise -- which also cost 20 KB of LDS. Computing ``Sᵀ`` instead would
+    not avoid the transpose: the softmax row-reduce would then run over ``q``,
+    which is the wrong axis.
 
-    Every wave redundantly computes the score tile and the softmax state. That
-    is deliberate: ``scf.if`` carries no results, so loop-carried state cannot be
-    produced inside a wave-gated region, and a barrier inside one would hang.
-    The state is bit-identical in every wave, so only the latent accumulator
-    tiles are split across waves and only the final stores are predicated.
+    The score GEMM's K reduction is split across waves and the partials are
+    summed through LDS in a fixed order, so every wave ends up holding the same
+    full score tile. Every wave then redundantly computes the softmax state.
+    That is deliberate: ``scf.if`` carries no results, so loop-carried state
+    cannot be produced inside a wave-gated region, and a barrier inside one
+    would hang. The state is bit-identical in every wave, so only the latent
+    accumulator tiles are split across waves and only the final stores are
+    predicated.
     """
     require_mla_prefill(spec, arch=arch)
 
@@ -1136,6 +1178,8 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # The absorbed query lives in [r_kv | d_rope]; one reduction covers both.
     QA_COLS = R_KV + D_ROPE
     SCORE_K_ITERS = QA_COLS // MFMA_K
+    NUM_WARPS = spec.num_warps
+    SCORE_K_PER_WAVE = SCORE_K_ITERS // NUM_WARPS
 
     # Latent PV accumulator: N_R_PER_WAVE * C_PER_LANE accumulator VGPRs per lane.
     N_R_TILES = R_KV // MFMA_N
@@ -1149,7 +1193,16 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
 
     # Prologue Q-absorb, d_nope -> r_kv, one r-slice at a time.
     ABSORB_N_TILES = R_TILE // MFMA_N
-    ABSORB_N_PER_WAVE = ABSORB_N_TILES // spec.num_warps
+    if ABSORB_N_TILES >= spec.num_warps:
+        ABSORB_N_PER_WAVE = ABSORB_N_TILES // spec.num_warps
+        ABSORB_ACTIVE_WAVES = None
+    else:
+        # A slice narrower than the workgroup: one n-tile on each of the first
+        # ABSORB_N_TILES waves. This is what lets r_kv_tile drop to 32, which
+        # brings the prologue -- the LDS peak -- under the two-workgroups-per-CU
+        # line.
+        ABSORB_N_PER_WAVE = 1
+        ABSORB_ACTIVE_WAVES = ABSORB_N_TILES
     ABSORB_K_ITERS = D_NOPE // MFMA_K
 
     LOG2E = math.log2(math.e)
@@ -1187,7 +1240,15 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     b.param("max_k", I32)  # unused here; keeps one 13-argument pack with the probe
 
     # ---- prologue: identify (sequence, query tile, head) ---------------------
-    q_block_global_idx = b.block_id_x()
+    # Block ids are walked in reverse. With the causal loop bound a query tile's
+    # work grows with its position in the sequence, and workgroups launch in
+    # block-id order, so reversing puts the heaviest tiles first and leaves the
+    # light ones to fill the tail. The grid's x extent is the AITER count
+    # ``total_q // BQ + num_seqs`` (``mla_prefill_fwd_grid``), and
+    # ``total_q == cu_seqlens_q[num_seqs]``.
+    total_q = b.global_load_i32(cu_q, num_seqs_p)
+    num_q_blocks = b.add(b.div(total_q, b.const_i32(BQ)), num_seqs_p)
+    q_block_global_idx = b.sub(b.sub(num_q_blocks, b.const_i32(1)), b.block_id_x())
     head = b.block_id_y()
     tid = b.thread_id_x()
     lane = b.mod(tid, b.const_i32(WAVE_SIZE))
@@ -1219,34 +1280,46 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     cu_k_start = b.global_load_i32(cu_k, seq_idx)
     cu_k_stop = b.global_load_i32(cu_k, b.add(seq_idx, b.const_i32(1)))
     s_k = b.sub(cu_k_stop, cu_k_start)
-    n_k_tiles = b.div(b.add(s_k, b.const_i32(BK - 1)), b.const_i32(BK))
     # Bottom-right causal alignment: query row ``i`` of this sequence attends to
     # keys ``0 .. i + context_off``. ``context_off`` is negative when S_k < S_q,
     # which is exactly what produces the fully masked leading rows the driver
     # checks for exact zeros / exact -inf.
     context_off = b.sub(s_k, s_q)
 
+    # Causal loop bound: no row of this tile sees a key at or past
+    # ``q_end + context_off``, where ``q_end`` is the tile's last real row + 1,
+    # so the tiles beyond it are fully masked and are skipped rather than
+    # computed and discarded. ``q_end <= s_q`` keeps the bound within ``s_k``;
+    # the clamp at 0 covers tiles whose rows are all fully masked, which then run
+    # zero iterations and finish with ``l == 0`` exactly as masking would leave
+    # them. The per-element masks below still handle the ragged edge tiles.
+    q_end = b.select(
+        b.cmp_lt(b.add(qb_start, b.const_i32(BQ)), s_q),
+        b.add(qb_start, b.const_i32(BQ)),
+        s_q,
+    )
+    k_end = b.add(q_end, context_off)
+    k_end = b.select(b.cmp_gt(k_end, b.const_i32(0)), k_end, b.const_i32(0))
+    n_k_tiles = b.div(b.add(k_end, b.const_i32(BK - 1)), b.const_i32(BK))
+
     # ---- LDS ---------------------------------------------------------------
     # No allocation is exclusive, so the lowerer pools them by liveness. The
     # three phases below never overlap, and the loop phase is the peak:
     #
-    #   prologue  q_lds  + wq_lds + qa_lds            (BQ=BK=16:  42112 B)
-    #   loop      qa_lds + kv_lds + ct_lds + p_lds    (BQ=BK=16:  58112 B)
+    #   prologue  q_lds  + wq_lds + qa_lds            (BQ=BK=16:  42240 B)
+    #   loop      kv_lds + p_lds                      (BQ=BK=16:  23712 B)
     #   epilogue  accl_lds + wt_lds                   (BQ=BK=16:  33920 B)
     #
-    # The pool actually emitted is 63104 B, ~5.0 KB above that loop-phase ideal.
-    # The packer is greedy first-fit in allocation order, so qa_lds is placed
-    # above wq_lds (at 23552) while still live across the loop; kv_lds then
-    # reuses the q_lds/wq_lds bytes from 0 but only reaches 18560, leaving
-    # [18560, 23552) stranded for the whole loop. Shrinking kv_lds therefore
-    # does not shrink the pool -- it only widens that stranded hole. Achieved
+    # The prologue is the peak, and the pool emitted is exactly that, 42240 B.
+    # qa_lds is dead before the loop (each wave reads its score A operand into
+    # registers first), so the loop packs from the base: kv_lds -- which carries
+    # the score-partial rows, see _s_part_rows -- reuses the q_lds/wq_lds bytes
+    # from 0, and p_lds lands at the start of the dead qa_lds slot. Achieved
     # layout:
     #
     #   0      q_lds / kv_lds / accl_lds   (three phases share the base)
-    #   6144   wq_lds
-    #   23552  qa_lds / wt_lds
-    #   42112  ct_lds
-    #   62592  p_lds                        -> 63104 B total
+    #   6272   wq_lds
+    #   23680  qa_lds / p_lds / wt_lds      -> 42240 B total
     #
     # **Each buffer is allocated at the point its phase begins, not all up
     # front.** The lowerer seeds a live interval at the ``tile.smem_alloc`` op
@@ -1259,7 +1332,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # Pooling means a later buffer may land on an earlier one's bytes, so every
     # phase boundary needs a barrier before its first write: the k-loop body
     # opens with one (fencing the prologue's q_lds/wq_lds readers against the
-    # kv_lds/ct_lds writes) and the epilogue opens with one of its own.
+    # kv_lds writes) and the epilogue opens with one of its own.
     #
     # Two different pads appear, and the difference is not cosmetic:
     #
@@ -1285,67 +1358,44 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # ``WT_PAD``, putting the stride at 2 mod 32 -- period 16, conflict-free.
     # See the ``C_STAGE_W`` comment for why the pad could not move on its own.
     #
-    # ``ct_lds`` takes ``WT_PAD`` for the same reason, and the arithmetic is
-    # worth spelling out because the two accesses want different things. Write
-    # ``s`` for the row stride in dwords; unpadded ``s == BK/2 == 8``, padded
-    # ``s == (BK + 4)/2 == 10``.
-    #
-    #   scatter store (one ds_write_b16 per lane, row ``lane*8 + e``, column
-    #   ``m`` constant across the wave):
-    #       addr_dw = (lane*8 + e)*s + m/2
-    #       s =  8 -> lane*64 == 0 (mod 32): every lane on ONE bank.
-    #       s = 10 -> lane*80 == lane*16 (mod 32): two banks.
-    #
-    #   MFMA B read (ds_read_b64 at [n_tile*16 + lane%16, kt*16 + (lane/16)*4]):
-    #       addr_dw = (lane%16)*s + (lane/16)*2 + const
-    #       s =  8 -> (lane%16)*8 mod 32 takes 4 values: 4-way.
-    #       s = 10 -> (lane%16)*10 mod 32 takes all 16: conflict-free.
-    #
-    # So the pad is a 4x win on the read and only 2x on the store. The store
-    # cannot do better with any legal pad: its lane stride is 8 rows, the bank
-    # period is 32/gcd(8s, 32), and gcd(8s, 32) >= 16 for every even ``s``.
-    # ``s`` odd would need a pad of 2 mod 4, which puts odd rows at 4 mod 8 and
-    # makes the align-8 declaration on the n=4 read a lie. Driving the store
-    # further needs an XOR swizzle on the column, not a wider pad.
-    #
     # Pads are a layout choice only; every index expression keeps its logical
     # range, so the kernel computes the same values either way.
-    q_lds = b.smem_alloc(dtype, [BQ, HDQK], name_hint="q_lds")  # 6144 B
+    # WT_PAD for the same reason as kv_lds: unpadded, the 384 B row stride is a
+    # multiple of the 32-bank width, so the absorb's 16-lane A read lands every
+    # row on bank 0. Padded, the stride is 2 mod 32 dwords -- conflict-free.
+    q_lds = b.smem_alloc(dtype, [BQ, D_NOPE + WT_PAD], name_hint="q_lds")  # 4224 B
     wq_lds = b.smem_alloc(
         dtype, [R_TILE, D_NOPE + V8_PAD], name_hint="wq_lds"
     )  # 17408 B
     qa_lds = b.smem_alloc(dtype, [BQ, QA_COLS + WT_PAD], name_hint="qa_lds")  # 18560 B
 
     # ---- stage Q once (loop-invariant) -------------------------------------
+    # Q_nope goes to q_lds, the absorb's A operand. Q_rope rides along in the
+    # absorbed query at qa_lds columns [R_KV, R_KV + D_ROPE), so the score GEMM
+    # is one K = R_KV + D_ROPE reduction instead of two; it is staged there
+    # straight from global. The absorb's first slice barrier publishes q_lds,
+    # and the barrier after the absorb publishes qa_lds.
     q_last_row = b.sub(s_q, b.const_i32(1))
-    q_chunks = (BQ * HDQK) // (THREADS * 4)
-    q_chunks_per_row = HDQK // 4
-    for j in range(q_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(q_chunks_per_row))
-        d0 = b.mul(b.mod(c, b.const_i32(q_chunks_per_row)), b.const_i32(4))
-        q_local = b.add(qb_start, m)
-        q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
-        token = b.add(cu_q_start, q_local)
-        idx = b.add(
-            b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)), d0
-        )
-        b.smem_store_vN(q_lds, [m, d0], b.global_load_vN(q_ptr, idx, dtype, 4), 4)
 
-    # The Q_rope copy below reads ``q_lds``, and ``_absorb_query`` reads it as an
-    # MFMA A operand -- both need the staging stores visible workgroup-wide.
-    b.sync()
+    def _stage_q(dst, *, width: int, src_col: int, dst_col: int):
+        chunks = (BQ * width) // (THREADS * 4)
+        per_row = width // 4
+        for j in range(chunks):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            m = b.div(c, b.const_i32(per_row))
+            d0 = b.mul(b.mod(c, b.const_i32(per_row)), b.const_i32(4))
+            q_local = b.add(qb_start, m)
+            q_local = b.select(b.cmp_lt(q_local, s_q), q_local, q_last_row)
+            token = b.add(cu_q_start, q_local)
+            idx = b.add(
+                b.mul(b.add(b.mul(token, b.const_i32(H)), head), b.const_i32(HDQK)),
+                _shift(b, src_col, d0),
+            )
+            v = b.global_load_vN(q_ptr, idx, dtype, 4)
+            b.smem_store_vN(dst, [m, _shift(b, dst_col, d0)], v, 4)
 
-    # Q_rope rides along in the absorbed query at columns [R_KV, R_KV + D_ROPE),
-    # so the score GEMM is one K = R_KV + D_ROPE reduction instead of two.
-    qr_chunks = (BQ * D_ROPE) // (THREADS * 4)
-    qr_chunks_per_row = D_ROPE // 4
-    for j in range(qr_chunks):
-        c = b.add(tid, b.const_i32(j * THREADS))
-        m = b.div(c, b.const_i32(qr_chunks_per_row))
-        d0 = b.mul(b.mod(c, b.const_i32(qr_chunks_per_row)), b.const_i32(4))
-        v = b.smem_load_vN(q_lds, m, b.add(d0, b.const_i32(D_NOPE)), dtype=dtype, n=4)
-        b.smem_store_vN(qa_lds, [m, b.add(d0, b.const_i32(R_KV))], v, 4)
+    _stage_q(q_lds, width=D_NOPE, src_col=0, dst_col=0)
+    _stage_q(qa_lds, width=D_ROPE, src_col=D_NOPE, dst_col=R_KV)
 
     w_head_base = b.mul(b.mul(head, b.const_i32(R_KV)), b.const_i32(W_COLS))
 
@@ -1370,9 +1420,31 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         w_cols=W_COLS,
         absorb_k_iters=ABSORB_K_ITERS,
         n_tiles_per_wave=ABSORB_N_PER_WAVE,
+        active_waves=ABSORB_ACTIVE_WAVES,
         m_tiles=M_TILES,
     )
-    # No trailing barrier: the k-loop opens with one, which fences qa_lds too.
+
+    # Each wave's score A operand is its own SCORE_K_PER_WAVE-step slice of the
+    # absorbed query, and it is loop-invariant: read it into registers once
+    # (one bf16x4 per k-step and M tile) instead of from qa_lds every key tile.
+    # qa_lds is then dead before the loop, so the loop's buffers can reuse its
+    # bytes. The barrier publishes the absorb's qa_lds stores; the loop's
+    # opening barrier fences these reads against the loop's first writes.
+    b.sync()
+    score_col = b.add(b.mul(wave, b.const_i32(SCORE_K_PER_WAVE * MFMA_K)), lane_kq)
+    qa_frags = [
+        [
+            b.smem_load_vN(
+                qa_lds,
+                _shift(b, mt * MFMA_M, lane_row),
+                _shift(b, kk * MFMA_K, score_col),
+                dtype=dtype,
+                n=4,
+            )
+            for mt in range(M_TILES)
+        ]
+        for kk in range(SCORE_K_PER_WAVE)
+    ]
 
     # Fold log2(e) here, next to the exp2 that consumes it: the ABI stays raw.
     scale_log2 = b.fmul(scale_p, b.const_f32(LOG2E))
@@ -1395,9 +1467,30 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # Loop-phase buffers: allocated here so they pool onto q_lds / wq_lds, whose
     # last readers are the absorb above and are fenced by the loop's opening
     # barrier.
-    kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + WT_PAD], name_hint="kv_lds")  # 18560 B
-    ct_lds = b.smem_alloc(dtype, [R_KV, BK + WT_PAD], name_hint="ct_lds")  # 20480 B
+    # p_lds is allocated before kv_lds on purpose: the packer reuses a dead
+    # slot only from its base, so the small buffer takes the base slot and
+    # kv_lds lands at the start of the dead wq_lds slot, below the prologue
+    # peak. In the other order p_lds finds every dead slot overlapping kv_lds
+    # and opens a new one above the pool.
     p_lds = b.smem_alloc(dtype, [BQ, BK], name_hint="p_lds")  # 512 B
+    # Rows [BK, BK + _s_part_rows) are not key data: they hold the per-wave
+    # score partials (see _s_part_rows for why they share this allocation).
+    kv_lds = b.smem_alloc(
+        dtype, [BK + _s_part_rows(spec), QA_COLS + WT_PAD], name_hint="kv_lds"
+    )  # 23200 B
+    # The partials are f32x4 C fragments addressed in bf16 units from the start
+    # of row BK, lane-major: fragment ``f`` of lane ``l`` sits at column
+    # ``(f * WAVE_SIZE + l) * PART_LANE_COLS``, running past the row width into
+    # the following tail rows. Row BK starts at BK * (QA_COLS + WT_PAD) * 2 B, a
+    # multiple of 16, so every fragment is 16 B-aligned for ds_*_b128. Every
+    # wave uses the same layout, so the exchange needs no index remap.
+    PART_LANE_COLS = C_PER_LANE * 4 // 2
+    N_SCORE_TILES = M_TILES * K_TILES
+    part_row = b.const_i32(BK)
+    lane_part = b.mul(lane, b.const_i32(PART_LANE_COLS))
+    wave_part = b.add(
+        b.mul(wave, b.const_i32(N_SCORE_TILES * WAVE_SIZE * PART_LANE_COLS)), lane_part
+    )
 
     # ---- k-loop staging, split so the loads can run ahead ------------------
     # Splitting the stage into a load half and a store half lets tile ``i+1``'s
@@ -1408,10 +1501,10 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     #
     # The equivalent pipeline in ``attention_tiled_2d`` hides the same latency
     # with a two-slot LDS double buffer, so its staged registers never cross an
-    # iteration boundary. That is not available here: the pool is already at
-    # 63104 of 65536 B and a second kv_lds/ct_lds slot needs ~38 KB more. The
-    # stage is therefore carried in ``iter_args``. Registers are the only
-    # resource this kernel still has spare, which is what makes the swap work.
+    # iteration boundary. When this was built the pool was near the 64 KB limit
+    # and a second slot did not fit, so the stage is carried in ``iter_args``
+    # instead. (The pool has since dropped to 42752 B, but a second kv_lds
+    # slot, 23200 B, still does not fit.)
     c_chunks = (BK * R_KV) // (THREADS * C_STAGE_W)
     c_chunks_per_row = R_KV // C_STAGE_W
     kr_chunks = (BK * D_ROPE) // (THREADS * 4)
@@ -1443,28 +1536,16 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         return staged
 
     def _stage_store(staged):
-        """Drain a staged tile into both LDS orientations.
+        """Drain a staged tile into ``kv_lds``, ``[key][r]``.
 
-        ``kv_lds`` is the B operand of the score GEMM, read as [key][r] -- the
-        natural layout. ``ct_lds`` is the B operand of the latent PV, read as
-        [r][key] -- the transpose. gfx942 has no ``ds_read_tr``, so the
-        transpose happens on the store path; both copies come off the same
-        staged register.
+        That is the natural layout for the score GEMM's B operand. The latent
+        PV reads the same buffer transposed, one bf16 per key.
         """
         for j in range(c_chunks):
             c = b.add(tid, b.const_i32(j * THREADS))
             m = b.div(c, b.const_i32(c_chunks_per_row))
             r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
-            v8 = staged[j]
-            b.smem_store_vN(kv_lds, [m, r0], v8, C_STAGE_W)
-            for e in range(C_STAGE_W):
-                ct_row = _shift(b, e, r0)
-                b.smem_store_vN(
-                    ct_lds,
-                    [ct_row, _ct_swizzle(b, ct_row, m)],
-                    b.vec_extract(v8, e),
-                    1,
-                )
+            b.smem_store_vN(kv_lds, [m, r0], staged[j], C_STAGE_W)
         for j in range(kr_chunks):
             c = b.add(tid, b.const_i32(j * THREADS))
             m = b.div(c, b.const_i32(kr_chunks_per_row))
@@ -1499,7 +1580,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         staged = list(state[-n_stage:])
         kb_start = b.mul(k_tile, b.const_i32(BK))
 
-        # WAR: the previous iteration's readers of kv_lds / ct_lds must retire
+        # WAR: the previous iteration's readers of kv_lds must retire
         # before this iteration overwrites them.
         b.sync()
 
@@ -1523,15 +1604,13 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
         staged_next = _stage_loads(nxt)
 
         # ---- S = scale * (Qa @ [C | K_rope]ᵀ); C decodes as (query, key) ---
+        # The K reduction is split across waves: wave w sums k-steps
+        # [w * SCORE_K_PER_WAVE, (w + 1) * SCORE_K_PER_WAVE) and the partials
+        # are combined through s_part below.
         s_acc = [[b.zero_vec_f32(4) for _ in range(K_TILES)] for _ in range(M_TILES)]
-        for kk in range(SCORE_K_ITERS):
-            col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            a_vs = [
-                b.smem_load_vN(
-                    qa_lds, _shift(b, mt * MFMA_M, lane_row), col, dtype=dtype, n=4
-                )
-                for mt in range(M_TILES)
-            ]
+        for kk in range(SCORE_K_PER_WAVE):
+            col = _shift(b, kk * MFMA_K, score_col)
+            a_vs = qa_frags[kk]
             for kt in range(K_TILES):
                 b_v = b.smem_load_vN(
                     kv_lds, _shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=4
@@ -1543,11 +1622,38 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
             # Hoist the next ``SCORE_SGB_GROUP`` steps' LDS reads above the
             # MFMAs they feed. Skipped when the group does not divide the trip
             # count -- a partial trailing block measured worse than no hint.
-            if SCORE_K_ITERS % SCORE_SGB_GROUP == 0 and (kk + 1) % SCORE_SGB_GROUP == 0:
-                b.sched_group_barrier(
-                    _SGB_DS_READ, SCORE_SGB_GROUP * (M_TILES + K_TILES), 0
-                )
+            if (
+                SCORE_K_PER_WAVE % SCORE_SGB_GROUP == 0
+                and (kk + 1) % SCORE_SGB_GROUP == 0
+            ):
+                b.sched_group_barrier(_SGB_DS_READ, SCORE_SGB_GROUP * K_TILES, 0)
                 b.sched_group_barrier(_SGB_MFMA, SCORE_SGB_GROUP * M_TILES * K_TILES, 0)
+
+        # Combine the partials. Every wave sums them in the same order, so the
+        # full S -- and with it the softmax state below -- stays bit-identical
+        # across waves. The partial rows' previous readers retired before this
+        # iteration's opening barrier, so only the RAW side needs fencing.
+        for mt in range(M_TILES):
+            for kt in range(K_TILES):
+                col = _shift(
+                    b, (mt * K_TILES + kt) * WAVE_SIZE * PART_LANE_COLS, wave_part
+                )
+                b.smem_store_vN(kv_lds, [part_row, col], s_acc[mt][kt], C_PER_LANE)
+        b.sync_lds_only()
+        for mt in range(M_TILES):
+            for kt in range(K_TILES):
+                total = None
+                for w in range(NUM_WARPS):
+                    frag = w * N_SCORE_TILES + mt * K_TILES + kt
+                    part = b.smem_load_vN(
+                        kv_lds,
+                        part_row,
+                        _shift(b, frag * WAVE_SIZE * PART_LANE_COLS, lane_part),
+                        dtype=F32,
+                        n=C_PER_LANE,
+                    )
+                    total = part if total is None else b.fadd(total, part)
+                s_acc[mt][kt] = total
 
         # ---- online softmax, one row slot at a time ------------------------
         # Two bounds, and both land on ``p`` rather than only on ``s``: the
@@ -1602,7 +1708,9 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
 
         # ---- publish P and accumulate acc_latent += P @ C ------------------
         # Every wave writes the same values; the barrier pair is what matters.
-        b.sync()
+        # LDS-only: P comes from registers, so a VMEM drain here would stall on
+        # the run-ahead loads and cut their overlap short at the score GEMM.
+        b.sync_lds_only()
         for mt in range(M_TILES):
             for kt in range(K_TILES):
                 packed = b.vec_trunc_f32_to_bf16(p_vecs[mt][kt])
@@ -1610,7 +1718,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
                 for r in range(C_PER_LANE):
                     row = _shift(b, mt * MFMA_M, _mfma_16x16_c_row(b, lane, r))
                     b.smem_store_vN(p_lds, [row, col], b.vec_extract(packed, r), 1)
-        b.sync()
+        b.sync_lds_only()
 
         for kt in range(K_TILES):
             a_col = _shift(b, kt * MFMA_N, lane_kq)
@@ -1623,8 +1731,19 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
             for t in range(N_R_PER_WAVE):
                 n_tile = b.add(b.mul(wave, b.const_i32(N_R_PER_WAVE)), b.const_i32(t))
                 b_row = b.add(b.mul(n_tile, b.const_i32(MFMA_N)), lane_row)
-                b_v = b.smem_load_vN(
-                    ct_lds, b_row, _ct_swizzle(b, b_row, a_col), dtype=dtype, n=4
+                # B[k][n] = C[key][r], gathered from kv_lds four keys at a time:
+                # the transpose happens on the read path, one bf16 per key.
+                b_v = b.vec_pack(
+                    [
+                        b.vec_extract(
+                            b.smem_load_vN(
+                                kv_lds, _shift(b, i, a_col), b_row, dtype=dtype, n=1
+                            ),
+                            0,
+                        )
+                        for i in range(4)
+                    ],
+                    dtype,
                 )
                 for mt in range(M_TILES):
                     accs[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, accs[mt][t])
@@ -1650,8 +1769,10 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # Epilogue buffers: allocated after the loop so they pool onto the loop's
     # slots. That aliasing is why the barrier below is mandatory -- the loop's
     # last readers have to retire before accl_lds is written.
-    accl_lds = b.smem_alloc(dtype, [BQ, R_KV + WT_PAD], name_hint="accl_lds")  # 16512 B
+    # wt_lds first, for the same packer reason as p_lds/kv_lds: it takes the
+    # base slot and accl_lds the dead qa_lds slot.
     wt_lds = b.smem_alloc(dtype, [D_V, R_TILE + WT_PAD], name_hint="wt_lds")  # 17408 B
+    accl_lds = b.smem_alloc(dtype, [BQ, R_KV + WT_PAD], name_hint="accl_lds")  # 16512 B
 
     b.sync()
     for t in range(N_R_PER_WAVE):
