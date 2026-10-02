@@ -41,8 +41,8 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile import LibraryIO
-from Tensile.Common import (
+from .. import LibraryIO
+from ..Common import (
     CHeader,
     DebugConfig,
     ensurePath,
@@ -58,37 +58,37 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, tuningArchOf, withArchBuildAliases
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, tuningArchOf, withArchBuildAliases
+from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
+from ..Common.TimingInstrumentation import timing_context
+from ..SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
-from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.KernelWriterBase import (
+from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..KernelWriterAssembly import KernelWriterAssembly
+from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
 )
-from Tensile.resources import copy_static_headers
-from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
-from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import (
+from ..resources import copy_static_headers
+from ..SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
+from ..SolutionStructs import Solution
+from ..SolutionStructs.Solution import (
     raiseIfTypeMismatches,
     mergeTypeMismatchCollector,
     resetTypeMismatchCollector,
 )
-from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
-from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
-from Tensile.Toolchain.Validators import (
+from ..verify_stinky_comment_vs_elf_text import verify_stinky_paths
+from ..Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from ..Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
+from ..Toolchain.Validators import (
     ToolchainDefaults,
     validateToolchain,
 )
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Utilities.Decorators.Profile import profile
-from Tensile.Utilities.Decorators.Timing import timing
+from ..Toolchain.Component import Assembler
+from ..Utilities.Decorators.Profile import profile
+from ..Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
 
@@ -423,7 +423,7 @@ def _applyCustomKernelDefToSol(sol, result):
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
         sol.originalSolution._state["CustomKernel"] = ckDef
-        from Tensile.Contractions import CustomKernel as CK
+        from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
