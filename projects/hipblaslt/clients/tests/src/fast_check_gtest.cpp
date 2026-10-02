@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 
 #include "fast_check.hpp"
+#include "hipBuffer.hpp"
+#include "hip_placement.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -1033,6 +1035,125 @@ namespace
         auto res            = fast_check_gemm(p);
         EXPECT_FALSE(res.passed);
         EXPECT_FALSE(res.message.empty());
+    }
+
+    // Reads word `word` of `base` twice: through the correct address, and through an address whose
+    // low 32 bits were computed without carrying into the high 32 bits.
+    __global__ void read_with_dropped_carry(const uint32_t* base,
+                                            uint64_t        word,
+                                            uint32_t*       correct,
+                                            uint32_t*       dropped)
+    {
+        uint64_t b       = reinterpret_cast<uint64_t>(base);
+        uint64_t right   = b + word * 4;
+        uint64_t wrapped = (b & ~uint64_t(0xffffffff)) | uint32_t(uint32_t(b) + uint32_t(word * 4));
+        *correct         = *reinterpret_cast<const uint32_t*>(right);
+        *dropped         = *reinterpret_cast<const uint32_t*>(wrapped);
+    }
+
+    __global__ void write_with_dropped_carry(uint32_t* base, uint64_t word, uint32_t value)
+    {
+        uint64_t b       = reinterpret_cast<uint64_t>(base);
+        uint64_t wrapped = (b & ~uint64_t(0xffffffff)) | uint32_t(uint32_t(b) + uint32_t(word * 4));
+        *reinterpret_cast<uint32_t*>(wrapped) = value;
+    }
+
+    // The placement harness must turn a dropped-carry read into a poison value instead of a fault,
+    // and report a dropped-carry write with the element it was meant for.
+    TEST(FastCheckDevice_pre_checkin, placed_region_catches_dropped_carry)
+    {
+        const size_t bytes = 8 << 20, below = 4 << 20;
+        std::string  why;
+        bool         unsupported = false;
+        auto         region = PlacedRegion::create(bytes, below, HIP_R_32F, &why, &unsupported);
+        if(!region && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(region) << why;
+
+        const uint64_t start = reinterpret_cast<uint64_t>(region->ptr());
+        ASSERT_EQ(region->boundary() - start, below);
+
+        std::vector<uint32_t> data(bytes / 4);
+        for(size_t n = 0; n < data.size(); n++)
+            data[n] = uint32_t(n);
+        ASSERT_EQ(hipMemcpy(region->ptr(), data.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+
+        const uint64_t word = below / 4 + 100; // 100 words past the boundary
+        uint32_t*      d_out;
+        ASSERT_EQ(hipMalloc(&d_out, 2 * sizeof(uint32_t)), hipSuccess);
+        hipLaunchKernelGGL(read_with_dropped_carry,
+                           dim3(1),
+                           dim3(1),
+                           0,
+                           0,
+                           static_cast<const uint32_t*>(region->ptr()),
+                           word,
+                           d_out,
+                           d_out + 1);
+        uint32_t out[2];
+        ASSERT_EQ(hipMemcpy(out, d_out, sizeof(out), hipMemcpyDeviceToHost), hipSuccess);
+        (void)hipFree(d_out);
+        float poison = kFastCheckPoisonValue;
+        EXPECT_EQ(out[0], uint32_t(word));
+        EXPECT_EQ(out[1], *reinterpret_cast<uint32_t*>(&poison));
+
+        auto clean = region->verify_poison("A", 0);
+        EXPECT_TRUE(clean.passed) << clean.message;
+
+        hipLaunchKernelGGL(write_with_dropped_carry,
+                           dim3(1),
+                           dim3(1),
+                           0,
+                           0,
+                           static_cast<uint32_t*>(region->ptr()),
+                           word,
+                           0x12345678u);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        auto written = region->verify_poison("A", 0);
+        ASSERT_FALSE(written.passed);
+        EXPECT_NE(
+            written.message.find("1 elements of the poison window 4 GiB below A were written"),
+            std::string::npos)
+            << written.message;
+        EXPECT_NE(written.message.find("A element " + std::to_string(word)), std::string::npos)
+            << written.message;
+
+        ASSERT_EQ(region->fill_poison(0), hipSuccess);
+        auto refilled = region->verify_poison("A", 0);
+        EXPECT_TRUE(refilled.passed) << refilled.message;
+    }
+
+    TEST(FastCheckDevice_pre_checkin, placement_rejects_requests_that_cannot_cross)
+    {
+        std::string why;
+        bool        unsupported = false;
+        if(!PlacedRegion::create(1 << 20, 0, HIP_R_32F, &why, &unsupported) && unsupported)
+            GTEST_SKIP() << why;
+        EXPECT_FALSE(PlacedRegion::create(4096, 8192, HIP_R_32F, &why, &unsupported));
+        EXPECT_FALSE(unsupported);
+        EXPECT_NE(why.find("cannot cross"), std::string::npos) << why;
+        EXPECT_FALSE(PlacedRegion::create(1 << 20, 100, HIP_R_32F, &why, &unsupported));
+        EXPECT_NE(why.find("multiple of the mapping granularity"), std::string::npos) << why;
+    }
+
+    // std::vector growth moves its elements. A placed buffer must keep its address through the
+    // move, and the moved-from object must not touch the placed memory when it is destroyed.
+    TEST(FastCheckDevice_pre_checkin, placed_buffer_survives_vector_growth)
+    {
+        std::string                  why;
+        bool                         unsupported = false;
+        std::vector<HipDeviceBuffer> buffers;
+        buffers.emplace_back(HIP_R_32F, size_t(1 << 20), size_t(0), &why, &unsupported);
+        if(!buffers.back().buf() && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(buffers.back().buf()) << why;
+        void* placed = buffers[0].buf();
+        for(int n = 0; n < 16; n++)
+            buffers.emplace_back(HIP_R_32F, size_t(1024));
+        EXPECT_EQ(buffers[0].buf(), placed);
+        ASSERT_TRUE(buffers[0].placement());
+        EXPECT_EQ(buffers[0].placement()->ptr(), placed);
+        EXPECT_EQ(hipMemset(placed, 0, 4 << 20), hipSuccess);
     }
 
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)

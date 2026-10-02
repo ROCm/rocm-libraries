@@ -1131,6 +1131,32 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     return {};
 }
 
+// Skips the test when buffer placement is unavailable on this platform, and fails it when the
+// placement request is invalid.
+#ifdef GOOGLE_TEST
+#define CHECK_PLACEMENT(ok, unsupported, why) \
+    do                                        \
+    {                                         \
+        if(!(ok))                             \
+        {                                     \
+            if(unsupported)                   \
+                GTEST_SKIP() << (why);        \
+            else                              \
+                FAIL() << (why);              \
+        }                                     \
+    } while(0)
+#else
+#define CHECK_PLACEMENT(ok, unsupported, why)     \
+    do                                            \
+    {                                             \
+        if(!(ok))                                 \
+        {                                         \
+            hipblaslt_cerr << (why) << std::endl; \
+            return;                               \
+        }                                         \
+    } while(0)
+#endif
+
 // Seed for the fast_check probe vectors: FNV-1a over the test name, so a failure reproduces.
 inline uint64_t fast_check_seed(const Arguments& arg)
 {
@@ -2368,6 +2394,36 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    if(arg.placement[0])
+    {
+        static const char* operands[]
+            = {"a", "b", "c", "d", "bias", "scale_alpha_vec", "workspace"};
+        std::string why;
+        if(!arg.fast_check)
+            why = "placement requires fast_check";
+        else if(std::none_of(std::begin(operands), std::end(operands), [&](const char* o) {
+                    return !strcmp(o, arg.placement);
+                }))
+            why = std::string("unknown placement operand '") + arg.placement + "'";
+        else if(HMM)
+            why = "placement does not support HMM";
+        else if(arg.c_equal_d && !strcmp(arg.placement, "d"))
+            why = "with c_equal_d, D is C: place c instead of d";
+        else if(!strcmp(arg.placement, "bias") && !arg.bias_vector)
+            why = "placing the bias requires bias_vector";
+        else if(!strcmp(arg.placement, "scale_alpha_vec") && !arg.scaleAlpha_vector)
+            why = "placing the scaleAlpha vector requires scaleAlpha_vector";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     // Calculating block count
     auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
         arg.adaptive, arg.max_iters, arg.cold_iters, arg.iters, rotating, totalRotatingSizeNeeded);
@@ -2665,17 +2721,44 @@ void testing_matmul_with_bias(const Arguments& arg,
                 epilogue_on[i] = true;
             }
 
-            // allocate memory on device
-            dA.emplace_back(TiA, size_dA[i] * block_count, HMM);
+            // allocate memory on device; the operand named by arg.placement crosses a 4 GiB
+            // boundary. allocate() returns false when that placement failed.
+            std::string placement_why;
+            bool        placement_unsupported = false;
+            auto        allocate              = [&](std::vector<HipDeviceBuffer>& v,
+                                hipDataType                   type,
+                                size_t                        elements,
+                                const char*                   operand) {
+                if(i == 0 && !strcmp(arg.placement, operand))
+                {
+                    v.emplace_back(type,
+                                   elements,
+                                   size_t(arg.placement_offset),
+                                   &placement_why,
+                                   &placement_unsupported);
+                    return v.back().buf() != nullptr;
+                }
+                v.emplace_back(type, elements, HMM);
+                return true;
+            };
+            CHECK_PLACEMENT(allocate(dA, TiA, size_dA[i] * block_count, "a"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
-            dB.emplace_back(TiB, size_dB[i] * block_count, HMM);
+            CHECK_PLACEMENT(allocate(dB, TiB, size_dB[i] * block_count, "b"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
-            dC.emplace_back(To, size_C[i] * block_count, HMM);
+            CHECK_PLACEMENT(allocate(dC, To, size_C[i] * block_count, "c"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
 
             if(!arg.c_equal_d)
             {
-                dD.emplace_back(To, size_D[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dD, To, size_D[i] * block_count, "d"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
                 dDp = &dD;
             }
@@ -2684,13 +2767,20 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(size_bias[i] * block_count != 0)
             {
-                dBias.emplace_back(Tbias, size_bias[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dBias, Tbias, size_bias[i] * block_count, "bias"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
             if(arg.scaleAlpha_vector)
             {
-                dScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dScaleAlphaVec,
+                                         Talpha,
+                                         size_scaleAlphaVec[i] * block_count,
+                                         "scale_alpha_vec"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
@@ -5021,6 +5111,22 @@ void testing_matmul_with_bias(const Arguments& arg,
     dWorkspace = new device_vector<unsigned char>(workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
 
+    // The workspace the checked solutions use. A placed workspace replaces the normal one.
+    std::unique_ptr<PlacedRegion> placedWorkspace;
+    void*                         workspacePtr = static_cast<unsigned char*>(*dWorkspace);
+    if(!strcmp(arg.placement, "workspace"))
+    {
+        std::string why;
+        bool        unsupported = false;
+        if(workspace_size == 0)
+            why = "placing the workspace requires a nonzero workspace size";
+        else
+            placedWorkspace = PlacedRegion::create(
+                workspace_size, size_t(arg.placement_offset), HIP_R_8I, &why, &unsupported);
+        CHECK_PLACEMENT(placedWorkspace != nullptr, unsupported, why);
+        workspacePtr = placedWorkspace->ptr();
+    }
+
     if(arg.use_user_args)
     {
         CHECK_HIP_ERROR(
@@ -5509,7 +5615,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         gemmVec[0].initialize(heuristicResult[sol].algo,
                                               tuningVec[heuristicTuningIndex[sol]],
-                                              *dWorkspace));
+                                              workspacePtr));
                     CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream));
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5537,7 +5643,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                           ddd[0],
                                                           matD[0],
                                                           &heuristicResult[sol].algo,
-                                                          *dWorkspace,
+                                                          workspacePtr,
                                                           workspace_size,
                                                           stream),
                                           HIPBLAS_STATUS_SUCCESS);
@@ -5558,7 +5664,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                           (*dDp)[0].buf(),
                                                           matD[0],
                                                           &heuristicResult[sol].algo,
-                                                          *dWorkspace,
+                                                          workspacePtr,
                                                           workspace_size,
                                                           stream),
                                           HIPBLAS_STATUS_SUCCESS);
@@ -5573,7 +5679,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
-                                                     *dWorkspace));
+                                                     workspacePtr));
                     groupedGemmVec[0].getDefaultValueForDeviceUserArguments(userArgs);
                     // Copy them to device memory
                     CHECK_HIP_ERROR(hipMemcpy(d_userArgs,
@@ -5589,7 +5695,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
-                                                     *dWorkspace,
+                                                     workspacePtr,
                                                      false,
                                                      stream));
 
@@ -5718,7 +5824,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             {"B", dB[i].buf(), size_B[i] * realDataTypeSize(TiB)},
                             {"C", dC[i].buf(), size_C[i] * realDataTypeSize(To)},
                             {"D", (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To)},
-                            {"workspace", static_cast<unsigned char*>(*dWorkspace), workspace_size}};
+                            {"workspace", workspacePtr, workspace_size}};
                         if(arg.bias_vector)
                             buffers.push_back(
                                 {"bias", dBias[i].buf(), size_bias[i] * realDataTypeSize(Tbias)});
@@ -5741,6 +5847,33 @@ void testing_matmul_with_bias(const Arguments& arg,
                         hipblaslt_cerr << report << std::endl;
 #endif
                     }
+                }
+
+                // A write that missed a placed operand by exactly 4 GiB lands in its poison.
+                const PlacedRegion* placed = placedWorkspace.get();
+                for(auto* v : {&dA, &dB, &dC, &dD, &dBias, &dScaleAlphaVec})
+                    if(!placed && !v->empty() && (*v)[0].placement())
+                        placed = (*v)[0].placement();
+                if(placed)
+                {
+                    FastCheckResult poison = placed->verify_poison(arg.placement, stream);
+                    if(!poison.passed)
+                    {
+                        const std::string report
+                            = "fast_check placement, "
+                              + solution_description(handle,
+                                                     heuristicResult[sol].algo,
+                                                     sol,
+                                                     heuristicResult.size(),
+                                                     true)
+                              + ":\n" + poison.message;
+#ifdef GOOGLE_TEST
+                        ADD_FAILURE() << report;
+#else
+                        hipblaslt_cerr << report << std::endl;
+#endif
+                    }
+                    CHECK_HIP_ERROR(placed->fill_poison(stream));
                 }
             }
         }

@@ -1438,48 +1438,97 @@ hipError_t fast_check_poison_padding_device(const FastCheckMatrix& m,
     return fill_outside_region(m, batch_count, total_elements, poison_bits(m.type), stream);
 }
 
+namespace
+{
+    // Runs scan_kernel and returns its counters: [0] padding mismatches, [1] first padding
+    // mismatch, [2] unwritten elements, [3] first unwritten element.
+    hipError_t run_scan(const FastCheckMatrix& m,
+                        int64_t                batch_count,
+                        size_t                 total_elements,
+                        bool                   expect_poison,
+                        hipStream_t            stream,
+                        unsigned long long (&counters)[4])
+    {
+        unsigned long long              init[4] = {0, ~0ull, 0, ~0ull};
+        DeviceArray<unsigned long long> d_counters(4);
+        if(!d_counters.ptr)
+            return hipErrorOutOfMemory;
+        hipError_t err
+            = hipMemcpyAsync(d_counters.ptr, init, sizeof(init), hipMemcpyHostToDevice, stream);
+        if(err != hipSuccess)
+            return err;
+        // A failed launch, or an unsupported type, would otherwise leave the counters clean.
+        err = hipErrorInvalidValue;
+        switch(element_size(m.type))
+        {
+        case 1:
+            err = launch_scan<uint8_t>(
+                m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
+            break;
+        case 2:
+            err = launch_scan<uint16_t>(
+                m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
+            break;
+        case 4:
+            err = launch_scan<uint32_t>(
+                m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
+            break;
+        case 8:
+            err = launch_scan<uint64_t>(
+                m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
+            break;
+        default:
+            break;
+        }
+        if(err != hipSuccess)
+            return err;
+        err = hipMemcpyAsync(
+            counters, d_counters.ptr, sizeof(counters), hipMemcpyDeviceToHost, stream);
+        if(err == hipSuccess)
+            err = hipStreamSynchronize(stream);
+        return err;
+    }
+} // namespace
+
+size_t fast_check_element_size(hipDataType type)
+{
+    return element_size(type);
+}
+
+uint64_t fast_check_poison_bits(hipDataType type)
+{
+    return poison_bits(type);
+}
+
+FastCheckChanged fast_check_count_changed_device(const void* data,
+                                                 hipDataType type,
+                                                 size_t      elements,
+                                                 hipStream_t stream)
+{
+    // An empty region makes every element padding, so the scan compares all of them with the
+    // poison value.
+    FastCheckMatrix    m{data, type, 0, 0, 1, 0};
+    unsigned long long counters[4];
+    FastCheckChanged   changed;
+    if(run_scan(m, 1, elements, true, stream, counters) != hipSuccess)
+    {
+        changed.ok = false;
+        return changed;
+    }
+    changed.count = counters[0];
+    changed.first = counters[1];
+    return changed;
+}
+
 FastCheckResult fast_check_scan_padding_device(const FastCheckMatrix& m,
                                                int64_t                batch_count,
                                                size_t                 total_elements,
                                                bool                   expect_poison,
                                                hipStream_t            stream)
 {
-    FastCheckResult                 result;
-    unsigned long long              init[4] = {0, ~0ull, 0, ~0ull};
-    DeviceArray<unsigned long long> d_counters(4);
-    if(!d_counters.ptr
-       || hipMemcpyAsync(d_counters.ptr, init, sizeof(init), hipMemcpyHostToDevice, stream)
-              != hipSuccess)
-        return {false, "fast_check could not allocate its scan counters"};
-    // A failed launch, or an unsupported type, would otherwise leave the counters clean.
-    hipError_t err = hipErrorInvalidValue;
-    switch(element_size(m.type))
-    {
-    case 1:
-        err = launch_scan<uint8_t>(
-            m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
-        break;
-    case 2:
-        err = launch_scan<uint16_t>(
-            m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
-        break;
-    case 4:
-        err = launch_scan<uint32_t>(
-            m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
-        break;
-    case 8:
-        err = launch_scan<uint64_t>(
-            m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
-        break;
-    default:
-        break;
-    }
-    if(err != hipSuccess)
-        return {false, std::string("fast_check scan failed: ") + hipGetErrorString(err)};
+    FastCheckResult    result;
     unsigned long long counters[4];
-    err = hipMemcpyAsync(counters, d_counters.ptr, sizeof(counters), hipMemcpyDeviceToHost, stream);
-    if(err == hipSuccess)
-        err = hipStreamSynchronize(stream);
+    hipError_t err = run_scan(m, batch_count, total_elements, expect_poison, stream, counters);
     if(err != hipSuccess)
         return {false, std::string("fast_check scan failed: ") + hipGetErrorString(err)};
 

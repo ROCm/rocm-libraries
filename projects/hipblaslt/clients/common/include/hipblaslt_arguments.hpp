@@ -174,6 +174,10 @@ struct Arguments
     int8_t unit_check;
     int8_t ulp_check;
     int8_t fast_check;
+    // fast_check: operand to place across a 4 GiB boundary (a, b, c, d, bias,
+    // scale_alpha_vec, workspace), and the bytes before the boundary (0 = middle)
+    char   placement[16];
+    size_t placement_offset;
     int8_t timing;
 
     char transA;
@@ -305,6 +309,8 @@ struct Arguments
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
     OPER(fast_check) SEP             \
+    OPER(placement) SEP              \
+    OPER(placement_offset) SEP       \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

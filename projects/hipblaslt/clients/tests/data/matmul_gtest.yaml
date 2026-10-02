@@ -3366,6 +3366,111 @@ Tests:
   gpu_arch: '9(0a|42|50)'
 
 
+###############################################################################
+# fast_check placement (AIHPBLAS-4994).
+#
+# Some address defects depend on where a buffer sits, not on problem size: a
+# kernel that drops the carry out of the low 32 bits of an address (ROCM-32046)
+# goes wrong only when a buffer crosses a 4 GiB boundary, and the wrong access
+# lands exactly 4 GiB away, outside every allocation. These cases place one
+# operand at a time across a 4 GiB virtual-address boundary (by default half of
+# it on each side) with poison memory mapped 4 GiB below and above it. A
+# dropped-carry read returns poison and fast_check reports a wrong D; a
+# dropped-carry write changes the poison and the test reports it. The defect
+# does not depend on size, so small shapes suffice, and every solution runs
+# because such defects are specific to a few kernels.
+###############################################################################
+
+# Every PR: each operand placed in turn, with the heuristic's first 16 solutions.
+# The workspace is placed only in the all-solutions cases below: at this shape
+# none of the first 16 f32 solutions uses one.
+# Runtime on gfx942: 8 cases, about 4 s.
+- name: matmul_fast_check_placement
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ a, b, c, d ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# The side operands, with the epilogue that reads them.
+# Runtime on gfx942: 4 cases, about 4 s.
+- name: matmul_fast_check_placement_epilogue
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  placement: [ bias, scale_alpha_vec ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Nightly: the same placements with every supported solution, about 6 minutes on
+# gfx942.
+# Runtime on gfx942: 10 cases, about 178 s.
+- name: matmul_fast_check_placement_all_solutions
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ a, b, c, d, workspace ]
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Runtime on gfx942: 4 cases, about 190 s.
+- name: matmul_fast_check_placement_epilogue_all_solutions
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  placement: [ bias, scale_alpha_vec ]
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
 - name: matmul_96_complex
   category: pre_checkin
   function:
