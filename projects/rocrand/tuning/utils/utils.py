@@ -58,7 +58,7 @@ class Parser:
             "--exclude-default-config",
             action="store_true",
             default=False,
-            help="Include default configs of previous tuning in the new results (default: off)",
+            help="Exclude default configs of previous tuning in the new results (default: off)",
         )
         parser.add_argument(
             "--strategy",
