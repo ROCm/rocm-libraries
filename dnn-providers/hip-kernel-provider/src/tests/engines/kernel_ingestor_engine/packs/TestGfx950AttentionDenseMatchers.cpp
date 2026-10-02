@@ -1448,11 +1448,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedDataType)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOneOverSqrtHeadSize)
+TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOne)
 {
-    // hipDNN's SDPA contract: no attn_scale_value and no scale tensor means 1/sqrt(D).
-    // The CPU reference and the ASM SDPA / HipFlash2 engines apply it, so declining
-    // here would only under-serve, and serving any other value would be wrong.
+    // cuDNN's default: no attn_scale_value and no scale tensor means no scaling, at every
+    // head size.
     for(const int64_t headSize : {int64_t{64}, int64_t{128}})
     {
         SCOPED_TRACE(headSize);
@@ -1464,7 +1463,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOneOverSqrtHea
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(
             hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
-            ieee754Bits(1.0F / std::sqrt(static_cast<float>(headSize))));
+            ieee754Bits(1.0F));
     }
 
     // An explicit scale still wins over the default.
