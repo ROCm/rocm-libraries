@@ -18,7 +18,33 @@ is not installed, and only the JIT tests use it. Builds with the backend export
 `jit::hipkittens::createBackend` and `jit::hipkittens::detail::resources` from
 it for the test binaries; they are not a supported API. Tests create the
 backend with `createBackend` and use it through `getJitAlgo` and
-`getLibraryAlgos`; heuristic queries do not use it.
+`getLibraryAlgos`. Heuristic queries use it only when `HIPBLASLT_JIT_BACKENDS`
+names it.
+
+## Heuristic queries
+
+In a build with the backend, HipKittens is an opt-in backend with the
+identifier `hipkittens`: with `HIPBLASLT_JIT_BACKENDS` unset or empty it is not
+configured, and heuristic queries behave as in a build without it. Listed, it
+serves the JIT step in its place in the list, as the
+[JIT guide](JIT.md#heuristic-integration) describes, and is configured once
+per process from the headers that `HIPBLASLT_JIT_HIPKITTENS_PATH` or the
+default locations provide. For example,
+`HIPBLASLT_JIT_BACKENDS=tensilelite,hipkittens` returns the TensileLite
+solutions and then the HipKittens one when the query requests at least two,
+and `hipkittens,tensilelite` lets `hipblasLtMatmul` without an algorithm run
+the HipKittens kernel. A problem outside the kernel's domain, or another
+device, skips it without a report. When its headers are missing, each problem
+reports one configure failure:
+
+```text
+hipblaslt warning: JIT configure failed for GEMM M=1024 N=512 K=768 ... EPILOGUE_DEFAULT: JIT backend HipKittens not available: headers not found at /opt/rocm/lib/hipblaslt/hipkittens/be1c91841b81; set HIPBLASLT_JIT_HIPKITTENS_PATH
+```
+
+`hipblasLtMatmulAlgoGetHeuristic` builds its problem with beta 1, so it never
+returns the HipKittens kernel, which needs beta 0. `GemmInstance::algoGetHeuristic`
+and `hipblasLtMatmul` without an algorithm use the problem's own alpha and
+beta.
 
 ## Build
 
