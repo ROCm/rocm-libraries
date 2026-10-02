@@ -66,6 +66,9 @@ When **disabled** (default):
 - First execution is faster than with benchmarking
 - May not use the optimal kernel for your specific configuration
 
+Disabling benchmarking does not guarantee independence from tuning results.
+The process-wide benchmarking override retains its normal precedence over this knob.
+
 When **enabled**:
 - MIOpen benchmarks multiple solver candidates
 - Convolution Find runs in MIOpen's Normal find mode with exhaustive search, matching

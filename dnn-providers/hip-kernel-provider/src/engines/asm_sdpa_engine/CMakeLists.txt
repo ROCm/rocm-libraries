@@ -84,6 +84,17 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
 
 # ============================================================================
+# Forward selector revision
+# ============================================================================
+# The `selector_revision` a deployed L1 model for this engine must record; inputs are
+# documented in AsmSdpaSelectorRevision.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
+hkp_asm_sdpa_fwd_revision(_fwd_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
+target_compile_definitions(hip_kernel_provider_impl PRIVATE
+    HKP_ASM_SDPA_FWD_REVISION="${_fwd_revision}")
+message(STATUS "hip-kernel-provider: asm_sdpa forward selector revision ${_fwd_revision}")
+
+# ============================================================================
 # Kpack Packing (build-time .co → .kpack)
 # ============================================================================
 #
