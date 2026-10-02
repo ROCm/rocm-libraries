@@ -49,6 +49,17 @@ _TUNED_TILES_KDA = (
 NUM_WARPS = (1, 2, 4, 8, 16)
 WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
 BLOCKS_PER_V_DIM = (1, 2, 4, 8, 16, 32)
+# GDN ``auto`` is one static tile on purpose; batch only changes the grid.
+# This replaced a batch-keyed table that picked (4,16,8) / (2,8,2) / (1,8,1) /
+# (8,16,1) for batch <=4 / <=32 / <=128 / larger. No single legal tile matches
+# all four of those winners. (2,16,8) was measured on gfx950 against that table
+# at batch 1/16/64/256: batch 256 was neutral, batch 64 is slower, and batch 1
+# and 16 read slower but were too noisy to call. The batch-64 cost was accepted
+# in exchange for one deterministic default. Across every legal tile at those
+# batches, (2,16,8) has the lowest geomean and worst-case slowdown against each
+# batch's fastest tile, though it is not the fastest at any single batch. To
+# revisit, run ``tune.py --gate-kind gdn``; it reports this default's rank and
+# its ratio to the fastest legal tile per batch.
 DEFAULT_TILE = (2, 16, 8)
 
 _LEXICOGRAPHIC_TILES = tuple(product(NUM_WARPS, WARP_THREADS_K, BLOCKS_PER_V_DIM))
