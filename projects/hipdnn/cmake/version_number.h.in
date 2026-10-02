@@ -5,15 +5,16 @@
 // leaves this file (and everything that includes only this file) untouched. The hash
 // lives in version.h as @_VERSION_PREFIX@_VERSION_TWEAK / _VERSION_STRING.
 
+// The include guard is a CMake placeholder too, which clang-format would split.
+// clang-format off
 #ifndef @_VERSION_PREFIX@_VERSION_NUMBER_H
 #define @_VERSION_PREFIX@_VERSION_NUMBER_H
 
-// clang-format off
 // NOLINTBEGIN(modernize-macro-to-enum)
 #define @_VERSION_PREFIX@_VERSION_MAJOR @_VERSION_MAJOR@
 #define @_VERSION_PREFIX@_VERSION_MINOR @_VERSION_MINOR@
 #define @_VERSION_PREFIX@_VERSION_PATCH @_VERSION_PATCH@
 // NOLINTEND(modernize-macro-to-enum)
-// clang-format on
 
 #endif // @_VERSION_PREFIX@_VERSION_NUMBER_H
+// clang-format on
