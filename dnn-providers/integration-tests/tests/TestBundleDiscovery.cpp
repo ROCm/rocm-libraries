@@ -628,9 +628,11 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
-    EXPECT_EQ(bundle.tensors->size(), 6u);
-    EXPECT_NE(bundle.tensors->find(5), bundle.tensors->end());
+    ASSERT_TRUE(bundle.blobs.has_value());
+    EXPECT_TRUE(bundle.hasGoldenOutputs);
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.size(), 6u);
+    EXPECT_NE(tensors.find(5), tensors.end());
 
     ASSERT_TRUE(bundle.metadata.operation.has_value());
     EXPECT_EQ(*bundle.metadata.operation, "BatchnormInference");
@@ -667,7 +669,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value()); // graph-only: no tensor data
+    EXPECT_FALSE(bundle.blobs.has_value()); // graph-only: no tensor data
     EXPECT_FALSE(bundle.hasGoldenOutputs);
     EXPECT_FALSE(bundle.metadata.operation.has_value()); // default-constructed
 }
@@ -743,7 +745,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
     EXPECT_EQ(bundle.outputTensorUids.size(), 1u);
 }
 
@@ -761,12 +763,13 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCasePopulatesExpandedGraphAn
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
 
-    ASSERT_TRUE(bundle.tensors.has_value());
+    ASSERT_TRUE(bundle.blobs.has_value());
     ASSERT_EQ(bundle.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.outputTensorUids.front(), 5);
-    EXPECT_EQ(bundle.tensors->at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
-    EXPECT_EQ(bundle.tensors->at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
-    EXPECT_EQ(bundle.tensors->at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    const auto tensors = bundle.loadTensors();
+    EXPECT_EQ(tensors.at(0)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
+    EXPECT_EQ(tensors.at(0)->strides(), (std::vector<int64_t>{60, 20, 5, 1}));
+    EXPECT_EQ(tensors.at(5)->dims(), (std::vector<int64_t>{2, 3, 4, 5}));
 
     const auto tensorAttrMap = bundle.graphWrapper().getTensorMap();
     EXPECT_EQ(tensorAttrMap.at(0)->data_type(),
@@ -797,7 +800,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
-    EXPECT_FALSE(bundle.tensors.has_value());
+    EXPECT_FALSE(bundle.blobs.has_value());
 }
 
 // Every case of a sweep shares one sweep.json, and a load pass must parse it once
@@ -948,7 +951,9 @@ TEST_F(TestBundleDiscoveryFixture, LoadDirectBundleWithBakedValueAndRuntimePassB
                  detail::RuntimePassByValueInvariantError);
 }
 
-TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
+// Registration only records where a bundle's blobs are. A bad blob therefore fails the
+// test that needs it, instead of dropping the bundle from the run when it is loaded.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinFailsOnlyWhenTheTensorsAreRead)
 {
     auto dir = _tempDir / "op" / "badbin";
     createLoadableBundle(dir, "badbin");
@@ -956,8 +961,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
     const auto jsonPath = dir / "badbin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
-    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_THROW(std::get<IntegrationTestBundle>(result).loadTensors(), std::exception);
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingTensorsKeyIsSchemaError)

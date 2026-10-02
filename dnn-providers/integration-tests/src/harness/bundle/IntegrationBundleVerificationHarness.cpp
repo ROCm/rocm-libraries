@@ -302,10 +302,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
 
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
-    // _bundle->tensors. Filling first made a declined graph pay the full host-side
+    // _inputs. Filling first made a declined graph pay the full host-side
     // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
-    // seconds per skip, and left those inputs cached on the bundle for the rest of
-    // the run.
+    // seconds per skip, and reading a golden bundle's blobs first made it pay for
+    // those too.
     if(session.engines.accepted)
     {
         if(auto unavailable = prepareInputs())
@@ -484,14 +484,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepareInputs()
 {
-    if(!_bundle->tensors.has_value())
+    if(!_bundle->blobs.has_value())
     {
         return fillBundleInputs();
     }
 
-    // Tensors that are already present are unpacked, but the engine reads sub-byte
-    // operands packed, and only fillBundleInputs() builds the packed set
-    // (ALMIOPEN-2724).
+    // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
+    // packed, and only fillBundleInputs() builds the packed set (ALMIOPEN-2724).
     const auto wrapper = _bundle->graphWrapper();
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
@@ -503,6 +502,21 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
             return unverifiable("sub-byte input " + std::to_string(uid)
                                 + " has no packed copy for the engine (ALMIOPEN-2724)");
         }
+    }
+
+    // Read here, not at registration, so a golden bundle holds its tensors only while
+    // its own test runs. A blob that is unreadable or the wrong size fails this test
+    // instead of quietly dropping it from the run.
+    try
+    {
+        _inputs = _bundle->loadTensors();
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("tensor data failed to load: ") + e.what()
+                                               + " (" + _bundlePath.string() + ")");
     }
     return std::nullopt;
 }
@@ -553,7 +567,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         _packedInputs = std::move(packed);
     }
 
-    _bundle->tensors = std::move(inputs);
+    _inputs = std::move(inputs);
     return std::nullopt;
 }
 
@@ -569,7 +583,7 @@ std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs, bool useDevice)
 {
     const auto wrapper = _bundle->graphWrapper();
-    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : *_bundle->tensors;
+    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
     return detail::buildVariantPack(
         inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
@@ -673,9 +687,7 @@ VerificationOutcome
 {
     return compareAgainst(
         engineOutputs,
-        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *_bundle->tensors->at(uid);
-        },
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_inputs.at(uid); },
         ValidationSite::HOST,
         Verifier::GOLDEN);
 }

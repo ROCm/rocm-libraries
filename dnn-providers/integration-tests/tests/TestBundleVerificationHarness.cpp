@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -188,8 +189,8 @@ void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::D
     auto bundle = makeMxMatmulBundle(xType);
     fillOnHost(harness, bundle);
 
-    ASSERT_TRUE(bundle->tensors.has_value());
-    const auto& unpacked = *bundle->tensors;
+    ASSERT_FALSE(harness.inputs().empty());
+    const auto& unpacked = harness.inputs();
     const auto& packed = harness.packedInputs();
     ASSERT_EQ(packed.size(), unpacked.size());
 
@@ -322,8 +323,81 @@ TEST_F(TestGoldenHarnessFixture, NonSubByteBundleHasNoPackedInputs)
     auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
     fillOnHost(harness, bundle);
 
-    ASSERT_TRUE(bundle->tensors.has_value());
+    EXPECT_FALSE(harness.inputs().empty());
     EXPECT_TRUE(harness.packedInputs().empty());
+}
+
+// A registered bundle outlives its tests, so what a run generates has to belong to the
+// run: nothing is left on the bundle for the next one, and every run regenerates the
+// same values from the same seed.
+TEST_F(TestGoldenHarnessFixture, GeneratedInputsBelongToTheRunAndRepeatIdentically)
+{
+    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
+
+    testing_support::HarnessMocks firstMocks;
+    IntegrationBundleVerificationHarness first(
+        firstMocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    fillOnHost(first, bundle);
+
+    testing_support::HarnessMocks secondMocks;
+    IntegrationBundleVerificationHarness second(
+        secondMocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    fillOnHost(second, bundle);
+
+    EXPECT_FALSE(bundle->blobs.has_value());
+    ASSERT_FALSE(first.inputs().empty());
+    ASSERT_EQ(first.inputs().size(), second.inputs().size());
+    for(const auto& [uid, tensor] : first.inputs())
+    {
+        auto& other = *second.inputs().at(uid);
+        EXPECT_NE(tensor.get(), &other) << "uid " << uid;
+        EXPECT_EQ(std::memcmp(tensor->rawHostData(),
+                              other.rawHostData(),
+                              tensor->elementSpace() * tensor->elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
+
+// Golden tensors are read by the run that needs them, so a bundle can be run again: the
+// second run reads its own copy instead of finding the first one's.
+TEST_F(TestGoldenHarnessFixture, GoldenBundleCanBeRunAgainBecauseEachRunReadsItsTensors)
+{
+    auto bundle = loadRunnableBundle("golden_run_twice");
+
+    for(int run = 0; run < 2; ++run)
+    {
+        testing_support::HarnessMocks mocks;
+        testing_support::engineWrites(
+            mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+        ::testing::TestPartResultArray results;
+        runCapturing(mocks, bundle, &results);
+
+        EXPECT_FALSE(testing_support::anyFailed(results)) << "run " << run;
+        EXPECT_FALSE(testing_support::anySkipped(results)) << "run " << run;
+    }
+}
+
+// A blob that cannot be read fails the test that needs it, with the reason, instead of
+// the bundle having been dropped quietly when it was registered.
+TEST_F(TestGoldenHarnessFixture, UnreadableGoldenBlobFailsTheRunWithTheReason)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    auto bundle = loadRunnableBundle("golden_bad_blob");
+    ASSERT_TRUE(bundle->blobs.has_value());
+    const auto blob = bundle->blobs->pathForUid(bundle->blobs->inputUids.front());
+    std::ofstream(blob, std::ios::binary | std::ios::trunc) << "too short";
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("tensor data failed to load"),
+              std::string::npos);
 }
 
 // Was ExecutorThrowsYieldsSkip: IGraphEngineRunner::execute() now answers "not
@@ -356,16 +430,20 @@ TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
         });
 
     auto bundle = makeRuntimePbvFillBundle();
-    ASSERT_FALSE(bundle->tensors.has_value());
+    ASSERT_FALSE(bundle->blobs.has_value());
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(bundle, "unit-test-bundle");
 
     ::testing::TestPartResultArray results;
-    runCapturing(mocks, bundle, &results);
+    testing_support::driveHarness(harness, &results);
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("Engine could not execute bundle"),
               std::string::npos);
-    EXPECT_FALSE(bundle->tensors.has_value());
+    EXPECT_TRUE(harness.inputs().empty());
 }
 
 TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)
