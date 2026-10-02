@@ -273,7 +273,8 @@ def solutions_from_config(
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
                              splitGSU=False, cluster_dim=None, problem_index=0,
-                             problem_fingerprint=None, expected_fork_count=None):
+                             problem_fingerprint=None, expected_fork_count=None,
+                             global_params=None):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -295,10 +296,16 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
+
+    ``global_params`` overrides ``globalParameters`` for this emit only (the
+    isolation context restores them afterwards). A kernel whose SGPR pool only
+    fits once the scalar allocator has run needs
+    ``{"StinkyTofuRegisterAllocation": 3}`` here, or it emits with err 2.
     """
     import rocisa  # noqa: F401  (ensures the singleton module is importable here)
     from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from Tensile.Common.GlobalParameters import globalParameters
     from Tensile.Common.Types import DebugConfig
     from Tensile.SolutionStructs.Naming import getKernelFileBase
 
@@ -306,6 +313,8 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     results = []
     with _isolated_globals_with_isa(iim):
+        if global_params:
+            globalParameters.update(global_params)
         sols = _solutions_from_config_unguarded(
             config_path,
             assembler,

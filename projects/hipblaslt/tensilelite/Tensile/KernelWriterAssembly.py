@@ -20259,6 +20259,11 @@ class KernelWriterAssembly(KernelWriter):
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
+    # A scale tensor holds one element per MXBlock along K, so its unroll extent
+    # is the data tensor's divided by the block size.
+    isMX: bool = tc.startswith("MX")
+    duScale: int = kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMX else 1
+    du //= duScale
     if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"] or tP["isM"]):
       du = du // 2
     if tP["isM"]:
@@ -20274,6 +20279,14 @@ class KernelWriterAssembly(KernelWriter):
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
     dim1Divisor = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
+    # Scale elements per MatrixInstK step: the descriptor counts scales, and one
+    # covers MXBlock data elements.
+    mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMX else 1
+    # The descriptor shifts by log2(mxUnit), so anything but a positive power of
+    # two would silently round the geometry instead of failing.
+    assert not isMX or (mxUnit >= 1 and mxUnit & (mxUnit - 1) == 0), \
+      "%s: MatrixInstK(%d) must be a power-of-two multiple of MXBlock(%d)" \
+      % (tc, kernel["MatrixInstK"], kernel["ProblemType"][f"MXBlock{tc[-1]}"])
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
     isMetadataML1: bool = isMetadata and kernel["ProblemType"]["Sparse"] and kernel["ProblemType"]["MetadataLayout"]
@@ -20343,31 +20356,53 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(SSubI32(sgpr(tmpMN.idx), sgpr(sizeRefName(ti)), sgpr(tmpMN.idx), f"remaining M/N = Size{INDEX_CHARS[ti]} - MT*wgId"))
         dim0Src = tmpMN.idx if (applyMNEdge and not dim0IsK) else sizeRefName(dim0Idx)
         dim1Src = tmpMN.idx if (applyMNEdge and dim0IsK) else sizeRefName(dim1Idx)
-        if is6bit:
-          # F6: 0.75 bytes/element. dim0 in bytes = elements * 3 / 4. Dense-only (TN).
-          with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpF6") as tmpF6:
-            mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
-            mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
-            mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+        if isMX:
+          # A scale descriptor is addressed in scale elements, and its axes do not
+          # follow the data tensor's: dim0 is the clamped free dim, dim1 the
+          # summation size. setTensorDim0 left-shifts an MX dim (multiplies the
+          # free dim by mxUnit); setTensorDim1 right-shifts, dividing K by
+          # MXBlock * mxUnit, which is MatrixInstK.
+          assert applyMNEdge, f"{tc}: scale dim0 reads the clamped remaining M/N"
+          mod.add(comp.setTensorDim0(descSgprName(1), tmpMN.idx, self, ceil(log2(mxUnit)), True))
+          mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, ceil(log2(duScale * mxUnit)), True))
         else:
-          mod.add(comp.setTensorDim0(descSgprName(1), dim0Src, self, sizeShifter, False,
-                                      isSparseTrack=isSparseTrack if dim0IsK else False,
-                                      isMetadata=isMetadata if dim0IsK else False))
-        mod.add(comp.setTensorDim1(descSgprName(1), dim1Src, self, 0, False,
-                                    isSparseTrack=isSparseTrack if not dim0IsK else False,
-                                    isMetadata=isMetadata if not dim0IsK else False))
-      if is6bit:
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+          if is6bit:
+            # F6: 0.75 bytes/element. dim0 in bytes = elements * 3 / 4. Dense-only (TN).
+            with self.allocTmpSgpr(1, tag="initTDMDescriptor_tmpF6") as tmpF6:
+              mod.add(SLShiftRightB32(sgpr(tmpF6.idx), hex(2), sgpr(sizeRefName(dim0Idx)), "F6: elements / 4"))
+              mod.add(SMulI32(sgpr(tmpF6.idx), sgpr(tmpF6.idx), 3, "F6: * 3 = bytes"))
+              mod.add(comp.setTensorDim0(descSgprName(1), tmpF6.idx, self, 0))
+          else:
+            mod.add(comp.setTensorDim0(descSgprName(1), dim0Src, self, sizeShifter, False,
+                                        isSparseTrack=isSparseTrack if dim0IsK else False,
+                                        isMetadata=isMetadata if dim0IsK else False))
+          mod.add(comp.setTensorDim1(descSgprName(1), dim1Src, self, 0, False,
+                                      isSparseTrack=isSparseTrack if not dim0IsK else False,
+                                      isMetadata=isMetadata if not dim0IsK else False))
+      if isMX:
+        # The scale tile spans the free dim once per K group, so tile0 counts the
+        # scales one group covers and tile1 the groups the unroll holds.
+        numMxKGroups = sizeTile0 // mxUnit
+        # Splitting groups across wave components is the wave-separated builder's
+        # job; this one runs at one wave, on the one group Solution.py allows.
+        assert numComp == 1 and numMxKGroups >= 1
+        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
+        mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       else:
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
-      if isTdmIter:
-        mod.add(comp.setTensorTile1(descSgprName(1),
-                                    self._tdmIterTileDim1(kernel, tc, du, dtype), self))
-      else:
-        mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
+        if is6bit:
+          mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0 * 3 // 4, self, 0))
+        else:
+          mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
+        if isTdmIter:
+          mod.add(comp.setTensorTile1(descSgprName(1),
+                                      self._tdmIterTileDim1(kernel, tc, du, dtype), self))
+        else:
+          mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
 
     # --- Tensor stride ---
-    if isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
+    if isMX:
+      mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
+    elif isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
       mod.add(comp.setTensorStride0Metadata(descSgprName(1), "SizeL"))
     elif isMetadataML1:
       ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]

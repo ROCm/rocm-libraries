@@ -26,7 +26,7 @@ _CONFIGS = [
     ("Tensile/Tests/common/gemm/gfx12/bf6_gfx1250.yaml", "7461004022b7", "gfx1250", 64, {0: 1}),
     ("Tensile/Tests/common/gemm/gfx12/segment_interleave_gfx1250.yaml", "f7f947393334", "gfx1250", 72, {0: 8}),
     ("Tensile/Tests/common/gemm/icache_flush.yaml", "04d3661728e3", "gfx942", 1, {0: 1}),
-    ("Tensile/Tests/common/gemm/gfx12/mxf6_tdm_gfx1250.yaml", "ae046eba508e", "gfx1250", 4, {-2: 2, 0: 2}),
+    ("Tensile/Tests/common/gemm/gfx12/mxf6_tdm_gfx1250.yaml", "ae046eba508e", "gfx1250", 4, {-2: 1, 0: 2}),
     ("Tensile/Tests/common/gemm/gfx12/zgemm_gfx1250.yaml", "29c407b9e664", "gfx1250", 18, {0: 8}),
     ("Tensile/Tests/common/gemm/hh_f8nhs.yaml", "2ca1bbea22cc", "gfx942", 4, {0: 4}),
     ("Tensile/Tests/common/gemm/mix_cvt_after_ds_fnuz.yaml", "b1bd4a0a2215", "gfx942", 1024, {0: 8}),

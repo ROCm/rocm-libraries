@@ -2966,12 +2966,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
-      #TODO: TDM handles MXSA and MXSB
       if tdmA:
         if not tdmInited:
           # Init resolves ArgType 3 A; offsets then apply to the selected matrix.
           module.add(self.initTDMDescriptor(kernel, tensorParametersA))
           module.add(self.tdmGlobalOffset(kernel, tensorParametersA, useDescriptor=True))
+          # The scale loads from a descriptor of its own, and the wave-separated
+          # branch above is the only other place one gets built.
+          if kernel["ProblemType"]["MXBlockA"]:
+            module.add(self.initTDMDescriptor(kernel, tensorParametersA["MX"]))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersA["MX"], useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -3004,6 +3008,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # Init resolves ArgType 3 B; offsets then apply to the selected matrix.
           module.add(self.initTDMDescriptor(kernel, tensorParametersB))
           module.add(self.tdmGlobalOffset(kernel, tensorParametersB, useDescriptor=True))
+          if kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.initTDMDescriptor(kernel, tensorParametersB["MX"]))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersB["MX"], useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
