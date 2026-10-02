@@ -28,8 +28,9 @@ cmake -S projects/hipblaslt -B "$project_build" \
 cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
-  hipblaslt-jit-component-test hipblaslt-jit-process-test hipblaslt-jit-artifacts-test \
-  hipblaslt-jit-code-object-test hipblaslt-jit-library-test hipblaslt-jit-heuristic-test
+  hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-process-test \
+  hipblaslt-jit-artifacts-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
+  hipblaslt-jit-heuristic-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
@@ -73,7 +74,8 @@ to replay, publish or rebuild it.
 | --- | --- |
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
 | `artifact-loader` | Source bundles read by directory convention: file ordering and roles, a missing `sources` or `library` directory, duplicate or corrupt library entries, missing main assembly, nested entries, empty or oversized files, the file-count cap, native Unicode paths, compressed library bytes, and path and symbolic-link containment |
-| `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds |
+| `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
+| `jit-debug` | The `HIPBLASLT_JIT_DEBUG` line writer, without a GPU: value parsing and its warning, JSON escaping and truncation, the line size cap, per-process file names, lines from several threads and processes intact in one file, rate limiting with aggregate lines, and the relay of a child's event file |
 | `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
@@ -101,6 +103,11 @@ to replay, publish or rebuild it.
 | `heuristic-partial-fill` | With the build's device library and one solution published in mode 2, a request for one more than the pre-tuned count in mode 1 whose generator fails if it runs returns that JIT solution once and every pre-tuned solution whose kernel differs from it, and reports the shortfall as a warning. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall) |
 | `heuristic-override` | With two solutions published in mode 2, a `HIPBLASLT_TUNING_OVERRIDE_FILE` whose first line names the library's git revision and whose entry names one of them: requests for three in mode 1 return that solution first and the other JIT solution second through both queries, with checked numerics and no kernel repeated, for either solution named |
 | `heuristic-provider-order` | With the build's device library in mode 1, for a size with an Equality match and for the default size, which has none: a request the Equality results fill returns the mode 0 result without consulting JIT, and `hipblasLtMatmul` without an algorithm runs the Equality solution; larger requests return the Equality results followed by JIT solutions, or only JIT solutions for the default size; a second process whose generator fails if it runs returns the same results, and its `hipblasLtMatmul` without an algorithm runs the same first solution, a JIT one for the default size; with generation failing, a request for two more returns those results followed by the next pre-tuned results whose kernels JIT does not use. It prints SKIP when no candidate size has an Equality match, the default size has one, or either returns fewer than eight pre-tuned results |
+| `heuristic-debug-timing` | `HIPBLASLT_JIT_DEBUG=timing` in mode 1: one `process` and one `setup` line, no progress lines, a `generation` line whose stage times add up and include the generator's own times, one `solution` line per published solution with its HIP compile times, and `query` lines whose `from` counts add up to the returned count; the results equal a run without the variable. A second process gets cache hits and no `generation` line, mode 2 queries take every result from JIT, and of two threads that start together the one that waits names the generation it waited for |
+| `heuristic-debug-progress` | `HIPBLASLT_JIT_DEBUG=progress` in mode 1: query, lookup, generation, relayed generator, build and publish events in order, with no timing lines or durations; inside a stream capture in mode 2 an unpublished size gives `capture.skip` and the unchanged report |
+| `heuristic-debug-off` | `HIPBLASLT_JIT_DEBUG` unset, empty or `0`: no lines, no `--debug` argument to the generator and the same results; `0` and an unknown name each print one warning and leave the names they accompany in effect; with `HIPBLASLT_JIT=0`, any value leaves the output unchanged |
+| `heuristic-debug-file` | `HIPBLASLT_JIT_DEBUG_FILE` with `%i` writes one owner-only file per process and nothing to stderr; two processes sharing one file leave every line intact; a file that cannot be opened prints one warning and the lines go to stderr |
+| `heuristic-debug-killed-child` | In modes 2 and 1, a generator killed with SIGKILL once it starts kernel source generation: the relayed events up to that point, `child.exit` with signal 9, a failed `generation.end`, one `generate failed` report, nothing published, the scratch directory kept with the generator's event file, and in mode 1 the pre-tuned results |
 | `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
 | `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
@@ -163,7 +170,9 @@ generic tests. With `--library` after the bundle it runs the
 That mode refuses to run unless `HIPBLASLT_JIT_LIBRARY_PATH` is set, so that it
 never publishes into the default library.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
-uses as the scratch parent; it needs no GPU.
+uses as the scratch parent; it needs no GPU. `hipblaslt-jit-debug-test` takes a
+fresh output directory too, needs no GPU and starts its child processes itself.
+Both are built only with `HIPBLASLT_ENABLE_JIT=ON`.
 
 ## JIT solution library tests
 

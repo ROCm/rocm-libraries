@@ -28,6 +28,11 @@ HEURISTIC_ROUTES = (
     "partial-fill",
     "override",
     "provider-order",
+    "debug-timing",
+    "debug-progress",
+    "debug-off",
+    "debug-file",
+    "debug-killed-child",
 )
 
 
@@ -53,6 +58,7 @@ def main():
             "jit-library",
             "jit-library-concurrency",
             "jit-component",
+            "jit-debug",
             "code-object",
             "code-object-gfx1250",
             "jit-gemm-gfx1250",
@@ -155,6 +161,12 @@ def main():
                 str(staging / "hipblaslt-jit-component-test"),
                 str(output / "jit-component"),
             ],
+            {},
+            60,
+        ),
+        (
+            "jit-debug",
+            [str(staging / "hipblaslt-jit-debug-test"), str(output / "jit-debug")],
             {},
             60,
         ),
