@@ -19,7 +19,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 /// Smallest engine plugin that satisfies the three type contracts of
-/// EnginePluginImpl.inl (container, handle, context) and nothing beyond them.
+/// EnginePluginImpl.inl (container, handle, context).
 ///
 /// CodegenFixtureContainer deliberately omits the optional static getEngineName
 /// member, so the generated hipdnnEnginePluginGetEngineName entry point takes
@@ -27,6 +27,12 @@
 ///
 /// The engine here computes nothing: it reports itself inapplicable to every
 /// graph, so the backend never asks it for a plan.
+///
+/// Its optional capabilities pin the generated entry points' three answers:
+/// candidate enumeration keeps the SDK default and declines (NOT_APPLICABLE);
+/// an engine-level prediction keeps the SDK default and succeeds with an
+/// UNAVAILABLE answer; a configuration-level prediction declines, since the
+/// engine has no configurations to predict.
 namespace codegen_fixture
 {
 
@@ -108,7 +114,7 @@ public:
                  void* workspace) const override;
 };
 
-/// Engine stub. Applicable to no graph.
+/// Engine stub. Applicable to no graph, and declines configuration predictions.
 class CodegenFixtureEngine : public hipdnn_plugin_sdk::IEngine<CodegenFixtureHandle,
                                                                CodegenFixtureSettings,
                                                                CodegenFixtureContext>
@@ -134,6 +140,13 @@ public:
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         CodegenFixtureContext& executionContext) const override;
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPrediction(CodegenFixtureHandle& handle,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+                      hipdnnEnginePredictionKind_t kind,
+                      bool evaluate) const override;
 };
 
 /// Container.
