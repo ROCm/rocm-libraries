@@ -70,7 +70,7 @@ which requires `--debug`, writes them as files instead: each progress event is
 appended to `DIR/events.jsonl` as one JSON line, and the stage times are written
 to `DIR/timing.json` when the command finishes. Nothing else the command writes
 changes, and a failure to record never fails it. hipBLASLt passes both when
-[`HIPBLASLT_JIT_DEBUG`](../JIT.md#diagnostics-with-hipblaslt_jit_debug) asks
+[`HIPBLASLT_JIT_DEBUG`](../JIT_TENSILELITE.md#diagnostics) asks
 for them.
 
 ## Describe one solution
