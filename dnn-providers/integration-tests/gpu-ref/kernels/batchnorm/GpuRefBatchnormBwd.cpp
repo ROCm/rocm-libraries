@@ -60,7 +60,6 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         }
 
         channelMean = reduceA[0] * invNhw;
-        __syncthreads();
 
         // Compute variance from deviations from the mean to avoid cancellation
         COMPUTE_TYPE varianceSum = static_cast<COMPUTE_TYPE>(0);
