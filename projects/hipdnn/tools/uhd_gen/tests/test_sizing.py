@@ -259,6 +259,16 @@ def store(tmp_path, monkeypatch):
     return {"tree": tree, "collections": [first, second], "root": tmp_path}
 
 
+def _dataset(store):
+    """The store's collections converted into one dataset (once; conversion is idempotent)."""
+    from uhd_gen.dataset import store as datasets
+
+    directory = store["root"] / "store.dataset"
+    for collection in store["collections"]:
+        datasets.add(directory, *datasets.from_collection(collection))
+    return directory
+
+
 def _size(store, evaluator, name, *extra):
     from uhd_gen.__main__ import main
 
@@ -266,8 +276,8 @@ def _size(store, evaluator, name, *extra):
     code = main(
         [
             "size",
-            "--collection",
-            *map(str, store["collections"]),
+            "--dataset",
+            str(_dataset(store)),
             "--test-set",
             str(store["root"] / "test_set.json"),
             "--descriptor-tree",
@@ -309,9 +319,9 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(
     trained_on = []
     real = sizing._write_subset
 
-    def spy(template, merged, metric, rows, destination):
+    def spy(dataset, metric, rows, destination, only=None):
         trained_on.append({row["benchmark"] for row in rows})
-        return real(template, merged, metric, rows, destination)
+        return real(dataset, metric, rows, destination, only)
 
     monkeypatch.setattr(sizing, "_write_subset", spy)
     code, output = _size(

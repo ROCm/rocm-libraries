@@ -8,7 +8,7 @@ decision is made from the measurements already in hand:
 
 1. **A pinned test set.** Shapes held out of every fit, chosen once and reused every round, so
    one round's numbers can be compared with the next's.
-2. **A learning curve.** The model is trained, exactly as `generate --collection` trains it,
+2. **A learning curve.** The model is trained, exactly as `generate --dataset` trains it,
    on nested subsets of the other shapes, several random subsets per size, and every model is
    scored on the same test set.
 3. **A ceiling, measured.** Where the store holds a shape measured more than once (another
@@ -43,14 +43,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .dataset import store
 from .generate import (
-    COLLECTION_MANIFEST,
-    _corpus_name,
     _measurement_key,
     _write_json,
-    load_collections,
+    dataset_contributions,
+    dataset_measurements,
+    load_dataset,
     read_regime_manifest,
-    write_collection,
 )
 from .immediate import ROLE
 from .ranking_metrics import DEFAULT_RANKING_METRIC, ranking_metric
@@ -68,11 +68,16 @@ BOOTSTRAP = 200
 
 def add_size_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--collection",
-        nargs="+",
+        "--dataset",
         required=True,
         metavar="DIR",
-        help="Collections to size from (every measurement in them is used)",
+        help="The dataset to size from (every training measurement in it is used)",
+    )
+    parser.add_argument(
+        "--contribution",
+        nargs="+",
+        metavar="ID",
+        help="Size from these contributions of the dataset only",
     )
     parser.add_argument(
         "--corpus-manifest",
@@ -123,7 +128,7 @@ def add_size_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--seed", type=int, default=0)
-    # The training every curve point runs: `generate --collection` with these.
+    # The training every curve point runs: `generate --dataset` with these.
     parser.add_argument("--descriptor-tree", required=True)
     parser.add_argument("--engine")
     parser.add_argument("--engine-id", type=int)
@@ -315,30 +320,17 @@ def default_sizes(pool: int) -> list:
 # ---------------------------------------------------------------------------------------------
 
 
-def _load_everything(paths: list, metric: str) -> tuple[dict, list, dict]:
-    """(labels, every measurement, the merge) for `metric`'s corpora in `paths`.
+def _load_everything(dataset: str, metric: str, only=None) -> tuple[dict, list, dict]:
+    """(labels, every measurement, the merge) for `metric`'s rows in `dataset`.
 
     Labels are key -> (session, row) by the rule training applies -- the newest session to
     measure a key -- decided here with the sessions kept, so the ceiling can tell a label from
-    its repeats. `load_collections` still does the merge, so everything it refuses (mixed
-    revisions, engines, a metric not measured) is refused here too.
+    its repeats. `load_dataset` still does the merge, so everything it refuses (another role, a
+    metric not measured) is refused here too.
     """
-    merged = load_collections(paths, role=ROLE, sources=[metric])
-    loaded = []
-    for supplied in paths:
-        directory = Path(supplied).resolve()
-        manifest = json.loads(
-            (directory / COLLECTION_MANIFEST).read_text(encoding="utf-8")
-        )
-        loaded.append((manifest["collected_at"], str(directory), manifest))
-    loaded.sort(key=lambda item: (item[0], item[1]))
-    measurements = []
-    for order, (_, directory, manifest) in enumerate(loaded):
-        corpus = Path(directory) / f"{_corpus_name(manifest['sources'], metric)}.json"
-        measurements.extend(
-            ((order, str(row["device"])), row)
-            for row in json.loads(corpus.read_text(encoding="utf-8"))
-        )
+    merged = load_dataset(dataset, role=ROLE, sources=[metric], only=only)
+    directory, chosen = dataset_contributions(dataset, role=ROLE, only=only)
+    measurements = dataset_measurements(directory, chosen, [metric])[metric]
     labels = {}
     for session, row in measurements:
         labels[_measurement_key(row)] = (session, row)
@@ -350,28 +342,26 @@ def _load_everything(paths: list, metric: str) -> tuple[dict, list, dict]:
 
 
 def _write_subset(
-    template: Path, merged: dict, metric: str, rows: list, destination: Path
+    dataset: str, metric: str, rows: list, destination: Path, only=None
 ) -> Path:
-    """A collection holding only `rows`, written as a measuring run would have written it."""
-    manifest = json.loads((template / COLLECTION_MANIFEST).read_text(encoding="utf-8"))
-    destination.mkdir(parents=True)
-    write_collection(
-        destination,
-        collected_at=manifest["collected_at"],
-        role=ROLE,
-        engine=manifest.get("engine"),
-        engine_id=merged["engine_id"],
-        sources=[metric],
-        rows={metric: rows},
-        published=merged["published"],
-        commands=[],
-        graph_inputs=[],
-        provenance=merged["provenance"],
-        knob_encodings=merged["knob_encodings"],
-        shipping_knobs=merged["shipping_knobs"],
-        collection_knobs=merged["collection_knobs"],
-        kernel_fields=merged["kernel_fields"],
-    )
+    """A dataset holding only `rows`, under the newest contribution's binding: one curve point's
+    training data, trained from exactly as the full dataset is."""
+    _, chosen = dataset_contributions(dataset, role=ROLE, only=only)
+    template = chosen[-1]
+    entry = {
+        **{k: v for k, v in template.items() if k != "columns"},
+        "contribution_id": f"subset-{destination.name}",
+        "sources": [metric],
+        "row_counts": {str(metric): len(rows)},
+        "graphs": [],
+        "commands": [],
+        "failed_graphs": [],
+        "origin": {"kind": "sizing-subset", "dataset": str(Path(dataset).resolve())},
+        "purpose": "training",
+        # Every contribution's addressing: a subset may hold rows any of them measured.
+        "knob_encodings": template.get("knob_encodings", {}),
+    }
+    store.add(destination, entry, {metric: rows})
     return destination
 
 
@@ -405,7 +395,9 @@ def run_size(args: argparse.Namespace) -> int:
         if args.target is not None and not 0 < args.target < 1:
             raise ValueError("--target is a fraction in (0, 1)")
         label_column = ranking_metric(args.metric).label
-        labels, measurements, merged = _load_everything(args.collection, args.metric)
+        labels, measurements, merged = _load_everything(
+            args.dataset, args.metric, args.contribution
+        )
 
         # Regimes: the rows' own, then any manifest named for rows collected before they had
         # one. Every regime a manifest names is known even if nothing in it was measured.
@@ -467,12 +459,6 @@ def run_size(args: argparse.Namespace) -> int:
         output.mkdir(parents=True)
         work = Path(tempfile.mkdtemp(prefix=".uhd-size-", dir=output.parent))
         try:
-            template = max(
-                (Path(p).resolve() for p in args.collection),
-                key=lambda p: json.loads((p / COLLECTION_MANIFEST).read_text())[
-                    "collected_at"
-                ],
-            )
             test_corpus = work / "test.json"
             _write_json(test_corpus, [usable[key] for key in test_keys])
             sizes = sorted(set(args.sizes)) if args.sizes else default_sizes(len(pool))
@@ -486,16 +472,16 @@ def run_size(args: argparse.Namespace) -> int:
                         continue  # the whole pool is one subset, whatever the draw
                     tag = f"n{size}_d{draw}"
                     subset = _write_subset(
-                        template,
-                        merged,
+                        args.dataset,
                         args.metric,
                         [usable[key] for key in order[:size]],
-                        work / "collections" / tag,
+                        work / "datasets" / tag,
+                        args.contribution,
                     )
                     model = work / "models" / tag
                     argv = [
                         "generate",
-                        "--collection",
+                        "--dataset",
                         str(subset),
                         "--descriptor-tree",
                         str(args.descriptor_tree),
@@ -746,7 +732,8 @@ def run_size(args: argparse.Namespace) -> int:
             "metric": args.metric,
             "label": label_column,
             "tolerance": args.tolerance,
-            "collections": [str(Path(p).resolve()) for p in args.collection],
+            "dataset": str(Path(args.dataset).resolve()),
+            "contributions": args.contribution,
             "test_set": {
                 "path": str(test_path.resolve()),
                 "shapes": len(test_set["shapes"]),

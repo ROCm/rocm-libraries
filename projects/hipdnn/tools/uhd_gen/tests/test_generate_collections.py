@@ -136,13 +136,23 @@ def _collect(world, name, collected_at=None, **engine):
     return output
 
 
+def _dataset(world, name, collections):
+    """The collections converted into one dataset, as `python -m uhd_gen.dataset add` does."""
+    from uhd_gen.dataset import store
+
+    directory = world["root"] / f"{name}.dataset"
+    for collection in collections:
+        store.add(directory, *store.from_collection(collection))
+    return directory
+
+
 def _train(world, name, evaluator, *, graphs=None, collections=(), extra=()):
     from uhd_gen.__main__ import main
 
     source = (
         ["--graphs", str(graphs)]
         if graphs
-        else ["--collection", *map(str, collections)]
+        else ["--dataset", str(_dataset(world, name, collections))]
     )
     output = world["root"] / name
     code = main(
@@ -342,16 +352,24 @@ def test_distinct_configurations_on_one_shape_are_distinct_rows():
 @pytest.mark.parametrize(
     "change, message",
     [
-        ({"revision": "provider-2"}, "collections disagree on selector revision"),
-        ({"engine_name": "provider:engine8"}, "collections disagree on engine"),
+        ({"revision": "provider-2"}, "on selector_revision"),
+        ({"engine_name": "provider:engine8"}, "on engine_name"),
     ],
 )
-def test_what_cannot_be_one_model_is_refused(world, evaluator, caplog, change, message):
+def test_what_cannot_be_one_model_is_refused(world, change, message):
+    """A dataset holds one binding, as a model is trained against one: a collection taken
+    under another is refused when it is converted in, not discovered by a training run.
+    """
+    from uhd_gen.dataset import store
+
     first = _collect(world, "first", device="board-a")
     second = _collect(world, "second", device="board-b", **change)
-    code, output = _train(world, "refused", evaluator, collections=[first, second])
-    assert code == 1 and not output.exists()
-    assert message in caplog.text
+    dataset = world["root"] / "one.dataset"
+    store.add(dataset, *store.from_collection(first))
+    with pytest.raises(store.DatasetError, match=message):
+        store.add(dataset, *store.from_collection(second))
+    # Converting the same collection again is a no-op, not a second measurement.
+    assert store.add(dataset, *store.from_collection(first))["added"] is False
 
 
 def test_a_metric_the_collection_did_not_measure_is_refused(world, evaluator, caplog):
@@ -607,3 +625,48 @@ def test_an_evaluation_set_that_cannot_hold_anything_out_is_refused(
     )
     assert code != 0
     assert message in caplog.text
+
+
+def test_a_run_can_train_on_some_contributions_of_a_dataset(world, evaluator):
+    from uhd_gen.__main__ import main
+
+    first = _collect(world, "first", collected_at="2026-01-01T00:00:00+00:00")
+    second = _collect(
+        world, "second", collected_at="2026-01-02T00:00:00+00:00", scale=2.0
+    )
+    dataset = _dataset(world, "both", [first, second])
+    common = [
+        "generate",
+        "--dataset",
+        str(dataset),
+        "--descriptor-tree",
+        str(world["tree"]),
+        "--engine-id",
+        "7",
+        "--role",
+        "predict_engine",
+        "--features",
+        "graph.flops",
+        "--num-boost-round",
+        "4",
+        "--early-stopping",
+        "2",
+        "--eval-fraction",
+        "0.25",
+        "--arch",
+        "gfx942",
+        "--no-promote",
+        "--feature-evaluator",
+        evaluator,
+    ]
+    output = world["root"] / "first-only"
+    assert main([*common, "--contribution", "first", "--output-dir", str(output)]) == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert [c["contribution_id"] for c in manifest["collections"]] == ["first"]
+    assert manifest["superseded_rows"] == 0, "the newer contribution was not read"
+    refused = world["root"] / "absent"
+    assert (
+        main([*common, "--contribution", "absent", "--output-dir", str(refused)]) == 1
+    )

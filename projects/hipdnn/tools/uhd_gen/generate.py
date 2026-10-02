@@ -64,11 +64,10 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "directory is searched recursively",
     )
     inputs.add_argument(
-        "--collection",
-        nargs="+",
+        "--dataset",
         metavar="DIR",
-        help="Train from recorded collections (written by --collect-only) instead of "
-        "measuring; several are merged into one measurement of each configuration "
+        help="Train from a stored dataset (python -m uhd_gen.dataset add) instead of "
+        "measuring: its training contributions, one measurement of each configuration "
         "on each shape, the newest winning",
     )
     parser.add_argument(
@@ -145,6 +144,35 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "model. Train on every shape and report accuracy over all of them as "
         "recall, instead of holding --eval-fraction of them out of the model",
     )
+    parser.add_argument(
+        "--contribution",
+        nargs="+",
+        metavar="ID",
+        help="With --dataset: train on these contributions only (default: every training "
+        "contribution)",
+    )
+    # A published dataset (§8.3 rows converted from CSV -- a sweep run elsewhere, the MIOpen
+    # perf DB) carries no engine binding and no UED, so what the binding would have decided is
+    # stated here, as `train` takes it.
+    parser.add_argument(
+        "--target",
+        help="Published dataset: the label column (default: the --metric's label)",
+    )
+    parser.add_argument(
+        "--objective",
+        choices=("min", "max"),
+        help="Published dataset: whether the label is minimised or maximised "
+        "(default: the --metric's direction)",
+    )
+    parser.add_argument(
+        "--group-by-feature",
+        help="Published dataset: train a two-layer model, grouping on this feature first "
+        "(e.g. kernel.solver_id: a solver, then its configuration)",
+    )
+    parser.add_argument(
+        "--descriptor-name", help="File stem of the written UHD descriptor"
+    )
+    parser.add_argument("--model-version", help="Version recorded in the written UHD")
     parser.add_argument(
         "--eval-benchmarks",
         metavar="FILE",
@@ -225,7 +253,8 @@ def _absent_as_null(value):
     return value
 
 
-#: The recorded form of one measuring run, read back by `--collection`.
+#: The recorded form of one measuring run, converted into a dataset by
+#: `python -m uhd_gen.dataset add --collection`.
 COLLECTION_SCHEMA = "uhd_gen.collection/1"
 COLLECTION_MANIFEST = "collection_manifest.json"
 
@@ -269,7 +298,7 @@ def write_collection(
     shard: str | None = None,
     failed_graphs: list | None = None,
 ) -> dict:
-    """Write what a measuring run produced so a later `--collection` can train from it.
+    """Write what a measuring run produced, for conversion into a dataset to train from.
 
     Everything training reads from a collection is here, and nothing training decides is:
     no split, no feature recipe, no model. For an engine-immediate collection the binding
@@ -386,77 +415,135 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
     return kept, len(measured) - len(kept)
 
 
-def load_collections(paths: list, *, role: str, sources: list) -> dict:
-    """Merge recorded collections into one measurement per shape, the newest winning.
+def dataset_contributions(
+    directory, *, role: str, purposes: tuple = ("training",), only=None
+) -> tuple[Path, list]:
+    """(resolved dataset directory, its contributions of `purposes`, oldest first).
 
-    Collections are taken oldest to newest by `collected_at` (not the order named), and
-    `one_measurement_per_shape` keeps the newest measurement of each configuration on
-    each shape. The count of rows set aside is returned, so the model can say how much of
-    the store it did not use.
-
-    Refused rather than merged: different roles or engines, different trained_against
-    (a model is bound to one selector revision or descriptor set), different knob
-    addressing, and a requested metric a collection did not measure.
+    `only` narrows to the named contribution ids -- training on some collections of a dataset,
+    a date window of them -- and a name the dataset does not hold is refused, not ignored.
     """
-    loaded = []
-    for supplied in paths:
-        directory = Path(supplied).resolve()
-        manifest = json.loads(
-            (directory / COLLECTION_MANIFEST).read_text(encoding="utf-8")
+    from .dataset.store import read_manifest
+
+    directory = Path(directory).resolve()
+    manifest = read_manifest(directory)
+    if manifest is None:
+        raise ValueError(f"{directory} holds no dataset")
+    if manifest["role"] != role:
+        raise ValueError(
+            f"{directory} was collected for {manifest['role']}, not {role}"
         )
-        if manifest.get("schema") != COLLECTION_SCHEMA:
-            raise ValueError(f"{directory} is not a {COLLECTION_SCHEMA} collection")
-        loaded.append((manifest["collected_at"], str(directory), manifest))
-    if not loaded:
-        raise ValueError("--collection names no collection")
-    loaded.sort(key=lambda item: (item[0], item[1]))
-    first = loaded[0][2]
-    for _, directory, manifest in loaded:
-        if manifest["role"] != role:
+    chosen = sorted(
+        (
+            c
+            for c in manifest["contributions"]
+            if c.get("purpose", "training") in purposes
+        ),
+        key=lambda c: (c["collected_at"], c["contribution_id"]),
+    )
+    if only is not None:
+        unknown = sorted(set(only) - {c["contribution_id"] for c in chosen})
+        if unknown:
             raise ValueError(
-                f"{directory} was collected for {manifest['role']}, not {role}"
+                f"{directory} holds no {'/'.join(purposes)} contribution {unknown}"
             )
-        for key, what in (
-            ("engine_name", "engine"),
-            ("engine_id", "engine id"),
-            ("selector_revision", "selector revision"),
-            ("trained_against", "trained_against provenance"),
-            ("collection_knobs", "collection knobs"),
-        ):
-            if manifest.get(key) != first.get(key):
-                raise ValueError(
-                    f"collections disagree on {what}: {first.get(key)!r} vs "
-                    f"{manifest.get(key)!r} ({directory}); a model is trained against one"
-                )
-        missing = [source for source in sources if source not in manifest["sources"]]
+        chosen = [c for c in chosen if c["contribution_id"] in set(only)]
+    if not chosen:
+        raise ValueError(f"{directory} holds no {'/'.join(purposes)} contribution")
+    return directory, chosen
+
+
+def dataset_measurements(directory: Path, chosen: list, sources: list) -> dict:
+    """source -> [((contribution order, device), record)], in the order measured: every
+    measurement the chosen contributions hold, each record exactly as its collection wrote it.
+    """
+    from .dataset.store import BOOKKEEPING, read_rows
+
+    order = {c["contribution_id"]: index for index, c in enumerate(chosen)}
+    columns = {c["contribution_id"]: c.get("columns") for c in chosen}
+    buckets: dict = {}
+    for row in read_rows(directory):
+        identity = row["contribution_id"]
+        if identity not in order:
+            continue
+        kept = columns[identity] and columns[identity].get(str(row["source"]))
+        record = {
+            key: value
+            for key, value in row.items()
+            if key not in BOOKKEEPING and (key in kept if kept else value is not None)
+        }
+        buckets.setdefault((row["source"], order[identity]), []).append(record)
+    measured = {}
+    for source in sources:
+        key = None if source is None else str(source)
+        measured[source] = [
+            ((index, str(record["device"])), record)
+            for index in range(len(chosen))
+            for record in buckets.get((key, index), [])
+        ]
+    return measured
+
+
+def _all_published(chosen: list) -> bool:
+    kinds = {(c.get("origin") or {}).get("kind") for c in chosen}
+    if "csv" in kinds and kinds != {"csv"}:
+        raise ValueError(
+            "a dataset mixing published CSV contributions with collected ones cannot train "
+            "as one: the two carry different evidence of their binding"
+        )
+    return kinds == {"csv"}
+
+
+def load_dataset(
+    directory,
+    *,
+    role: str,
+    sources: list,
+    purposes: tuple = ("training",),
+    only=None,
+) -> dict:
+    """The training rows of a stored dataset: one measurement per shape, the newest winning.
+
+    A dataset (`uhd_gen.dataset.store`) keeps every measurement every contribution brought;
+    this decides the label exactly as reading the collections themselves did. Contributions
+    are taken oldest to newest by `collected_at`, and `one_measurement_per_shape` keeps the
+    newest measurement of each configuration on each shape; the count set aside is returned
+    so the model can say how much of the store it did not use. Only contributions whose
+    purpose is in `purposes` are read: evaluation measurements never train.
+
+    What every contribution must share (role, engine, binding, collection knobs) was refused
+    when it was added; what is refused here is a request the dataset cannot answer -- another
+    role, a metric a contribution did not measure, knob addressing that contradicts itself.
+    """
+    directory, chosen = dataset_contributions(
+        directory, role=role, purposes=purposes, only=only
+    )
+    for contribution in chosen:
+        missing = [s for s in sources if s not in contribution["sources"]]
         if missing:
             raise ValueError(
-                f"{directory} did not measure {missing}; it holds {manifest['sources']}"
+                f"contribution {contribution['contribution_id']} did not measure {missing}; "
+                f"it holds {contribution['sources']}"
             )
-    # Each collection records the addressing its own candidates showed: a subset of the
+    # Each contribution records the addressing its own candidates showed: a subset of the
     # engine's numbering, which shards of one corpus split between them. Merged, refusing a
     # pin two of them read differently.
     try:
         knob_encodings = addressing.merge_manifests(
-            m.get("knob_encodings") for _, _, m in loaded
+            c.get("knob_encodings") for c in chosen
         )
     except ValueError as error:
-        raise ValueError(f"collections disagree on knob addressing: {error}") from None
+        raise ValueError(
+            f"contributions disagree on knob addressing: {error}"
+        ) from None
+    measured = dataset_measurements(directory, chosen, sources)
     rows, superseded, published = {source: [] for source in sources}, 0, set()
     for source in sources:
-        measured = []
-        for order, (_, directory, manifest) in enumerate(loaded):
-            corpus = (
-                Path(directory) / f"{_corpus_name(manifest['sources'], source)}.json"
-            )
-            measured.extend(
-                ((order, str(row["device"])), row)
-                for row in json.loads(corpus.read_text(encoding="utf-8"))
-            )
-        rows[source], dropped = one_measurement_per_shape(measured)
+        rows[source], dropped = one_measurement_per_shape(measured[source])
         superseded += dropped
-    for _, _, manifest in loaded:
-        published.update(manifest["published"])
+    for contribution in chosen:
+        published.update(contribution["published"])
+    first = chosen[0]
     return {
         "rows": rows,
         "published": published,
@@ -468,28 +555,36 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
         "kernel_fields": set(first["kernel_fields"]),
         "engine_id": first["engine_id"],
         "graphs": [
-            dict(graph, collection=directory)
-            for _, directory, manifest in loaded
-            for graph in manifest["graphs"]
+            dict(graph, contribution=c["contribution_id"])
+            for c in chosen
+            for graph in c.get("graphs") or []
         ],
         "commands": [
-            dict(command, collection=directory)
-            for _, directory, manifest in loaded
-            for command in manifest["commands"]
+            dict(command, contribution=c["contribution_id"])
+            for c in chosen
+            for command in c.get("commands") or []
         ],
         "failed_graphs": [
-            dict(failure, collection=directory)
-            for _, directory, manifest in loaded
-            for failure in manifest.get("failed_graphs") or []
+            dict(failure, contribution=c["contribution_id"])
+            for c in chosen
+            for failure in c.get("failed_graphs") or []
         ],
+        "dataset": str(directory),
+        # Every contribution was converted from §8.3 CSV: rows with no engine binding, already
+        # validated by publish, trained as `train` trains them (generate's published mode).
+        "from_published": _all_published(chosen),
+        "training_options": [c.get("training_options") for c in chosen],
         "collections": [
             {
-                "path": directory,
-                "collected_at": collected_at,
-                "devices": manifest["devices"],
-                "rows": manifest["row_counts"],
+                "contribution_id": c["contribution_id"],
+                # Where it was converted from: a collection's directory, for lineage.
+                "path": (c.get("origin") or {}).get("path"),
+                "origin": c.get("origin"),
+                "collected_at": c["collected_at"],
+                "devices": c["devices"],
+                "rows": c["row_counts"],
             }
-            for collected_at, directory, manifest in loaded
+            for c in chosen
         ],
     }
 
@@ -900,8 +995,8 @@ def _measure(
 ) -> dict:
     """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
 
-    Returns exactly what training reads, so `--collect-only` can write it down and
-    `--collection` can hand the same values back without measuring.
+    Returns exactly what training reads, so `--collect-only` can write it down and a
+    dataset converted from it (`--dataset`) can hand the same values back without measuring.
     """
     if args.engine_id is None:
         raise ValueError("--engine-id is required to measure")
@@ -1277,6 +1372,236 @@ def feature_recipe(
     return signature, omitted
 
 
+def _relocate_stage(stage: Path, output: Path) -> None:
+    """Recorded paths must refer to the final output rather than the staging directory."""
+    old_root = str(stage)
+
+    def relocate(value):
+        if isinstance(value, str):
+            return (
+                str(output) + value[len(old_root) :]
+                if value.startswith(old_root)
+                else value
+            )
+        if isinstance(value, list):
+            return [relocate(item) for item in value]
+        if isinstance(value, dict):
+            return {key: relocate(item) for key, item in value.items()}
+        return value
+
+    for path in stage.rglob("*.json"):
+        if (
+            "collection_descriptors" in path.relative_to(stage).parts
+            or "graphs" in path.relative_to(stage).parts
+        ):
+            continue
+        _write_json(path, relocate(json.loads(path.read_text(encoding="utf-8"))))
+
+
+def _generate_published(
+    args: argparse.Namespace, measured: dict, stage: Path, output: Path, metrics: list
+) -> int:
+    """Train and score a model from a published dataset, as `train` and `evaluate` would.
+
+    A published dataset's rows came through `publish` (§8.3 checks, descriptor expansion) and
+    carry no engine binding and no UED: an opaque catalog such as MIOpen's, ranked by solver
+    and configuration. So nothing generate infers from a binding or a UED is inferred here --
+    the features, the label and its direction are stated, as `train` requires them -- and the
+    model cannot be promoted (there is no UED to bind it in). The holdout is generate's own:
+    the named evaluation set, a drawn fraction of the problems, or recall.
+    """
+    from .__main__ import main
+
+    if args.role == ROLE:
+        raise ValueError(
+            "a published dataset is a measured catalog; train it as a catalog ranker, "
+            "not as an engine estimate"
+        )
+    if not args.no_promote:
+        raise ValueError(
+            "a published dataset's engine has no UED to install into; pass --no-promote"
+        )
+    if not (args.features or args.feature_signature):
+        raise ValueError(
+            "a published dataset names no feature recipe; pass --features or --feature-signature"
+        )
+    named = ranking_metric(metrics[0]) if args.metric else None
+    target = args.target or (named.label if named else None)
+    objective = args.objective or (named.objective if named else None)
+    if not target or not objective:
+        raise ValueError(
+            "a published dataset carries no binding to name its label: pass --target and "
+            "--objective, or --metric"
+        )
+    rows = measured["rows"][None]
+    frame = pd.DataFrame(rows)
+    if target not in frame.columns:
+        raise ValueError(f"the dataset has no {target!r} column to train on")
+    _write_json(stage / "provenance.json", measured["provenance"])
+    frame.to_csv(stage / "corpus.csv", index=False)
+    _write_json(stage / "corpus.json", _absent_as_null(rows))
+    grouping = resolve_grouping(frame)
+    keys = problem_keys(frame, grouping)
+    held = _eval_benchmarks(args.eval_benchmarks) if args.eval_benchmarks else None
+    if args.recall:
+        in_eval = pd.Series(True, index=frame.index)
+    elif held is not None:
+        in_eval = frame[BENCHMARK_COLUMN].astype(str).isin(held)
+        if not in_eval.any():
+            raise ValueError(
+                f"none of the {len(held)} --eval-benchmarks graphs is in this dataset; "
+                "there is nothing to evaluate on"
+            )
+    else:
+        split = split_problems(keys, args.eval_fraction, args.seed)
+        in_eval = keys.isin(split.eval_problems)
+    train_frame = frame if args.recall else frame[~in_eval]
+    eval_frame = frame[in_eval]
+    if len(set(problem_keys(train_frame, grouping))) < 5:
+        raise ValueError(
+            "generation needs at least five training problems plus held-out ones"
+        )
+    train_path, eval_path = stage / "train.json", stage / "eval_corpus.json"
+    train_frame.to_csv(stage / "train.csv", index=False)
+    _write_json(train_path, _absent_as_null(train_frame.to_dict(orient="records")))
+    _write_json(eval_path, _absent_as_null(eval_frame.to_dict(orient="records")))
+    arches = (
+        sorted(frame["arch"].astype(str).unique()) if "arch" in frame.columns else []
+    )
+    model_dir = stage / "model"
+    features = (
+        ["--feature-signature", str(Path(args.feature_signature).resolve())]
+        if args.feature_signature
+        else ["--features", *args.features]
+    )
+    train_args = [
+        "train",
+        "--input",
+        str(train_path),
+        *features,
+        "--provenance",
+        str(stage / "provenance.json"),
+        "--target",
+        target,
+        "--objective",
+        objective,
+        "--role",
+        args.role,
+        "--group-by",
+        *grouping.columns,
+        "--output-dir",
+        str(model_dir),
+        "--name",
+        args.name,
+        "--num-boost-round",
+        str(args.num_boost_round),
+        "--early-stopping",
+        str(args.early_stopping),
+    ]
+    if arches:
+        train_args += ["--training-arches", *arches]
+    for flag, value in (
+        ("--group-by-feature", args.group_by_feature),
+        ("--descriptor-name", args.descriptor_name),
+        ("--model-version", args.model_version),
+        ("--engine", args.engine),
+        ("--arch", args.arch),
+        ("--feature-evaluator", args.feature_evaluator),
+    ):
+        if value:
+            train_args += [flag, str(value)]
+    if args.uhd_ids:
+        # One model: a bare id, or the one METRIC=UUID entry, names it.
+        train_args += ["--uhd-id", args.uhd_ids[0].split("=", 1)[-1]]
+    if main(train_args):
+        raise ValueError(
+            "training the published dataset failed; no model was published"
+        )
+    eval_args = [
+        "evaluate",
+        "--input",
+        str(eval_path),
+        "--model-dir",
+        str(model_dir),
+        "--eval-fraction",
+        "1.0",
+        "--seed",
+        str(args.seed),
+        "--include-per-problem",
+        "--target",
+        target,
+        "--objective",
+        objective,
+    ]
+    if args.feature_evaluator:
+        eval_args += ["--feature-evaluator", args.feature_evaluator]
+    if main(eval_args):
+        raise ValueError("evaluating the published dataset's model failed")
+    report_path = model_dir / "eval_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    training_keys = set(problem_keys(train_frame, grouping))
+    evaluated_keys = set(problem_keys(eval_frame, grouping))
+    if not args.recall and training_keys & evaluated_keys:
+        raise ValueError("evaluation includes a problem seen during training")
+    report["holdout_integrity"] = {
+        "status": "recall" if args.recall else "held_out",
+        "detail": "Training and evaluation problem identities recorded and compared",
+    }
+    _write_json(report_path, report)
+    evaluation = (
+        "recall" if args.recall else ("eval_set" if held is not None else "holdout")
+    )
+    _write_json(
+        stage / "generation_manifest.json",
+        {
+            "schema": "uhd_gen.generation/2",
+            "trained_against": measured["provenance"],
+            "collections": measured["collections"],
+            "superseded_rows": measured["superseded_rows"],
+            "published_dataset": True,
+            "training_options": measured["training_options"],
+            "models": [
+                {
+                    "metric": named.name if named else None,
+                    "requested_metric": named.name if named else None,
+                    "target": target,
+                    "objective": objective,
+                    "uhd_id": (
+                        args.uhd_ids[0].split("=", 1)[-1] if args.uhd_ids else None
+                    ),
+                    "model_dir": str(model_dir),
+                    "corpus": str(stage / "corpus.json"),
+                    "training_arguments": train_args,
+                    "evaluation_arguments": eval_args,
+                    "training_problem_keys": sorted(training_keys),
+                    "eval_problem_keys": sorted(evaluated_keys),
+                }
+            ],
+            "seed": args.seed,
+            "eval_fraction": (
+                None if args.recall or held is not None else args.eval_fraction
+            ),
+            "evaluation": evaluation,
+            "eval_benchmarks": (
+                None
+                if held is None
+                else {
+                    "path": str(Path(args.eval_benchmarks).resolve()),
+                    "listed": len(held),
+                    "measured": int(eval_frame[BENCHMARK_COLUMN].astype(str).nunique()),
+                }
+            ),
+            "engine_id": measured["engine_id"],
+            "training_arches": arches,
+            "promotion_role": args.role,
+        },
+    )
+    _relocate_stage(stage, output)
+    stage.rename(output)
+    print(f"Generated installable UHD: {output / 'model'}")
+    return 0
+
+
 def run_generate(args: argparse.Namespace) -> int:
     from .__main__ import main
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
@@ -1319,16 +1644,16 @@ def run_generate(args: argparse.Namespace) -> int:
             )
         if args.shard and not args.collect_only:
             raise ValueError("--shard slices a collection; it needs --collect-only")
-        if args.collect_only and args.collection:
+        if args.collect_only and args.dataset:
             raise ValueError(
-                "--collect-only measures --graphs; it cannot also read --collection"
+                "--collect-only measures --graphs; it cannot also read --dataset"
             )
-        if args.collection and (
+        if args.dataset and (
             args.knob or args.device or args.workspace_limit is not None
         ):
             raise ValueError(
                 "--knob, --device and --workspace-limit shape a measurement, and a "
-                "--collection run measures nothing"
+                "--dataset run measures nothing"
             )
         if immediate:
             if args.knob or args.dim_tile:
@@ -1385,10 +1710,14 @@ def run_generate(args: argparse.Namespace) -> int:
                 superseded += dropped
         else:
             # Measuring nothing: the rows, and everything training reads beside them, come
-            # back from the collections exactly as a measuring run would have produced them.
-            measured = load_collections(
-                args.collection, role=args.role, sources=sources
+            # back from the dataset exactly as a measuring run would have produced them.
+            measured = load_dataset(
+                args.dataset, role=args.role, sources=sources, only=args.contribution
             )
+            if measured["from_published"]:
+                code = _generate_published(args, measured, stage, output, metrics)
+                stage = None if code == 0 else stage
+                return code
             engine_id = (
                 args.engine_id if args.engine_id is not None else measured["engine_id"]
             )
@@ -1820,30 +2149,7 @@ def run_generate(args: argparse.Namespace) -> int:
             )
             for model in models
         ]
-        # Recorded paths must refer to the final output rather than the staging directory.
-        old_root = str(stage)
-        for path in stage.rglob("*.json"):
-            if (
-                "collection_descriptors" in path.relative_to(stage).parts
-                or "graphs" in path.relative_to(stage).parts
-            ):
-                continue
-            document = json.loads(path.read_text(encoding="utf-8"))
-
-            def relocate(value):
-                if isinstance(value, str):
-                    return (
-                        str(output) + value[len(old_root) :]
-                        if value.startswith(old_root)
-                        else value
-                    )
-                if isinstance(value, list):
-                    return [relocate(item) for item in value]
-                if isinstance(value, dict):
-                    return {key: relocate(item) for key, item in value.items()}
-                return value
-
-            _write_json(path, relocate(document))
+        _relocate_stage(stage, output)
         stage.rename(output)
         stage = None
         if not args.no_promote:
