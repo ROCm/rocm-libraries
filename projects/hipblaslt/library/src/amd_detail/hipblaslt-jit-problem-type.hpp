@@ -29,7 +29,13 @@ namespace hipblaslt_jit
         size_t m = 0, n = 0, k = 0, batch = 0;
     };
 
-    // Throws std::runtime_error when a Tensile ProblemType cannot describe the problem.
+    // Why JIT does not implement the problem, or nullptr when it does. The
+    // ProblemType a Tensile.JitGemm request spells has no fused all-to-all, so
+    // JIT neither generates nor stores solutions for fused GEMM and all-to-all.
+    const char* notImplemented(const TensileLite::ContractionProblemGemm& problem);
+
+    // Throws std::runtime_error when a Tensile ProblemType cannot describe the
+    // problem or notImplemented names a reason.
     CanonicalGemm canonicalGemm(const TensileLite::ContractionProblemGemm& problem);
 
     // The problem's Tensile ProblemType, as a Tensile.JitGemm request spells it.

@@ -507,6 +507,8 @@ namespace hipblaslt_jit
     {
         indices.clear();
         return staged(Stage::Lookup, [&]() -> Status {
+            if(const auto reason = notImplemented(problem))
+                return {Status::Code::NotSupported, Stage::Lookup, reason};
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
@@ -552,6 +554,8 @@ namespace hipblaslt_jit
     {
         indices.clear();
         return staged(Stage::Publish, [&]() -> Status {
+            if(const auto reason = notImplemented(problem))
+                return {Status::Code::NotSupported, Stage::Publish, reason};
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;

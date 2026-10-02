@@ -16,8 +16,15 @@ namespace hipblaslt_jit
         }
     }
 
+    const char* notImplemented(const TensileLite::ContractionProblemGemm& problem)
+    {
+        return problem.fusedGemmA2A() ? "fused GEMM and all-to-all is not implemented" : nullptr;
+    }
+
     CanonicalGemm canonicalGemm(const TensileLite::ContractionProblemGemm& problem)
     {
+        if(const auto reason = notImplemented(problem))
+            throw std::runtime_error(reason);
         require(problem.stridedBatched() && !problem.groupedGemm(),
                 "prediction requires a single strided GEMM; grouped GEMM is not implemented");
         require(problem.c().dataType() == problem.d().dataType(),

@@ -4,7 +4,8 @@
 // Exercises the JIT solution library without a GPU: cache keys, directory
 // checks, the stock TensileLite loader reading what the library writes,
 // exact-size lookup, index allocation, a crash after every publication step,
-// and concurrent publishers in separate processes.
+// concurrent publishers in separate processes, and the rejection of fused GEMM
+// and all-to-all.
 
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-library.hpp"
@@ -743,6 +744,51 @@ namespace
                      "in any backend's directory for their toolchain\n";
     }
 
+    void fusedA2A(const Context& ctx)
+    {
+        const auto root  = ctx.fresh("fused-a2a");
+        const auto key   = testKey();
+        auto       fused = gemm(256);
+        fused.setFusedGemmA2A(true);
+        fused.setFusedA2AExtent(256);
+        fused.setFusedA2AWorld(2);
+        const auto rejected = [](const hj::Status& status, hj::Stage stage) {
+            return status.code == hj::Status::Code::NotSupported && status.stage == stage
+                   && status.message.find("fused GEMM and all-to-all") != std::string::npos;
+        };
+        std::vector<int32_t> indices;
+        {
+            hj::JitLibrary library(root);
+            auto status = library.lookup(key, 0, fused, ctx.hardware, 1, {}, indices);
+            require(rejected(status, hj::Stage::Lookup) && indices.empty(),
+                    "A fused all-to-all lookup was not rejected: " + status.message);
+            status = library.publish(key, 0, fused, {built(ctx.entry)}, indices);
+            require(rejected(status, hj::Stage::Publish) && indices.empty(),
+                    "A fused all-to-all publication was not rejected: " + status.message);
+        }
+        require(!fs::exists(root), "Rejecting fused all-to-all touched the library");
+        std::string reason;
+        try
+        {
+            hj::problemTypeKey(fused);
+        }
+        catch(const std::runtime_error& e)
+        {
+            reason = e.what();
+        }
+        require(reason.find("fused GEMM and all-to-all") != std::string::npos,
+                "A fused all-to-all problem has a JIT ProblemType: " + reason);
+
+        hj::JitLibrary library(root);
+        const auto     plain  = publish(library, key, gemm(256), {ctx.entry});
+        const auto     status = library.lookup(key, 0, fused, ctx.hardware, 1, {}, indices);
+        require(rejected(status, hj::Stage::Lookup) && indices.empty(),
+                "A plain solution of the same sizes served fused all-to-all");
+        require(ctx.find(library, key, gemm(256)) == plain, "The plain problem lost its solution");
+        std::cout << "PASS fused GEMM and all-to-all is neither served nor stored, even beside a "
+                     "plain solution of the same sizes\n";
+    }
+
     void concurrency(const Context& ctx, int writers, int perWriter)
     {
         const auto root = ctx.fresh("concurrency");
@@ -927,6 +973,7 @@ int main(int argc, char** argv)
             allocator(ctx);
             crashes(ctx);
             refresh(ctx);
+            fusedA2A(ctx);
         }
         std::cout << "ALL JIT LIBRARY CHECKS PASSED\n";
     }
