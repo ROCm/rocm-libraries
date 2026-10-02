@@ -21,6 +21,13 @@
   - [Rejected — num_warps 4 to 8](#rejected--num_warps-4-to-8)
   - [Rejected — r_kv_tile below 64](#rejected--r_kv_tile-below-64)
   - [Rejected — canned iglp_opt whole-loop interleave](#rejected--canned-iglp_opt-whole-loop-interleave)
+- [Second pass — trace-guided levers](#second-pass--trace-guided-levers)
+  - [Capturing a trace](#capturing-a-trace)
+  - [Kept — score GEMM split across waves](#kept--score-gemm-split-across-waves)
+  - [Kept — causal loop bound](#kept--causal-loop-bound)
+  - [Kept — read-path transpose for the PV operand](#kept--read-path-transpose-for-the-pv-operand)
+  - [Kept — two workgroups per CU](#kept--two-workgroups-per-cu)
+  - [Rejected in the second pass](#rejected-in-the-second-pass)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -101,12 +108,18 @@ workgroups/CU = min( LDS_per_CU // lds_bytes ,
 waves_per_simd_vgpr = min( 512 // round_up(vgpr, 8), 8 )
 ```
 
-**Both terms bind here.** This kernel's LDS is well above the 32768 B that two
-workgroups would require, *and* its VGPR count is above the 256 that two
-waves/SIMD would require. The consequence is the central finding of this pass:
+**Both terms bound in the first pass.** The kernel's LDS was well above the
+32768 B that two workgroups would require, *and* its VGPR count was above the 256
+that two waves/SIMD would require. The consequence was the central finding of
+that pass:
 
 > An LDS-only reduction cannot improve occupancy on this kernel. Reaching two
 > workgroups per CU requires LDS ≤ 32768 **and** VGPR ≤ 256 simultaneously.
+
+The second pass met both conditions: splitting the score GEMM across waves
+(lever 10) brought VGPR under 256, and levers 20–22 brought the pool to 31488 B.
+By the model above the kernel now fits two workgroups per CU; see
+[Kept — two workgroups per CU](#kept--two-workgroups-per-cu).
 
 This corrects the planning assumption that framed occupancy purely as an LDS
 budget problem. It also makes "output-accumulator relocation" inapplicable: `O`,
@@ -128,6 +141,21 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 6 | Register-resident k-loop prefetch | **Kept** | LDS pool and barrier count unchanged, no spill; measured improvement on every shape |
 | 7 | Canned `iglp_opt` whole-loop interleave | Rejected | both levels regressed measurably; level 1 undoes lever 6 by shortening live ranges |
 | 8 | Score-GEMM read-ahead `sched_group_barrier` pin | **Kept** | instruction mix, LDS pool and barrier count unchanged, VGPR fell, no spill; measured improvement on every shape |
+| 9 | P-publish barriers `sync` → `sync_lds_only` | **Kept** | the VMEM drain stalled on the run-ahead loads; measured improvement on every shape |
+| 10 | Score GEMM K reduction split across waves | **Kept** | MFMA and LDS reads per wave cut, +1 barrier, VGPR fell, pool unchanged; measured improvement on every shape |
+| 11 | Row reduce masks 1/2 on `quad_perm` DPP | **Kept** | half the `ds_swizzle`s; bit-identical; measured improvement on every shape |
+| 12 | Causal k-loop bound | **Kept** | skips fully masked key tiles; bit-identical; large gain on full-prompt shapes, neutral on chunked |
+| 13 | Prologue/epilogue read-ahead pin | Rejected | measured slightly slower |
+| 14 | `q_lds` bank-conflict pad | **Kept** | absorb A read was single-bank; measured improvement on short shapes |
+| 15 | `wq_lds` pad with 4-wide staging | Rejected | doubled staging ops cost more than the 2-way conflict saved |
+| 16 | Heaviest query tiles launched first | **Kept** | reverse block order; measured improvement, none slower |
+| 17 | `wt_lds` XOR swizzle on the epilogue store | **Kept** | store spread from ~4 banks; measured improvement on short shapes |
+| 18 | Register prefetch of W slices | Rejected | neutral; the compiler already overlapped them |
+| 19 | Drop the redundant WAR barrier before P | Rejected | provably redundant but neutral |
+| 20 | Read-path transpose for the PV operand | **Kept** | `ct_lds` removed (−20 KB LDS, −32 `ds_write` per tile); measured improvement on every shape |
+| 21 | Score A operand held in registers | **Kept** | `qa_lds` dead in the loop; measured improvement on every shape |
+| 22 | `r_kv_tile` 64 → 32 with a gated absorb | **Kept** | pool 31488 B and VGPR 228: two workgroups per CU; large gain on every shape |
+| 23 | Read-path transpose in the epilogue | Rejected | neutral at two workgroups per CU |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -355,10 +383,10 @@ regressed monotonically as the tile shrank.
 workgroup limit and comgr fails in `CODEGEN_BC_TO_RELOCATABLE`. That is the upper
 bound, not a tuning candidate.
 
-Verdict: default retained at 64. This closes the open question of whether the
-planned `r_kv_tile` reduction was worth pairing with a second lever — on the
-evidence it is not, because the pairing partner it needs is a VGPR reduction, not
-a second LDS reduction.
+Verdict at the time: default retained at 64. The pairing partner it needed was a
+VGPR reduction, not a second LDS reduction — and once levers 10 and 20–21
+supplied that, lever 22 reversed this verdict. See
+[Kept — two workgroups per CU](#kept--two-workgroups-per-cu).
 
 ### Rejected — canned iglp_opt whole-loop interleave
 
@@ -386,6 +414,88 @@ The general lesson is that a canned schedule is not a free win once a kernel has
 hand-built latency-hiding structure — it can silently dismantle it, and the static
 resource report shows *that* as an improvement.
 
+## Second pass — trace-guided levers
+
+Levers 9–23 were chosen from ATT traces rather than from the static report, and
+each was timed against the previous kept state before its parity run. All were
+measured on a 304-CU MI300X across the DeepSeek-V3 shape set of
+[`benchmark_mla_prefill_live`](../../../benchmarks/gfx942/attention/prefill/benchmark_mla_prefill_live.py).
+
+### Capturing a trace
+
+```bash
+W=$ROCKE/dsl_docs/optimization/utilities/tools/wavescope
+cd library
+ROCKE_COMGR_LIB=/opt/rocm/lib/libamd_comgr.so.3 \
+"$PY" $W/capture_wavescope_trace.py --kernel-regex mla_prefill_fwd_gfx942 \
+  -- "$PY" -m benchmarks.gfx942.attention.prefill.benchmark_mla_prefill_live \
+     --mode time --model DeepSeek --regime full_prompt --limit 1 --no-aiter
+```
+
+`ROCKE_COMGR_LIB` is required. `rocprofv3` preloads `/opt/rocm`'s comgr and
+LLVM, and rocke otherwise loads torch's bundled comgr into the same process; the
+two collide and the compile segfaults. Open the reported
+`ui_output_*_dispatch_*` folder with **WaveScope: Open Trace Folder…** and switch
+the Source tab to **+ inlined**.
+
+Two cautions from this pass. A trace covers one CU, so at two workgroups per CU
+one workgroup's stalls are hidden by the other's work: stall share stops
+predicting wall time (levers 13, 18, 19 and 23 all looked worthwhile in the
+trace and measured neutral). And `code.json` stall columns are totals over every
+execution; divide by `Hit`.
+
+### Kept — score GEMM split across waves
+
+Every wave used to compute the whole score tile redundantly. Each wave now
+reduces a quarter of the K = 576 axis, parks its f32 partial C fragment in LDS,
+and after one LDS-only barrier every wave sums the four partials in the same
+order — so the softmax state stays bit-identical across waves.
+
+The partials live in tail rows of `kv_lds` rather than in their own buffer. The
+LDS packer reuses a dead slot only from its base offset, so a separate buffer
+could never land in the gap `kv_lds` leaves below the next live buffer and would
+have opened a new slot above 64 KB. See
+[`_s_part_rows`](../../../kernels/mla/mla_prefill_gfx942.py).
+
+### Kept — causal loop bound
+
+The k-loop ran over every key tile and masked the ones past the causal edge. It
+now stops at the last tile any row of the query tile can see, and a tile whose
+rows are all fully masked runs zero iterations — finishing with `l == 0`, which
+is what the dead-row checks require. Launching the heaviest query tiles first
+(lever 16) followed from the same change, since per-workgroup work now varies.
+
+### Kept — read-path transpose for the PV operand
+
+gfx942 has no transposing LDS read, so the PV GEMM's B operand used to come from
+`ct_lds`, a second copy of the latent tile scattered in one bf16 at a time. It is
+now gathered from `kv_lds` with four scalar reads per lane; at the `kv_lds`
+stride those reads are conflict-free. That removed the scatter from the
+critical section between barriers and freed 20 KB of LDS, which levers 21–22
+spent on occupancy.
+
+### Kept — two workgroups per CU
+
+Three changes together: the score A operand is read into registers once (lever
+21), so the prologue trio is dead during the loop; Q_rope is staged straight
+into `qa_lds`; and `r_kv_tile` drops to 32, with the absorb's two n-tiles run on
+two of the four waves inside a barrier-free `scf.if`. Allocation order matters —
+each later phase allocates its small buffer first so the packer gives it the base
+slot. The static result is a 31488 B pool and 228 VGPR: two workgroups per CU.
+
+### Rejected in the second pass
+
+- **Prologue/epilogue read-ahead pin (13).** The absorb's reads were already
+  issued ahead; their cost was a single-bank conflict, which lever 14 fixed.
+- **`wq_lds` 4-wide staging (15).** Doubling the staging ops cost more than the
+  2-way read conflict saved, and the shrunk buffer stopped the k-loop buffer from
+  folding into the prologue's slot.
+- **W-slice register prefetch (18)** and **dropping the redundant P barrier
+  (19).** Both neutral: the compiler already overlapped the loads, and the waves
+  arrive at that barrier together.
+- **Epilogue read-path transpose (23).** Neutral once a second workgroup hides
+  the epilogue.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -408,11 +518,10 @@ They are not deliverables and their output does not belong in this repository.
 
 ## What remains unproven
 
-- **The 304-CU part was not run.** Only a 228-CU MI300A was reachable. Every
-  workgroups/CU figure here is per-part and is *not* extrapolated to 304 CU.
-- **Two workgroups per CU was never achieved,** and no combination reaching it was
-  demonstrated. It needs a simultaneous LDS *and* VGPR reduction; this pass showed
-  that no single available lever delivers both.
+- **The first pass ran on a 228-CU MI300A and the second on a 304-CU MI300X.**
+  First-pass verdicts were not re-measured on the 304-CU part.
+- **Two workgroups per CU is derived, not observed.** The occupancy model says two
+  fit; no runtime occupancy counter was read.
 - **`num_warps = 8` was never parity-verified.** It was rejected on measurement
   before adoption, so its functional correctness at 8 warps is untested.
 - **Two-pass latent expansion was not attempted.** The in-loop path re-expands
@@ -420,6 +529,10 @@ They are not deliverables and their output does not belong in this repository.
   redundancy. But removing it adds a workspace buffer, a second launch and new
   host-visible pointer arguments, which makes it an algorithmic change, not a
   tuning lever. It belongs to its own milestone.
-- **Bank-conflict degree was never measured directly,** only inferred from the
-  stride arithmetic and confirmed end-to-end by the width sweep. An ATT trace
-  would settle it; none was captured.
+- **Bank-conflict degree is inferred, not counted.** ATT traces located the
+  conflicted reads (levers 14 and 17) by their wait time; no LDS bank-conflict
+  counter was read.
+- **Untried next levers.** `block_q = 32` would reuse every key-tile read across
+  two query blocks but needs `qa_lds` staged in halves to stay under 32 KB; the
+  last two `ds_swizzle` reduce stages need a `row_mirror` / `row_half_mirror`
+  DPP op, which is a platform change in both engines.
