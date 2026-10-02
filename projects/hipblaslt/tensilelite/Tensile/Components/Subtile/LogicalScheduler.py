@@ -31,6 +31,8 @@ import copy
 import io
 import math
 
+from rocisa.instruction import SBitcmp1B32
+
 from rocisa.code import Module
 from .ScheduleTypes import (
     AnnotatedSchedule,
@@ -3426,7 +3428,7 @@ class LogicalScheduler:
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
-        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SCBranchSCC1, SMovB32
 
         # gfx1250 needs a larger ds_read->waitcnt gap.
         isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
@@ -3461,9 +3463,9 @@ class LogicalScheduler:
                         if use_pap_preloop_skip and not first_gr_group_done:
                             if em.opType == 'gr':
                                 if not skipping_first_gr_group:
-                                    module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
+                                    module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
                                                          comment="Subtile PAP: first PRELOOP GR already issued?"))
-                                    module.add(SCBranchSCC0(labelName=pap_merge_label.getLabelName(),
+                                    module.add(SCBranchSCC1(labelName=pap_merge_label.getLabelName(),
                                                             comment="skip first PRELOOP GR group if primed"))
                                     skipping_first_gr_group = True
                             elif skipping_first_gr_group:

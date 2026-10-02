@@ -6,12 +6,12 @@
 from dataclasses import dataclass
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, SMEMModifiers, GLOBALModifiers, EXEC, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, SEndpgm
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SAddCU32, SAddU32, SAndB32, SBitcmp1B32, SBarrier, SCBranchSCC0, SCMovB32, SCSelectB32, SCmpGeU32, SCmpLtU32, SLShiftLeftB32, SLShiftRightB32, VLShiftLeftB32, SMovB64, SMulI32, SNop, SSubU32, SXorB32, SWaitAlu, SWaitCnt, SWaitXCnt, VSubU32, VCmpXEqU32, GlobalAtomicIncU32Saddr, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32
 import abc
 from ..Component import Component
-from ..Common import log2, clusterEnabled, persistentSpatialCluster, persistentMulticast
+from ..Common import log2, clusterEnabled, persistentSpatialCluster
 from rocisa.enum import CacheScope
-from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder, sMagicDiv2
+from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
 from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
 
 @dataclass(frozen=True)
@@ -27,11 +27,19 @@ class QueuePartition:
 
 @dataclass(frozen=True)
 class StaticPartition:
-    """Cursor storage and units supplied by the selected work interpretation."""
+    """Registers describing the remaining work for one static workgroup.
+
+    The cursor identifies its next assignment; bound is the exclusive end.
+    DataParallel uses output tile IDs (tile_units=True), while StreamK uses
+    K-iteration positions so assignments may begin or end inside an output tile.
+    """
     cursor: str
     bound: str
     grid: str
     initial_rank: str
+    tile_units: bool = False
+
+RESERVED_MASK = 0x80000000
 
 def _mailboxLds0Token(writer):
     return MemTokenData([writer.states.memTokenLdsBuffer0])
@@ -135,13 +143,27 @@ class WorkAssignment(Component):
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipSignal', electTag='PersistentMulticastElect')
         return module
 
-    def persistentMulticastProloguePrefetchHandshake(self, writer, kernel):
-        module = Module('Persistent multicast prologue prefetch cluster handshake')
-        if not persistentMulticast(kernel):
+    def persistentClusterNextTileArrive(self, writer, kernel):
+        """Arrive for the next tile's first-load cluster wait.
+
+        Peers multicast the next tile's prefetch into each other's LDS, so each
+        workgroup arrives only after all of its waves are done with LDS for the
+        current tile. Peers own the same number of blocks, so the has-next-tile
+        test is uniform across the cluster and the last tile leaves no arrive.
+        """
+        module = Module('Persistent cluster next-tile arrive')
+        if not persistentSpatialCluster(kernel):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
-        module.addComment0('cluster B-multicast: bracket prologue double-buffer prefetch load with cluster handshake')
-        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPrefetchSignal', electTag='PersistentMulticastPrefetchElect', wait=True)
+        partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
+        module.addComment0('cluster B-multicast: arrive for the next tile once this tile is done with LDS')
+        module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
+        module.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
+        module.add(SWaitCnt(dscnt=0, comment='LDS reads of this tile done'))
+        module.add(SBarrier(comment='all waves done with LDS before the cluster arrive'))
+        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
+        module.add(skipArrive)
         return module
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
@@ -154,30 +176,6 @@ class WorkAssignment(Component):
         module.add(SCBranchSCC0(labelName=skipWait.getLabelName(), comment='>=1 full iteration: the first-load cluster wait pairs the arrive'))
         module.add(SBarrier(True, True, True, comment='cluster_barrier wait'))
         module.add(skipWait)
-        return module
-
-    def persistentClusterPadEarlyExit(self, writer, kernel):
-        module = Module('Persistent cluster pad early-exit')
-        if not persistentSpatialCluster(kernel):
-            return module
-        assert clusterEnabled(kernel['ClusterDim']), 'persistentClusterPadEarlyExit requires an enabled cluster'
-        module.addComment1('Persistent cluster multicast: exit padded boundary-cluster peers before the cluster barrier (grid rounded up to ClusterDim)')
-        padExit = Label(writer.labels.getNameInc('PersistentClusterPad_EarlyStop'), '')
-        padNoExit = Label(writer.labels.getNameInc('PersistentClusterPad_NoEarlyStop'), '')
-        module.add(SCmpGeU32(src0=sgpr('WorkGroup0'), src1=sgpr('NumWorkGroups0'), comment='padded if WorkGroup0 (M-tile) >= tilesM'))
-        module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
-        with writer.allocTmpSgpr(1, tag='persistentClusterPad_tmpSgpr') as padTmp:
-            boundN = 'NumWorkGroups1'
-            if kernel['GlobalSplitU'] != 0:
-                module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr('GSU'), src1=writer.gsuMaskHex(kernel), comment='Restore GSU'))
-                module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr('NumWorkGroups1'), src1=sgpr(padTmp.idx), comment='tilesN * GSU'))
-                boundN = padTmp.idx
-            module.add(SCmpGeU32(src0=sgpr('WorkGroup1'), src1=sgpr(boundN), comment='padded if WorkGroup1 (N-tile) >= tilesN*GSU'))
-            module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
-            module.add(SBranch(labelName=padNoExit.getLabelName()))
-            module.add(padExit)
-            module.add(SEndpgm(comment='padded work-group: exit before any cluster barrier/load (WAVEDONE frees -3 barrier slot)'))
-            module.add(padNoExit)
         return module
 
     @abc.abstractmethod
@@ -688,33 +686,6 @@ class WorkAssignment(Component):
 
         return module, sWorkItemIdx
 
-    def activateFullTileRange(self, writer, kernel, processing, tPA, tPB):
-        module = Module('Persistent TwoTileDPFirst graWorkGroup')
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, 'PersistentMappingTemp', preventOverflow=False)
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-        module.add(processing.computeTotalTiles(writer, kernel, sTmp + 3))
-        module.add(SMulI32(dst=sgpr(sTmp + 3), src0=sgpr(sTmp + 3), src1=sgpr(sIpt), comment='dpSectionSize = totalTiles * ItersPerTile'))
-        module.add(SCmpLtU32(src0=sgpr('PersistentIteration'), src1=sgpr(sTmp + 3), comment="Make sure there's DP work to do"))
-        module.add(writer.longBranchScc0(Label('KernelEnd', ''), posNeg=1))
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(processing.mapIterationToTile(writer, kernel, sTmp, tPA, tPB))
-        sIpt = writer.acquirePersistentConstSgpr(kernel, 'ItersPerTile')
-        sGrid = writer.acquirePersistentConstSgpr(kernel, 'skGrid')
-        if constantsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.persistentConstVgprs['ItersPerTile'])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.persistentConstVgprs['skGrid'])))
-        module.add(SMulI32(dst=sgpr(sTmp + 1), src0=sgpr(sGrid), src1=sgpr(sIpt), comment='DP iterations shift'))
-        writer.releasePersistentConstSgpr(sGrid)
-        writer.releasePersistentConstSgpr(sIpt)
-        module.add(SAddU32(dst=sgpr(sTmp + 1), src0=sgpr(sTmp + 1), src1=sgpr('PersistentIteration'), comment='Add DP shift'))
-        module.add(SMovB32(dst=sgpr('PersistentIteration'), src=sgpr(sTmp + 1), comment='Store next DP iteration'))
-        module.add(processing.tileIndexToWorkGroup(writer, kernel, sTmp))
-        writer.sgprPool.checkIn(sTmp)
-        return module
-
 
 class StaticGrid(WorkAssignment):
     kernel = {"WorkAssignment": "StaticGrid"}
@@ -736,35 +707,26 @@ class StaticGrid(WorkAssignment):
 
         # No USO prologue: bit 29 is tested in place at each divergence site.
 
-        # Cluster multicast: exit padded boundary-cluster peers here, before the
-        # fold overwrites WorkGroup0 with the linear index and before the prologue
-        # cluster-barrier arrive, so their WAVEDONE frees the -3 barrier slot for
-        # the present peers. No-op unless this is the ForceDPOnly cluster path;
-        # the two-tile cluster instead defers the prologue arrive to AFTER the
-        # StreamK work-check (see below).
-        module.add(self.persistentClusterPadEarlyExit(writer, kernel))
-
-        # Cluster multicast: fold the 2-D (+batch) HW workgroup coords into the
-        # linear DP tile index the DP decode expects. WorkGroup0 = global M-tile
-        # (Cs B-peers M-adjacent), WorkGroup1 = global N-tile (Ck A-peers
-        # N-adjacent), WorkGroup2 = batch, so (M-fastest, matching tileIndexToWorkGroup):
-        #   PersistentWorkGroupIndex = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
-        # written into WorkGroup0 so the save below copies the final index. A 1-D
-        # [Cs, 1] cluster launches the same 2-D grid, so it folds identically.
+        # Cluster multicast: the host launches (Cs * clusters, Ck, 1), so after the
+        # cluster remap WorkGroup0 = cluster*Cs + peerX and WorkGroup1 = peerY. Fold
+        # them into the cluster-block rank the DataParallel decode expects:
+        #   rank = cluster*(Cs*Ck) + peerY*Cs + peerX
         if persistentSpatialCluster(kernel):
-            with writer.allocTmpSgpr(2, tag="ClusterDPFold") as tRes:
+            cs, ck = kernel["ClusterDim"]
+            with writer.allocTmpSgpr(1, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
-                t1 = tRes.idx + 1
-                module.add(SMulI32(dst=sgpr(t0), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"),
-                                   comment="DP fold: WorkGroup1 * nWG0 (N-tile row)"))
-                module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
-                                   comment="DP fold: nWG0 * nWG1 (tiles per batch)"))
-                module.add(SMulI32(dst=sgpr(t1), src0=sgpr(t1), src1=sgpr("WorkGroup2"),
-                                   comment="DP fold: batch * (nWG0*nWG1)"))
+                module.add(SAndB32(dst=sgpr(t0), src0=sgpr("WorkGroup0"), src1=hex(cs - 1),
+                                   comment="DP fold: peerX"))
+                module.add(SLShiftRightB32(dst=sgpr("WorkGroup0"), shiftHex=hex(log2(cs)), src=sgpr("WorkGroup0"),
+                                           comment="DP fold: cluster"))
+                module.add(SLShiftLeftB32(dst=sgpr("WorkGroup0"), shiftHex=hex(log2(cs * ck)), src=sgpr("WorkGroup0"),
+                                          comment="DP fold: cluster * Cs*Ck"))
                 module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
-                                   comment="DP fold: + WorkGroup1*nWG0"))
-                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t1),
-                                   comment="DP fold: PersistentWorkGroupIndex = batch*(nWG0*nWG1) + N*nWG0 + M"))
+                                   comment="DP fold: + peerX"))
+                module.add(SLShiftLeftB32(dst=sgpr(t0), shiftHex=hex(log2(cs)), src=sgpr("WorkGroup1"),
+                                          comment="DP fold: peerY * Cs"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
+                                   comment="DP fold: rank = cluster*Cs*Ck + peerY*Cs + peerX"))
 
         if skConstsInVgprs:
             module.add(VMovB32(dst=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"]), src=sgpr("WorkGroup0"),
@@ -775,25 +737,30 @@ class StaticGrid(WorkAssignment):
 
         # Cluster multicast: arrive once per workgroup at the cluster split barrier
         # here in the prologue, before the first tensor_load_to_lds, so it pairs
-        # the cluster-barrier pass's first-load wait.
-        #
-        # EXCEPTION -- the two-tile (StreamKForceDPOnly==0) cluster: its no-work
-        # peers only reveal themselves at the StreamK work-check below, so arriving
-        # here would over-count the -3 barrier. DEFER that arrive to just after the
-        # work-check. The ForceDPOnly cluster has already dropped its no-work peers
-        # in persistentClusterPadEarlyExit above, so it arrives here.
+        # the cluster-barrier pass's first-load wait. Every later tile's wait pairs
+        # the arrive at the persistent loop close.
         if persistentSpatialCluster(kernel):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
 
 
-        module.add(processing.initializePartition(writer, kernel))
+        if partition.tile_units:
+            module.add(processing.computeTotalTiles(writer, kernel, partition.bound))
+            module.add(SCmpLtU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="Initial tile is in range"))
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+        else:
+            module.add(processing.initializePartition(writer, kernel))
         return module
 
     def activateReservedOrAcquire(self, writer, kernel, processing, tPA, tPB):
         writer.states.currentTileWork = processing.tileWork(kernel)
-        if writer.states.currentTileWork.k_start is None:
-            return self.activateFullTileRange(writer, kernel, processing, tPA, tPB)
-        return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
+        partition = processing.staticPartition()
+        if not partition.tile_units:
+            return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
+        module = Module("StaticGrid activate tile")
+        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB))
+        module.add(SAddU32(dst=sgpr(partition.cursor), src0=sgpr(partition.cursor), src1=sgpr(partition.grid), comment="Advance by the persistent grid in tile units"))
+        module.add(SCSelectB32(dst=sgpr(partition.cursor), src0=sgpr(partition.bound), src1=sgpr(partition.cursor), comment="A wrapped cursor is exhausted"))
+        return module
 
     def __call__(self):
         raise NotImplementedError
@@ -801,42 +768,29 @@ class StaticGrid(WorkAssignment):
     def reserveNext(self, writer, kernel, skipLabel):
         module = Module("StaticGrid reserveNext")
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Reserve next static assignment once"))
+        module.add(SCMovB32(dst=sgpr("PersistentPrefetchState"), src=hex(RESERVED_MASK), comment="Reserved; no data issued yet"))
         module.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment="No next persistent iteration"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
         return module
 
     def peekTileBatch(self, writer, kernel, dstSgpr):
-        """Batch index of the tile ``PersistentIteration`` currently points at, into ``dstSgpr``.
+        """Return the batch of the tile about to be activated, without advancing it.
 
-        Repeats the arithmetic ``mapIterationToTile`` and ``tileIndexToWorkGroup`` perform -- tile
-        index from ``PersistentIteration``, then tile index over the tiles per batch -- but
-        writes only ``dstSgpr`` and temporaries. ``mapIterationToTile`` also resets the
-        local-read offsets and ``tileIndexToWorkGroup`` claims ``WorkGroup0/1/2``, neither of
-        which may happen at a point that might still branch away.
-
-        Valid only at a persistent-loop entry, where ``PersistentIteration`` still names the
-        tile about to be computed; ``graWorkGroup`` advances it past that point.
-
-        ReuseAcrossPersistent calls this at both entries to decide whether the
-        resident A belongs to the tile this iteration will compute.
+        Call at persistent-loop entry, before activateReservedOrAcquire/graWorkGroup.
+        The cursor still identifies this iteration's tile here; activation advances
+        it to the following tile, so peeking afterward can return a different batch.
         """
-        module = Module('Persistent rapTileBatch')
-        constantsInVgprs = writer.isPersistentConstantsToVgprEnabled(kernel)
-        with writer.allocTmpSgpr(4, 2, 'RAPTileBatchTemp') as sTmpRes:
-            sTmp = sTmpRes.idx
-            sMagicNum = writer.acquirePersistentConstSgpr(kernel, 'MagicNumberItersPerTile')
-            sMagicShift = writer.acquirePersistentConstSgpr(kernel, 'MagicShiftItersPerTile')
-            if constantsInVgprs:
-                module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.persistentConstVgprs['MagicNumberItersPerTile'])))
-                module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.persistentConstVgprs['MagicShiftItersPerTile'])))
-            module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp + 1), sgpr('PersistentIteration'), sgpr(sMagicNum), sgpr(sMagicShift), sgpr(sTmp + 2)))
-            writer.releasePersistentConstSgpr(sMagicNum)
-            writer.releasePersistentConstSgpr(sMagicShift)
-            module.add(SMulI32(dst=sgpr(sTmp + 1), src0=sgpr('NumWorkGroups0'), src1=sgpr('NumWorkGroups1'), comment='RAP: tiles per batch'))
-            tmpVgpr = writer.vgprPool.checkOut(2, 'rapTileBatchDiv')
-            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=sTmp, divReg=sTmp + 1, rReg=sTmp + 3, tmpVgprRes=tmpVgprRes, wavewidth=kernel['WavefrontSize'], doRemainder=False, comment='RAP: batch of the tile at PersistentIteration'))
-            writer.vgprPool.checkIn(tmpVgpr)
+        partition = Component.TileProcessingStrategy.find(writer).staticPartition()
+        assert partition.tile_units, "RAP needs whole-tile assignment"
+        module = Module("StaticGrid peekTileBatch")
+        with writer.allocTmpSgpr(2, 2, "PersistentBatchPeek") as tmp:
+            module.add(SMulI32(dst=sgpr(tmp.idx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Tiles per batch"))
+            vtmp = writer.vgprPool.checkOut(2, "PersistentBatchDivide")
+            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=partition.cursor, divReg=tmp.idx, rReg=tmp.idx + 1,
+                tmpVgprRes=ContinuousRegister(idx=vtmp, size=2), wavewidth=kernel["WavefrontSize"], doRemainder=False,
+                comment="Batch of the tile about to be activated"))
+            writer.vgprPool.checkIn(vtmp)
         return module
 
     def closeLoop(self, writer, kernel):
@@ -899,6 +853,9 @@ class DynamicWorkQueue(WorkAssignment):
         """
         partition = Component.TileProcessingStrategy.find(writer).queuePartition()
         module = Module("StreamK Dynamic papHasNextPersistentIteration")
+        reserved = Label(writer.labels.getNameInc("PAP_AlreadyReserved"), "")
+        module.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Has this next assignment already been reserved?"))
+        module.add(SCBranchSCC0(labelName=reserved.getLabelName(), comment="Reuse work or exhaustion reservation without another pop"))
         # The OptNLL PAP window runs near the SGPR high-water mark, so let the
         # pop's scratch check-outs grow the pool (preventOverflow=False) instead
         # of tripping the preventOverflow guard.
@@ -907,8 +864,9 @@ class DynamicWorkQueue(WorkAssignment):
         module.add(SMovB32(dst=sgpr("NextWorkItem"), src=sgpr(sWorkItemIdx), comment="PAP: stash popped work item for persistent back-edge"))
         # Mark primed BEFORE the drain check so the back-edge reuses the stashed
         # work item (never re-pops) even when this pop drained the queue.
-        module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="PAP: next work item already popped"))
+        module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=hex(RESERVED_MASK), comment="PAP: next work item reserved; no data issued"))
         writer.sgprPool.checkIn(sWorkItemIdx)
+        module.add(reserved)
         module.add(SCmpGeU32(src0=sgpr("NextWorkItem"), src1=sgpr(partition.total_items), comment="PAP: queue drained (no next tile)?"))
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="drained: skip next-tile prefetch"))
         return module
