@@ -25,9 +25,9 @@ from typing import List
 
 from rocisa import rocIsa
 
-from Tensile.Activation import ActivationInline, ActivationType
-from Tensile.Common.Architectures import archMacroNames, IsaVersion
-from Tensile.KernelWriterBase import KernelWriterBase
+from .Activation import ActivationInline, ActivationType
+from .Common.Architectures import archMacroNames, IsaVersion
+from .KernelWriterBase import KernelWriterBase
 
 class KernelWriterActivationFunction(KernelWriterBase):
 
