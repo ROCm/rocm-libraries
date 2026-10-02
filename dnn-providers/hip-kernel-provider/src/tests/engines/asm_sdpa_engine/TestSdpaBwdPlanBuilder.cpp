@@ -1113,6 +1113,90 @@ TEST_F(TestSdpaBwdPlanBuilder, BottomRightCausalMaskWithLeftBoundIsBottomRightSl
     EXPECT_FALSE(mask.topLeft);
 }
 
+// left_bound and right_bound are int64 attributes; the DQDKDV kernel window
+// fields are int32. kernelWindowBounds must not wrap a large bound into a narrow
+// window: 4294967298 is 2^32 + 2, which a plain int32 cast turns into 2.
+TEST_F(TestSdpaBwdPlanBuilder, CausalWindowWithInt64LeftBoundIsUnboundedForTheKernel)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    constexpr int64_t K_HUGE_LEFT = 4294967298LL;
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(K_HUGE_LEFT),
+        flatbuffers::nullopt,
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::ResolvedMask mask;
+    ASSERT_NO_THROW(mask = resolveMaskOf(builder));
+    ASSERT_EQ(mask.type, plan_utils::MaskType::SLIDING_WINDOW);
+    EXPECT_EQ(mask.left, K_HUGE_LEFT);
+
+    // The graph's sequence lengths (createSdpaBwdGraphWithMask uses 256 for both).
+    constexpr int32_t K_SEQ = 256;
+    const auto [left, right] = plan_utils::kernelWindowBounds(mask, K_SEQ, K_SEQ);
+    EXPECT_EQ(left, -1);
+    EXPECT_EQ(right, 0);
+
+    // -1 gives the kernel the same mask coordinates as the widest window that
+    // fits, so the clamp keeps the plain causal triangle the references compute.
+    EXPECT_EQ(plan_utils::computeMaskCoordinates(left, right, K_SEQ, K_SEQ, true),
+              plan_utils::computeMaskCoordinates(K_SEQ - 1, 0, K_SEQ, K_SEQ, true));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, KernelWindowBoundsKeepsBoundsInsideTheSequence)
+{
+    // Top-left: the left span is seqLenQ - 1 and the right span is seqLenKv - 1.
+    // A bound one short of its span still masks something and passes through.
+    plan_utils::ResolvedMask topLeft;
+    topLeft.type = plan_utils::MaskType::SLIDING_WINDOW;
+    topLeft.topLeft = true;
+    topLeft.left = 127;
+    topLeft.right = 510;
+    EXPECT_EQ(plan_utils::kernelWindowBounds(topLeft, 128, 512), std::make_pair(-1, 510));
+    topLeft.left = 126;
+    topLeft.right = 511;
+    EXPECT_EQ(plan_utils::kernelWindowBounds(topLeft, 128, 512), std::make_pair(126, -1));
+
+    // Bottom-right swaps the spans: left reaches seqLenKv - 1, right seqLenQ - 1.
+    plan_utils::ResolvedMask bottomRight;
+    bottomRight.type = plan_utils::MaskType::SLIDING_WINDOW;
+    bottomRight.topLeft = false;
+    bottomRight.left = 510;
+    bottomRight.right = 127;
+    EXPECT_EQ(plan_utils::kernelWindowBounds(bottomRight, 128, 512), std::make_pair(510, -1));
+    bottomRight.left = 511;
+    bottomRight.right = 126;
+    EXPECT_EQ(plan_utils::kernelWindowBounds(bottomRight, 128, 512), std::make_pair(-1, 126));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundBelowMinusOneThrows)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // The references reject bounds below -1. -4294967294 is also the case a
+    // plain int32 cast would turn into a window of 2.
+    for(const int64_t bad : {int64_t{-2}, int64_t{-4294967294LL}})
+    {
+        auto leftBad = createSdpaBwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            flatbuffers::Optional<int64_t>(bad),
+            flatbuffers::Optional<int64_t>(0),
+            DiagonalAlignment::TOP_LEFT);
+        EXPECT_THROW(resolveMaskOf(leftBad), hipdnn_plugin_sdk::HipdnnPluginException) << bad;
+
+        auto rightBad = createSdpaBwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            flatbuffers::Optional<int64_t>(64),
+            flatbuffers::Optional<int64_t>(bad),
+            DiagonalAlignment::TOP_LEFT);
+        EXPECT_THROW(resolveMaskOf(rightBad), hipdnn_plugin_sdk::HipdnnPluginException) << bad;
+    }
+}
+
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
 // as unbounded (-1), so a partially specified trio still derives the mask it
 // describes.

@@ -25,6 +25,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 
 // Backward CSV columns consumed by this builder:
@@ -1176,9 +1177,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     {
         // Resolved bounds, not the raw attributes: a deprecated causal boolean
         // plus left_bound is a window whose right bound and alignment come from
-        // the boolean, not from right_bound / diagonal_alignment.
-        params.windowLeft = static_cast<int32_t>(resolvedMask.left);
-        params.windowRight = static_cast<int32_t>(resolvedMask.right);
+        // the boolean, not from right_bound / diagonal_alignment. Bounds that span
+        // the whole sequence become -1 so an int64 bound never wraps in the int32
+        // kernel field.
+        std::tie(params.windowLeft, params.windowRight)
+            = plan_utils::kernelWindowBounds(resolvedMask, seqLenQ, seqLenKv);
         params.topLeftAlignment = resolvedMask.topLeft;
     }
 

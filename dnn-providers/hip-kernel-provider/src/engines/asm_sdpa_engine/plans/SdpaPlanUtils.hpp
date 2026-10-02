@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -78,7 +79,8 @@ struct ResolvedMask
 // plus set_sliding_window_length(n) spells one. This matches the CPU and GPU
 // SDPA references (extractDiagonalBandParams). Without a deprecated boolean
 // the trio is authoritative. The two deprecated booleans are mutually
-// exclusive, so setting both throws HipdnnPluginException(INVALID_VALUE).
+// exclusive, so setting both throws HipdnnPluginException(INVALID_VALUE), and
+// so does a bound below -1 (the CPU and GPU references reject those too).
 //
 // Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
 // fields as plain bool defaulting to false, with no has_*() accessor.
@@ -105,8 +107,18 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
+    const int64_t leftBound = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    const int64_t rightBound = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    if(leftBound < -1 || rightBound < -1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound and right_bound must be >= -1 (left_bound="
+                + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
+    }
+
     ResolvedMask mask;
-    mask.left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    mask.left = leftBound;
     if(causalDeprecated || bottomRightDeprecated)
     {
         mask.right = 0;
@@ -114,7 +126,7 @@ ResolvedMask resolveMask(const SdpaAttrsT& attrs)
     }
     else
     {
-        mask.right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+        mask.right = rightBound;
         mask.topLeft = attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT;
     }
 
@@ -138,6 +150,28 @@ template <typename SdpaAttrsT>
 MaskType getMaskType(const SdpaAttrsT& attrs)
 {
     return resolveMask(attrs).type;
+}
+
+// Narrow a SLIDING_WINDOW mask's bounds to the kernel's int32 window fields.
+//
+// A bound that reaches the widest offset the band can span for this alignment
+// and these sequence lengths masks nothing on its side, so it becomes -1. That
+// is the same mask: computeMaskCoordinates() replaces -1 with exactly that
+// widest offset (seqLen - 1 on the matching axis). Every bound that survives is
+// below a sequence length, so the int32 cast is exact; a raw int64 bound such
+// as 4294967298 would otherwise wrap to 2 and shrink the window.
+//
+// Expects bounds >= -1 (resolveMask() rejects the rest) and sequence lengths
+// that fit int32 (the kernel argument fields are int32 as well).
+inline std::pair<int32_t, int32_t>
+    kernelWindowBounds(const ResolvedMask& mask, int64_t seqLenQ, int64_t seqLenKv)
+{
+    const int64_t leftSpan = mask.topLeft ? seqLenQ - 1 : seqLenKv - 1;
+    const int64_t rightSpan = mask.topLeft ? seqLenKv - 1 : seqLenQ - 1;
+    const auto narrow = [](int64_t bound, int64_t span) {
+        return (bound < 0 || bound >= span) ? int32_t{-1} : static_cast<int32_t>(bound);
+    };
+    return {narrow(mask.left, leftSpan), narrow(mask.right, rightSpan)};
 }
 
 // =============================================================================

@@ -71,9 +71,21 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
+    // K2: reject mask types the kernel does not implement, and decline the
+    // invalid mask attributes getMaskType throws on (both deprecated booleans,
+    // a bound below -1) instead of letting the exception escape.
     {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
+        asm_sdpa_engine::plan_utils::MaskType maskType
+            = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(HIP_KERNEL_LOG_PREFIX << e.what());
+            return false;
+        }
         HIP_KERNEL_RETURN_FALSE_IF(
             maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
                 && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
