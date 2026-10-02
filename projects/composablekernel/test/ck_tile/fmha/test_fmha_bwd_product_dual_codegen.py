@@ -3,7 +3,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Regression test for the gfx12 BF16 D=128 product-dual codegen path."""
+"""Regression tests for the gfx12 BF16 D=64/128 product-dual codegen paths."""
 
 import re
 import subprocess
@@ -25,12 +25,15 @@ _ELIGIBLE_GLOB = (
 
 
 class TestFmhaBwdProductDualCodegen(unittest.TestCase):
+    dim = 128
+    eligible_glob = _ELIGIBLE_GLOB
+
     @classmethod
     def setUpClass(cls):
         if not _GENERATE.is_file():
             raise unittest.SkipTest(f"generate.py not found at {_GENERATE}")
 
-    def test_gfx12_bf16_d128_emits_product_dual_dispatch(self):
+    def test_gfx12_bf16_emits_product_dual_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             result = subprocess.run(
@@ -44,7 +47,7 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
                     "--receipt",
                     "2",
                     "--optdim",
-                    "128",
+                    str(self.dim),
                     "--output_dir",
                     str(output_dir),
                 ],
@@ -61,7 +64,7 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
                 ),
             )
 
-            eligible = list(output_dir.glob(_ELIGIBLE_GLOB))
+            eligible = list(output_dir.glob(self.eligible_glob))
             self.assertEqual(
                 len(eligible),
                 1,
@@ -73,6 +76,7 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
             self.assertIn("BlockFmhaBwdDQOnlyQMajor", kernel_source)
             self.assertIn("BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt", kernel_source)
             self.assertIn("product_dual@", kernel_source)
+            self.assertIn("std::is_same_v<ck_tile::gfx12_t, ck_tile::gfx12_t>", kernel_source)
 
             # The host workspace helpers use the DKDV alias. Only that wrapper
             # receives the product predicate; dQ still writes its output directly.
@@ -109,7 +113,9 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
                 ),
             ):
                 with self.subTest(fallback=suffix):
-                    candidates = list(output_dir.glob("fmha_bwd_d128_" + suffix))
+                    candidates = list(
+                        output_dir.glob(f"fmha_bwd_d{self.dim}_" + suffix)
+                    )
                     self.assertTrue(candidates, suffix)
                     source = candidates[0].read_text()
                     predicate = source.split(
@@ -125,6 +131,16 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
                 "std::conditional_t<product_dual_dispatch_, void, convert_dq_trait_>",
                 api_source,
             )
+
+
+class TestFmhaBwdD64ProductDualCodegen(TestFmhaBwdProductDualCodegen):
+    dim = 64
+    eligible_glob = (
+        "fmha_bwd_d64_bf16_batch_"
+        "b32x64x64x32x64x32x32x64x64_*_"
+        "maxq0_npad_nbias_ndbias_nmask_ndropout_"
+        "ndeterministic_ntrload_gfx12.cpp"
+    )
 
 
 if __name__ == "__main__":

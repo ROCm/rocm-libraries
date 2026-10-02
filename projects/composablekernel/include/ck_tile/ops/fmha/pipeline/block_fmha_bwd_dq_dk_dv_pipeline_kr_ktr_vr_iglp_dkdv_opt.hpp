@@ -48,8 +48,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
     static constexpr index_t kQKHeaddim = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
 
-    static_assert(kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128,
-                  "The DK/DV-only pipeline is specialized for the D128 product path");
+    static constexpr bool kD64 = kM0 == 32 && kN0 == 64 && kQKHeaddim == 64 && kVHeaddim == 64;
+    static_assert(kD64 || (kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128),
+                  "The DK/DV-only pipeline requires a supported D64/D128 product tile");
 
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
     static constexpr index_t kPadHeadDimQ  = Problem::kPadHeadDimQ;
@@ -365,6 +366,84 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                     make_tuple(sequence<0>{}, sequence<1>{}));
 
                 static_assert(p_desc.get_element_space_size() == 32 * 32);
+                return p_desc;
+            }
+            else if constexpr(kM0 == 32 && kN0 == 64 && kQKHeaddim == 64 && kVHeaddim == 64 &&
+                              sizeof(GemmDataType) == 2)
+            {
+                // D64-P-ADJACENT-MPAIR:
+                // Shared P/dS LDS layout for the M32/N64/D64 BF16 product.
+                //
+                // Gemm1 consumes P^T[N,M]. For gfx12 WMMA 16x16x16,
+                // each lane's K-axis values contain adjacent M even/odd pairs.
+                //
+                // Logical:
+                //   A  = M >> 1
+                //   P  = M & 1
+                //   J  = N >> 5
+                //   B  = (N >> 3) & 3
+                //   R  = N & 7
+                //   C  = (A >> 1) & 3
+                //
+                // Physical element offset:
+                //   A*128 + J*64 + (B ^ C)*16 + R*2 + P
+                //
+                // Thus P[N,M-even:M-even+2] is a naturally aligned BF16x2
+                // pair while the full 32x64 logical tile remains bijective.
+                //
+                // Physical dimensions:
+                // H,C,L,J,G,R,P = 2,4,2,2,4,8,2
+                // A = H*8 + C*2 + L
+                constexpr auto p_desc_0 = make_naive_tensor_descriptor(make_tuple(number<2>{},
+                                                                                  number<4>{},
+                                                                                  number<2>{},
+                                                                                  number<2>{},
+                                                                                  number<4>{},
+                                                                                  number<8>{},
+                                                                                  number<2>{}),
+                                                                       make_tuple(number<1024>{},
+                                                                                  number<256>{},
+                                                                                  number<128>{},
+                                                                                  number<64>{},
+                                                                                  number<16>{},
+                                                                                  number<2>{},
+                                                                                  number<1>{}),
+                                                                       number<2>{},
+                                                                       number<1>{});
+
+                // G = B xor C. J carries N's high group bit unchanged.
+                constexpr auto p_desc_xor = transform_tensor_descriptor(
+                    p_desc_0,
+                    make_tuple(make_pass_through_transform(number<2>{}),
+                               make_xor_transform(make_tuple(number<4>{}, number<4>{})),
+                               make_pass_through_transform(number<2>{}),
+                               make_pass_through_transform(number<2>{}),
+                               make_pass_through_transform(number<8>{}),
+                               make_pass_through_transform(number<2>{})),
+                    make_tuple(sequence<0>{},
+                               sequence<1, 4>{},
+                               sequence<2>{},
+                               sequence<3>{},
+                               sequence<5>{},
+                               sequence<6>{}),
+                    make_tuple(sequence<0>{},
+                               sequence<1, 4>{},
+                               sequence<2>{},
+                               sequence<3>{},
+                               sequence<5>{},
+                               sequence<6>{}));
+
+                // [H,C,L,P] -> M, [J,B,R] -> N
+                constexpr auto p_desc = transform_tensor_descriptor(
+                    p_desc_xor,
+                    make_tuple(make_merge_transform_v3_division_mod(
+                                   make_tuple(number<2>{}, number<4>{}, number<2>{}, number<2>{})),
+                               make_merge_transform_v3_division_mod(
+                                   make_tuple(number<2>{}, number<4>{}, number<8>{}))),
+                    make_tuple(sequence<0, 1, 2, 6>{}, sequence<3, 4, 5>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+
+                static_assert(p_desc.get_element_space_size() == 32 * 64);
                 return p_desc;
             }
             else
@@ -799,7 +878,20 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                 {seqlen_q_step},
                 Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
 
-            auto d_hot_direct = load_tile(d_hot_direct_window);
+            // Load four D scalars before Gemm2; defer the other twelve to
+            // their dS consumers to keep the D64 live set below the spill cliff.
+            auto d_hot_early = [&]() {
+                if constexpr(kD64)
+                {
+                    auto values = make_static_distributed_tensor<DDataType>(
+                        d_hot_direct_window.get_tile_distribution());
+                    static_assert(remove_cvref_t<decltype(values)>::get_thread_buffer_size() == 16);
+                    d_hot_direct_window.template load_stage5_mapped_split<4, true>(values);
+                    return values;
+                }
+                else
+                    return load_tile(d_hot_direct_window);
+            }();
             __builtin_amdgcn_sched_barrier(0);
 
             // DO-JIT: leave dO in its independent LDS region until Gemm2.
@@ -810,6 +902,17 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             // Delay the next-iteration global prefetch to shorten VGPR live ranges.
             HotLoopScheduler::template GemmStagedScheduler<2>();
             __builtin_amdgcn_sched_barrier(0);
+            auto d_hot_late = [&]() {
+                auto values = make_static_distributed_tensor<DDataType>(
+                    d_hot_direct_window.get_tile_distribution());
+                if constexpr(kD64)
+                {
+                    static_assert(remove_cvref_t<decltype(values)>::get_thread_buffer_size() == 16);
+                    d_hot_direct_window.template load_stage5_mapped_split<4, false>(values);
+                    __builtin_amdgcn_sched_barrier(0);
+                }
+                return values;
+            }();
             // STAGE 5, P^T(PGrad^T - D)
 
             // The earlier HBM->LDS->Reg D staging is intentionally omitted.
@@ -819,12 +922,24 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
             sweep_tile_span(ds_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
+                const auto d_hot_value = [&]() {
+                    if constexpr(kD64)
+                    {
+                        constexpr index_t logical_idx = idx0.impl_.at(0) * 8 + idx0.impl_.at(2);
+                        if constexpr(logical_idx >= 4)
+                            return d_hot_late[i_idx];
+                        else
+                            return d_hot_early[i_idx];
+                    }
+                    else
+                        return d_hot_early[i_idx];
+                }();
                 sweep_tile_span(ds_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     bool undrop_flag       = p[i_j_idx] >= 0;
                     ds(i_j_idx)            = p[i_j_idx] * (!FmhaDropout::IsDropout || undrop_flag
-                                                               ? (dp_acc[i_j_idx] - d_hot_direct[i_idx])
-                                                               : d_hot_direct[i_idx]);
+                                                               ? (dp_acc[i_j_idx] - d_hot_value)
+                                                               : d_hot_value);
                 });
             });
 

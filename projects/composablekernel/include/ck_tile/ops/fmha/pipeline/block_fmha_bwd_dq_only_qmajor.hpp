@@ -116,8 +116,12 @@ struct BlockFmhaBwdDQOnlyQMajor
         // LDS-PADDING-CONTROL:
         // Reserve the same stage0 footprint as V-separate,
         // but keep the original LATEKT dataflow and barriers unchanged.
+        // D64-only reservation trim. K+KT and V already reuse LDS offset 0
+        // sequentially under the existing barriers; no load/address/barrier
+        // ordering is changed here.
         constexpr ck_tile::index_t smem_size_stage0_control =
-            smem_size_k + smem_size_kt + smem_size_v;
+            kQKHeaddim == 64 ? ck_tile::max(smem_size_k + smem_size_kt, smem_size_v)
+                             : (smem_size_k + smem_size_kt + smem_size_v);
 
         // QMAJOR_COMPACT_LDS_PROBE
         // QMAJOR_DS_TAIL_FULLSIZE_CONTROL:
@@ -492,6 +496,8 @@ struct BlockFmhaBwdDQOnlyQMajor
                 {
                     ds_reg_tensor_next = load_tile(ds_lds_read_window);
                     move_tile_window(ds_lds_read_window, {0, kK4});
+                    if constexpr(kM0 == 32 && kN0 == 64 && kQKHeaddim == 64)
+                        __builtin_amdgcn_sched_barrier(0);
                 }
                 auto kt_reg_tensor_slice = get_slice_tile(
                     kt_reg_tensor,
