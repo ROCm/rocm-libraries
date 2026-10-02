@@ -179,10 +179,12 @@ void BuildTableForSolver(const std::string& arch,
 
     const auto& model = GetCandidateSelectionModel(arch, spec.solver_name);
 
+    std::size_t num_split_ks = 1;
     std::vector<std::vector<std::string>> params;
     if(spec.uses_split_k)
     {
         const auto& split_ks = model.metadata().GetSplitKValues();
+        num_split_ks         = split_ks.size();
         std::vector<int> hidx(heuristic_kernels.size());
         std::iota(hidx.begin(), hidx.end(), 0);
         auto always_valid        = [](int, int) { return true; };
@@ -209,6 +211,11 @@ void BuildTableForSolver(const std::string& arch,
             out_emb.push_back(emb[i]);
         }
     }
+
+    std::cout << "[stats] " << spec.solver_name << ": ck_instances=" << all_kernels.size()
+              << " heuristic_kernels=" << heuristic_kernels.size()
+              << " split_ks=" << num_split_ks << " expanded=" << params.size()
+              << " deduped_rows=" << out_keys.size() << std::endl;
 }
 
 } // namespace
