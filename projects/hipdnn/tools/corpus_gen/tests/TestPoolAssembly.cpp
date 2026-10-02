@@ -251,6 +251,7 @@ TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
     // the rare one, which is the lopsided corpus a quota exists to correct. Owed six, it gets
     // six, and the rest of the count is cut from what is left, as before.
     std::vector<PoolEntry> pool;
+    pool.reserve(100);
     for(int64_t index = 0; index < 100; ++index)
     {
         pool.push_back(entryAt("sweep", index, index < 90 ? "common" : "rare"));
@@ -273,6 +274,7 @@ TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
     // The quotas are what the caller measured it needs; a count set with them in mind must not
     // quietly undo them.
     std::vector<PoolEntry> pool;
+    pool.reserve(40);
     for(int64_t index = 0; index < 40; ++index)
     {
         pool.push_back(entryAt("sweep", index, index % 2 == 0 ? "a" : "b"));

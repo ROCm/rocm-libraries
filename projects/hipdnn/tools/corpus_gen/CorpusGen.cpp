@@ -991,6 +991,7 @@ int runGenerator(const std::vector<std::string>& args)
             askedEngines.end(), options.alsoEngineIds.begin(), options.alsoEngineIds.end());
         const auto everyEngine = [&](int64_t maxBytes) {
             std::vector<hipdnn_corpus_gen::ProblemOracle> each;
+            each.reserve(askedEngines.size());
             for(const auto id : askedEngines)
             {
                 each.push_back(hipdnn_corpus_gen::makeCorpusOracle(handle,
@@ -1279,11 +1280,18 @@ int runGenerator(const std::vector<std::string>& args)
                         pools["sweep"].push_back(std::move(entry));
                     }
                 }
+                const char* stop = "";
+                if(found.saturated)
+                {
+                    stop = ", saturated";
+                }
+                else if(found.searchCapped)
+                {
+                    stop = ", budget limit";
+                }
                 std::cerr << "  focus " << regime << ": " << have << " pooled, " << asked - have
                           << " wanted, " << found.problems.size() << " found (" << found.inRegime
-                          << " of " << found.proposed << " proposals in the regime)"
-                          << (found.saturated ? ", saturated"
-                                              : (found.searchCapped ? ", budget limit" : ""))
+                          << " of " << found.proposed << " proposals in the regime)" << stop
                           << "\n";
                 focused.emplace(regime, std::move(found));
             }

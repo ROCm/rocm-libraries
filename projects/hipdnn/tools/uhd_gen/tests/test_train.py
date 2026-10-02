@@ -7,6 +7,7 @@ import pytest
 
 pytest.importorskip("lightgbm")
 pytest.importorskip("flatbuffers")
+pytest.importorskip("pandas")
 
 from uhd_gen.__main__ import main  # noqa: E402
 

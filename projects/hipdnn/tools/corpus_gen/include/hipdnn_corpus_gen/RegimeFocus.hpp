@@ -415,6 +415,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     std::vector<Lane> lanes(served.size());
 
     std::vector<std::string> names;
+    names.reserve(window.size());
     for(const auto& dimension : window)
     {
         names.push_back(dimension.name);

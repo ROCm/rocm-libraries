@@ -16,6 +16,7 @@ import pytest
 # Every model here is a real artifact built by the shipping converter, which needs both.
 pytest.importorskip("flatbuffers")
 pytest.importorskip("lightgbm")
+pytest.importorskip("pandas")
 
 from uhd_gen.features import (
     compute_features_hash,

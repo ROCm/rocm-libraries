@@ -131,6 +131,7 @@ def test_shards_that_read_one_pin_differently_are_refused():
 def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_saw(
     tmp_path,
 ):
+    pytest.importorskip("pandas")  # uhd_gen.generate reads collections into frames
     from uhd_gen.generate import (
         COLLECTION_MANIFEST,
         COLLECTION_SCHEMA,
