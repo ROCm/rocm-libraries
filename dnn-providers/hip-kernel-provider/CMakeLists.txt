@@ -354,20 +354,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
-    # pointwise_model is authored in part and generated in part, so unlike every set above
-    # its source root is assembled in the build tree rather than read from the source tree.
-    # Its heuristic is a trained artifact: uhd_model_gen emits the .uhd.json and the model
-    # together so `features_hash` cannot drift between them, and a committed descriptor
-    # would be free to disagree with the model it names.
-    #
-    # The generated half cannot be written into the packed output, because a pack wipes its
-    # OUT_ROOT and refills it from SOURCE_ROOT -- anything placed there is removed by the
-    # next pack. Assembling a source root first keeps this an ordinary pack rather than a
-    # second staging mechanism beside the packer.
-    #
-    # The authored JSONs stay where they were rather than moving under test_descriptors/:
-    # this set is not authored-whole, so a folder there would invite being wired directly,
-    # which would pack the descriptors without the model they name.
+    # pointwise_model is part authored, part generated (uhd_model_gen emits the .uhd.json
+    # with its model so `features_hash` cannot drift), so its source root is assembled in
+    # the build tree. The authored JSONs stay out of test_descriptors/ so the set is never
+    # wired directly, which would pack descriptors without their model.
     set(HIPKERNELPROVIDER_POINTWISE_MODEL_SET "pointwise_model")
     set(HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures/pointwise_model")
@@ -468,24 +458,15 @@ endif()
 # ============================================================================
 # ASM SDPA engine heuristics
 # ============================================================================
-# AITER owns no descriptor set: it binds its L1 model by a UUID declared in provider code
-# (AsmSdpaEngine.hpp, RFC 0019 §4.1 / Open Question 7), and the loader resolves that UUID
-# out of the catalog it already walks. So the model has no pack to travel in -- it is a
-# loose UHD that must reach the same production tree the ingestor's packs deliver into, or
-# the engine reports UNAVAILABLE with a model sitting in the source tree unread.
-#
-# Gated on the ingestor because that is what creates and walks that tree; the model itself
-# has nothing to do with the ingestor, and moves the day another loader roots it.
-#
-# Declared ahead of descriptor-packaging because the production pack stages these files
-# itself (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES). That pack wipes and refills this very
-# tree, so a copy made by any rule of its own is deleted whenever the pack reruns for an
-# edit elsewhere -- and an incremental build then installs a tree with no model in it.
+# AITER binds its L1 model by a UUID declared in provider code (RFC 0019 §4.1), so the
+# model has no pack and must be delivered into the production tree directly. Declared
+# ahead of descriptor-packaging because the production pack wipes that tree and stages
+# these files itself (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES); a separate copy would be
+# deleted on repack.
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/asm_sdpa_engine/descriptors")
-    # Explicit, like every other descriptor list here: one list feeds staging and install,
-    # so the two cannot disagree about what ships.
+    # One list feeds staging and install, so the two cannot disagree about what ships.
     set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES
         predict_engine/gfx942/asm_sdpa_engine_tflops.uhd.json
         predict_engine/gfx942/asm_sdpa_engine_tflops.bin
@@ -514,10 +495,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
-    # Produces the pointwise_model pack's .uhd.json and its model artifact. Ahead of
-    # descriptor-packaging because that is where the pack is wired, and the staging rules
-    # there name this target -- a dependency cannot be added to a target that does not yet
-    # exist.
+    # Must precede descriptor-packaging: its staging rules depend on this target.
     add_subdirectory(tools/uhd_model_gen)
     add_subdirectory(descriptor-packaging)
 endif()
@@ -649,12 +627,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 endif()
 
-# ASM SDPA heuristics with production packaging dormant. When the product pack is wired it
-# stages HIPKERNELPROVIDER_PRODUCT_STAGE_FILES itself and arch_content/ installs wholesale
-# with them in it. Dormant, nothing wipes that tree and nothing installs it, so the files
-# are copied into the build tree by rules of their own and install from the source tree --
-# one rule delivers each file either way, and the installed tree stays a copy of the build
-# tree.
+# Production pack dormant: nothing stages or installs arch_content/, so copy the ASM SDPA
+# heuristics into the build tree and install them from the source tree.
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR
    AND NOT TARGET hkp_packaging_product)
     set(_asm_sdpa_staged)

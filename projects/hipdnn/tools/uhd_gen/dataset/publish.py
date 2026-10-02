@@ -3,24 +3,10 @@
 
 """Turning collected benchmark CSVs into the Parquet dataset training consumes.
 
-RFC 0019.13 §8.3 collects as CSV and publishes as Parquet, because the two ends want opposite
-things: a run lasting days must be resumable from a partial file and its shards must merge by
-appending, neither of which Parquet does, while training wants a typed columnar dataset.
-
-This is also the only place §8.3's checks are enforced. While training read the collected CSV
-directly there was nothing between producer and consumer to apply them, so rules describing a
-merge spanning inconsistent candidate sets described a check nothing performed.
-
-Takes results from any producer, not only ours. The minimum a foreign CSV must carry is a problem
-namespace, `kernel.*`, `device.*` and a measurement; everything else has a default, and the
-metrics are derived rather than demanded.
-
-The problem namespace is not a fixed word. The runtime publishes each problem value under the
-token its matcher bound, which is the operation's own name (`attention_dense.seqlen_kv`), so a
-corpus of one op and a corpus of another do not share a root and neither is `q`. Nothing here
-needs them to: `kernel.*` and `device.*` are the two roots with a defined meaning, and a problem
-column is any other namespaced column. That also accepts the older `q.*` spelling and
-`corpus_gen`'s, without either being privileged.
+RFC 0019.13 §8.3 collects as CSV (resumable, shards merge by appending) and publishes as
+Parquet; this is the only place §8.3's checks are enforced. Accepts any producer's corpus:
+`kernel.*` and `device.*` are reserved roots, and any other namespaced column is a problem
+column, whatever op token it is bound under.
 """
 
 from __future__ import annotations
@@ -51,45 +37,26 @@ __all__ = [
     "resolve_duplicates",
 ]
 
-#: Collection bookkeeping, meaningless once the shards are merged (§8.3). `is_valid` and
-#: `skip_reason` are the collector's spelling of a failed candidate (see
-#: `_translate_collector_failure`); they are read on the way in and then dropped, because
-#: §8.3's published dataset records a failure once, as `error`, and never as two columns
-#: that can disagree.
+#: Collection bookkeeping, dropped once shards are merged (§8.3). `is_valid`/`skip_reason`
+#: are first translated into `error`, so a failure is published once, in one column.
 COLLECTION_ONLY = ["shard_id", "is_valid", "skip_reason"]
 
-#: What a producer may omit. A provider publishing tuning results is publishing a sweep, not
-#: hand-tuned partials, so completeness defaults true rather than forcing every external corpus
-#: to disclaim a caveat that does not apply to it.
+#: What a producer may omit. A published sweep is complete unless it says otherwise.
 DEFAULTS = {"problem_complete": True, "error": ""}
 
 TIMING_COLUMNS = ["minTimeMs", "avgTimeMs", "stddevMs", "iters"]
 
-#: Identity columns, pinned to text at the read. A device id or a benchmark name that
-#: happens to be all digits is still a name -- nothing computes with it -- and letting the
-#: CSV reader infer it as int64 makes the published dataset's dtype depend on which board
-#: happened to be swept. Consumers group and join on these (`uhd_gen.evaluate`'s problem
-#: identity, `uhd_gen.immediate`'s canonical-string check), so the CSV and Parquet ends of
-#: the pipeline must agree on the type before anything downstream can branch on it.
+#: Identity columns, pinned to text at the read so an all-digit device id or benchmark name
+#: does not make the published dtype depend on which board was swept.
 IDENTITY_DTYPES = {"benchmark": str, "device": str}
 
 
 class ValidationError(Exception):
-    """A collected corpus that §8.3 rejects.
-
-    Raised rather than warned. Every condition checked here makes the dataset silently wrong
-    downstream -- a merge of two candidate sets trains a model on a catalog that never existed,
-    and a row claiming both a measurement and an error is a producer bug whose rows cannot be
-    trusted either way.
-    """
+    """A collected corpus that §8.3 rejects; raised, never warned."""
 
 
 def load_csvs(paths: Iterable[pathlib.Path]) -> pd.DataFrame:
-    """Reads and concatenates collected CSVs.
-
-    Appending is the whole reason collection stays CSV, so a merge is a concatenation here and
-    nothing more. Empty fields arrive as NaN, which is how §8.3 spells "no measurement".
-    """
+    """Reads and concatenates collected CSVs; empty fields arrive as NaN ("no measurement")."""
     frames = [pd.read_csv(path, dtype=IDENTITY_DTYPES) for path in paths]
     if not frames:
         raise ValidationError("no input CSVs")
@@ -105,18 +72,14 @@ def _apply_defaults(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-#: Roots whose meaning is defined: the variant space and the machine. Everything else that is
-#: namespaced describes the problem.
+#: Roots with a defined meaning; any other namespaced column describes the problem.
 _RESERVED_ROOTS = ("kernel.", "device.")
 
 
 def _query_columns(frame: pd.DataFrame) -> list[str]:
     """The columns describing the problem, whatever root the producer bound them under.
 
-    Identified by complement rather than by prefix, because there is no prefix to match: the
-    root is the bound token's own name, which is the operation's (`attention_dense.*`). A
-    dotless column is envelope -- the collector writes every envelope key as a bare word and
-    every feature key namespaced, which is what makes the dot sufficient here.
+    Identified by complement: the root is the op's own token. Dotless columns are envelope.
     """
     return [c for c in frame.columns if "." in c and not c.startswith(_RESERVED_ROOTS)]
 
@@ -124,9 +87,7 @@ def _query_columns(frame: pd.DataFrame) -> list[str]:
 def _short_name(column: str) -> str:
     """A problem column without its namespace: `attention_dense.seqlen_kv` -> `seqlen_kv`.
 
-    The namespace says which operation bound the value; the rest is the name the engine bound it
-    under. Split on the first dot so a nested token (`attention_dense.q.uid`) keeps the shape the
-    engine gave it.
+    Splits on the first dot only, so a nested token (`attention_dense.q.uid`) keeps its shape.
     """
     return column.split(".", 1)[1]
 
@@ -138,24 +99,9 @@ def _kernel_columns(frame: pd.DataFrame) -> list[str]:
 def _problem_key_columns(frame: pd.DataFrame) -> list[str]:
     """The columns that identify a problem: the shape AND the machine that measured it.
 
-    A problem is `(graph, device)`. The same shape on two GPUs is two problems with two
-    different best kernels, which is why the runtime keys its winner cache on the pair and why
-    `uhd_gen.evaluate.resolve_grouping` groups on it; the problem columns alone are only the
-    shape half.
-
-    Keyed on that half, a corpus spanning two boards folds each shape's two measurements into
-    one problem, and everything below reads that as a corrupt corpus rather than as two
-    machines: the candidate list repeats every `kernel.*` tuple, so `_validate` refuses it as a
-    merge of two candidate sets, and `_mark_incomplete_where_errored` downgrades a healthy
-    board's problem because the other board faulted on the same shape -- which makes that
-    board's exact regret report as a lower bound.
-
-    The device half is whichever spelling the corpus carries, in the order `resolve_grouping`
-    prefers: the identity column (`device`, or `device_id` from a producer that publishes only
-    the id), and failing that the `device.*` property columns §8.3 requires of every corpus,
-    which are then the only remaining evidence of which machine a row came from. `benchmark`
-    joins the key wherever present -- it is the graph identity the rest of the toolchain groups
-    on, and two graphs that happen to share a shape are still two problems.
+    The same shape on two GPUs is two problems; keyed on shape alone, a multi-board corpus
+    fails validation and has healthy problems downgraded. Device is `device`/`device_id`, else
+    the `device.*` properties; `benchmark` joins the key wherever present.
     """
     identity = [c for c in ("benchmark", "device", "device_id") if c in frame.columns]
     if "device" not in identity and "device_id" not in identity:
@@ -164,11 +110,7 @@ def _problem_key_columns(frame: pd.DataFrame) -> list[str]:
 
 
 def _paired_identities(frame: pd.DataFrame) -> list[tuple[str, str]]:
-    """Columns carrying two spellings of one identity: `X` and `X_id`.
-
-    A convention rather than a fixed list, so this reads any producer's corpus. Where only one
-    of a pair is present there is nothing to disagree, and the check does not apply.
-    """
+    """Columns carrying two spellings of one identity: `X` and `X_id`."""
     return [
         (column, f"{column}_id")
         for column in frame.columns
@@ -179,14 +121,8 @@ def _paired_identities(frame: pd.DataFrame) -> list[tuple[str, str]]:
 def _validate_identity_is_unambiguous(frame: pd.DataFrame) -> None:
     """Two spellings of one identity must agree one-for-one.
 
-    A name bound to two ids -- or an id to two names -- means the corpus merges collections
-    taken against different versions of the engine, where a candidate was renamed or an id
-    reused. Nothing else in the file records which version a row came from.
-
-    Caught rather than tolerated because of what it does downstream silently: the candidate
-    identity spans every `kernel.*` column, so one candidate wearing two names becomes two.
-    Every problem's candidate count inflates and regret is computed over a catalog that
-    existed on no single machine.
+    Otherwise the corpus mixes engine versions, and one candidate wearing two names becomes
+    two candidates, inflating every problem's catalog.
     """
     for name, identifier in _paired_identities(frame):
         _validate_pair_agrees(frame, name, identifier)
@@ -210,29 +146,13 @@ def _validate_pair_agrees(frame: pd.DataFrame, name: str, identifier: str) -> No
 def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
     """Rewrites the collector's `is_valid=False` + `skip_reason` as §8.3's `error`.
 
-    `uhd_gen export-benchmarks` writes a failed candidate the way the runtime record spells it
-    at the moment of failure: a boolean plus a reason, no `error` column at all. §8.3's
-    published dataset spells the same fact once -- a null measurement and a non-empty `error` --
-    precisely so that no two columns can disagree about whether a row was measured. Without a
-    translation the documented chain does not compose: every sweep containing a failure is
-    refused below as "neither a measurement nor an error".
-
-    Translated here rather than emitted by the collector because the collector must stay an
-    appendable log of what happened (§8.8), and because this is the one place §8.3's spelling is
-    decided: a foreign corpus that already writes `error` needs no collector change, and a
-    second producer gets the same treatment for free. The two columns then leave with the rest
-    of the collection bookkeeping (COLLECTION_ONLY), so nothing downstream can read a validity
-    flag that the published dataset does not have.
-
-    Only an explicit false translates. A blank flag is not a claim of failure, and a row that
-    carries neither a measurement nor a reason still falls to the check below rather than being
-    given an invented error.
+    Done here, not in the collector, which must stay an appendable log (§8.8). Only an
+    explicit false translates; a blank flag is not a claim of failure.
     """
     if "is_valid" not in frame.columns:
         return frame
     failed = frame["is_valid"].astype(str).str.strip().str.lower().isin({"false", "0"})
-    # An error already recorded is the producer's own words and is never overwritten; a row
-    # marked failed with no reason gets the flag itself, which is all the corpus knows.
+    # Never overwrite a recorded error; with no reason, the flag itself is the reason.
     reason = (
         frame["skip_reason"].fillna("").astype(str).str.strip()
         if "skip_reason" in frame.columns
@@ -247,21 +167,8 @@ def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
 def _translate_numerical_failure(frame: pd.DataFrame) -> pd.DataFrame:
     """A candidate checked wrong is published as the failure it is, verdict and reason kept.
 
-    RFC 0019 §13.2: "A timing is only a training label once the candidate is known
-    correct", and a candidate shown wrong "is written with its measurement suppressed and an
-    explicit invalid marker". The benchmark's timing flag is independent of that verdict --
-    a kernel that computed the wrong answer quickly still reports a fast, `is_valid` timing --
-    so without this the dataset carried its time and a derived rate as an ordinary label.
-
-    Spelled the way §8.3 spells every failure here: the timings go null (so `tflops`/`gbs`
-    derive to null too) and `error` carries the reason, which `_mark_incomplete_where_errored`
-    then reads like any other unmeasured candidate. Unlike the collector's flag, the verdict
-    and its reason are NOT bookkeeping: they stay as columns, so promotion and evaluation see
-    the same `numerically_valid=False` generation wrote. `generate` already suppressed the
-    timing of such a row; it gains its `error` here rather than being refused as "neither a
-    measurement nor an error".
-
-    Only an explicit False translates; null is unknown, and stays a measurement.
+    RFC 0019 §13.2: timings go null (so derived rates do too) and `error` gets the reason; the
+    verdict columns stay. Only an explicit False translates; null is unknown.
     """
     wrong = known_wrong(frame)
     if not wrong.any():
@@ -269,8 +176,7 @@ def _translate_numerical_failure(frame: pd.DataFrame) -> pd.DataFrame:
     for column in (*SUPPRESSED_TIMINGS, *DERIVED_LABELS):
         if column in frame.columns:
             frame[column] = frame[column].astype("float64").where(~wrong)
-    # The producer's own words when it gave any; the verdict itself when it did not, which
-    # is all the corpus knows. An error already recorded is never overwritten.
+    # Never overwrite a recorded error; with no reason, the verdict itself is the reason.
     reason = (
         frame[REASON].fillna("").astype(str).str.strip()
         if REASON in frame.columns
@@ -283,7 +189,7 @@ def _translate_numerical_failure(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate(frame: pd.DataFrame) -> None:
-    """§8.3's checks, applied where they can finally be applied."""
+    """§8.3's checks."""
     if not _query_columns(frame):
         raise ValidationError(
             "no problem columns; a corpus must identify its problem. Every value describing "
@@ -299,8 +205,7 @@ def _validate(frame: pd.DataFrame) -> None:
     measured = frame["minTimeMs"].notna()
     has_error = frame["error"].astype(str).str.len() > 0
 
-    # A row is a measurement or a failure, never both and never neither. The error message is
-    # the whole flag -- there is no validity column that could disagree with it.
+    # A row is a measurement or a failure, never both and never neither.
     both = measured & has_error
     if both.any():
         raise ValidationError(
@@ -328,10 +233,8 @@ def _validate(frame: pd.DataFrame) -> None:
                 "problem_complete disagrees across rows of one problem"
             )
 
-        # A problem whose candidate space was fully measured must present the same candidates
-        # wherever it came from. Two collections taken against different kernel sets merge into
-        # a catalog that never existed, and argmax seeks precisely the configurations that were
-        # added after training.
+        # A complete problem must present each candidate once; a repeat means two
+        # collections with different kernel sets were merged.
         if kernels and bool(rows["problem_complete"].iloc[0]):
             tuples = rows[kernels].apply(tuple, axis=1)
             if tuples.duplicated().any():
@@ -344,9 +247,7 @@ def _validate(frame: pd.DataFrame) -> None:
 def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
     """A candidate that could not be measured means the space was not fully measured.
 
-    Downgrades that problem rather than failing the run: a hardware fault on one pair should not
-    discard a multi-hour sweep, but the problem must not present as exact either, or regret over
-    it silently becomes a lower bound.
+    Downgrades the problem rather than failing the run, so its regret is not reported as exact.
     """
     key = _problem_key_columns(frame)
     errored = frame["error"].astype(str).str.len() > 0
@@ -365,20 +266,9 @@ def expand_descriptors(
 ) -> pd.DataFrame:
     """Replace opaque configuration strings with features a grouped model can select on.
 
-    The source column is kept: it is the human-readable identity of a configuration, and every
-    report that names a winner wants it.
-
-    `<column>.variant` is emitted as the descriptor's *word shape*, a string. RFC 0019 §6.5
-    gives numbering to the training tool, which observes the values, ships the map in the UHD's
-    `categorical_encoding`, and has it covered by `features_hash` -- so a code cannot change
-    underneath a trained model without the contract check seeing it.
-
-    With `scope_by`, each group gets its own columns (`<column>.s<group>_f<n>`) instead of one
-    shared set of positions. A configuration schema that varies with the kernel makes a shared
-    position meaningless -- slot 3 a tile width for one group and a stage count for another --
-    and it is the *first* layer of a grouped model that pays, because it is the one that sees
-    every row. Which positions a group uses is observed from the corpus; nothing here consults
-    the library that produced the descriptors.
+    The source column is kept. `<column>.variant` stays a string: the training tool numbers it
+    (RFC 0019 §6.5). With `scope_by`, each group gets its own `<column>.s<group>_f<n>` columns,
+    since slot meaning differs per kernel.
     """
     frame = frame.copy()
     for column in columns:
@@ -402,8 +292,7 @@ def expand_descriptors(
                 slots_used_by(rows, groups).items(), key=str
             ):
                 for index in positions:
-                    # A row outside this group takes the absent value, which is what a kernel
-                    # with no such field means -- the same state an unfilled slot already has.
+                    # Rows outside this group take ABSENT, same as an unfilled slot.
                     frame[f"{column}.s{group}_f{index}"] = [
                         row[index] if member == group else ABSENT
                         for row, member in zip(rows, groups)
@@ -417,20 +306,10 @@ def resolve_duplicates(
 ) -> pd.DataFrame:
     """Keep, per problem, only the most recent occasion it was measured.
 
-    `_validate` rejects a complete problem carrying one configuration twice, because that
-    usually means two collections with different candidate sets were merged. A problem that was
-    simply re-measured trips the same check, and the rule for it is: latest deduplicates,
-    fastest breaks ties within one occasion.
-
-    Resolved per problem rather than globally. Taking the newest occasion in the *file* would
-    delete every problem that occasion did not cover -- typically the ones an older, broader
-    sweep measured -- which is a silent loss of exactly the problems with the widest candidate
-    coverage. Per problem, one occasion also means a problem's candidates were all measured
-    against each other, which is what makes their times comparable at all.
+    Latest deduplicates; fastest breaks ties within one occasion. Per problem, not per file, so
+    problems the newest occasion did not cover are kept.
     """
-    # The full problem identity -- shape, graph and device -- not the shape alone: the same
-    # shape on two boards (or two graphs sharing one) is two problems, and keyed on the shape
-    # the newer board's occasion deleted the other board's rows and mixed the two candidate sets.
+    # Full problem identity (shape, graph, device): one shape on two boards is two problems.
     query = _problem_key_columns(frame)
     if not query:
         return frame
@@ -443,8 +322,7 @@ def resolve_duplicates(
     newest = occasion.groupby(problem).transform("max")
     frame = frame[occasion == newest]
 
-    # Within it, a repeated candidate is a repeated measurement: repeats differ by contention
-    # and clocks, not by anything about the kernel, so the best stands for the candidate.
+    # A repeated candidate within one occasion is a repeated measurement; keep the best.
     kernels = _kernel_columns(frame)
     if kernels:
         keep = frame[query + kernels].astype(str).agg("|".join, axis=1)
@@ -462,10 +340,7 @@ def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     _validate(frame)
     frame = _mark_incomplete_where_errored(frame)
 
-    # Derived from `avgTimeMs`, the statistic every calibrated label is defined on (RFC 0019
-    # §13.4, `ranking_metrics`): a min-derived rate names a different winner whenever one
-    # kernel's best run is fast and its typical run is not, and a model trained on it claims
-    # a calibration it does not have.
+    # Derived from `avgTimeMs`, the statistic calibrated labels are defined on (RFC 0019 §13.4).
     query = _query_columns(frame)
     metrics = [
         derive_metrics(
@@ -486,9 +361,7 @@ def write_parquet(frame: pd.DataFrame, destination: pathlib.Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Named explicitly: argparse would otherwise take the program name from the file argv[0]
-    # points at and print `usage: __main__.py`, which is neither what anyone typed nor
-    # something they could type.
+    # Otherwise argparse prints `usage: __main__.py`.
     parser = argparse.ArgumentParser(
         prog="python -m uhd_gen.dataset", description=__doc__
     )
@@ -532,9 +405,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # The order is the point. Resolution happens first because it settles the very duplicates
-    # validation would reject; expansion happens last so those checks see the producer's own
-    # columns rather than this tool's derived ones.
+    # Resolve first: it settles duplicates validation would reject. Expand last, so the checks
+    # see the producer's columns rather than derived ones.
     try:
         frame = load_csvs(args.csv)
         if args.resolve_duplicates is not None:

@@ -2,26 +2,17 @@
 #SBATCH --job-name=uhd-l1-validate
 #SBATCH --output=%x-%j.log
 #
-# Validation, not generation: does every engine that serves a graph report an L1
-# number on it? Builds UHD_BRANCH, lists the engines it ships, and for
-# each graph asks every engine for an engine-kind prediction. The interesting rows
-# are the graphs several engines answer for -- those are the ones they compete on.
+# Validation, not generation: does every engine that serves a graph report an L1 number on
+# it? Installs no model, so UNAVAILABLE with a reason is the expected answer.
 #
-# No model is installed by this job. Before an L1 model exists the honest answer is
-# UNAVAILABLE with a reason, and this run is what proves the plumbing reaches that
-# answer for every engine rather than failing or staying silent.
-#
-# Partition, account and GPU constraint are passed at submission (reproduce/README.md,
-# "What every job needs").
+# Site settings go on submission (reproduce/README.md, "What every job needs").
 set -uo pipefail
 
 BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
 CORPUS=${UHD_CORPUS:-/exchange/corpus-small}
 SRC=/tmp/uhd/src
-# The descriptor root the provider packs as `product`. Unset keeps the provider's own
-# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
-# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
-# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+# Descriptor root packed as `product`, relative to the checkout; unset keeps the provider's
+# shipped root.
 PRODUCTION_ROOT_ARGS=()
 [ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
     PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
@@ -51,19 +42,12 @@ done
 
 step "source: $BRANCH"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd
-# --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
-# clone has no ancestor for it to apply against ("Repository lacks these prerequisite
-# commits"), even on a node whose mirror is current rather than stale.
+# --depth 200, not 1: a bundle needs ancestor commits to apply against.
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
 if [ -n "${UHD_BUNDLE:-}" ]; then
-    # The compute sites do not all resolve github.com to the same mirror: a node can clone a
-    # branch tip hours behind the one `git ls-remote` reports from the login node. A bundle
-    # carries the exact commits from the machine that pushed them, so verification cannot
-    # silently test a different tree than the one under review.
-    # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
-    # fetch asks for exactly that and checks out FETCH_HEAD.
+    # Mirrors can lag; a bundle pins the exact commits. Its tip is HEAD, not a branch ref.
     git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
         && git -C "$SRC" checkout --detach FETCH_HEAD >> /tmp/uhd/clone.log 2>&1 \
         || { echo "FATAL: bundle $UHD_BUNDLE did not apply"; tail -8 /tmp/uhd/clone.log; exit 1; }
@@ -87,11 +71,8 @@ echo "configure rc=$?"
 grep -B2 -A10 "CMake Error" /tmp/uhd/configure.log | head -30 || tail -3 /tmp/uhd/configure.log
 
 step "build"
-# Build ALL, not a target list. Every descriptor that reaches an engine is staged by an
-# `add_custom_target(... ALL)`: hip_kernel_provider_descriptors for the in-tree packs,
-# hkp_descriptor_staging and hkp_packaging_* for the rocKE production packs. An explicit
-# target list skips them and registers only the hand-written engines, and naming some of
-# them still misses the rest; a full build cannot miss a staging step.
+# Build ALL: descriptor staging rides on `add_custom_target(... ALL)` rules that a target
+# list skips.
 cmake --build "$BUILD" -j "$(nproc)" > /tmp/uhd/build.log 2>&1
 BLD=$?; echo "build rc=$BLD"
 if [ "$BLD" -ne 0 ]; then
@@ -132,8 +113,7 @@ for graph in graphs:
                    "--engine-id", str(engine_id), "--predict-engine"]
         proc = subprocess.run(command, capture_output=True, text=True, timeout=600)
         row = {"graph": graph.stem, "engine": name, "rc": proc.returncode}
-        # Keep the tool's own words whatever happens: a declining engine exits non-zero and
-        # says why on stderr, which is lost if only the JSON line is kept.
+        # A declining engine says why on stderr; keep it, not just the JSON line.
         tail = [line for line in (proc.stdout + "\n" + proc.stderr).splitlines()
                 if line.strip() and not line.startswith("{") and "HIP Library Path" not in line]
         row["output"] = tail[-1][:200] if tail else ""
@@ -177,11 +157,8 @@ for name, _ in engines:
         for text, count in sorted(seen.items(), key=lambda kv: -kv[1])[:2]:
             print(f"      declines {count:3d}x: {text[:110]}")
 
-# An engine serving nothing is the interesting case, and the generic backend text
-# ("Failed to finalize inspection engine descriptor") is the same sentence whether the
-# engine legitimately does not implement the operation or its plan builder rejected a
-# detail of this shape. The provider says which at INFO, so ask it once per silent
-# engine rather than reading 240 identical lines.
+# The generic decline text is identical whether the engine lacks the op or rejected this
+# shape; the provider says which at INFO, so ask once per silent engine.
 print("\n  --- why the silent engines decline (HIPDNN_LOG_LEVEL=info, first graph) ---")
 verbose = dict(os.environ, HIPDNN_LOG_LEVEL="info")
 for name, engine_id in engines:
@@ -190,11 +167,7 @@ for name, engine_id in engines:
     proc = subprocess.run([bench, "--graph", str(graphs[0]), *plugin_args,
                            "--engine-id", str(engine_id), "--predict-engine"],
                           capture_output=True, text=True, timeout=600, env=verbose)
-    # Keep the whole provider transcript, not a keyword match. The builder's shape
-    # rejections carry `isApplicable`, but the gate that fires before any of them
-    # ("Could not query device string") is logged by a different macro with no such
-    # marker, and a filter that misses the first gate reports silence where there is
-    # an answer. Written to a file per engine; the last lines are printed here.
+    # Keep the whole transcript: early gates log without the `isApplicable` marker.
     transcript = proc.stdout + "\n" + proc.stderr
     (out / f"decline-{name.replace(':', '_')}.log").write_text(transcript)
     said = [line.strip() for line in transcript.splitlines()

@@ -170,12 +170,6 @@ struct HeuristicProvenance
 };
 
 /// UHD: the kernel-selection model for one engine.
-///
-/// The whole descriptor, not a pointer to one. An earlier design put these fields in a
-/// FlatBuffer that a four-field JSON stub named, which made the UHD the only descriptor
-/// in the family a human could not read, diff or hand-write -- for 134 bytes, on a file
-/// read once per engine. RFC 0019 §4 always specified JSON; the binary is reserved for
-/// the model artifact, which earns it by being read once per candidate score.
 struct HeuristicDescriptor
 {
     DescriptorId id;
@@ -189,17 +183,10 @@ struct HeuristicDescriptor
     /// extractor recomputes it and refuses to load on a mismatch (RFC 0019 §6.3).
     std::string featuresHash;
 
-    /// RFC 0019 §6.5's string-to-code map, generated with the model from the corpus it
-    /// was fitted on, and folded into @ref featuresHash -- §6.5 is explicit that the
-    /// signature text alone does not catch a changed encoding.
-    ///
-    /// Keyed by the whole `$`-reference, matching an entry in @ref featuresSignature.
-    /// Not by the trailing field name: `$kernel.dtype` may hold the KMD's `"BF16"` where
-    /// `$q.attention_dense.dtype` holds the runtime's `"bf16"`, and a per-field key
-    /// merges two vocabularies into one category whose codes then depend on which side
-    /// was seen first.
-    ///
-    /// Empty when the signature reads no string field, which is most of them.
+    /// RFC 0019 §6.5 string-to-code map, folded into @ref featuresHash. Keyed by the whole
+    /// `$`-reference, not the field name: `$kernel.dtype` ("BF16") and
+    /// `$q.attention_dense.dtype` ("bf16") are separate vocabularies. Empty when the signature
+    /// reads no string field.
     std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
 
     /// "max" or "min". A model trained on a cost rather than a rate ranks ascending, and
@@ -211,45 +198,26 @@ struct HeuristicDescriptor
     std::string nativeSymbol;
     /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path, relative to @ref baseDir.
     std::string modelArtifactPath;
-    /// SHA-256 of the artifact (lowercase hex): the declared digest, else the digest of the
-    /// bytes present when the UHD was parsed. Both verify the artifact at load and identify
-    /// the model's content. Empty only when neither exists -- no artifact, or none deployed
-    /// yet -- which leaves the model without content identity.
+    /// SHA-256 of the artifact (lowercase hex): the declared digest, else that of the bytes
+    /// present at parse. Verifies the artifact at load; empty when no artifact exists yet.
     std::string modelHash;
     /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
     std::string customLibrarySymbol;
 
-    /// Directory of the `.uhd.json` that declared this descriptor. @ref modelArtifactPath
-    /// resolves against it, so a descriptor set relocates as a unit.
-    ///
-    /// Empty for descriptors built in memory rather than parsed from disk.
+    /// Directory of the `.uhd.json` that declared this; @ref modelArtifactPath resolves
+    /// against it. Empty for descriptors built in memory.
     std::filesystem::path baseDir;
-    /// The descriptor tree @ref baseDir was found under -- the root the loader was
-    /// pointed at, not the file's own folder.
-    ///
-    /// Same split as KernelDescriptor's originDirectory/treeRoot pair, and for the same
-    /// reason: resolution and CONTAINMENT are different questions. An artifact resolves
-    /// against baseDir, but the boundary it may not cross is the tree, so a descriptor
-    /// nested in an arch shard can legitimately name `../shared/model.bin` while nothing
-    /// may climb out of the tree entirely. The artifact is author-controlled input
-    /// (RFC 0019 §16, "Drop-in trust").
-    ///
-    /// Empty for descriptors built in memory. Filled by the loader, never authored.
+    /// The tree root the loader walked: the containment boundary for the author-controlled
+    /// artifact path (RFC 0019 §16), which may leave @ref baseDir but never the tree. Filled
+    /// by the loader; empty for descriptors built in memory.
     std::filesystem::path treeRoot;
 
     /// Required for feature-consuming models. Semantic revisions are checked against
     /// the engine, metadata schema and matcher identities before a model is used.
     std::optional<HeuristicProvenance> trainedAgainst;
-    /// RFC 0019 §4.1 `trained_against.selector_revision`: the provider build whose
-    /// behaviour this model was measured against. Empty unless authored.
-    ///
-    /// The other half of @ref trainedAgainst, for the engine that has no descriptor set
-    /// to be trained against: an engine with no UED binds this model by declaring its
-    /// UUID in provider code (Open Question 7, RESOLVED), and this is what lets the
-    /// loader tell a model measured on THIS build from one measured on another. Refused
-    /// on mismatch rather than warned about, because L1 is the one score compared across
-    /// engines -- a stale estimate changes which engine is selected, not just what a
-    /// number reads.
+    /// RFC 0019 §4.1 `trained_against.selector_revision`: the provider build this model was
+    /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
+    /// warned about, because a stale L1 estimate changes which engine is selected.
     std::string trainedAgainstSelectorRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
@@ -267,26 +235,15 @@ struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// The engine's default catalog ranker for the `default` architecture key (see
-    /// DescriptorSet::heuristic), or nullopt when there is none.
-    ///
+    /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
-    /// descriptor-declared order. Equals `DescriptorSet::heuristic`'s id when set. Filled by
-    /// resolveDescriptorSets(), never at parse: which of a role list's UHDs is the default
-    /// ranker depends on the metric each declares, which only the loaded UHDs say.
+    /// descriptor-declared order. Filled by resolveDescriptorSets(), not at parse, because the
+    /// default depends on the metric each loaded UHD declares.
     std::optional<DescriptorId> heuristicId;
 
-    /// RFC 0019 §3.1: an engine names up to three role-scoped UHDs, each mapped by
-    /// architecture, and each independently optional.
-    ///
-    ///   sort_kernel_catalog        ranks the catalog and picks the kernel, one per metric
-    ///   predict_engine             cheap f(graph) -> expected metric value, one per metric
-    ///   predict_applicable_kernels generates the candidate set (future, JIT case)
-    ///
-    /// Keyed by `gcnArchName`, with an optional `default` fallback. The two scoring roles
-    /// map each architecture to a list: the loader indexes it by the metric each UHD
-    /// declares in its own `score.metric`, since the metric is a fact about the model and
-    /// restating it here would be a second copy that could disagree.
+    /// RFC 0019 §3.1 role-scoped UHDs, each optional, keyed by `gcnArchName` with an optional
+    /// `default`. The scoring roles list UHDs per arch; the loader indexes them by each UHD's
+    /// own `score.metric` rather than restating the metric here.
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, DescriptorId> predictApplicableKernels;
@@ -547,15 +504,9 @@ struct DescriptorSet
     /// on `priority` then descriptor id. See makeKernelHeuristic().
     std::optional<HeuristicDescriptor> heuristic;
 
-    /// RFC 0019 §3.1: the engine's catalog-ranking UHDs, by the metric each declares (`""`
-    /// for the metric-less ranker) and then by architecture, keyed as the UED wrote it,
-    /// `default` included.
-    ///
-    /// Resolution cannot happen at load: descriptor discovery is a process-wide memoized
-    /// static that runs before any device exists. §8.3's "exact gcnArchName, then default"
-    /// therefore happens at first rank(), where the device is known -- which is also what
-    /// §9.2 asks for, load-on-demand with a per-engine cache. The fallback is per metric:
-    /// (gfx942, time) falls back to (default, time), never to another metric.
+    /// RFC 0019 §3.1 catalog-ranking UHDs by declared metric (`""` for the metric-less
+    /// ranker), then by arch key as the UED wrote it. Arch resolution (exact, then `default`,
+    /// within one metric) happens at first rank(): discovery runs before any device exists.
     std::map<std::string, std::map<std::string, HeuristicDescriptor>> heuristicsByMetric;
     /// Resolved cheap graph/device models by metric, then architecture; never consumed by
     /// catalog ranking. Every `predict_engine` UHD declares a metric, so there is no `""`.

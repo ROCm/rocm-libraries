@@ -161,9 +161,7 @@ TEST_F(TestEnginePredictionTransport, RejectsConfigurationThatChangesWorkspaceCo
     EXPECT_EQ(result.engine_config, nullptr);
 }
 
-// RFC 0019 §11.4: the host checks that the answer is in the requested metric. An answer
-// in another one is a claim about a different quantity, invalid whatever its status, and
-// the rejection still names the metric that was asked for.
+// RFC 0019 §11.4: invalid whatever its status, and still named by the requested metric.
 TEST_F(TestEnginePredictionTransport, AnswerInAnotherMetricIsInvalid)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -183,8 +181,7 @@ TEST_F(TestEnginePredictionTransport, AnswerInAnotherMetricIsInvalid)
     EXPECT_EQ(result.metric, "tflops");
 }
 
-// Validity of an AVAILABLE value is the requested metric's: zero is a legal (worst)
-// throughput but never a legal time.
+// Zero is a legal (worst) throughput but never a legal time.
 TEST_F(TestEnginePredictionTransport, AvailableValueIsValidatedByTheRequestedMetric)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -208,8 +205,7 @@ TEST_F(TestEnginePredictionTransport, UnregisteredRequestedMetricIsRefusedBefore
     ASSERT_THROW_HIPDNN_STATUS(query(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-// A configuration selected by metric M builds by M, so the returned configuration names
-// it; one the plugin says it selected by another metric is refused.
+// A configuration the plugin says it selected by another metric is refused.
 TEST_F(TestEnginePredictionTransport, SelectedConfigurationCarriesTheRequestedMetric)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -227,9 +223,8 @@ TEST_F(TestEnginePredictionTransport, SelectedConfigurationCarriesTheRequestedMe
     EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
 }
 
-// A measured configuration value names no UHD (RFC 0019 §5 step 9): the host admits it
-// with its value and configuration. An engine-level estimate always comes from a UHD, so
-// one that names none is still refused.
+// A measured configuration value names no UHD (RFC 0019 §5 step 9); an engine-level
+// estimate must name one.
 TEST_F(TestEnginePredictionTransport, MeasuredConfigurationNeedsNoUhdButEngineEstimateDoes)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -254,10 +249,8 @@ TEST_F(TestEnginePredictionTransport, MeasuredConfigurationNeedsNoUhdButEngineEs
     EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
 }
 
-// A union payload is optional in FlatBuffers, so a KnobSetting tagged IntValue, FloatValue or
-// StringValue with no payload table passes VerifyBuffer. The host must refuse it before
-// UnPackTo(), which dereferences the missing payload. Falsifying mutation: drop the
-// everyKnobValueIsPresent() check, and this crashes inside UnPackTo().
+// A KnobSetting tagged with no payload table passes VerifyBuffer; the host must refuse it
+// before UnPackTo() dereferences the missing payload.
 TEST_F(TestEnginePredictionTransport, KnobTaggedWithoutItsValueIsInvalidNotUnpacked)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -4520,9 +4513,8 @@ TEST(TestEnginePluginResourceManager, MismatchedEngineNameIsDroppedAtLoad)
 }
 
 // ---------------------------------------------------------------------------
-// The optional enumeration and prediction entry points, against real binaries.
-// The codegen fixture exports both and answers as CodegenFixturePlugin.hpp
-// describes; the lying engine-name fixture exports neither.
+// Optional enumeration and prediction entry points, against real plugin binaries. The
+// codegen fixture exports both; the lying engine-name fixture exports neither.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -4613,8 +4605,7 @@ TEST_F(TestEnginePluginOptionalCapabilities, PredictionAnswerIsReturnedAndReleas
     EXPECT_NO_THROW(_plugin->destroyEngineDetails(_handle, &prediction));
 }
 
-// NOT_APPLICABLE is how a plugin declines: no prediction, no error, and no stale output
-// left for the caller to free.
+// The decline must leave no output for the caller to free.
 TEST_F(TestEnginePluginOptionalCapabilities, DeclinedPredictionIsAbsentNotAnError)
 {
     load(CODEGEN_FIXTURE_PATH);
@@ -4633,7 +4624,6 @@ TEST_F(TestEnginePluginOptionalCapabilities, DeclinedPredictionIsAbsentNotAnErro
     EXPECT_EQ(prediction.size, 0U);
 }
 
-// Any other failure is a plugin error, and carries the plugin's own explanation.
 TEST_F(TestEnginePluginOptionalCapabilities, FailedPredictionIsAPluginErrorWithThePluginMessage)
 {
     load(CODEGEN_FIXTURE_PATH);
@@ -4656,7 +4646,6 @@ TEST_F(TestEnginePluginOptionalCapabilities, FailedPredictionIsAPluginErrorWithT
     EXPECT_THAT(message, HasSubstr("Engine with ID " + std::to_string(UNKNOWN_ENGINE_ID)));
 }
 
-// An engine that declines enumeration is unsupported, not an empty catalog.
 TEST_F(TestEnginePluginOptionalCapabilities, DeclinedEnumerationIsNotSupported)
 {
     load(CODEGEN_FIXTURE_PATH);
@@ -4685,7 +4674,6 @@ TEST_F(TestEnginePluginOptionalCapabilities, FailedEnumerationIsAPluginErrorWith
     EXPECT_THAT(message, HasSubstr("Candidate page limit must be in [1, 10000]"));
 }
 
-// Both entry points are optional exports; a plugin without them is never called.
 TEST_F(TestEnginePluginOptionalCapabilities, PluginWithoutTheExportsReportsNoCapability)
 {
     load(LYING_ENGINE_NAME_PLUGIN_PATH);
@@ -4706,8 +4694,8 @@ TEST_F(TestEnginePluginOptionalCapabilities, PluginWithoutTheExportsReportsNoCap
     EXPECT_THAT(message, HasSubstr("does not export"));
 }
 
-// The same three answers, as the resource manager publishes them: a plugin's answer is
-// passed on, a decline is reported as absent, and a plugin failure becomes INVALID.
+// Through the resource manager: an answer is passed on, a decline is absent, and a
+// plugin failure becomes INVALID.
 TEST(TestEnginePluginResourceManager, CodegenFixturePredictionsThroughResourceManager)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;

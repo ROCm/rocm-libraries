@@ -18,35 +18,24 @@
 /// @file ModelShapeSource.hpp
 /// @brief The model pool: shapes somebody recorded a real workload running.
 ///
-/// The exploration knows what the operation admits and the pack knows what the engine was
-/// compiled for. Neither knows what anyone runs, and a corpus without that is a map of a region
-/// with the cities left off -- correct, and wrong where the error matters.
-///
-/// Mining the shapes is not done here. That work is markdown and CSV scraping over the dozens
-/// of column spellings published model cards use, it is inherently per-operation, and it does
-/// not belong in a tool whose point is that nothing in it names an operation. It stays in
-/// `IngestorGenerator/tools/mine_shapes.py`, which emits the `q.<parameter>` columns this reads
-/// -- the same column spelling the corpus itself emits, so a miner's output can be diffed
-/// against a manifest without a translation step.
+/// Mining is done by `IngestorGenerator/tools/mine_shapes.py`, which emits the `q.<parameter>`
+/// columns read here.
 namespace hipdnn_corpus_gen
 {
 
-/// What a shape file yielded, and what it did not.
+/// What a shape file yielded and what it rejected.
 struct ModelShapeReport
 {
     std::filesystem::path path;
     int64_t rows = 0;
 
-    /// Rows naming another operation in an `op` column. Not a defect: one mined file may cover
-    /// several operations, and each run takes its own.
+    /// Rows whose `op` column names another operation; not a defect.
     int64_t otherOperation = 0;
 
-    /// Rows missing a parameter the declaration requires, or carrying a value it does not
-    /// accept. Counted rather than dropped in silence -- a miner emitting `causal` where the
-    /// declaration says `is_causal` loses every row, and a count is the only way that shows.
+    /// Rows missing a required parameter or carrying an undeclared value.
     int64_t unusable = 0;
 
-    /// First reason a row was unusable, since one message is worth more than a count.
+    /// First reason a row was unusable.
     std::string firstProblem;
 };
 
@@ -102,9 +91,8 @@ inline std::vector<std::string> csvFields(const std::string& line)
 
 /// @brief One row's text values as a point of @p metadata's declared types.
 ///
-/// Every declared parameter must be present and readable. A partial point is refused rather
-/// than completed from a default: the missing parameter is a dimension of the problem, and a
-/// default for it is a shape nobody recorded being reported as one that was.
+/// Every declared parameter must be present and readable; a partial point is refused rather
+/// than defaulted, since a default would pass off an unrecorded shape as recorded.
 inline bool pointFromColumns(const OperationMetadata& metadata,
                              const std::map<std::string, std::string>& values,
                              ProblemPoint& point,
@@ -187,14 +175,9 @@ inline bool pointFromColumns(const OperationMetadata& metadata,
 
 /// @brief The recorded shapes in @p path that @p metadata can express.
 ///
-/// The file is a CSV whose header names columns `q.<parameter>`; a bare `<parameter>` is also
-/// accepted, so a miner that predates the prefix still reads. An optional `op` column selects
-/// rows, and an optional `name` column becomes the entry's origin -- which is the whole value
-/// of this pool to a later audit, since "llama3-70b prefill" explains a regime that a row of
-/// numbers does not.
-///
-/// Admission is the caller's: the points come back unfiltered by any oracle, because whether an
-/// engine serves a shape somebody actually runs is a finding, not a reason to drop the row here.
+/// A CSV with `q.<parameter>` (or bare `<parameter>`) columns; an optional `op` column selects
+/// rows and an optional `name` column becomes the entry's origin. Points are not filtered by
+/// any oracle; admission is the caller's.
 inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
                                               const std::filesystem::path& path,
                                               ModelShapeReport& report)

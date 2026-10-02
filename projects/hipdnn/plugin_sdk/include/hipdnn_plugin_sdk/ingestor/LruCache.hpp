@@ -99,22 +99,16 @@ public:
         return true;
     }
 
-    /// Merges a batch whose entries are ordered newest-first, under ONE hold of the lock:
-    /// a key already present is left alone (whatever is in memory is newer than the batch),
-    /// and of several batch entries for one key only the first is taken. Which keys are
-    /// absent is decided before anything is inserted, so an entry evicted by the batch
-    /// itself can never be refilled by an older value later in that batch -- the failure a
-    /// putIfAbsent() loop has once the batch outgrows the capacity.
-    ///
-    /// The first admitted entry ends up most-recently-used, so when the batch exceeds the
-    /// capacity it is the newest entries that stay resident.
+    /// Merges a batch ordered newest-first under one lock hold. Keys already present are kept
+    /// (memory is newer than the batch), and only the first batch entry per key is taken.
+    /// Absence is decided before inserting, so an entry the batch evicts is never refilled by
+    /// an older one; when the batch exceeds capacity, the newest entries stay resident.
     void mergeAbsent(std::vector<Entry> newestFirst)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
 
-        // References into the batch, which does not move while they live: the keys are
-        // compared, never stored. equal_to<Key> unwraps the references; equal_to<> would
-        // compare the reference_wrappers themselves, which have no operator==.
+        // The set references batch keys, which do not move while it lives. equal_to<Key>
+        // unwraps the reference_wrappers; equal_to<> cannot compare them.
         // NOLINTNEXTLINE(modernize-use-transparent-functors) - must convert to const Key&
         std::unordered_set<std::reference_wrapper<const Key>, Hash, std::equal_to<Key>> seen;
         std::vector<Entry*> admitted;

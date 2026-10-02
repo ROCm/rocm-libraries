@@ -17,11 +17,8 @@
 /// @file TestCorpusManifest.cpp
 /// @brief The record that makes a corpus joinable to its measurements.
 ///
-/// What is being protected here is a contract with code outside this tree:
-/// `uhd_gen/reproduce/score_predictions.py:43-45` and `compare_engines.py:46-49` index
-/// `manifest["graphs"]` and read `benchmark`, `name` and `regime` off each row. Those keys
-/// are asserted by name rather than left to a round-trip test that would pass under any
-/// renaming.
+/// `uhd_gen/reproduce/score_predictions.py` and `compare_engines.py` read `benchmark`, `name`
+/// and `regime` from `manifest["graphs"]`, so those keys are asserted by name.
 
 using namespace hipdnn_corpus_gen;
 
@@ -140,9 +137,7 @@ std::vector<std::vector<std::string>> parseCsv(const std::string& text)
 
 TEST(TestCorpusManifest, TheThreeColumnsTheReproduceScriptsIndexSurviveThePort)
 {
-    // score_predictions.py:43-45 and compare_engines.py:46-49 read exactly these off each row
-    // of manifest["graphs"]. Renaming any of them does not fail -- both scripts fall back to
-    // reporting the raw graph id -- so the break would be a quietly worse report, not an error.
+    // A rename would not error in the scripts; they fall back to raw graph ids.
     const auto manifest = corpusManifest(
         {sdpaEntry("a", 2048, 2048, "sweep", "draw 0", "prefill_short")}, sdpaContext());
 
@@ -155,9 +150,7 @@ TEST(TestCorpusManifest, TheThreeColumnsTheReproduceScriptsIndexSurviveThePort)
 
 TEST(TestCorpusManifest, TheProblemColumnsComeFromThePointRatherThanFromAnOperationsFieldNames)
 {
-    // The Python emitted `dtype`, `batch`, `heads_q`, ... because it knew it was writing SDPA.
-    // Here they are the point's own parameters under the `q.` prefix uhd_gen's feature hash
-    // expects, which is the single edit that makes the manifest op-general.
+    // Columns are the point's parameters under the `q.` prefix uhd_gen's feature hash expects.
     const auto manifest = corpusManifest(
         {sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json", "decode_long")}, sdpaContext());
 
@@ -173,9 +166,7 @@ TEST(TestCorpusManifest, TheProblemColumnsComeFromThePointRatherThanFromAnOperat
 
 TEST(TestCorpusManifest, EachDeclaredFacetGetsItsOwnColumnBesideTheJoinedLabel)
 {
-    // `phase` and `context` were columns in the Python because those three facet names were
-    // compiled in. Splitting them back out of `regime` is not available: a declared label may
-    // itself contain the separator.
+    // Facets cannot be split back out of `regime`: a label may contain the separator.
     const auto manifest
         = corpusManifest({sdpaEntry("a", 1, 4096, "kernel", "pack", "decode_long")}, sdpaContext());
 
@@ -187,8 +178,6 @@ TEST(TestCorpusManifest, EachDeclaredFacetGetsItsOwnColumnBesideTheJoinedLabel)
 
 TEST(TestCorpusManifest, AnOperationDeclaringNoPopulationsGetsNoFacetColumns)
 {
-    // Coverage is "whatever has a declaration", so a declaration without a regime_label block
-    // must still produce a manifest -- with no invented column and no invented label.
     auto entry = sdpaEntry("a", 1, 4096, "kernel", "pack", "");
     entry.regimeAxes = {};
 
@@ -204,8 +193,7 @@ TEST(TestCorpusManifest, AnOperationDeclaringNoPopulationsGetsNoFacetColumns)
 
 TEST(TestCorpusManifest, TheCsvHeaderAndItsRowsAgreeColumnForColumn)
 {
-    // The failure this forbids is silent: a header that disagrees with its rows transposes two
-    // features, and a model trains on the wrong ones without anything reporting an error.
+    // A mismatched header would silently transpose features.
     const std::vector<ManifestEntry> entries{
         sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json", "decode_long"),
         sdpaEntry("b", 2048, 2048, "sweep", "draw 3", "prefill_short")};
@@ -231,8 +219,7 @@ TEST(TestCorpusManifest, TheCsvHeaderAndItsRowsAgreeColumnForColumn)
 
 TEST(TestCorpusManifest, TheCsvAndTheJsonCarryTheSameValuesForEveryRow)
 {
-    // Two manifests, one content. They are generated from separate traversals, so agreement
-    // is asserted rather than assumed.
+    // The two manifests come from separate traversals.
     const auto context = sdpaContext();
     const std::vector<ManifestEntry> entries{
         sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json", "decode_long"),
@@ -262,8 +249,7 @@ TEST(TestCorpusManifest, TheCsvAndTheJsonCarryTheSameValuesForEveryRow)
 
 TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
 {
-    // `origin` is free text by design -- a pack file and its kernel count, a model name, a draw
-    // index -- so it is the one column an unquoted writer would silently break.
+    // `origin` is free text, so it is the column an unquoted writer would break.
     auto entry = sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json, 6 kernels", "decode_long");
     const auto rows = parseCsv(corpusManifestCsv({entry}));
 
@@ -277,8 +263,7 @@ TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
 
 TEST(TestCorpusManifest, TheTotalsReportWhatWasEmittedAndWhatWasAskedForSeparately)
 {
-    // Shortfall is reported, never filled (RFC 0019.13): a corpus of two problems from a
-    // source that has two is complete, and inventing two more would be the defect.
+    // Shortfall is reported, never filled (RFC 0019.13).
     auto context = sdpaContext();
     context.requested = 4;
 
@@ -300,10 +285,8 @@ TEST(TestCorpusManifest, TheTotalsReportWhatWasEmittedAndWhatWasAskedForSeparate
 
 TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmpty)
 {
-    // One corpus may cover several operations -- the consumers read a single
-    // `corpus/manifest.json` -- and their parameters do not agree. A row is not wrong about its
-    // own columns just because another operation has some it does not, so the header is the
-    // union and the cells an entry cannot fill are empty rather than absent.
+    // One manifest may cover several operations: the header is the union of their columns and
+    // cells a row cannot fill are empty.
     auto other = sdpaEntry("b", 2048, 2048, "sweep", "draw 3", "");
     other.operation = "conv_fwd";
     other.regimeAxes = {};
@@ -320,7 +303,6 @@ TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmp
     ASSERT_LT(column("q.seqlen_k"), header.size());
     ASSERT_LT(column("q.channels"), header.size());
 
-    // Each row carries its own operation's values and nothing of the other's.
     EXPECT_EQ(rows[1][column("op")], "sdpa_fwd");
     EXPECT_EQ(rows[1][column("q.seqlen_k")], "4096");
     EXPECT_EQ(rows[1][column("q.channels")], "");
@@ -328,8 +310,7 @@ TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmp
     EXPECT_EQ(rows[2][column("q.seqlen_k")], "");
     EXPECT_EQ(rows[2][column("q.channels")], "64");
 
-    // The facet columns are the first operation's alone, and the second leaves them empty
-    // rather than borrowing a label from axes it never declared.
+    // Facet columns are not borrowed by an operation that never declared them.
     ASSERT_LT(column("phase"), header.size());
     EXPECT_EQ(rows[1][column("phase")], "decode");
     EXPECT_EQ(rows[2][column("phase")], "");

@@ -89,9 +89,8 @@ public:
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
-    /// Optional matched-catalog enumeration. A successful empty page means no
-    /// candidates in scope; engines without this capability must decline explicitly.
-    /// Output is EngineDetails with candidate_page, freed like ordinary details.
+    /// Optional matched-catalog enumeration into EngineDetails.candidate_page. An empty
+    /// page means no candidates; unsupported engines must throw NOT_APPLICABLE.
     // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
     virtual void enumerateCandidates(
         THandle& /*handle*/,
@@ -107,18 +106,13 @@ public:
     // NOLINTEND(portability-template-virtual-member-function)
 
     /**
-     * @brief Describes or evaluates an optional calibrated prediction in the metric the
-     * configuration names.
+     * @brief Describes or evaluates an optional prediction in
+     * `heuristics::rankingMetric(config)` (RFC 0019 §11.4).
      *
-     * The metric is `heuristics::rankingMetric(config)` (RFC 0019 §11.4). Every answer,
-     * whatever its status, carries that metric; an AVAILABLE value is in its registered
-     * units. An engine with no model for the metric reports UNAVAILABLE rather than
-     * answering in another one. Absence of a model is independent of engine
-     * applicability. Legacy engines return UNAVAILABLE; CONFIGURATION estimates must
-     * identify the exact plan.
+     * Every answer carries that metric; with no model for it, report UNAVAILABLE rather
+     * than answer in another. CONFIGURATION estimates must identify the exact plan.
      *
-     * @throws HipdnnPluginException BAD_PARAM for an unregistered metric: it is a malformed
-     *         request, not a missing model.
+     * @throws HipdnnPluginException BAD_PARAM for an unregistered metric.
      */
     // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
     virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT

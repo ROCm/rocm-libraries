@@ -22,15 +22,6 @@
 
 /// @file MetadataCorpus.hpp
 /// @brief Generating an engine's problems from declarations alone (RFC 0019.13 §4, §5).
-///
-/// The whole path, with nothing hand-written per problem: a metadata file declares an
-/// operation's parameters and how they build; the exploration walks that space once, the same
-/// way for every operation; each candidate is built into a graph and offered to the engine;
-/// what the engine accepts is the corpus.
-///
-/// Presenting *one* problem is not the deliverable -- anybody can write a graph by hand. The
-/// deliverable is that the problems are produced automatically across the range the engine
-/// serves, which is why the only inputs here are a directory of declarations and an engine.
 namespace hipdnn_corpus_gen
 {
 
@@ -41,16 +32,14 @@ struct MetadataOperationCorpus
     std::string metadataPath;
     ProblemCorpus corpus;
 
-    /// Problems whose graph could not be built at all -- a metadata bug rather than an engine
-    /// refusal, and counted separately so the two are never confused.
+    /// Graphs that could not be built at all: a metadata bug, counted apart from engine refusals.
     int64_t buildFailures = 0;
 
-    /// First build failure seen, since one message is worth more than a count.
+    /// First build failure seen.
     std::string firstBuildError;
 };
 
-/// Where an engine query's time goes. Applicability is a yes/no question and should be cheap;
-/// these say which stage is not.
+/// Where an engine query's time goes.
 struct OracleTiming
 {
     int64_t queries = 0;
@@ -61,15 +50,9 @@ struct OracleTiming
 
 /// @brief An oracle that asks @p engineId about the graph @p metadata builds for a point.
 ///
-/// The one place a declaration meets a live engine. Everything upstream is data; everything
-/// downstream is a measurement.
-///
-/// @p handle must be a live handle; pass `nullptr` to @ref makeCorpusOracle instead, which is
-/// the branch that names no engine.
-///
-/// The declared half -- does it build, does it fit @p maxBytes -- is @ref buildAdmissible, not
-/// a copy of it, so this oracle and the device-free @ref makeDeclaredOracle cannot drift into
-/// disagreeing about what a declaration can express.
+/// @p handle must be live; for the no-engine case use @ref makeCorpusOracle with `nullptr`.
+/// The declared checks (builds, fits @p maxBytes) reuse @ref buildAdmissible so this oracle
+/// and @ref makeDeclaredOracle cannot disagree.
 inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
                                         int64_t engineId,
                                         const OperationMetadata& metadata,
@@ -108,9 +91,8 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
             const auto restored = graph.deserialize(handle, *built);
             if(!restored.is_good())
             {
-                // Distinct from an engine refusal for the same reason a build failure is: a
-                // graph the frontend will not read is broken for every point, and folding it
-                // into "declined" reports an engine that serves nothing.
+                // Counted as a build failure, not an engine refusal: an unreadable graph is
+                // broken for every point.
                 tally.note("deserialize: " + restored.get_message());
                 return false;
             }
@@ -141,10 +123,8 @@ inline ProblemOracle makeMetadataOracle(hipdnnHandle_t handle,
 
 /// @brief The oracle for a run, which may or may not have named an engine.
 ///
-/// A null @p handle is the no-engine case, not an error: the corpus is then every point the
-/// declaration can express and benchmark. That is what a deterministic engine needs measured,
-/// and it is produced without a device -- so naming an engine narrows a corpus rather than
-/// enabling one.
+/// A null @p handle means no engine: the corpus is then every point the declaration can
+/// express, produced without a device.
 inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
                                       int64_t engineId,
                                       const OperationMetadata& metadata,
@@ -161,19 +141,13 @@ inline ProblemOracle makeCorpusOracle(hipdnnHandle_t handle,
         handle, engineId, metadata, buildFailures, firstBuildError, maxBytes, timing);
 }
 
-/// @brief Generates the problem corpus for @p engineId across every declared operation.
-///
-/// This is requirement 3: not one problem, but the range, produced without anyone writing a
-/// problem down. An operation the engine declines contributes nothing and says so.
-///
-/// @p handle may be null; see @ref makeCorpusOracle.
-///
-/// @p keep, when set, is asked about a point before the engine is: a point it refuses never
-/// costs an oracle call, and never counts toward a combination's target. Applied afterwards
-/// instead, a filter spends the search on points it then discards and the corpus comes back
-/// short by exactly the filtered fraction. It receives the operation's name alongside the point.
+/// Pre-oracle filter, given the operation name and the point. A refused point costs no oracle
+/// call and does not count toward a combination's target.
 using CorpusFilter = std::function<bool(const std::string&, const ProblemPoint&)>;
 
+/// @brief Generates the problem corpus for @p engineId across every declared operation.
+///
+/// @p handle may be null; see @ref makeCorpusOracle.
 inline std::vector<MetadataOperationCorpus> generateCorpus(hipdnnHandle_t handle,
                                                            int64_t engineId,
                                                            const MetadataSet& declarations,

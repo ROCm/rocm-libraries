@@ -211,9 +211,8 @@ GraphT convBiasReluGraph()
     return graph;
 }
 
-// Every feature the hand-written Matmul/ConvolutionFwd/SDPA binders published for these
-// graphs, captured from them before the generic binder replaced them. Shipped models
-// read these names, so each must keep its name, value and JSON kind.
+// Features published for these graphs. Shipped models read these names, so each must keep
+// its name, value and JSON kind.
 constexpr const char* GOLDEN_DEVICE = R"json({
     "device.cu_count": 64, "device.lds_size": 65536, "device.memory_bus_width": 256,
     "device.memory_clock_rate": 1000, "device.multi_processor_count": 64,
@@ -1084,8 +1083,7 @@ TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
     graph.tensors[0]->ragged_offset_tensor_uid = 4;
     const auto published = features(graph);
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
-    // Matmul, ConvolutionFwd and SDPA published counts before the content rule, so a ragged
-    // operand keeps the value shipped models were trained on.
+    // Matmul's count ignores ragged contents, matching what shipped models were trained on.
     EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 840.0);
     // The graph's footprint follows the offsets' contents, not the padded dims.
     EXPECT_FALSE(published.contains("graph.logical_bytes"));
@@ -1122,9 +1120,8 @@ TEST(TestEngineFeatures, WorkOfLaterTypesIsUnknownWhenContentsDecideIt)
 
 TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
 {
-    // Shipped models read `$graph.flops` and `$graph.nodes[0].flops`. Changing any value
-    // below changes what they mean: it requires bumping FEATURE_SEMANTICS_REVISION, and
-    // this assertion with it.
+    // Shipped models read these values; changing any requires bumping
+    // FEATURE_SEMANTICS_REVISION.
     EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
     struct Case
     {
@@ -1194,7 +1191,7 @@ TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
         }
     }
 
-    // Every operand or flag SDPA refused before still refuses on its own.
+    // Each SDPA operand or flag refuses a count on its own.
     using Refusal = void (*)(SdpaAttributesT&);
     const std::vector<std::pair<const char*, Refusal>> refusals = {
         {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }},

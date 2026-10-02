@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Convert LightGBM model to FlatBuffer GbdtModel format.
+"""Convert a LightGBM model to the FlatBuffer GbdtModel read by TreeDataAdapter.
 
-The output format is hipdnn_flatbuffers_sdk.data_objects.GbdtModel, read at runtime
-by TreeDataAdapter.
-
-Written through the flatc-generated object API. The hand-rolled vtable this
-replaced happened to match gbdt_model.fbs, but only by coincidence -- the sibling
-writer that emitted the UHD as a FlatBuffer did not, and shipped unloadable
-buffers for as long as it existed. That one is gone; the UHD is JSON. Field
-identity here is a name, so a schema addition renumbers nothing.
+Written through the flatc-generated object API, so fields are matched by name.
 """
 from __future__ import annotations
 
@@ -35,20 +28,15 @@ logger = logging.getLogger(__name__)
 # File identifier for GbdtModel FlatBuffers
 GBDT_MODEL_FILE_IDENTIFIER = b"HGBM"
 
-#: The reproducible-builds variable every other build step in this tree honours. A
-#: shipped artifact has to be checkable against its source, and RFC 0019 §10.5 records a
-#: content hash over the model -- which is worth nothing if converting the same LightGBM
-#: model twice produces two different digests.
+#: Reproducible-builds stamp source: converting the same model twice must give the same
+#: bytes, since RFC 0019 §10.5 records a content hash over them.
 SOURCE_DATE_EPOCH = "SOURCE_DATE_EPOCH"
 
 
 def resolve_training_date(training_date: str | None = None) -> str | None:
-    """The stamp to record, or None when there is no truthful one to record.
+    """The stamp to record, or None when there is no truthful one.
 
-    Wall-clock `now()` is not provenance: it says when the file was written, not what it
-    was built from, and it makes the 4.8 MB of committed `.bin` artifacts differ on every
-    conversion. An omitted optional field costs a reader nothing; an invented one costs
-    them byte-reproducibility.
+    Never wall-clock time: that would make every conversion's bytes differ.
     """
     if training_date is not None:
         return training_date
@@ -75,27 +63,11 @@ def convert(
     group_by_feature_index: int = -1,
     group_models: list[tuple[float, "lgb.Booster"]] | None = None,
 ) -> str:
-    """Convert LightGBM model to FlatBuffer GbdtModel.
+    """Convert a LightGBM model file to FlatBuffer GbdtModel and write it.
 
-    Args:
-        lgbm_path: Path to .lgbm model file.
-        features_hash: SHA-256 hash of feature specification.
-        output_path: Output path for .bin FlatBuffer file.
-        num_training_samples: Optional number of training samples for metadata.
-        training_arches: Optional list of GPU architectures the model was trained
-            on (e.g., ["gfx942", "gfx1100"]). Used for RFC 0019 §9.2 out-of-distribution
-            detection at runtime.
-        model_version: Optional semantic version (e.g., "1.0.0").
-        training_date: ISO 8601 stamp to record; see `resolve_training_date`.
-        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
-            single-layer model.
-        group_models: One `(grouping value, booster)` pair per group's layer 2.
-            None writes a single-layer model.
-
-    Returns:
-        The SHA-256 of the bytes written, as `TreeDataAdapter` recomputes them: the
-        content hash RFC 0019 §7.2 lets the descriptor body carry and §10.5 requires the
-        manifest to record.
+    `training_arches` feeds RFC 0019 §9.2 out-of-distribution detection.
+    `group_models` is one `(grouping value, booster)` per layer-2 group; None writes a
+    single-layer model. Returns the bare hex SHA-256 of the bytes written.
     """
     model = lgb.Booster(model_file=str(lgbm_path))
     model_json = model.dump_model()
@@ -139,22 +111,10 @@ def build_gbdt_model(
     group_by_feature_index: int = -1,
     groups: list[tuple[float, dict[str, Any]]] | None = None,
 ) -> bytes:
-    """Build FlatBuffer GbdtModel from LightGBM model JSON.
+    """Build FlatBuffer GbdtModel bytes from `lgb.Booster.dump_model()` output.
 
-    Args:
-        model_json: Output of lgb.Booster.dump_model().
-        features_hash: SHA-256 hash of feature specification.
-        num_training_samples: Optional number of training samples.
-        training_arches: GPU architectures the model was trained on.
-        model_version: Semantic version string.
-        training_date: ISO 8601 stamp to record; see `resolve_training_date`.
-        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
-            single-layer model.
-        groups: One `(grouping value, dumped ensemble)` pair per group, in the
-            order layer 1 decides between them. None writes a single-layer model.
-
-    Returns:
-        FlatBuffer bytes for GbdtModel.
+    `groups` is one `(grouping value, dumped ensemble)` per group, in layer-1 order;
+    None writes a single-layer model.
     """
     model = GbdtModelT()
     model.trees = [
@@ -184,8 +144,7 @@ def build_gbdt_model(
     if model_version:
         model.modelVersion = model_version
 
-    # Layer 2, when the caller trained one ensemble per group. Absent, the artifact is
-    # exactly what this tool has always written and the runtime reads it as single-layer.
+    # Layer 2, when one ensemble was trained per group; absent means single-layer.
     if groups:
         model.groupByFeatureIndex = group_by_feature_index
         model.groups = []
@@ -203,13 +162,7 @@ def build_gbdt_model(
 
 
 def _objective_name(model_json: dict[str, Any]) -> str:
-    """Extract the bare objective name from a LightGBM model dump.
-
-    LightGBM 4.x reports `objective` as a string, sometimes carrying trailing
-    parameters (e.g. "binary sigmoid:1"); only the leading token names the
-    objective. Older 2.x/3.x dumps used a {"name": ..., "config": ...} mapping.
-    Both are accepted so an artifact produced against either version converts.
-    """
+    """The bare objective name from a LightGBM 2.x-4.x model dump."""
     objective = model_json.get("objective")
 
     if isinstance(objective, str):
@@ -224,11 +177,7 @@ def _objective_name(model_json: dict[str, Any]) -> str:
 
 
 def _build_tree(root_node: dict[str, Any]) -> GbdtTreeT:
-    """Build a GbdtTreeT from a LightGBM tree structure.
-
-    LightGBM stores trees as nested dicts. We flatten to parallel arrays for
-    cache-friendly traversal matching TreeDataAdapter's evaluation.
-    """
+    """Flatten a LightGBM nested tree into the parallel arrays TreeDataAdapter reads."""
     nodes: list[dict[str, Any]] = []
     _flatten_tree(root_node, nodes)
 
@@ -244,10 +193,7 @@ def _build_tree(root_node: dict[str, Any]) -> GbdtTreeT:
 
 
 def _flatten_tree(node: dict[str, Any], nodes: list[dict[str, Any]]) -> int:
-    """DFS flatten LightGBM tree to node array with child indices.
-
-    Returns the index of this node in the nodes list.
-    """
+    """DFS-flatten a LightGBM tree into `nodes`; returns this node's index."""
     current_idx = len(nodes)
 
     if "leaf_value" in node:
@@ -262,8 +208,7 @@ def _flatten_tree(node: dict[str, Any], nodes: list[dict[str, Any]]) -> int:
         nodes.append({})
         left_idx = _flatten_tree(node["left_child"], nodes)
         right_idx = _flatten_tree(node["right_child"], nodes)
-        # LightGBM decision_type: "<=" means go left if feature <= threshold (default)
-        # decision_type can be "==" for categorical, but we treat those as <=
+        # Categorical "==" splits are treated as "<=".
         decision_type = node.get("decision_type", "<=")
         use_lte = decision_type in ("<=", "==")
         nodes[current_idx] = {

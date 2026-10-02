@@ -88,10 +88,8 @@ target_compile_definitions(hip_kernel_provider_impl PRIVATE
 # ============================================================================
 # Forward selector revision
 # ============================================================================
-# The value a deployed L1 model for this engine must record as its `selector_revision`.
-# What it hashes, and why each input is (or is not) one, is in AsmSdpaSelectorRevision.cmake.
-# CONFIGURE_DEPENDS: an edit to any input, or a forward kernel added, reconfigures, so the
-# build never reports a revision for sources it no longer compiles.
+# The `selector_revision` a deployed L1 model for this engine must record; inputs are
+# documented in AsmSdpaSelectorRevision.cmake.
 include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
 hkp_asm_sdpa_fwd_revision(_fwd_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
 target_compile_definitions(hip_kernel_provider_impl PRIVATE

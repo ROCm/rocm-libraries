@@ -151,16 +151,10 @@ endfunction()
 
 # Generate FlatBuffer Python bindings from .fbs schema files.
 #
-# Separate from hipdnn_generate_flatbuffer_headers() rather than a LANGUAGE argument
-# on it, because the two have different shapes: the C++ side emits one predictable
-# `<schema>_generated.h` per schema, while flatc's Python output is a package tree
-# named for the schema's namespace with one module per declared type, so the output
-# set cannot be derived from the schema filename. This function therefore drives a
-# stamp file rather than declaring the generated modules as OUTPUTs.
-#
-# The shared flatc_flags.txt is deliberately NOT applied: --gen-compare and
-# --scoped-enums are C++-only and flatc rejects them here. --gen-object-api is passed
-# explicitly because the Python writers are built on the object API.
+# flatc's Python output is a package tree with one module per declared type, so the outputs
+# cannot be derived from the schema name; this drives a stamp file instead.
+# flatc_flags.txt is not applied (its flags are C++-only); --gen-object-api is explicit
+# because the Python writers use the object API.
 function(hipdnn_generate_flatbuffer_python)
     set(_options "")
     set(_one_value_args TARGET SCHEMAS_DIR OUTPUT_DIR NAME)

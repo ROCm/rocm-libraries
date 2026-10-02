@@ -1,12 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Collection as its own step: `generate --collect-only`, then `generate --collection`.
+"""Tests for `generate --collect-only` followed by `generate --collection`.
 
-Measuring and training used to be one run, so every model re-measured its corpus and the
-measurements lived only inside that model's output. These pin the split: a recorded
-collection trains exactly what the one-shot run would have, training takes one measurement
-of each configuration on each shape (the newest), and what cannot be one model is refused
-at the merge rather than trained.
+Merging keeps the newest measurement of each configuration on each shape, and refuses
+collections that cannot form one model.
 """
 import json
 from pathlib import Path
@@ -23,7 +20,7 @@ GRAPHS = 16
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """An L1 engine behind a fake bench whose device, revision and speed a test can set."""
+    """An L1 engine behind a fake bench with settable device, revision and speed."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
     tree = tmp_path / "descriptors"
@@ -209,7 +206,7 @@ def test_collect_only_records_measurements_and_trains_nothing(world):
 
 
 def test_a_recorded_collection_trains_what_the_one_shot_run_would(world, evaluator):
-    """Same measurements, same seed: the split, and so the model's training set, match."""
+    """Same measurements and seed give the same split and training set."""
     one_shot = _train(world, "one_shot", evaluator, graphs=world["graphs"])
     calls = world["engine"]["calls"]
     collection = _collect(world, "col")
@@ -240,7 +237,7 @@ def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evalu
     newer = _collect(
         world, "newer", collected_at="2026-09-30T10:00:00+00:00", scale=2.0
     )
-    # Named newest-first on purpose: the order given does not decide, the collection time does.
+    # Passed newest-first: collection time, not argument order, decides.
     code, output = _train(world, "merged", evaluator, collections=[newer, older])
     assert code == 0
     labels, newest = _labels(output), _labels(newer)
@@ -280,7 +277,7 @@ def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, eval
 
 
 def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
-    """`--device` repeated measures every shape on each GPU; the last GPU's is the label."""
+    """Repeated `--device` measures each shape per GPU; the last GPU's is the label."""
     world["engine"][
         "drift"
     ] = 1.01  # every measurement differs, so the label is traceable
@@ -301,7 +298,7 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
 
 
 def test_distinct_configurations_on_one_shape_are_distinct_rows():
-    """A catalog sweep times many configurations of a shape; only a repeat is a duplicate."""
+    """Only a repeat of the same configuration on a shape is a duplicate."""
     from uhd_gen.generate import one_measurement_per_shape
 
     def row(graph, kernel, knobs, arch="gfx942"):
@@ -375,7 +372,7 @@ def test_measurement_options_are_refused_without_a_measurement(
 
 
 def test_rows_carry_the_regime_their_corpus_labelled_them_with(world, evaluator):
-    """Beside `graphs/`, hipdnn_corpus_gen's manifest.csv names each graph's population."""
+    """hipdnn_corpus_gen's manifest.csv names each graph's population."""
     import csv
 
     with (world["graphs"] / "manifest.csv").open(
@@ -429,7 +426,7 @@ def test_graphs_without_a_corpus_manifest_carry_no_regime(world):
 
 
 def test_shards_partition_a_corpus_into_collections_that_train_as_one(world, evaluator):
-    """N GPUs, N collections: every graph measured exactly once, and trained on together."""
+    """Shards measure every graph exactly once (e.g. one shard per GPU)."""
     from uhd_gen.__main__ import main
 
     shards = []
@@ -515,8 +512,7 @@ def test_a_malformed_shard_is_refused(world, caplog, shard, message):
 def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(
     world, evaluator
 ):
-    """A pack-bound engine meets no shape outside its pack: holding some out of the model
-    would only ship it blind to shapes it will certainly be asked about."""
+    """`--recall` trains on every shape: a pack-bound engine sees no others."""
     collection = _collect(world, "col")
     held, _ = _train(world, "held", evaluator, collections=[collection])
     assert held == 0

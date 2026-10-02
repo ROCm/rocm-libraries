@@ -4,13 +4,8 @@
 #pragma once
 
 /// @file
-/// Internal generation-tool types. These decode the ENGINE/ENGINECFG inspection
-/// attributes read by hipdnn_frontend::detail::getEngineCandidates,
-/// hipdnn_frontend::detail::getEnginePrediction and
-/// hipdnn_frontend::detail::getPredictionCapabilities. They are not part of the public
-/// Graph API and carry no Python bindings: consumers select engines through the
-/// heuristic descriptor, not by walking a kernel catalog (RFC 0017 §2,
-/// RFC 0019 Open Question 12).
+/// Internal generation-tool types decoded by the hipdnn_frontend::detail engine queries. Not
+/// part of the public Graph API and not bound to Python (RFC 0019 Open Question 12).
 
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
@@ -54,9 +49,8 @@ struct EnginePrediction
     std::optional<EngineVariant> configuration; ///< Exact scored configuration, if available.
 };
 
-/// One prediction an engine can answer on this graph: a model is bound for this
-/// (kind, metric) pair. Describes a binding; says nothing about whether evaluating it
-/// would currently succeed.
+/// A (kind, metric) prediction an engine can answer on this graph, i.e. a bound model. Says
+/// nothing about whether evaluating it would currently succeed.
 struct PredictionCapability
 {
     PredictionKind kind = PredictionKind::ENGINE;

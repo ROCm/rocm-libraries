@@ -1,22 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Generate the node-operand visitor header (node_operands_generated.h) from the schemas.
+"""Generate node_operands_generated.h, a per-node-type operand visitor, from graph.fbs.
 
-Emits, per ``NodeAttributes`` union member, a zero-allocation visitor over the node's
-operands: every ``cache_uid`` field as a tensor role, every scalar/enum/bool attribute,
-and every element of a numeric-vector attribute. Heuristics publish these as features
-(plugin_sdk EngineFeatures.hpp), so a node type added to the schema publishes its
-operands without hand-written per-op code.
-
-Shares gen_cache_key.py's binary-schema reader: flatc parses and resolves the schema,
-and the annotations deciding what a field is -- ``cache_uid`` for a tensor reference,
-``work_data_dependent`` for one whose contents decide the node's work -- are read from
-the compiled schema, never inferred from a field's name.
-
-Takes no arguments: it re-derives the whole header. Run manually, from the build via
-the custom target in flatbuffers_sdk/CMakeLists.txt, or through the
-``node-operands-hipdnn`` pre-commit hook.
+What a field is comes from the compiled schema's ``cache_uid`` and
+``work_data_dependent`` annotations, never from its name. Run manually, from the
+flatbuffers_sdk build target, or via the ``node-operands-hipdnn`` pre-commit hook.
 """
 
 import argparse
@@ -132,11 +121,7 @@ class OperandsEmitter:
         return accessor(field["name"]), self.schema["enums"][field["type"]["index"]]
 
     def _resolve_tensor_table(self, root_name):
-        """The table `cache_uid` references resolve to, from the root's domain vector.
-
-        None when the schema declares no domain: there is then no tensor table whose
-        own fields could make work data-dependent.
-        """
+        """The tensor table `cache_uid` refers to, or None without a domain."""
         root = self.objects.get(root_name)
         if root is None:
             return None
@@ -224,10 +209,7 @@ class OperandsEmitter:
         )
 
     def _validate_work_annotations(self):
-        """`work_data_dependent` must sit where the visitor reports it.
-
-        Anywhere else it would compile and silently mark nothing.
-        """
+        """Reject `work_data_dependent` where the visitor would never report it."""
         reported = {member["name"] for _, member in self.members}
         if self.tensor_table is not None:
             reported.add(self.tensor_table["name"])

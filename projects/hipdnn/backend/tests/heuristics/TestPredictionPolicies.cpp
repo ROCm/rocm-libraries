@@ -5,12 +5,8 @@
  * @file TestPredictionPolicies.cpp
  * @brief Unit tests for the SelectionHeuristic::ModeA / ModeB prediction policies.
  *
- * The policies ship as a backend built-in (RFC 0007 §5.3.5, §10.1), registered by
- * HeuristicPluginManager::registerBuiltIns through HeuristicPlugin::createBuiltIn
- * exactly like Config and StaticOrdering. These tests therefore resolve the policy
- * implementation the way production does — from a plain HeuristicPluginManager — so
- * a registration regression fails here rather than silently disabling prediction
- * ranking.
+ * Policies are resolved from a plain HeuristicPluginManager, as in production, so a
+ * registration regression fails here.
  */
 
 #include "HipdnnException.hpp"
@@ -48,9 +44,7 @@ using hipdnn_data_sdk::utilities::policyNameToId;
 using hipdnn_data_sdk::utilities::ScopedResource;
 using Key = std::pair<int64_t, hipdnnEnginePredictionKind_t>;
 
-// Locate the registered built-in that serves the prediction policies. Resolving by
-// policy ID rather than by plugin name is the contract the heuristic chain uses:
-// EngineHeuristicDescriptor only ever asks for a policy ID.
+// Resolve by policy ID, as EngineHeuristicDescriptor does.
 std::shared_ptr<HeuristicPlugin> findPredictionPlugin(const HeuristicPluginManager& manager)
 {
     const auto modeA = policyNameToId(MODE_A_POLICY_NAME);
@@ -70,8 +64,7 @@ class TestPredictionPolicies : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // ABSOLUTE loading with no paths drops every externally loaded plugin. Built-ins
-        // are not loaded from a path, so the prediction policies must still be there
+        // Built-ins are not loaded from a path, so ABSOLUTE loading with no paths keeps them
         // (HeuristicPluginManager::actionAfterClearing re-registers them).
         const std::set<std::filesystem::path> noPaths;
         _manager.loadPlugins(noPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
@@ -168,9 +161,8 @@ protected:
     std::vector<uint8_t> _malformed{0, 0, 0, 0};
 };
 
-// RFC 0007 §17: a first-party policy is delivered by built-in registration, so both
-// policy IDs must be the FNV-1a hashes of their canonical names and must answer with
-// those names — that is the only handle a caller (or HIPDNN_HEUR_POLICY_ORDER) has.
+// Policy IDs are the FNV-1a hashes of the canonical names, the only handle a caller or
+// HIPDNN_HEUR_POLICY_ORDER has (RFC 0007 §17).
 TEST_F(TestPredictionPolicies, RegistersBothPredictionPoliciesUnderTheirCanonicalNames)
 {
     const auto policyIds = _plugin->getAllPolicyIds();
@@ -186,9 +178,7 @@ TEST_F(TestPredictionPolicies, RegistersBothPredictionPoliciesUnderTheirCanonica
     EXPECT_NE(findPredictionPlugin(fresh), nullptr);
 }
 
-// RFC 0019 §11.2 quick policy: rank applicable engines by A (L1) alone. B (L2) is never
-// evaluated under this policy, for any engine — not even to fill in the winner's kernel,
-// which plan build chooses by the same metric (Open Question 21, option (b)).
+// RFC 0019 §11.2 quick policy; the winner's kernel is chosen at plan build.
 TEST_F(TestPredictionPolicies, ModeARanksByL1AndNeverQueriesConfigurationPredictions)
 {
     selectMode(MODE_A_POLICY_NAME, {1, 2, 3, 4});
@@ -220,9 +210,7 @@ TEST_F(TestPredictionPolicies, ModeARanksByL1AndNeverQueriesConfigurationPredict
     }
 }
 
-// RFC 0019 §4.4/§11.2: engines are compared in the requested metric's direction. For
-// `time` lower is better, and a value the metric rejects (a non-positive time) or an
-// answer in another metric scores nothing rather than ranking first.
+// Rejected values and foreign-metric answers score nothing rather than ranking first.
 TEST_F(TestPredictionPolicies, TimeMetricRanksLowerFirstAndRejectsForeignOrInvalidValues)
 {
     _metric = "time";
@@ -244,8 +232,6 @@ TEST_F(TestPredictionPolicies, TimeMetricRanksLowerFirstAndRejectsForeignOrInval
     }
 }
 
-// Equal values do not fall back to candidate-arrival order: RFC 0019 §11.2 breaks ties
-// by the static rules.
 TEST_F(TestPredictionPolicies, TiesFollowStaticOrderNotArrivalOrder)
 {
     using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
@@ -260,9 +246,7 @@ TEST_F(TestPredictionPolicies, TiesFollowStaticOrderNotArrivalOrder)
               (std::vector<int64_t>{MIOPEN_ENGINE_ID, HIPBLASLT_ENGINE_ID}));
 }
 
-// RFC 0019 §11.2 table row "No declared model": an engine that answers neither query
-// "falls back to static ordering; contributes no score" and "is ordered by the existing
-// static rules" — identically under both policies. The arrival order is neither.
+// RFC 0019 §11.2 "No declared model": identical under both policies.
 TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
 {
     using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
@@ -290,9 +274,8 @@ TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
     }
 }
 
-// The operator's HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is the static rule when it is set: the
-// engines it names lead the unscored tail in the order written, and any it does not name
-// follow in the built-in order rather than being dropped.
+// Engines the operator names lead the unscored tail in written order; the rest follow in
+// built-in order rather than being dropped.
 TEST_F(TestPredictionPolicies, UnscoredEnginesFollowTheOperatorFallbackOrder)
 {
     using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
@@ -401,8 +384,6 @@ void capturePredictionLog(hipdnnSeverity_t /*severity*/, const char* message)
     }
 }
 
-// RFC 0019 §11.2: a policy with nothing scored declines and says which metric and which
-// levels nobody served, so a static-order result is never mistaken for a ranking.
 TEST_F(TestPredictionPolicies, DeclineNamesTheMetricAndTheLevelsAsked)
 {
     auto abi = hipdnn_backend::heuristics::prediction::populateFunctionTable();
@@ -462,8 +443,7 @@ TEST_F(TestPredictionPolicies, RejectsIncompatibleScopedHostBeforeInvokingCallba
     EXPECT_TRUE(_calls.empty());
 }
 
-// A version 1 table predates ranking_metric and ends before it; it means TFLOPS and the
-// policy must not read past the table to find out.
+// A version 1 table ends before ranking_metric; the policy must not read past it.
 TEST_F(TestPredictionPolicies, VersionOneHostRanksByTflops)
 {
     selectMode(MODE_A_POLICY_NAME, {1, 2});

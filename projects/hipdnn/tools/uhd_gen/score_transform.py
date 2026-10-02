@@ -2,24 +2,9 @@
 # SPDX-License-Identifier: MIT
 """The score transform uhd_gen trains on, and the inverses it can score with.
 
-Mirrors `hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp`: a model is fitted on a
-transformed target, the descriptor's `score.transform` names that transform, and the
-runtime inverts it (`applyInverse`) to recover a value in `score.metric`'s units.
-
-uhd_gen trains on `log(target)`. The runtime refuses any recovered score that is not
-finite and strictly positive (`UhdKernelHeuristic::scoreFromRaw`, RFC 0019 §8.3), and the
-inverse of `log` is `exp`, which is positive for every finite raw output. A model trained
-this way cannot produce a score the runtime discards, whatever it extrapolates to.
-
-It used to train on `log1p(target)`. `expm1` is negative for any raw output below zero,
-and a gradient-boosted ensemble undershoots on the smallest targets it saw -- measured on
-the cluster: an AITER gfx950 L1 model trained on 1600 graphs predicted negative TFLOPS
-for 4 of 200 unseen graphs, and the engine answered INVALID for each. Training could only
-report that after the fact. `log` removes it by construction, and it fits relative error
-uniformly, which is what a throughput prediction compared across engines needs.
-
-The labels are strictly positive by the same rule: a zero or negative measurement is no
-measurement (§8.3), and `log` of one is undefined, so training refuses them.
+Mirrors `hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp`. Training uses `log`
+because its inverse `exp` is positive for any finite output, so the runtime never
+discards a prediction as non-positive (`log1p`/`expm1` could). Labels must be > 0.
 """
 
 from __future__ import annotations
@@ -29,7 +14,7 @@ import numpy as np
 #: The transform `train` fits and declares.
 TRAINED = "log"
 
-#: Transforms uhd_gen can invert, so a model trained before `log` still scores.
+#: Transforms uhd_gen can invert, so older `log1p`/`identity` models still score.
 INVERTIBLE = ("identity", "log1p", "log")
 
 
@@ -44,9 +29,7 @@ def forward(target: np.ndarray) -> np.ndarray:
 def inverse(raw: np.ndarray, transform: str) -> np.ndarray:
     """Model output -> value in the metric's units, as `applyInverse` computes it.
 
-    A raw score of -inf marks a candidate the ranking rejected; it stays -inf rather than
-    becoming the transform's image of -inf (`exp` gives 0, `expm1` gives -1), which would
-    be a finite value that outranks a real score.
+    -inf (a rejected candidate) stays -inf rather than becoming a finite value.
     """
     if transform not in INVERTIBLE and transform != "":
         raise ValueError(

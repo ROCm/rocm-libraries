@@ -5,10 +5,8 @@
  * @file TestProblemSpace.cpp
  * @brief Covers the one exploration, against declarations the test writes.
  *
- * The property under test is that there is nothing engine-specific and nothing
- * operation-specific in how the space is explored — only in what is declared. So every case
- * here drives the same function with different metadata, and the oracle is a region the test
- * already knows rather than an engine.
+ * Exploration is generic: each case drives the same function with different metadata and a
+ * known-region oracle instead of an engine.
  */
 
 #include <gtest/gtest.h>
@@ -57,9 +55,7 @@ const ProblemOracle ACCEPT_EVERYTHING = [](const ProblemPoint&) { return true; }
 
 TEST(TestProblemSpace, EnumeratesEveryDeclaredDtypeRatherThanPickingOne)
 {
-    // The failure this replaces: an earlier generator hardcoded fp32, so half the engine's
-    // kernels were unreachable and nothing in the corpus said so. dtype is a parameter of the
-    // problem, and the declaration is what says which values exist.
+    // dtype is a declared parameter, so every value is explored.
     ExplorationRequest request;
     request.pointsPerCombination = 10;
     request.seed = 1;
@@ -85,7 +81,6 @@ TEST(TestProblemSpace, SearchesTheNumericAxesAndEnumeratesTheCategoricalOnes)
 
     EXPECT_EQ(corpus.numericParameters, (std::vector<std::string>{"M", "N"}));
 
-    // Numeric axes vary within one categorical combination; that is the search working.
     std::set<int64_t> distinctM;
     for(const auto& point : corpus.combinations.front().problems)
     {
@@ -96,8 +91,7 @@ TEST(TestProblemSpace, SearchesTheNumericAxesAndEnumeratesTheCategoricalOnes)
 
 TEST(TestProblemSpace, GivesEveryCombinationItsOwnBudget)
 {
-    // A shared budget is spent by whichever combination runs first, and the corpus then covers
-    // one dtype thoroughly and the rest not at all -- while reporting a total that looks whole.
+    // A shared budget would be spent by whichever combination runs first.
     ExplorationRequest request;
     request.pointsPerCombination = 15;
     request.seed = 3;
@@ -113,8 +107,7 @@ TEST(TestProblemSpace, GivesEveryCombinationItsOwnBudget)
 
 TEST(TestProblemSpace, AppliesTheOracleToWholeProblemPoints)
 {
-    // Coupling between a categorical and a numeric axis is ordinary -- a dtype an engine only
-    // serves at small extents, say. The oracle therefore sees the whole point, not a shape.
+    // Engines may couple categorical and numeric axes, so the oracle sees the whole point.
     const ProblemOracle halfOnlySmall = [](const ProblemPoint& point) {
         const auto dtype = std::get<std::string>(point.at("dtype"));
         return dtype == "fp32" || std::get<int64_t>(point.at("M")) <= 64;
@@ -137,8 +130,7 @@ TEST(TestProblemSpace, AppliesTheOracleToWholeProblemPoints)
 
 TEST(TestProblemSpace, ProducesOneProblemPerCombinationWhenNothingIsNumeric)
 {
-    // An operation whose every parameter is categorical still has problems. Returning nothing
-    // would drop it from the corpus while looking like an empty region.
+    // An all-categorical operation still has problems.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.0",
       "operation": "flags_only",
@@ -159,8 +151,7 @@ TEST(TestProblemSpace, ProducesOneProblemPerCombinationWhenNothingIsNumeric)
 
 TEST(TestProblemSpace, SaysSoWhenItDidNotExploreEveryCombination)
 {
-    // A corpus covering three of twelve dtype/layout combinations, silently, is
-    // indistinguishable from one that covered the space.
+    // Partial coverage must be reported, not silent.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.0",
       "operation": "many_flags",
@@ -185,8 +176,7 @@ TEST(TestProblemSpace, SaysSoWhenItDidNotExploreEveryCombination)
 
 TEST(TestProblemSpace, HonoursASemanticRangeButNotAnAbsentOne)
 {
-    // §4.3.2: a range is a limit inherent to the operation. Where one is declared it binds;
-    // where none is, the ceiling applies and no authored guess narrows the space.
+    // §4.3.2: a declared range binds; an absent one leaves only the ceiling.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.0",
       "operation": "ranged",
@@ -235,10 +225,8 @@ TEST(TestProblemSpace, IsReproducibleFromItsSeed)
 
 TEST(TestProblemSpace, DeclaredConstraintsKeepInvalidPointsOutOfTheSearch)
 {
-    // §4.3.2 calls a range "a limit inherent to the operation, such as one dimension that
-    // cannot exceed another", but a range bounds one parameter against constants. A filter
-    // fitting inside its input is a relation, and without one the frontend rejected 2559 of
-    // 2559 candidates before any engine saw them.
+    // Ranges bound a parameter against constants; relations such as filter <= input need
+    // declared constraints.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.0",
       "operation": "toy_conv",
@@ -285,8 +273,7 @@ TEST(TestProblemSpace, AnUnevaluableConstraintRejectsRatherThanAdmits)
 namespace
 {
 
-/// An engine that serves one dtype only -- the AITER shape of the problem: one combination
-/// carries the whole corpus, so its first-pass target is the corpus size unless it is grown.
+/// An engine that serves one dtype only, so one combination must carry the whole corpus.
 ProblemOracle servesOnlyFp16(int64_t mLimit, int64_t nLimit, std::map<std::string, int64_t>* asked)
 {
     return [=](const ProblemPoint& point) {
@@ -323,8 +310,7 @@ TEST(TestProblemSpace, GrowsAServedCombinationToTheCorpusTarget)
 
 TEST(TestProblemSpace, ReturnsFewerOnlyWhenTheServedRegionIsSpent)
 {
-    // Nine served points exist. Asking for fifty must return those nine and say that the
-    // search, not the request, was the limit -- saturated, and named as such.
+    // Nine served points exist; asking for fifty returns nine and reports saturation.
     ExplorationRequest request;
     request.pointsPerCombination = 4;
     request.numericCeiling = 64;
@@ -351,8 +337,7 @@ TEST(TestProblemSpace, ReturnsFewerOnlyWhenTheServedRegionIsSpent)
 
 TEST(TestProblemSpace, DoesNotGrowACombinationTheEngineDeclines)
 {
-    // A declined combination costs its first-pass budget and nothing more: growing it would
-    // spend budget proving again that it serves nothing.
+    // Growing a declined combination would only re-prove that it serves nothing.
     ExplorationRequest request;
     request.pointsPerCombination = 10;
     request.numericCeiling = 256;
@@ -371,8 +356,7 @@ TEST(TestProblemSpace, DoesNotGrowACombinationTheEngineDeclines)
 
 TEST(TestProblemSpace, ReportsABudgetLimitAsASearchLimitNotAnEngineLimit)
 {
-    // Stopped while still finding points: more exist, and saying "saturated" would tell the
-    // caller the engine serves no more when it was the search that was not allowed to look.
+    // Budget-limited is not saturated: more points exist.
     ExplorationRequest request;
     request.pointsPerCombination = 5;
     request.budgetPerCombination = 60;
@@ -400,9 +384,8 @@ TEST(TestProblemSpace, ReportsABudgetLimitAsASearchLimitNotAnEngineLimit)
 
 TEST(TestProblemSpace, AnEngineThatServesOnlyHeldPointsIsSearchedNotDeclined)
 {
-    // rocKE's shape: every point it serves is a pack geometry the caller already holds. The
-    // search must still be grown for it and report that it found nothing new -- not skip it as
-    // though the engine served nothing.
+    // rocKE serves only pack geometries the caller already holds; the search must still run
+    // and report nothing new rather than treat the engine as declining.
     ExplorationRequest request;
     request.pointsPerCombination = 4;
     request.numericCeiling = 64;
@@ -431,7 +414,7 @@ TEST(TestProblemSpace, AnEngineThatServesOnlyHeldPointsIsSearchedNotDeclined)
 
 TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
 {
-    // The walk must be free to step through held points: treated as refused they fence it in.
+    // Held points must not be treated as refused, or they fence the walk in.
     ExplorationRequest request;
     request.pointsPerCombination = 10;
     request.numericCeiling = 256;
@@ -453,7 +436,7 @@ TEST(TestProblemSpace, HeldPointsDoNotWallTheSearchOffFromTheRestOfTheRegion)
 
 TEST(TestProblemSpace, AllOfAdmitsOnlyWhatEveryEngineServes)
 {
-    // Two engines whose coverage overlaps on one band of M: a cross-engine corpus is that band.
+    // Coverage overlaps on one band of M; the cross-engine corpus is that band.
     int laterAsked = 0;
     const ProblemOracle small
         = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) <= 64; };

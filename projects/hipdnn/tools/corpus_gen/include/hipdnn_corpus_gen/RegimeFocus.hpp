@@ -21,21 +21,9 @@
 /// @file RegimeFocus.hpp
 /// @brief Generating problems in one named regime, for a corpus asked to fill a quota there.
 ///
-/// The exploration in ProblemSpace.hpp finds what an engine serves, and a regime is whatever
-/// population those points happen to land in. That leaves the regimes defined by an *equality*
-/// almost empty: `decode` is `seqlen_q == 1`, `prefill` is `seqlen_q == seqlen_k`, `mha` is
-/// `heads_kv == heads`, and a walk over independent extents meets an equality with probability
-/// close to zero. A model trained on that corpus has seen a handful of multi-head decode shapes,
-/// and its errors there are the worst it has. Sampling more of the same does not fix it; asking
-/// for them does.
-///
-/// A focus is a regime label read back into the relations that produce it. An `==` clause
-/// against a constant is a pin, and against another parameter is a tie; the search then walks
-/// only the parameters left free, so every point it proposes already satisfies the equalities.
-/// Everything else a label requires -- an inequality, or the negation an `otherwise` label
-/// implies -- is not compiled at all: every candidate is labelled by the same `regimeLabel` the
-/// manifest uses and kept only if it matches, so a focus can make a regime reachable but can
-/// never put a point in the wrong one.
+/// Regimes defined by an equality (`decode` is `seqlen_q == 1`) are almost never hit by a free
+/// walk, so a focus pins/ties those parameters and walks the rest. Every candidate is still
+/// checked with `regimeLabel`, so a focus never puts a point in the wrong regime.
 namespace hipdnn_corpus_gen
 {
 
@@ -59,9 +47,8 @@ struct RegimeFocus
 namespace detail
 {
 
-/// Which declared label each axis would have to take for the joined @p label, or nullopt when
-/// no assignment of the axes' labels spells it. Tried rather than split on `_`, because a
-/// declared label may itself contain one.
+/// Which declared label each axis would take for the joined @p label, or nullopt when none
+/// spells it. Tried rather than split on `_`, because a declared label may contain one.
 inline std::optional<std::vector<std::string>>
     splitRegimeLabel(const std::vector<RegimeAxis>& axes, const std::string& label, size_t axis = 0)
 {
@@ -166,9 +153,8 @@ inline void foldEqualities(const OperationMetadata& metadata,
         {
             return;
         }
-        // The dependent is the left operand, as written: `heads_kv == heads` reads as "heads_kv
-        // takes heads' value". A tie that would close a cycle, or re-tie something already fixed,
-        // is dropped; the label check still holds the point to both.
+        // The left operand is the dependent. A tie that would close a cycle or re-tie a fixed
+        // parameter is dropped; the label check still enforces it.
         std::string source = right;
         for(auto hop = focus.ties.find(source); hop != focus.ties.end();
             hop = focus.ties.find(source))
@@ -205,9 +191,7 @@ inline void foldEqualities(const OperationMetadata& metadata,
 /// @brief The focus for @p label under @p metadata's declared facets, or nullopt with @p error
 /// set when no assignment of the declared labels spells it.
 ///
-/// A label nothing can produce is refused here rather than searched for: the search would spend
-/// its whole budget and report the regime as saturated, which reads as "the engine serves none
-/// of these" when the truth is "this regime does not exist".
+/// An impossible label is refused rather than searched, which would report it as saturated.
 inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& metadata,
                                                      const std::string& label,
                                                      std::string& error)
@@ -232,9 +216,8 @@ inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& me
                 clauses.push_back(i);
             }
         }
-        // One clause names the label: its equalities hold for every point carrying it. Several
-        // clauses naming one label is a disjunction -- none of them is required -- and
-        // `otherwise` requires only negations; neither pins anything.
+        // Only a label named by exactly one clause pins anything: several clauses are a
+        // disjunction, and `otherwise` implies only negations.
         if(clauses.size() == 1 && clauses.front() < declared.whens.size())
         {
             detail::foldEqualities(metadata, declared.whens[clauses.front()], focus);
@@ -254,9 +237,8 @@ struct RegimeSearchResult
     /// A combination stopped at the budget limit while still finding points. More exist.
     bool searchCapped = false;
 
-    /// Candidates proposed and labelled, and how many of those were in the regime. A focus
-    /// whose candidates almost never land in it is a declaration the compiler read too little
-    /// of, and this is where that shows.
+    /// Candidates proposed and labelled, and how many landed in the regime. A low ratio means
+    /// the focus compiled too little of the declaration.
     int64_t proposed = 0;
     int64_t inRegime = 0;
 };
@@ -264,16 +246,9 @@ struct RegimeSearchResult
 /// @brief Up to @p wanted problems in @p focus's regime that @p admits accepts, none of them
 /// @p held.
 ///
-/// The walk is `buildFeasibleShapeSet` over the parameters the focus leaves free, each proposal
-/// completed with the pins and ties and then held to the declared constraints, to the exact
-/// label, and to the engine. @p anchors -- points already known to be served, in any regime --
-/// seed the walk: projected onto the free parameters, a served point is usually still served
-/// once its dependents are set, and a walk that starts inside the region finds far more than one
-/// that has to hunt for it.
-///
-/// Grown the way `exploreProblemSpace` grows a combination toward a corpus target: at its budget
-/// first, then doubled while it keeps finding new points, and stopped either saturated or at the
-/// growth limit. The two stops mean different things and are reported apart.
+/// Walks the parameters the focus leaves free, seeded by @p anchors (served points in any
+/// regime) projected onto them. Grows like `exploreProblemSpace`, stopping saturated or at the
+/// growth limit; the two are reported apart.
 inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
                                         const RegimeFocus& focus,
                                         const ExplorationRequest& request,
@@ -314,9 +289,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             combinations.push_back(std::move(combination));
         }
     }
-    // Only combinations something is known to serve: a dtype the engine declines costs a whole
-    // budget to prove again, and the first pass already proved it. With no anchors at all there
-    // is nothing to go on, so every combination is tried.
+    // Only combinations some anchor shows are served; a declined dtype would burn a whole
+    // budget again. With no anchors, every combination is tried.
     std::vector<ProblemPoint> served;
     for(const auto& combination : combinations)
     {
@@ -398,9 +372,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         return outcome;
     }
 
-    // One lane per combination, kept across rounds: its search request (whose budget only
-    // grows), its memo of oracle answers -- so a longer walk retracing a shorter one costs
-    // lookups, not engine queries -- and what it has found.
+    // One lane per combination, kept across rounds. The memo lets a longer walk that retraces
+    // a shorter one reuse answers instead of querying the engine again.
     struct Lane
     {
         ProblemPoint categorical;
@@ -432,8 +405,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         lane.search.oracleBudget = request.budgetPerCombination;
         lane.search.restarts = request.restarts;
         lane.search.stepsPerStart = request.stepsPerStart;
-        // Offset from the first pass's seeds, so a focus does not retrace the walk that missed
-        // this regime; still fixed by `seed`, so the corpus reproduces.
+        // Offset from the first pass's seeds so the focus does not retrace the walk that missed
+        // this regime; still deterministic in `seed`.
         lane.search.seed = request.seed + 0x5eed + index;
         for(const auto& anchor : anchors)
         {
@@ -476,8 +449,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             lane.memo.emplace(shape, verdict);
             return verdict;
         };
-        // Held points are returned by the search and then set aside, so they are budgeted for:
-        // a target they could meet on their own would add nothing.
+        // Held points come back from the search and are set aside, so the target includes them.
         lane.search.targetCount += lane.held;
         const auto found = buildFeasibleShapeSet(oracle, lane.search);
         lane.search.targetCount -= lane.held;
@@ -505,9 +477,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         return sum;
     };
 
-    // Rounds, as `exploreProblemSpace` grows toward a corpus target: what is still wanted is
-    // split over the lanes not yet spent, so a combination that cannot serve the regime at all
-    // -- an alignment a declared constraint rules out -- hands its share to those that can.
+    // Split what is still wanted over the lanes not yet spent, so a combination that cannot
+    // serve the regime hands its share to those that can.
     while(true)
     {
         const auto need = wanted - total();
@@ -529,8 +500,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         {
             const auto target = static_cast<int64_t>(lane->fresh.size()) + share;
             lane->search.targetCount = target;
-            // At the budget it already has first: a larger target alone re-tessellates what the
-            // walk observed. Then doubled while it keeps finding new points.
+            // Run at the current budget first (a larger target re-tessellates existing
+            // observations), then double while new points keep appearing.
             lane->reached = run(*lane);
             while(static_cast<int64_t>(lane->fresh.size()) < target)
             {

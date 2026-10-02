@@ -16,8 +16,7 @@ def candidate(knobs, features):
 
 
 def test_an_ordinal_learns_its_value_from_the_candidate_it_addressed():
-    # The pair the engine hands over on every enumerated candidate: the pin that selects
-    # this kernel, and what the kernel is. No second derivation, so nothing to disagree.
+    # Each enumerated candidate pairs the pin that selects it with the kernel it is.
     table = addressing.observe(
         [
             candidate({"dtype": 0, "block_m": 256}, {"dtype": "BF16", "block_m": 256}),
@@ -29,8 +28,7 @@ def test_an_ordinal_learns_its_value_from_the_candidate_it_addressed():
 
 
 def test_an_integer_knob_pins_its_own_value_and_is_not_an_ordinal():
-    """`block_m=256` means 256, not "the value at index 256" -- a reader must be able to
-    tell the two apart, because only one of them is meaningful without this table."""
+    """`block_m=256` means 256, not "the value at index 256"."""
     table = addressing.observe([candidate({"block_m": 256}, {"block_m": 256})])
     assert not addressing.is_ordinal(table, "block_m")
     assert addressing.decode(table, "block_m", 256) == 256
@@ -38,15 +36,14 @@ def test_an_integer_knob_pins_its_own_value_and_is_not_an_ordinal():
 
 @pytest.mark.parametrize("value", ["BF16", True, 2.5, [1, 2]])
 def test_every_non_integer_kmd_type_is_addressable(value):
-    """bool, float, string and int_list all pin through an index; before this they were
-    dropped from the tuple and their kernels were unreachable."""
+    """bool, float, string and int_list all pin through an index."""
     table = addressing.observe([candidate({"field": 0}, {"field": value})])
     expected = tuple(value) if isinstance(value, list) else value
     assert addressing.decode(table, "field", 0) == expected
 
 
 def test_two_kernels_differing_only_in_a_string_field_get_distinct_pins():
-    """The collision that aborted a real run: identical exposed tuples for two kernels."""
+    """Two kernels differing only in a string field must not share a pin tuple."""
     table = addressing.observe(
         [
             candidate({"block_m": 64, "dtype": 0}, {"block_m": 64, "dtype": "BF16"}),
@@ -57,9 +54,7 @@ def test_two_kernels_differing_only_in_a_string_field_get_distinct_pins():
 
 
 def test_a_numbering_that_changes_mid_corpus_is_an_error_not_an_overwrite():
-    """The failure this design exists to prevent. If ordinal 1 meant FP16 for the first
-    half of a collection and BF16 for the second, every row from the first half replays
-    against a different kernel -- silently, because both are valid integers."""
+    """Otherwise earlier rows would silently replay a different kernel."""
     table = addressing.observe([candidate({"dtype": 1}, {"dtype": "FP16"})])
     with pytest.raises(ValueError, match="numbering changed during collection"):
         addressing.observe([candidate({"dtype": 1}, {"dtype": "BF16"})], table)
@@ -72,8 +67,7 @@ def test_an_unobserved_ordinal_refuses_rather_than_returning_a_neighbour():
 
 
 def test_a_knob_no_candidate_pinned_is_reported():
-    """An advertised knob that addresses nothing is a pack defect whose collision surfaces
-    far from this cause."""
+    """An advertised knob that addresses nothing is a pack defect."""
     table = addressing.observe([candidate({"dtype": 0}, {"dtype": "BF16"})])
     assert addressing.unaddressable(["dtype", "never_used"], table) == ["never_used"]
 

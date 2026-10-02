@@ -30,15 +30,12 @@ target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hipdnn_plugin_sdk INTERFACE HIPDNN_ENABLE_KERNEL_INGESTOR)
 
-    # CMAKE_DL_LIBS because CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose (RFC 0019
-    # §7.2's escape hatch). A header-only target has to propagate what its headers use: this
-    # links today only because glibc 2.34+ folds libdl into libc and the current consumers
-    # happen to link it themselves, neither of which is a guarantee.
+    # CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose; a header-only target must propagate
+    # what its headers use rather than rely on glibc 2.34+ folding libdl into libc.
     target_link_libraries(hipdnn_plugin_sdk INTERFACE ${CMAKE_DL_LIBS})
 
-    # The descriptor loader and UHD parser include <nlohmann/json.hpp> directly, including
-    # when the FlatBuffers SDK's optional JSON helpers are disabled, so this target carries
-    # its own dependency rather than relying on a sibling's implementation detail.
+    # The descriptor loader and UHD parser include <nlohmann/json.hpp> directly, even when the
+    # FlatBuffers SDK's optional JSON helpers are disabled.
     if(NOT TARGET nlohmann_json::nlohmann_json)
         hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
     endif()

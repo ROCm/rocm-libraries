@@ -51,10 +51,8 @@ TEST(TestFeatureExtractor, ChangingAnInlineComputationChangesTheContract)
     EXPECT_NE(FeatureExtractor::computeHash({"$q.batch", "$kernel.tile_m"}),
               FeatureExtractor::computeHash({"$kernel.tile_m", "$q.batch"}));
 
-    // Same operator, same operands, permuted -- the case a canonicalization that sorted
-    // operand arrays would let through while the two expressions compute reciprocals of
-    // each other. §6.5's reason for folding the encoding into the hash is this one: what
-    // the model consumes must not be able to change while the fingerprint reads the same.
+    // Permuted operands compute reciprocals, so the hash must not sort operand arrays
+    // (RFC 0019 §6.5).
     EXPECT_NE(FeatureExtractor::computeHash({json::parse(R"({"/":["$q.flops","$q.bytes"]})")}),
               FeatureExtractor::computeHash({json::parse(R"({"/":["$q.bytes","$q.flops"]})")}));
 }

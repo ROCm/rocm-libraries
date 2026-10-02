@@ -64,10 +64,8 @@ endfunction()
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
 #   a concrete gfx name. <out_source_var> receives the name of the variable the
 #   targets came from, or empty when neither is set, so a caller can name it in a
-#   diagnostic. <out_rejected_var> receives the entries that were dropped, so a
-#   caller can tell "nothing was asked for" (legal: pack nothing) apart from
-#   "everything asked for was unusable" (a misconfiguration) -- see
-#   hkp_diagnose_no_arches. No intersection with a fixed fixture set: the tool
+#   diagnostic. <out_rejected_var> receives the dropped entries (see
+#   hkp_diagnose_no_arches). No intersection with a fixed fixture set: the tool
 #   compiles from authored sources for whatever arch is requested.
 #
 #   The only consumer of GPU_TARGETS in dnn-providers/. The sibling kpack
@@ -118,18 +116,9 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_diagnose_no_arches(<what> <required> <source_var> <rejected>)
-#   Report an empty architecture list for the two cases that mean different
-#   things, and pick the severity the caller can live with.
-#
-#   REJECTED non-empty is always fatal, whatever the caller could tolerate: the
-#   build was pointed at targets it cannot pack -- a TheRock family name like
-#   gfx94X-dcgpu where a concrete gfx belongs -- and every one of them was
-#   dropped. Warning there produces a green build that packs an EMPTY tree and
-#   says so nowhere. That is the failure this guard exists to prevent.
-#
-#   Nothing requested at all is not a misconfiguration, only an absence. It is
-#   fatal when the caller REQUIRED a list (it has roots to pack and no way to
-#   pack them) and a warning when the caller can proceed with nothing.
+#   Diagnose an empty architecture list. Non-empty REJECTED is always fatal
+#   (e.g. a family name like gfx94X-dcgpu would silently pack an empty tree).
+#   Nothing requested is fatal only when <required>, otherwise a warning.
 # ---------------------------------------------------------------------------
 function(hkp_diagnose_no_arches what required source_var rejected)
     if(rejected)
@@ -141,8 +130,7 @@ function(hkp_diagnose_no_arches what required source_var rejected)
             "gfx942) in ${source_var}. A family name like gfx94X-dcgpu is valid "
             "only for the ROCm wheel extra, never for ${source_var}.")
     endif()
-    # string(CONCAT), not a multi-argument set(): the latter builds a LIST, and
-    # interpolating it back into a message joins the parts with a semicolon.
+    # string(CONCAT), not set(): a multi-argument set() builds a ;-joined list.
     if(source_var)
         string(CONCAT _asked
             "${source_var} (${${source_var}}) resolves to an empty architecture "
@@ -166,12 +154,9 @@ endfunction()
 # ---------------------------------------------------------------------------
 # _hkp_resolve_stage_files(<out_sources> <out_commands> <out_manifest> <name> <out_root>
 #                          [<src> <dest>]...)
-#   Resolve hkp_wire_pack_target's STAGE_FILES pairs into the pack command's inputs
-#   (<out_sources>), the COMMAND steps that create the destination directories and copy
-#   each file (<out_commands>), and one "<src> -> <dest>" line per pair for the input
-#   manifest (<out_manifest>). Each <dest> is relative to <out_root>. Resolved at
-#   configure time so a malformed list fails the configure rather than shipping a tree
-#   with a file missing or written outside <out_root>.
+#   Resolve STAGE_FILES pairs into pack inputs (<out_sources>), COMMAND steps that
+#   copy each file (<out_commands>), and "<src> -> <dest>" manifest lines
+#   (<out_manifest>). Each <dest> is relative to <out_root> and must stay inside it.
 # ---------------------------------------------------------------------------
 function(_hkp_resolve_stage_files out_sources out_commands out_manifest name out_root)
     set(_pairs ${ARGN})
@@ -217,18 +202,10 @@ endfunction()
 # _hkp_write_input_manifest(<out_var> <name> [<entry>]...)
 #   Write root <name>'s sorted input set to a manifest file and return its path.
 #
-#   A pack edge's globbed inputs cover an added or edited file but not a REMOVED one: a
-#   shorter DEPENDS list makes no input newer and changes no command, so the edge would
-#   stay clean, the wipe would never fire, and the staged copy of a deleted descriptor
-#   would survive an incremental build.
-#
-#   This manifest puts the input SET into the edge. Its content changes when a path
-#   leaves either glob, or a STAGE_FILES pair is dropped or retargeted, which makes it
-#   newer than the stamp and forces the pack. file(CONFIGURE) rewrites only when the
-#   content differs, so an unchanged tree does not repack on every configure. It lives
-#   in the binary dir rather than under the output root because the pack command wipes
-#   that tree -- a dependency deleted by the command it guards would make every build
-#   repack. @ONLY because the body is paths, not a template.
+#   Globbed DEPENDS do not notice a REMOVED input, so this manifest puts the input
+#   set into the pack edge: it changes when a path or STAGE_FILES pair is dropped,
+#   forcing a repack. file(CONFIGURE) rewrites only on change. It lives outside the
+#   output root because the pack wipes that tree.
 # ---------------------------------------------------------------------------
 function(_hkp_write_input_manifest out_var name)
     set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${name}-inputs.txt")
@@ -236,8 +213,7 @@ function(_hkp_write_input_manifest out_var name)
     list(SORT _paths)
     string(REPLACE ";" "\n" _body "${_paths}")
     # cmake-lint: disable=E1126
-    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
-    #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
+    #   cmake-lint has no form spec for file(CONFIGURE), valid since CMake 3.18.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_body}\n" @ONLY)
     set(${out_var} "${_manifest}" PARENT_SCOPE)
 endfunction()
@@ -263,15 +239,10 @@ endfunction()
 #   test_arch_content/ in the build tree, and those two trees are installed
 #   wholesale by hip-kernel-provider/CMakeLists.txt.
 #
-#   STAGE_FILES delivers files the packer does not produce into OUT_ROOT: each
-#   <src> is copied to OUT_ROOT/<dest>, <dest> being relative to OUT_ROOT. They
-#   cannot be staged by a rule of their own, because the pack wipes OUT_ROOT: such
-#   a copy holds no edge to the pack, so a pack rerun by an edit to anything else
-#   it reads deletes the copy and nothing restores it. The copies are steps of the
-#   pack command instead, after the packer writes and before the stamp, and each
-#   <src> is an input of it -- so every pack restages them, an edit to one repacks,
-#   and the stamp vouches for them with the rest of the tree. <dest> must not name
-#   a path the packer writes, and may neither be rooted nor climb out of OUT_ROOT.
+#   STAGE_FILES copies each <src> to OUT_ROOT/<dest> as steps of the pack command,
+#   after the packer and before the stamp: the pack wipes OUT_ROOT, so a separate
+#   copy rule would be deleted on repack. <dest> must not name a path the packer
+#   writes, and may neither be rooted nor climb out of OUT_ROOT.
 #
 #   A source root that is not a directory, or a missing output root, is a
 #   configure error: each one makes the pack step write nothing, and a consumer
@@ -298,20 +269,12 @@ endfunction()
 #   roots name a small cap so their pools do not multiply, and the product root
 #   omits it because it is the root expected to be large enough to repay a full pool.
 #
-#   An empty ARCHES still wires the target, because the roots that follow it in
-#   hkp_add_packaging take target-level dependencies on this one and a skipped
-#   root would leave those dangling. It is diagnosed instead: REJECTED carries
-#   what hkp_selected_arches threw out, so "a family name was named here" is
-#   told apart from "nothing was asked for" -- see hkp_diagnose_no_arches. The
-#   ingestor's own gate (hkp_require_ingestor_toolchain) is stricter and fails
-#   the configure before any root is wired, so this only fires for a root wired
-#   outside that gate.
+#   An empty ARCHES still wires the target, because later roots in
+#   hkp_add_packaging depend on it; it is diagnosed via hkp_diagnose_no_arches.
 #
-#   NAME is also the source label the packer writes into every descriptor's
-#   provenance. The function records NAME, the absolute SOURCE_ROOT, OUT_ROOT and
-#   ARCHES in a global registry, which hkp_verify_embedded_sources() reads to
-#   resolve a descriptor's authored location and hkp_register_census_tests() reads
-#   to find the shard a suite censuses.
+#   NAME is also the source label written into every descriptor's provenance.
+#   NAME, SOURCE_ROOT, OUT_ROOT and ARCHES are recorded in a global registry read
+#   by hkp_verify_embedded_sources() and hkp_register_census_tests().
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES REJECTED HIPCC ROCM_KPACK_DIR
@@ -428,8 +391,8 @@ function(hkp_wire_pack_target)
     # the stamp alone, and installs as an empty directory: the install rules exclude the
     # stamp file, not the directory it sits in.
     #
-    # STAGE_FILES copies land between the packer and the stamp, so a pack that fails
-    # before them leaves no stamp, and a stamp never vouches for a tree missing them.
+    # STAGE_FILES copies run before the stamp, so a stamp never vouches for a tree
+    # missing them.
     add_custom_command(
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
@@ -989,9 +952,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_require_ingestor_toolchain(<out_arches> <out_rejected>)
 #   Assert what the ingestor needs to pack anything -- hipcc, a non-empty gfx
-#   list, and the rocke wheel supply -- and return the architecture list along
-#   with the requested targets hkp_selected_arches threw out. Set HKP_HIPCC as a
-#   side effect.
+#   list, and the rocke wheel supply -- and return the architecture list and the
+#   targets hkp_selected_arches rejected. Sets HKP_HIPCC as a side effect.
 #
 #   Without hipcc or a gfx list the packer creates no output root at all, and a
 #   consumer of a packed root reports that as a broken layout rather than as a
@@ -1003,10 +965,7 @@ endfunction()
 #   hkp_rocke_wheel_python_interp populates does not exist until the build runs;
 #   imports are asserted there under the environment the pack step will use.
 #
-#   The gfx list is REQUIRED here: every root this build wires packs for it, so
-#   an empty one leaves nothing to pack and nothing to test. Which of the two
-#   empty cases it is decides the remedy, so the diagnosis is left to
-#   hkp_diagnose_no_arches rather than spelled a second time.
+#   The gfx list is REQUIRED: every root this build wires packs for it.
 
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches out_rejected)
@@ -1435,37 +1394,25 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # _hkp_wire_pointwise_model_pack(<arches> <rocm_kpack_dir> <unit_root> [<rocke args>...])
-#   Assemble the pointwise_model test set -- authored descriptors plus the UHD and model
-#   that uhd_model_gen generates -- into its stage root, pack it into <unit_root>, and
-#   place the model artifact beside the packed descriptor for every arch in <arches>.
-#   Split out of hkp_add_packaging() because it is the one set built rather than
-#   authored; the trailing arguments are the rocKE keyword list for hkp_wire_pack_target.
+#   Stage the pointwise_model set (authored descriptors plus the UHD and model that
+#   uhd_model_gen generates), pack it into <unit_root>, and place the model beside the
+#   packed descriptor for every arch. Trailing arguments are hkp_wire_pack_target's
+#   rocKE keywords.
 # ---------------------------------------------------------------------------
 function(_hkp_wire_pointwise_model_pack arches rocm_kpack_dir unit_root)
-    # The one set whose source root is built rather than authored: pointwise_model's
-    # heuristic is a generated model, and the descriptor naming it is generated with it so
-    # `features_hash` cannot drift. Assembled here, then packed like any other root.
-    #
     # Created at configure time because hkp_wire_pack_target refuses a SOURCE_ROOT that is
-    # not a directory, and the copies below only run at build time. The packer walks the
-    # root when it runs, so a root that is empty at configure and filled by the build is
-    # read correctly -- what the configure-time glob inside that function misses is the
-    # retrigger edge, which the explicit dependency below supplies instead.
+    # not a directory; the build fills it.
     file(MAKE_DIRECTORY "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}")
 
-    # The kernel source is staged at CONFIGURE time, unlike the descriptors beside it. Kernel
-    # embedding reads it with file(READ) while configuring, and hkp_verify_embedded_sources()
-    # requires the embedded file to come from inside this pack's SOURCE_ROOT -- so a copy that
-    # only appeared during the build would be unreadable when it is needed and in the wrong
-    # place when it is checked. Editing it therefore needs a reconfigure, which is already
-    # true of every embedded kernel.
+    # Staged at configure time: kernel embedding file(READ)s it while configuring, and
+    # hkp_verify_embedded_sources() requires it inside SOURCE_ROOT. Edits need a
+    # reconfigure.
     file(COPY "${HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR}/kernels"
          DESTINATION "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}")
 
     set(_pointwise_model_staged)
-    # Every authored file of the set, listed rather than globbed: a root is packed and
-    # validated whole, so a descriptor missing from here is an unresolved reference at pack
-    # time rather than a file that quietly does not ship.
+    # Listed rather than globbed, so a missing descriptor fails the pack as an unresolved
+    # reference instead of silently not shipping.
     foreach(_authored_file IN ITEMS
             pointwise_model.kmd.json
             pointwise_model.ued.json
@@ -1473,8 +1420,7 @@ function(_hkp_wire_pointwise_model_pack arches rocm_kpack_dir unit_root)
             pointwise_model_add.kdp.json
             operation_is_add.umd.json
             kernel_dtype_matches_graph.umd.json)
-        # make_directory first: an entry may name a subdirectory, and copy_if_different does
-        # not create the parent. It is a no-op for the flat entries.
+        # copy_if_different does not create the parent directory.
         get_filename_component(_authored_subdir "${_authored_file}" DIRECTORY)
         add_custom_command(
             OUTPUT "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_file}"
@@ -1490,19 +1436,8 @@ function(_hkp_wire_pointwise_model_pack arches rocm_kpack_dir unit_root)
              "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_file}")
     endforeach()
 
-    # Both outputs of one command because one run writes both, and the descriptor is only
-    # meaningful beside the model whose hash it carries.
-    #
-    # Two arguments: the output directory, then the descriptor roots to snapshot
-    # provenance from. The generated UHD records the UED/KMD/UMD revisions it was trained
-    # against, and uhd_model_gen resolves them by loading a catalog -- it fails outright
-    # when the set's UED is not in any supplied root. The stage dir is both, because this
-    # set's authored descriptors are staged into the same folder the generated pair lands
-    # in.
-    #
-    # Those staged copies are therefore INPUTS, not just siblings: without the file-level
-    # edge the generator is free to run uhd_model_gen before the copies and the provenance
-    # lookup finds no catalog at all.
+    # uhd_model_gen <out_dir> <descriptor roots>: it resolves the UED/KMD/UMD provenance
+    # from the staged authored copies, so those are file-level inputs, not just siblings.
     set(_pointwise_model_generated
         "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.uhd.json"
         "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.bin")
@@ -1528,21 +1463,14 @@ function(_hkp_wire_pointwise_model_pack arches rocm_kpack_dir unit_root)
         ${ARGN}
         PACK_JOBS 1)
 
-    # The edge the configure-time glob cannot carry: the source root is empty when that
-    # glob runs, so without this the pack could be scheduled before the root is filled and
-    # would pack nothing -- a root with no descriptors being a legal pass.
+    # The configure-time glob sees an empty root, so it cannot order the pack after the
+    # root is filled; without this the pack could run first and pack nothing.
     add_dependencies(hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
                      hkp_pointwise_model_source)
 
-    # The model artifact has to land beside the descriptor that names it. The packer moves
-    # descriptors and kpack archives; a heuristic's model file is neither, so it is placed
-    # here, per arch, after the pack has written that arch's folder.
-    #
-    # Sequenced on the pack's stamp rather than on the target, because the pack wipes and
-    # refills OUT_ROOT: a copy that ran first would be deleted, and the descriptor would
-    # name an artifact that is not there. The loader treats that as a model it cannot read
-    # and ranks by declared order instead -- correct by §5 step 7, and indistinguishable
-    # from having no model at all, which is why it must not be left to chance.
+    # The packer does not move model files, so place the model beside its descriptor per
+    # arch, after the pack: the pack wipes OUT_ROOT, and a missing model silently falls
+    # back to declared order (§5 step 7).
     set(_pointwise_model_artifacts)
     foreach(_arch IN LISTS arches)
         add_custom_command(
@@ -1561,10 +1489,8 @@ function(_hkp_wire_pointwise_model_pack arches rocm_kpack_dir unit_root)
         DEPENDS ${_pointwise_model_artifacts}
         COMMENT "hkp: placing the pointwise_model artifact beside its descriptor")
 
-    # Ordered on the packaging TARGET, not on its stamp file. Depending on the stamp would
-    # copy that rule -- and the whole chain behind it, down to the shared rocKE venv -- into
-    # this target's build.make as well, and make will run a rule it finds in two files twice
-    # at once. That showed up as a pack importing rocke while the venv was still installing.
+    # Ordered on the packaging TARGET, not its stamp: depending on the stamp would copy
+    # that rule chain into this target's build.make, and make would run it twice at once.
     add_dependencies(hkp_pointwise_model_artifact
                      hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET})
 endfunction()
@@ -1586,10 +1512,8 @@ endfunction()
 #   packer's hard failure. Root set but not a directory = fatal. The tests are wired
 #   regardless.
 #
-#   HIPKERNELPROVIDER_PRODUCT_STAGE_FILES, set by the caller, is the product pack's
-#   STAGE_FILES list: content outside the production source root that must ship in the
-#   production tree. A dormant product pack stages nothing, so the caller delivers that
-#   content itself then.
+#   HIPKERNELPROVIDER_PRODUCT_STAGE_FILES is the product pack's STAGE_FILES list. A
+#   dormant product pack stages nothing, so the caller then delivers that content itself.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -1796,11 +1720,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
-    # Every entry above is add_test()'d in this scope, so the YAML's
-    # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
-    # avoided: apply_ctest_category_labels joins it with ';', which execute_process
-    # re-splits into separate argv, leaking a second name into the parser's
-    # positional install-file slot.
+    # EXPLICIT_TESTS is avoided: apply_ctest_category_labels joins it with ';', which
+    # execute_process re-splits into separate argv.
     if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
        AND COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")

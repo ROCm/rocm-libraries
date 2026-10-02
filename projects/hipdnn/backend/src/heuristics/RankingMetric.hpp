@@ -14,9 +14,7 @@ namespace hipdnn_backend::heuristics
 {
 
 /// @brief The registered ranking metric named @p name, or the default for an empty name.
-/// @throws HipdnnException HIPDNN_STATUS_BAD_PARAM for a name the registry does not know.
-///         RFC 0019 §4.4 refuses an unknown metric where the request is made: it has no
-///         direction to rank by, and answering in another metric would invent a number.
+/// @throws HipdnnException HIPDNN_STATUS_BAD_PARAM for an unregistered name (RFC 0019 §4.4).
 inline const hipdnn_data_sdk::utilities::RankingMetric& resolveRankingMetric(std::string_view name)
 {
     const auto effective = name.empty() ? hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC : name;

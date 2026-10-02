@@ -3,12 +3,9 @@
 
 /**
  * @file TestEngineQueries.cpp
- * @brief Frontend unit tests for the ranking-metric side of the engine prediction queries.
+ * @brief Frontend tests for the ranking metric in the engine prediction queries.
  *
- * Drives detail::getEnginePrediction and detail::getPredictionCapabilities through
- * Mock_hipdnn_backend. The mock answers each query from the metric the frontend set on
- * the queried descriptor, so what is asserted is the round trip: the metric reaches the
- * backend on the descriptor that defines the kind, and the answer is held to it.
+ * Mock_hipdnn_backend answers from the metric set on the queried descriptor.
  */
 
 #include <gmock/gmock.h>
@@ -181,8 +178,7 @@ TEST_F(TestEngineQueries, UnregisteredMetricIsRejectedBeforeAnyBackendCall)
     }
 }
 
-// An answer in another metric is a different quantity, not a stale one: it is refused
-// rather than converted or passed through under the requested name.
+// Refused rather than converted or passed through under the requested name.
 TEST_F(TestEngineQueries, AnswerInAnotherMetricIsRejected)
 {
     _respond = [](PredictionKind, const std::string&) {
@@ -227,8 +223,7 @@ TEST_F(TestEngineQueries, AvailableValueIsValidatedAgainstTheMetric)
               ErrorCode::HIPDNN_BACKEND_ERROR);
 }
 
-// Capabilities report exactly the (kind, metric) pairs with a bound, non-INVALID model:
-// an unbound metric and an INVALID binding are both left out.
+// Unbound metrics and INVALID bindings are both left out.
 TEST_F(TestEngineQueries, CapabilitiesListBoundModelsPerKindAndMetric)
 {
     _respond = [](PredictionKind kind, const std::string& metric) {
@@ -289,10 +284,8 @@ TEST_F(TestEngineQueries, CapabilitiesNeverEvaluateAModel)
     EXPECT_THAT(evaluateFlags, Each(0));
 }
 
-// Union payloads are optional in FlatBuffers: a KnobSetting tagged IntValue, FloatValue or
-// StringValue with no payload table verifies, and its typed accessor returns null. Both
-// decoders must report that as an error. Falsifying mutation: dereference
-// value_as_IntValue() (etc.) unchecked again, as both decoders did, and these crash.
+// A KnobSetting tagged with no payload table verifies, and its typed accessor returns
+// null; both decoders must report that as an error.
 constexpr std::array<fb::KnobValue, 3> TAGGED_KNOB_VALUES{
     fb::KnobValue::IntValue, fb::KnobValue::FloatValue, fb::KnobValue::StringValue};
 

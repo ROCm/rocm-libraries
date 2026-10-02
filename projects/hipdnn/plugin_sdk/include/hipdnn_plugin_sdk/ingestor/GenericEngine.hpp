@@ -87,17 +87,10 @@ public:
             throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + *undeclared
                                         + "', which its metadata schema does not declare");
         }
-        // RFC 0019 §3.1: the UED's role map is this engine's L1 binding, and it lives in
-        // the loader's resolution rather than in the UHD the map names. The metric is the
-        // one each UHD declares, by which the loader keyed it.
-        //
-        // §4.1 `trained_against.selector_revision` is checked here exactly as the loader's
-        // resolveDeclaredEnginePredictions checks it for an engine with no descriptors. The
-        // loader proved only the descriptors' provenance, while the selector this engine
-        // computes (MakeEngine.hpp's engineSelectorRevision) also covers its rankers, packs,
-        // kernels and native symbols. An L1 estimate is compared across engines, so a model
-        // measured against another selector does not merely misreport a number -- it changes
-        // which engine is chosen.
+        // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
+        // §4.1 selector_revision is re-checked here because this engine's selector also covers
+        // its rankers, packs, kernels and native symbols; an L1 model measured against another
+        // selector changes which engine is chosen.
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
@@ -127,9 +120,8 @@ public:
                 }
             }
         }
-        // A UED named this (metric, architecture)'s model and the loader refused it: RFC 0019
-        // §11.2's distrust signal, which is a claim ("do not pick me") rather than the
-        // silence an engine with no model at all reports.
+        // RFC 0019 §11.2: a refused, explicitly named model reports distrust ("do not pick
+        // me"), unlike an engine with no model at all.
         for(const auto& [metric, arches] : unavailablePredictionArches)
         {
             for(const auto& arch : arches)
@@ -216,10 +208,8 @@ public:
     }
 
     /// @brief L1 uses only graph bindings; L2 returns the calibrated ranker's exact candidate.
-    ///
-    /// Both answer in the metric @p config carries (RFC 0019 §11.4), and every response names
-    /// it, whatever its status. An unregistered metric is the caller's error, not an absent
-    /// estimate, so it throws BAD_PARAM rather than reporting UNAVAILABLE.
+    /// Answers are in @p config's metric (RFC 0019 §11.4), named on every response. An
+    /// unregistered metric throws BAD_PARAM rather than reporting UNAVAILABLE.
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle& handle,
                       const IGraph& graph,
@@ -259,8 +249,7 @@ public:
         if(!result.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(result.binding_json);
-            // The descriptor set this engine loaded from, which is what a staleness check
-            // compares the model's own trained_against against.
+            // The loaded descriptor set, which a staleness check compares trained_against to.
             for(const auto& dependency : _provenance.items())
             {
                 binding["trained_against"][dependency.key()] = dependency.value();
@@ -271,10 +260,8 @@ public:
         {
             result.kind = PredictionKind::CONFIGURATION;
             result.status = PredictionStatus::UNAVAILABLE;
-            // The model a configuration prediction evaluates is the L2 ranker's, not the L1
-            // model the binding above named. Clearing the id instead -- which this did -- left
-            // getPredictionCapabilities unable to list any L2 model, since a capability is a
-            // description that names one. Read off the bindings: describing ranks nothing.
+            // Names the L2 ranker's model, not the L1 binding's, so capabilities can list it.
+            // Read off the bindings: describing ranks nothing.
             result.uhd_id = _stateManager->calibratedModelId(metric, arch);
             result.reason = "Exact configuration prediction was not evaluated";
             if(!result.binding_json.empty())

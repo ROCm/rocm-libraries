@@ -14,22 +14,11 @@
 
 /// @file ArgumentResolver.hpp
 /// @brief Turning a problem point into a builder's arguments (RFC 0019.13 §4.3.6).
-///
-/// The corpus is parameter dictionaries; benchmarking needs a graph. This is the half of that
-/// gap that can be closed without a graph library: resolving each declared argument to a
-/// concrete value, in declaration order, so `strides_of` can refer to a dims list already
-/// resolved.
-///
-/// Kept separate from the dispatch that calls the builder because the two fail differently and
-/// only one of them needs a device. A resolver bug -- a dims list assembled in the wrong order,
-/// strides computed against the wrong argument -- produces a graph that builds, benchmarks, and
-/// describes a different problem than the row says. That is worth testing against arithmetic,
-/// which is what this seam allows.
+/// Separate from builder dispatch so it can be tested without a device or graph library.
 namespace hipdnn_corpus_gen
 {
 
-/// A resolved argument, in the shapes the builders take: dims and strides lists, a dtype name,
-/// or a scalar.
+/// A dims/strides list, a dtype name, or a scalar.
 using ResolvedValue = std::variant<std::vector<int64_t>, std::string, int64_t, double, bool>;
 
 struct ResolvedArgument
@@ -64,7 +53,7 @@ struct ArgumentResolution
 namespace detail
 {
 
-/// Row-major contiguous strides for @p dims, which is what `strides_of` means (§4.3.6).
+/// Row-major contiguous strides for @p dims (`strides_of`, §4.3.6).
 inline std::vector<int64_t> rowMajorStrides(const std::vector<int64_t>& dims)
 {
     std::vector<int64_t> strides(dims.size(), 1);
@@ -81,7 +70,7 @@ inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& po
     hipdnn_plugin_sdk::uhd::VariableContext context;
     for(const auto& entry : point)
     {
-        // entry rather than a structured binding: capturing one in a lambda is C++20.
+        // Not a structured binding: capturing one in a lambda is C++20.
         const auto& name = entry.first;
         std::visit([&context, &name](const auto& held) { context.bind("$q." + name, held); },
                    entry.second);
@@ -92,10 +81,7 @@ inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& po
 } // namespace detail
 
 /// @brief Resolves every argument of @p spec against @p point, in declaration order.
-///
-/// Declaration order is load-bearing rather than stylistic: `strides_of` reads an argument
-/// resolved earlier, so resolving out of order would silently produce strides for an empty
-/// dims list -- a rank-zero tensor that fails much later, somewhere unrelated.
+/// Order matters: `strides_of` reads an argument resolved earlier.
 inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const ProblemPoint& point)
 {
     ArgumentResolution resolution;
@@ -172,8 +158,7 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             }
             catch(const std::exception& error)
             {
-                // Fails closed, per §6.2: an unknown symbol or a type error is a metadata bug,
-                // and a substituted value would build a graph that disagrees with its label.
+                // Fail closed (§6.2): a substituted value would mislabel the graph.
                 resolution.error = "argument '" + argument.name + "': " + error.what();
                 return resolution;
             }
@@ -218,8 +203,7 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
                                    + "' is not a dtype name";
                 return resolution;
             }
-            // Left as the declared name; mapping to the FlatBuffers enumerator belongs with
-            // the dispatch, which is the only place that knows the enum exists.
+            // Kept as the declared name; the dispatch maps it to the FlatBuffers enum.
             resolved.value = *name;
             break;
         }

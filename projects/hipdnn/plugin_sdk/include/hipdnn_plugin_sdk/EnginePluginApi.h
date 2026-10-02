@@ -146,14 +146,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 /**
  * @brief Optional matched-catalog enumeration (engine plugin API 1.5.0).
  *
- * The engine config's explicit knob settings restrict the graph/device catalog.
- * offset is zero-based; limit must be in [1, 10000]. Returns EngineDetails with
- * candidate_page including total_count and offset. Stable candidate-ID order is
- * independent of heuristic ranking. An offset beyond total_count is an error.
- * Complete returned knob tuples must resolve uniquely to their candidate.
- *
- * Absence of this symbol or NOT_APPLICABLE means enumeration is unsupported,
- * not an empty catalog. Use DestroyEngineDetails to free a successful response.
+ * Explicit knob settings in engine_config restrict the catalog. offset is zero-based and
+ * must not exceed total_count; limit must be in [1, 10000]. Candidate order is stable and
+ * independent of ranking. An absent export or NOT_APPLICABLE means unsupported, not empty.
+ * Free a successful response with DestroyEngineDetails.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginEnumerateCandidates(hipdnnEnginePluginHandle_t handle,
@@ -166,30 +162,17 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 /**
  * @brief Describes or evaluates an engine UHD prediction (engine API 1.5.0).
  *
- * ENGINE predicts ordinary execution with tuning off, without enumerating or
- * scoring configurations. CONFIGURATION returns an engine ID and complete knob
- * settings identifying one configuration, with its predicted value.
- * Neither request may benchmark, tune, or execute GPU work.
- * Description requests publish the model binding and input features even when no
- * model is installed. A missing prediction never changes engine applicability.
+ * ENGINE predicts execution with tuning off; CONFIGURATION returns complete knob settings
+ * for one configuration. Neither may benchmark, tune, or run GPU work, and a missing
+ * prediction never changes applicability. The output `metric` is always
+ * engine_config.ranking_metric (empty = "tflops"; RFC 0019 §11.4); an engine with no
+ * model for it reports UNAVAILABLE. An unregistered metric is BAD_PARAM.
  *
- * The request names its ranking metric in engine_config.ranking_metric (empty means
- * "tflops"; RFC 0019 §11.4). The output's `metric` is always that metric, whatever the
- * status, and an AVAILABLE `value` is in its registered units. An engine with no model
- * for the metric reports UNAVAILABLE; it never answers in another metric, and the host
- * treats an answer in another metric as INVALID. An unregistered metric is BAD_PARAM.
- *
- * @param[in] handle Engine plugin handle.
- * @param[in] engine_config Serialized EngineConfig: selection constraints and metric.
- * @param[in] op_graph Serialized operation graph.
- * @param[in] kind Requested prediction layer.
  * @param[in] evaluate Zero for description only, one to evaluate the prediction.
- * @param[out] prediction Serialized EnginePrediction from engine_prediction.fbs.
- * The provider owns successful output until hipdnnEnginePluginDestroyEngineDetails
- * releases it. On failure, output must remain empty.
- *
- * @return SUCCESS with an AVAILABLE, UNAVAILABLE, or INVALID prediction, or a
- * parameter/operational error. An absent export or NOT_APPLICABLE means unsupported.
+ * @param[out] prediction Serialized EnginePrediction, freed with
+ * hipdnnEnginePluginDestroyEngineDetails; left empty on failure.
+ * @return SUCCESS with an AVAILABLE, UNAVAILABLE, or INVALID prediction, or an error.
+ * An absent export or NOT_APPLICABLE means unsupported.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetPrediction(hipdnnEnginePluginHandle_t handle,
@@ -235,9 +218,7 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @brief Creates an execution context for a specific engine configuration and an operation graph.
  *
  * An engine that chooses its own kernel here ranks its catalog by
- * engine_config.ranking_metric (empty means "tflops"; RFC 0019 §11.4), so a configuration
- * selected by `time` builds the kernel predicted fastest rather than the highest-throughput
- * one. Explicit knob settings still constrain that choice.
+ * engine_config.ranking_metric (empty = "tflops"), within any explicit knob settings.
  *
  * @param[in] handle The engine plugin handle.
  * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from

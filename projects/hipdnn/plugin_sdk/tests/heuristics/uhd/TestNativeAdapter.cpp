@@ -62,10 +62,7 @@ TEST(TestNativeScorerRegistry, DuplicateRegistrationRejected)
 
 TEST(TestNativeScorerRegistry, NullRegistrationDegradesRatherThanCrashes)
 {
-    // The shared ingestor registry accepts any T, including a null function
-    // pointer. NativeAdapter resolves through tryResolve, so a null entry reads
-    // as unresolved and selection degrades to static_order instead of calling
-    // through a null pointer.
+    // The registry accepts a null pointer; NativeAdapter must treat it as unresolved.
     const ScopedNativeScorer scope("null_scorer", nullptr);
 
     EXPECT_EQ(NativeAdapter::resolve("null_scorer", 3, "sha256:abc"), nullptr);
@@ -95,8 +92,7 @@ TEST(TestNativeAdapter, ResolvesAndScoresFeatureRow)
 
 TEST(TestNativeAdapter, UnresolvedSymbolReturnsNullForStaticOrderFallback)
 {
-    // Selection must degrade to static_order rather than fail the request
-    // (RFC 0019 §5), so an unresolved symbol is a null adapter, not a throw.
+    // An unresolved symbol degrades to static_order (RFC 0019 §5), so it is null, not a throw.
     EXPECT_EQ(NativeAdapter::resolve("never_registered", 3, "sha256:abc"), nullptr);
 }
 
@@ -117,8 +113,8 @@ TEST(TestNativeAdapter, FeatureCountMismatchThrows)
 
 TEST(TestNativeAdapter, ZeroFeatureCountSkipsRowValidation)
 {
-    // RFC 0019 §7.1 makes features_signature optional for this adapter: a
-    // scorer may featurize from the bindings instead of taking the row.
+    // features_signature is optional here: a scorer may featurize from the bindings
+    // (RFC 0019 §7.1).
     const ScopedNativeScorer scope(CONSTANT_SYMBOL, &constantScorer);
 
     auto adapter = NativeAdapter::resolve(CONSTANT_SYMBOL, 0, "");

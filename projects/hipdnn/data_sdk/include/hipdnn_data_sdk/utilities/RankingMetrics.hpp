@@ -20,10 +20,8 @@ enum class MetricDirection
 /**
  * @brief One registered ranking metric (RFC 0019 §4.4).
  *
- * The registry is closed and owned by hipDNN: the backend orders engines by these
- * values, so it must know each metric's direction and units rather than trusting the
- * model that produced the number. Adding a metric is a row here, not an ABI change;
- * requests and predictions carry the metric by name.
+ * The registry is closed: the backend needs each metric's direction to order engines.
+ * Adding a metric is a row here, not an ABI change.
  */
 struct RankingMetric
 {
@@ -32,8 +30,7 @@ struct RankingMetric
     MetricDirection direction;
 };
 
-/// The metric a request ranks by when it names none. Engine selection before metrics
-/// existed ranked by calibrated TFLOPS, so this default changes nothing for such a request.
+/// The metric a request ranks by when it names none.
 inline constexpr std::string_view DEFAULT_RANKING_METRIC = "tflops";
 
 inline constexpr std::array<RankingMetric, 2> RANKING_METRICS{{

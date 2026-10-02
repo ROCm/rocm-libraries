@@ -5,10 +5,7 @@
  * @file TestGraphBuilderRegistry.cpp
  * @brief Covers metadata to a real graph (RFC 0019.13 §4.3.6).
  *
- * This is the join that makes an operation addable by writing a file: a parameter dictionary
- * on one side, a builder that already exists on the other, and a declaration in between. What
- * is asserted is that the declaration is actually obeyed — a graph built from a stale default
- * rather than from the point is the failure mode, and it produces a perfectly good graph.
+ * The failure mode is a valid graph built from a builder default instead of the point.
  */
 
 #include <gtest/gtest.h>
@@ -67,7 +64,7 @@ OperationMetadata matmulMetadata()
     })");
 }
 
-/// Reads the graph back, which is the only way to check the declaration was obeyed.
+/// Reads the graph back to check the declaration was obeyed.
 const hipdnn_flatbuffers_sdk::data_objects::Graph* asGraph(const GraphBytes& bytes)
 {
     return hipdnn_flatbuffers_sdk::data_objects::GetGraph(bytes.data());
@@ -93,10 +90,7 @@ TEST(TestGraphBuilderRegistry, BuildsAGraphFromADeclarationAndAProblemPoint)
 
 TEST(TestGraphBuilderRegistry, TheProblemPointReachesTheTensors)
 {
-    // The assertion the whole layer exists for. A builder called with its defaults produces a
-    // graph that is valid, benchmarks fine, and has nothing to do with the corpus row naming
-    // it -- so it is not enough that a graph came back; the extents have to be the ones asked
-    // for.
+    // A builder run on its defaults also yields a valid graph; the extents must match the point.
     const ProblemPoint point{{"M", int64_t{128}},
                              {"N", int64_t{256}},
                              {"K", int64_t{64}},
@@ -113,8 +107,7 @@ TEST(TestGraphBuilderRegistry, TheProblemPointReachesTheTensors)
            && extents->Get(1) == 64)
         {
             sawA = true;
-            // dtype is a parameter of the problem, so it must arrive too -- not the builder's
-            // FLOAT default.
+            // Not the builder's FLOAT default.
             EXPECT_EQ(tensor->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
         }
     }
@@ -123,8 +116,6 @@ TEST(TestGraphBuilderRegistry, TheProblemPointReachesTheTensors)
 
 TEST(TestGraphBuilderRegistry, DtypeIsTakenFromTheProblemNotTheDefault)
 {
-    // Each declared dtype must reach the graph, or a corpus sweeping dtypes is really sweeping
-    // one and mislabelling the rest.
     for(const auto& [name, expected] :
         std::vector<std::pair<std::string, hipdnn_flatbuffers_sdk::data_objects::DataType>>{
             {"fp32", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT},
@@ -142,10 +133,8 @@ TEST(TestGraphBuilderRegistry, DtypeIsTakenFromTheProblemNotTheDefault)
 
 TEST(TestGraphBuilderRegistry, ArgumentsAreMatchedByNameNotByPosition)
 {
-    // §4.2's own worked example declares dims before strides while the builder it names takes
-    // (strides, dims, ...). Under positional dispatch that swaps a tensor's extents with its
-    // strides -- which builds, benchmarks, and is a different problem. Reordering the
-    // declaration must therefore change nothing.
+    // §4.2's example declares dims before strides, but the builder takes (strides, dims, ...);
+    // positional dispatch would swap them and still build.
     auto reordered = nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "matmul",
@@ -186,8 +175,7 @@ TEST(TestGraphBuilderRegistry, ArgumentsAreMatchedByNameNotByPosition)
 
 TEST(TestGraphBuilderRegistry, NamesTheBuilderItCannotFind)
 {
-    // §4.4 check 5. A metadata file naming an unregistered builder cannot produce a problem,
-    // and the message has to say which name so the fix is obvious.
+    // §4.4 check 5: the error must name the missing builder.
     auto unknown = nlohmann::json::parse(R"({
       "schema_version": "1.0", "operation": "x",
       "parameters": { "M": { "type": "int64" } },
@@ -205,8 +193,7 @@ TEST(TestGraphBuilderRegistry, NamesTheBuilderItCannotFind)
 
 TEST(TestGraphBuilderRegistry, DeclinesAnIncompleteDeclaration)
 {
-    // An adapter that filled in what the metadata omitted would be the same failure the
-    // resolver refuses, one layer down.
+    // Adapters must not fill in what the declaration omits.
     auto partial = nlohmann::json::parse(R"({
       "schema_version": "1.0", "operation": "matmul",
       "parameters": { "M": { "type": "int64" }, "K": { "type": "int64" } },
@@ -231,10 +218,7 @@ TEST(TestGraphBuilderRegistry, RegistersTheBuildersAMetadataFileMayName)
 
 TEST(TestGraphBuilderRegistry, EveryDataTypeTheBackendAcceptsCanBeNamed)
 {
-    // The backend converts eighteen types in both directions (DataTypeConversion.cpp); a
-    // hand-written copy of that list here named ten, so a declaration asking for fp4_e2m1 or a
-    // fnuz variant was refused exactly as a misspelling would be. A corpus cannot cover a dtype
-    // it cannot spell, and nothing in the output distinguishes "unsupported" from "unnameable".
+    // Every type DataTypeConversion.cpp converts; an unnameable dtype is refused like a typo.
     const std::vector<std::string> supported{"float",
                                              "double",
                                              "half",
@@ -259,32 +243,25 @@ TEST(TestGraphBuilderRegistry, EveryDataTypeTheBackendAcceptsCanBeNamed)
         EXPECT_TRUE(detail::dataTypeFor(name).has_value()) << name << " cannot be named";
     }
 
-    // The runtime's spellings, which are what the declarations use and what the corpus records.
+    // The runtime's spellings, used by declarations and recorded in the corpus.
     EXPECT_EQ(detail::dataTypeFor("fp32"), detail::dataTypeFor("float"));
     EXPECT_EQ(detail::dataTypeFor("fp16"), detail::dataTypeFor("half"));
     EXPECT_EQ(detail::dataTypeFor("bf16"), detail::dataTypeFor("bfloat16"));
     EXPECT_EQ(detail::dataTypeFor("fp64"), detail::dataTypeFor("double"));
 
-    // The numpy spellings are refused, not quietly accepted. Resolving them would build a valid
-    // graph and then write `float32` into the corpus's `q.dtype` column, so the
-    // `categorical_encoding` generated from that corpus would hold `float32` while the runtime
-    // binds `fp32` -- a spelling that corpus never held, with no code, refused at scoring.
-    // Failing here names the offending declaration instead.
+    // numpy spellings are refused: `float32` in `q.dtype` would not match the runtime's `fp32`
+    // at scoring time.
     EXPECT_FALSE(detail::dataTypeFor("float32").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float16").has_value());
     EXPECT_FALSE(detail::dataTypeFor("float64").has_value());
 
-    // And an unknown name is still a refusal rather than an untyped tensor.
     EXPECT_FALSE(detail::dataTypeFor("float17").has_value());
     EXPECT_FALSE(detail::dataTypeFor("unset").has_value());
 }
 
 TEST(TestGraphBuilderRegistry, EveryShippedDeclarationNamesABuilderThatExists)
 {
-    // A declaration naming a builder nobody registered produces no graphs and no error visible
-    // from a corpus run -- the operation just contributes nothing, which reads exactly like an
-    // engine that serves nothing. One declaration named a function that had been deleted and
-    // stayed that way, so this is a hard failure rather than a logged note.
+    // Otherwise the operation silently contributes nothing to a corpus run.
     const auto names = registeredBuilders();
 
     int declarationsSeen = 0;
@@ -311,10 +288,7 @@ TEST(TestGraphBuilderRegistry, EveryShippedDeclarationNamesABuilderThatExists)
 
 TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
 {
-    // The operation declared entirely in a file, exercised through the same path a corpus run
-    // uses. This is what "adding an operation is a metadata file" has to mean in practice, and
-    // it is checked against the shipped artifact rather than an inline copy so the file itself
-    // cannot rot.
+    // Uses the shipped file, through the same path as a corpus run.
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
     ASSERT_TRUE(file.good()) << "conv_fwd.opmeta.json is not where the build says it is";
 
@@ -348,7 +322,6 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
     const auto built = buildGraphFor(*parsed.metadata, conv1);
     ASSERT_TRUE(built.ok()) << built.error;
 
-    // The output extents must be the ones convolution defines, not the builder's defaults:
     // floor((224 + 6 - 6 - 1)/2) + 1 = 112.
     bool sawOutput = false;
     for(const auto* tensor : *asGraph(built.bytes)->tensors())
@@ -404,9 +377,7 @@ TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)
 
 TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
 {
-    // The declaration's constraints must admit the convolutions the declaration's own regimes
-    // describe. A relation that is too strong empties the corpus silently -- the generator
-    // reports no problems, which reads as an engine that serves nothing.
+    // Overly strong constraints would silently empty the corpus.
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/conv_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
@@ -438,7 +409,6 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
     EXPECT_TRUE(detail::satisfiesConstraints(*parsed.metadata, resnetLayer3))
         << "the shipped declaration rejects a 3x3 filter on a 28x28 input";
 
-    // And must reject one that genuinely does not fit.
     auto tooLarge = resnetLayer3;
     tooLarge["R"] = int64_t{64};
     EXPECT_FALSE(detail::satisfiesConstraints(*parsed.metadata, tooLarge));
@@ -446,16 +416,8 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionAdmitsARealLayer)
 
 TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
 {
-    // The contract that justifies owning these builders rather than borrowing the test SDK's.
-    //
-    // A fixture may accept a parameter and ignore it -- createValidLayernormFpropGraph takes
-    // inputDataType and computeDataType and writes io=FLOAT, intermediate=HALF,
-    // compute=BFLOAT16 regardless -- and no test notices, because a fixture's job is to yield
-    // *a* valid graph. For a corpus it is fatal: the row records what was asked for, the
-    // hardware ran something else, and nothing downstream can tell.
-    //
-    // So: perturb one declared parameter at a time and require the emitted bytes to change.
-    // Mechanical, and it is the check that would have caught every instance of this class.
+    // Test SDK fixtures may ignore parameters (createValidLayernormFpropGraph ignores its
+    // dtypes), which is fatal for a corpus. Perturb each parameter and require the bytes change.
     for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
@@ -469,8 +431,7 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
                                  << (parsed.errors.empty() ? "" : parsed.errors.front());
         const auto& metadata = *parsed.metadata;
 
-        // A baseline every operation can build: a modest extent everywhere, the first declared
-        // value for each categorical. Validity is not required -- only that the bytes respond.
+        // Modest extents and the first categorical value; validity is not required.
         ProblemPoint baseline;
         for(const auto& parameter : metadata.parameters)
         {
@@ -491,8 +452,7 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
         const auto reference = buildGraphFor(metadata, baseline);
         if(!reference.ok())
         {
-            // No owned builder yet: reported by name so an unregistered operation is visible
-            // rather than quietly exempt from the contract.
+            // Logged so an operation without a builder is visible, not silently exempt.
             GTEST_LOG_(INFO) << metadata.operation << ": " << reference.error;
             continue;
         }
@@ -529,13 +489,8 @@ TEST(TestGraphBuilderRegistry, EveryDeclaredParameterReachesTheGraph)
 
 TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor)
 {
-    // The byte-difference check above is necessary and not sufficient: it catches a parameter
-    // ignored entirely, and misses one applied partially. That is exactly the LayerNorm
-    // fixture's failure -- dtype reaches the tensors, so the bytes change, while the graph
-    // header stays io=FLOAT, intermediate=HALF, compute=BFLOAT16 and the graph will not
-    // deserialize. Verified by mutation: reintroducing that bug leaves the byte check green.
-    //
-    // So a dtype_of argument is followed to where it must arrive.
+    // The byte check misses a dtype applied only partially (tensors but not the header), so
+    // follow dtype_of to the graph header.
     for(const auto& entry : std::filesystem::directory_iterator(HIPDNN_CORPUS_GEN_OPERATIONS_DIR))
     {
         if(entry.path().string().find(".opmeta.") == std::string::npos)
@@ -590,11 +545,8 @@ TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor
             EXPECT_EQ(graph->io_data_type(), *expected)
                 << metadata.operation << " with dtype=" << declared
                 << ": graph io_data_type does not follow the declaration";
-            // Compute type follows the declaration too, but the declaration may separate it
-            // from the operands: fp16 storage with fp32 accumulate is the ordinary mixed
-            // precision case, and MIOpen's convolution builder requires exactly that. So the
-            // expectation is whatever `computeDataType` names, falling back to the operand type
-            // when a declaration does not separate them.
+            // Compute type is `computeDataType` when declared (e.g. fp16 storage with fp32
+            // accumulate, which MIOpen convolution requires), else the operand type.
             auto expectedCompute = expected;
             for(const auto& argument : metadata.graphBuilder.arguments)
             {
@@ -614,10 +566,8 @@ TEST(TestGraphBuilderRegistry, ADeclaredDtypeReachesTheGraphHeaderAndEveryTensor
 namespace
 {
 
-/// SDPA declared with a causal-anchor axis, which is the only argument these three tests are
-/// about. The geometry is deliberately Sq < Sk, because that is the only regime where the two
-/// anchors mask different triangles and so the only regime where getting this wrong is a
-/// different problem rather than the same one spelled twice.
+/// SDPA with a causal-anchor axis. Sq < Sk, the only regime where the anchors mask
+/// different triangles.
 OperationMetadata sdpaAlignmentMetadata()
 {
     return load(R"({
@@ -690,9 +640,7 @@ TEST(TestGraphBuilderRegistry, TheCausalAnchorFollowsTheDeclarationNotTheSchemaD
 
 TEST(TestGraphBuilderRegistry, AnUndeclaredAnchorIsRefusedRatherThanReadAsTopLeft)
 {
-    // The reason this is not a default: at Sq < Sk the two anchors are different work, so a
-    // spelling nobody defined, read as TOP_LEFT, would build, benchmark and record a corpus of
-    // the wrong problem with no line anywhere saying so.
+    // At Sq < Sk the anchors are different work, so an unknown spelling must not default.
     const auto built = buildGraphFor(sdpaAlignmentMetadata(),
                                      ProblemPoint{{"alignment", std::string("middle")}});
 
@@ -702,8 +650,7 @@ TEST(TestGraphBuilderRegistry, AnUndeclaredAnchorIsRefusedRatherThanReadAsTopLef
 
 TEST(TestGraphBuilderRegistry, ADeclarationThatNeverHeardOfTheAnchorStillBuildsWhatItAlwaysBuilt)
 {
-    // TOP_LEFT is the schema default, so an unset argument must write the bytes a declaration
-    // predating this axis wrote -- otherwise every corpus id in flight would move.
+    // TOP_LEFT is the schema default; an unset argument must not change existing corpus ids.
     auto metadata = sdpaAlignmentMetadata();
     auto& arguments = metadata.graphBuilder.arguments;
     arguments.erase(std::remove_if(arguments.begin(),
@@ -725,13 +672,10 @@ TEST(TestGraphBuilderRegistry, ADeclarationThatNeverHeardOfTheAnchorStillBuildsW
 
 TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccept)
 {
-    // Three properties no device-free check would notice and each of which, on hardware,
-    // empties a live-engine corpus completely -- found that way, one at a time:
-    //  - fp32 compute: hip-kernel-provider's SdpaFwdPlanBuilder refuses any other
-    //    ("Compute data type must be FLOAT"), and the ingestor engines decline at graph_match;
-    //  - BSHD strides: rocKE's dense kernels take no stride kernargs, so its matcher declines
-    //    the row-major BHSD layout `strides_of` would give;
-    //  - an explicit attn_scale_value: rocKE requires one rather than guessing.
+    // Each of these is required by an engine and invisible to device-free checks:
+    //  - fp32 compute: hip-kernel-provider's SdpaFwdPlanBuilder and the ingestor engines need it;
+    //  - BSHD strides: rocKE's dense kernels take no stride kernargs;
+    //  - an explicit attn_scale_value: rocKE requires one.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
@@ -739,7 +683,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
 
-    // GQA and Sq != Sk, so a stride that used the wrong head count or sequence length shows.
+    // GQA and Sq != Sk, so a wrong head count or sequence length in a stride shows.
     const ProblemPoint point{{"batch", int64_t{2}},
                              {"heads", int64_t{8}},
                              {"heads_kv", int64_t{2}},
@@ -791,9 +735,8 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
 
 TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDeprecatedFlag)
 {
-    // Providers give causal_mask precedence over the bounds and read it as top-left whatever
-    // diagonal_alignment says, so a bottom-right problem built with the flag is top-left -- and
-    // AITER on gfx942, whose causal kernels are all bottom-right, declined every one.
+    // Providers let causal_mask override diagonal_alignment and read it as top-left, so a
+    // bottom-right problem must use bounds instead.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
@@ -831,8 +774,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
 
 TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
 {
-    // A present relu_upper_clip makes ReLU a clamp: written as 0 by default, every "ReLU" in
-    // the corpus was a clamp to [0, 0], which MIOpen accepts and computes as such.
+    // A present relu_upper_clip turns ReLU into a clamp.
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/pointwise_unary.opmeta.json");
@@ -860,8 +802,7 @@ TEST(TestGraphBuilderRegistry, AShippedUnaryActivationLeavesItsParametersUnset)
 
 TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
 {
-    // generate_stats without a stats tensor is a graph no engine can run; with the flag the
-    // statistics tensor is part of the graph and named by the node.
+    // generate_stats requires the stats tensor in the graph, named by the node.
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));

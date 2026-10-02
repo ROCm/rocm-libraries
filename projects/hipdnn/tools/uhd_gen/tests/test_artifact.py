@@ -60,9 +60,7 @@ def _artifact(path: Path, *, trees=None, grouped=False, identifier=b"HGBM") -> P
 
 
 def test_a_buffer_the_runtime_does_not_identify_as_a_gbdt_model_is_refused(tmp_path):
-    """`BufferHasIdentifier(buffer, "HGBM")` is the loader's first structural check; the
-    Python object API decodes a `NOPE` buffer happily, which is how evaluate reported
-    regret for bytes the engine would never load."""
+    """The runtime checks the `HGBM` identifier; the Python object API does not."""
     nope = _artifact(tmp_path / "model.bin", identifier=b"NOPE")
     with pytest.raises(ValueError, match="identifier"):
         verify_tree_artifact(nope, None)
@@ -117,9 +115,7 @@ def test_a_tree_the_runtime_cannot_prepare_is_refused(tmp_path):
 
 
 def test_a_buffer_the_flatbuffers_verifier_refuses_is_refused(tmp_path):
-    """`VerifyGbdtModelBuffer` runs before any accessor: a string whose NUL terminator is
-    gone still decodes through the generated Python accessors, and the runtime refuses it.
-    """
+    """`VerifyGbdtModelBuffer` refuses a string missing its NUL; Python does not."""
     path = _artifact(tmp_path / "model.bin")
     data = bytearray(path.read_bytes())
     end = data.index(b"sha256:0123456789abcdef") + len("sha256:0123456789abcdef")
@@ -142,8 +138,7 @@ def test_a_buffer_the_flatbuffers_verifier_refuses_is_refused(tmp_path):
 
 
 def test_an_artifact_whose_arity_is_not_its_signatures_is_refused(tmp_path):
-    """EnginePredictor and UhdKernelHeuristic refuse a model whose `num_features` differs
-    from its signature's slot count, whatever the features_hash says."""
+    """The runtime refuses `num_features` other than the signature's slot count."""
     path = _artifact(tmp_path / "model.bin")
     assert verify_tree_artifact(path, None, feature_count=2) == path.read_bytes()
     with pytest.raises(ValueError, match="num_features 2"):

@@ -5,25 +5,12 @@
  * @file HipdnnBench.cpp
  * @brief Runs one problem against one engine and reports its kernel times (RFC 0019.13 §5.3).
  *
- * The harvest end of corpus generation. A UHD is trained on rows of (problem, configuration)
- * -> time; the generator produces the problems, and this produces the rows.
+ * One process sweeps many configurations so plugin load, graph build and kernel compilation
+ * are paid once. Immediate collection runs the engine's normal plan with global.benchmarking
+ * disabled and never autotunes.
  *
- * One invocation, one problem, many rows -- one per configuration. That split is deliberate:
- * a corpus is 10^4-10^6 rows, and a process per row would pay plugin load, graph build and
- * kernel compilation for every one of them. Sweeping inside one process amortises all three.
- *
- * Candidate timing and immediate timing share hipDNN's stable-iteration statistics. Immediate
- * collection builds the requested engine's normal plan with global.benchmarking disabled and
- * never invokes autotune or candidate discovery. Prediction and description do not execute it.
- *
- * Two things this deliberately does not do:
- *
- *  - It does not write autotune's result file. That file keeps the rank-0 winner and replaces
- *    matching entries, which is right for a heuristic cache and backwards for training: a
- *    ranking model learns from the candidates that lost.
- *  - It does not tune in EXHAUSTIVE mode. That primes engines via `global.benchmarking`, and
- *    an engine given that knob selects a kernel itself -- so the row would not describe the
- *    configuration this tool pinned.
+ * Does not write autotune's result file (it keeps only the winner; ranking training needs the
+ * losers) and does not tune in EXHAUSTIVE mode (engines would then pick their own kernel).
  */
 
 #include <hipdnn_bench/CsvOutput.hpp>
@@ -68,10 +55,7 @@ using hipdnn_frontend::ErrorCode;
 using hipdnn_frontend::KnobSetting;
 using hipdnn_frontend::TuneMode;
 
-/// Generation-tool access to the finalized backend graph descriptor the engine-inspection
-/// attributes are read through. `Graph` keeps that accessor protected for internal and
-/// tooling use; re-exporting it in a derived type is the established convention
-/// (hipdnn_test_sdk::TestableGraph does the same).
+/// Exposes the protected finalized backend descriptor for engine-inspection queries.
 class BenchGraph : public hipdnn_frontend::graph::Graph
 {
 public:
@@ -109,8 +93,8 @@ struct Options
     bool enumerate = false;
     bool json = false;
     EngineMode engineMode = EngineMode::NONE;
-    /// Registered metric the prediction is asked in and immediate collection's engine
-    /// selects its kernel by. A label is only comparable with predictions in its metric.
+    /// Metric the prediction is made in and immediate collection selects its kernel by.
+    /// A label is only comparable with predictions in its metric.
     std::string rankingMetric{hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC};
     bool haveRankingMetric = false;
     bool havePageOptions = false;
@@ -118,17 +102,12 @@ struct Options
     int64_t limit = 10000;
     std::vector<std::pair<std::string, int64_t>> knobs;
     int maxIterations = 100;
-    /// Ten, not one. Measured: with a single warmup iteration the first timed run of a fresh
-    /// process came in at 0.038 ms against a steady state of 0.014 -- kernel compilation
-    /// landing inside the timed loop. That contaminates the first problem of every fleet
-    /// invocation, and it is invisible in the row: a compile is just a slower number.
+    /// Enough warmup to keep first-run kernel compilation out of the timed loop.
     int warmup = 10;
     float stability = 0.05F;
     std::string problemId;
 
-    /// The problem's declared parameters, as `name=value` pairs. Carried on the command line
-    /// rather than looked up, so a row is complete on its own: a timing whose q.* values live
-    /// in another file is a timing that can be joined to the wrong problem.
+    /// Declared problem parameters as `name=value` pairs, so each row is self-contained.
     std::vector<std::pair<std::string, std::string>> query;
 };
 
@@ -380,10 +359,7 @@ public:
     PackBuffers(PackBuffers&&) = delete;
     PackBuffers& operator=(PackBuffers&&) = delete;
 
-    /// Allocates and zero-fills device memory. Filled rather than left as whatever the device
-    /// held: on some hardware denormals and NaNs read from uninitialised memory are slower
-    /// than normal values, and a corpus row that recorded that would be measuring the
-    /// allocator.
+    /// Allocates zero-filled device memory; uninitialised denormals/NaNs can slow kernels.
     void* addDevice(int64_t bytes)
     {
         void* pointer = nullptr;
@@ -442,7 +418,6 @@ hipdnn_frontend::Error allocateVariantPack(const hipdnn_bench::VariantPackPlan& 
     return {};
 }
 
-/// One knob's value as text.
 std::string knobValue(const KnobSetting& setting)
 {
     std::ostringstream stream;
@@ -450,10 +425,8 @@ std::string knobValue(const KnobSetting& setting)
     return stream.str();
 }
 
-/// Every knob name any variant sets, sorted.
-///
-/// Collected across all results rather than from the first, because a variant may omit a knob
-/// it left at its default; a header taken from one row would then shift the columns of another.
+/// Every knob name any variant sets, sorted. Collected across all results because a variant
+/// may omit a knob left at its default.
 std::vector<std::string> kernelColumns(const std::vector<AutotuneResult>& results)
 {
     std::set<std::string> names;
@@ -611,11 +584,8 @@ nlohmann::json numericallyValid(hipdnn_bench::NumericalVerdict verdict)
 
 /// @brief Writes the validation fill into every input buffer of @p variantPack.
 ///
-/// Results are left at their zero fill: writing over one would hide the kernel that writes
-/// nothing -- the case leftOutputUntouched() exists to catch. A tensor of a type this build
-/// cannot encode exactly keeps its zero fill too: writing a code from a guessed exponent bias
-/// would put a NaN into an input, and a catalog that all computes NaN is condemned for a
-/// defect this tool introduced.
+/// Results keep their zero fill so a kernel that writes nothing is detectable. Types this
+/// build cannot encode exactly also keep zeros rather than risk filling NaNs.
 hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan,
                                        const std::unordered_map<int64_t, void*>& variantPack,
                                        uint64_t seed)
@@ -646,28 +616,11 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_bench::VariantPackPlan& plan
 }
 
 /// @brief Runs one candidate once, untimed, and copies back every non-virtual tensor it
-///        wrote -- its outputs, never its inputs (hipdnn_bench::crossCheckedOutputs).
+///        wrote (hipdnn_bench::crossCheckedOutputs), for the RFC 0019 §13.2 cross-check.
 ///
-/// RFC 0019 §13.2 admits a timing as a training label only once the candidate is known
-/// correct, and the check has to see the candidate's own output to say anything about it.
-/// Autotune cannot supply that: every variant it benchmarks writes into the one shared
-/// variant pack, so by the time it returns only the last writer's bytes survive.
-///
-/// A freshly deserialized graph per candidate, because `create_execution_plan_ext` refuses
-/// to run after `add_engine_variants` (Graph.hpp: "Cannot call create_execution_plan_ext()
-/// after add_engine_*()"), and the timing graph has had exactly that called on it.
-///
-/// The inputs are filled rather than left at the allocator's zeros. A graph run on zeros
-/// can still leave a non-zero output -- a bias, a normalisation epsilon, a mask fill -- and
-/// then every candidate agrees on an output that exercised nothing: a wrong reduction
-/// order, a wrong mask and a wrong tile boundary are all bit-identical on zero input, so
-/// `agrees_with_catalog` would be claiming more than was tested. The seed is the graph's
-/// and not the candidate's, so every candidate of one problem reads identical bytes, which
-/// is what makes their outputs comparable at all.
-///
-/// Untimed and outside the measurement loop: this execution never contributes to a row's
-/// timing, so the fill cannot move a number either, and its cost is one extra launch beside
-/// the warmup plus up to `--max-iterations` timed launches the same candidate already pays.
+/// Uses a fresh graph because create_execution_plan_ext() is refused after
+/// add_engine_variants(). Inputs get a per-graph seeded fill, so every candidate of one
+/// problem reads identical non-zero bytes.
 hipdnn_frontend::Error
     captureCandidateOutput(hipdnnHandle_t handle,
                            const std::vector<uint8_t>& graphBytes,
@@ -757,9 +710,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     }
     HIPDNN_CHECK_ERROR(hipError(hipStreamSynchronize(stream), "Warmup synchronization failed"));
 
-    // Unstalled, host-bracketed HIP events: this loop is not one of the stall-gated
-    // comparisons, so every sample reports TimingQuality::UNSTALLED and the pass below is
-    // run with stalled=false, which can never ask for a restart.
+    // Unstalled HIP events: run with stalled=false, so the loop never asks for a restart.
     const auto timeOnce = [&](hipdnn_frontend::ExecutionTiming& timing) -> hipdnn_frontend::Error {
         HIPDNN_CHECK_ERROR(hipError(hipEventRecord(start.get(), stream), "Could not start timing"));
         HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
@@ -774,9 +725,8 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
             return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
                     "HIP event timing must be finite and positive"};
         }
-        // A finite negative reading leaves `timing` INVALID with no elapsed time, the same
-        // shape execute_timed_ext() reports it in, so the loop re-measures the slot within
-        // its bounded retry budget instead of failing the whole collection on it.
+        // A negative reading leaves `timing` INVALID so the loop retries the slot instead of
+        // failing the collection.
         if(elapsed > 0.0F)
         {
             timing.elapsedMs = elapsed;
@@ -801,14 +751,10 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     output["min_time_ms"] = *std::min_element(outcome.timings.begin(), outcome.timings.end());
     output["avg_time_ms"] = hipdnn_data_sdk::utilities::detail::mean(outcome.timings);
     output["stddev_ms"] = hipdnn_data_sdk::utilities::detail::stddev(outcome.timings);
-    // `is_valid` says a measurement was obtained; it is not, and must not become, a
-    // numerical correctness assertion -- uhd_gen and RFC 0019 §8.1 both read it that way.
+    // `is_valid` means a measurement was obtained, never numerical correctness (RFC 0019 §8.1).
     output["is_valid"] = true;
-    // RFC 0019 §13.2's verdict, recorded rather than omitted. L1 measures the engine's one
-    // ordinary selection, so there is no second candidate to cross-check it against and no
-    // per-op reference to call (Open Question 19(a) is still open). `null` says exactly
-    // that; leaving the field out would let a consumer default it to "valid", which is the
-    // inverted oracle the section exists to prevent.
+    // RFC 0019 §13.2: one selection has nothing to cross-check against, so record null rather
+    // than omit the field (an absent field may be defaulted to "valid").
     output["numerically_valid"] = nullptr;
     output["validation"] = "no_reference: engine-immediate collection times one selection, "
                            "so there is no second candidate to cross-check it against";
@@ -825,11 +771,8 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
     }
     const bool collect = options.engineMode == EngineMode::COLLECT_IMMEDIATE;
     const bool evaluate = options.engineMode == EngineMode::PREDICT;
-    // User knob constraints describe an exact configuration, so they select the kind:
-    // an engine-level estimate is by definition unconstrained. The benchmarking pin this
-    // tool adds for its own execution is not such a constraint and is never queried with:
-    // the backend requires an exact-configuration prediction to preserve every requested
-    // knob, and an engine whose catalog has no global.benchmarking knob cannot.
+    // User knob constraints select CONFIGURATION prediction. The benchmarking pin this tool
+    // adds is excluded: engines without that knob could not honour it.
     std::vector<KnobSetting> queryConstraints;
     for(const auto& [name, value] : options.knobs)
     {
@@ -860,8 +803,7 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
                        {"stability_window", AutotuneConfig{}.windowSize},
                        {"stability_threshold", options.stability}});
     }
-    // Generation-tool surface: the descriptor attributes are driven directly, because
-    // engine inspection is not part of the consumer Graph API.
+    // Engine inspection is not part of the consumer Graph API, so use the descriptor directly.
     hipdnn_frontend::EnginePrediction description;
     auto error = hipdnn_frontend::detail::getEnginePrediction(graph.get_raw_graph_descriptor(),
                                                               options.engineId,
@@ -873,8 +815,7 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
     hipdnn_frontend::EnginePrediction prediction;
     if(error.is_good())
     {
-        // Evaluated predictions omit metadata on the policy hot path. The CLI publishes the
-        // authoritative description with the same constraints alongside the evaluated score.
+        // Evaluated predictions omit metadata, so publish the unevaluated description too.
         output["binding"] = std::move(description.binding);
         output["features"] = std::move(description.features);
         if(evaluate)
@@ -1002,9 +943,7 @@ int runBench(const std::vector<std::string>& args)
     }
     const hipdnn_data_sdk::utilities::ScopedResource ownedHandle(handle, hipdnnDestroy);
 
-    // A problem file is a serialized graph in either form: the generator writes the binary
-    // FlatBuffers a builder produces, while a hand-made or exported problem is often JSON.
-    // Distinguished by content rather than by extension, so a renamed file still loads.
+    // Detect JSON vs FlatBuffer by content, not extension.
     BenchGraph graph;
     const bool looksLikeJson = graphBytes.front() == static_cast<uint8_t>('{');
     const auto restored = [&]() -> Error {
@@ -1017,8 +956,7 @@ int runBench(const std::vector<std::string>& args)
             return graph.deserialize(handle, graphBytes);
         }
 
-        // L1 consumes only the graph: discard any embedded plan before attaching a handle.
-        // Re-serialize the restored graph rather than re-lowering its nodes, preserving its ID.
+        // Discard any embedded plan; re-serialize rather than re-lower to preserve the graph ID.
         HIPDNN_CHECK_ERROR(graph.deserialize(graphBytes));
         std::vector<uint8_t> problem;
         HIPDNN_CHECK_ERROR(graph.serialize(problem));
@@ -1171,8 +1109,7 @@ int runBench(const std::vector<std::string>& args)
     }
 
     AutotuneConfig config;
-    // STANDARD, not EXHAUSTIVE: see the file comment. An engine primed with the benchmarking
-    // knob picks its own kernel, and the row would then not describe the pinned configuration.
+    // STANDARD, not EXHAUSTIVE: see the file comment.
     config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
     config.warmupIterations = options.warmup;
@@ -1181,7 +1118,7 @@ int runBench(const std::vector<std::string>& args)
     config.engineIdFilter = {options.engineId};
 
     std::vector<AutotuneResult> results;
-    // Storage config deliberately left default (no file): it persists only the winner.
+    // No storage file: it would persist only the winner.
     const auto tuned
         = graph.autotune(handle, variantPack, workspace, workspaceSize, config, {}, &results);
     if(!tuned.is_good() && results.empty())
@@ -1192,19 +1129,9 @@ int runBench(const std::vector<std::string>& args)
 
     const std::string problemId = options.problemId.empty() ? options.graphPath : options.problemId;
 
-    // RFC 0019 §13.2's correctness gate: "A timing is only a training label once the
-    // candidate is known correct." Every candidate that produced a measurement is re-run
-    // once, untimed, and cross-checked against the rest of this problem's catalog. Runs
-    // after autotune rather than instead of it, because a candidate that cannot be timed
-    // has no label to protect and is not worth an execution.
-    //
-    // Index-aligned with `results`, so both the JSON and the CSV row read their verdict by
-    // position. The verdict is recorded on every row including the ones it cannot decide;
-    // an absent field would be read as "valid" by the first consumer that defaults it.
-    //
-    // Each capture is handed straight to the cross-check and never kept here: the images of
-    // a 60-candidate sweep do not fit in host memory, and CatalogCrossCheck holds one per
-    // distinct answer instead of one per candidate.
+    // RFC 0019 §13.2: re-run each measured candidate once, untimed, and cross-check it against
+    // the rest of the catalog. `verdicts` is index-aligned with `results`. Captures go straight
+    // to the cross-check, which keeps one image per distinct answer, not per candidate.
     std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
     hipdnn_bench::CatalogCrossCheck crossCheck(tensors);
     for(const auto& result : results)
@@ -1226,9 +1153,7 @@ int runBench(const std::vector<std::string>& args)
             captured.executed = ran.is_good();
             if(!ran.is_good())
             {
-                // A partial image is worse than none: a tensor missing from the map is
-                // skipped by the comparison, so half a read-back would silently narrow the
-                // check instead of declining it.
+                // Drop partial images: a missing tensor would silently narrow the check.
                 captured.failure = ran.get_message();
                 captured.images.clear();
             }
@@ -1240,12 +1165,8 @@ int runBench(const std::vector<std::string>& args)
     if(options.json)
     {
         auto output = pageJson(catalog);
-        // The enumerated catalog stays in a --sweep response. It was erased here, so a
-        // caller that wanted both the candidate set and its timings ran `enumerate` in a
-        // second process -- paying plugin load, graph build and enumeration twice for one
-        // graph, which is the cost --sweep exists to remove. A single-configuration --json
-        // run still drops it: there the caller named the tuple, so the page tells it
-        // nothing it did not already have.
+        // --sweep keeps the catalog so callers need not enumerate separately; a single
+        // configuration run drops it since the caller already named the tuple.
         if(!options.sweep)
         {
             output.erase("candidates");
@@ -1265,7 +1186,7 @@ int runBench(const std::vector<std::string>& args)
                 std::cerr << "Measured configuration was not an enrolled catalog candidate\n";
                 return 1;
             }
-            // Preserve existing is_valid semantics: measured, not numerical correctness.
+            // is_valid means measured, not numerically correct.
             const bool timed = result.succeeded && result.iterationsRun > 0;
             std::string reason;
             if(!result.succeeded)
@@ -1277,10 +1198,7 @@ int runBench(const std::vector<std::string>& args)
             {
                 reason = "not_timed: autotune reported success without running an iteration";
             }
-            // Three-valued, and a separate field from `is_valid`. `is_valid` answers "did we
-            // obtain a measurement", which uhd_gen and RFC 0019 §8.1 both depend on; folding a
-            // correctness verdict into it would make an unmeasured row and an incorrect row
-            // indistinguishable and break the coverage record §13.2 keeps deliberately.
+            // Separate from `is_valid` so an unmeasured row and an incorrect row stay distinct.
             const auto& verdict = verdicts[index];
             output["results"].push_back({{"candidate_id", candidate->id},
                                          {"knob_settings", knobJson(tuple)},
@@ -1303,10 +1221,7 @@ int runBench(const std::vector<std::string>& args)
         return results.empty() ? 2 : 0;
     }
 
-    // One column per feature, not a blob. RFC 0019.13 §7 keys a row on q.* and kernel.*, and
-    // uhd_gen hashes the header as the features signature -- so the header a harvest emits is
-    // the contract the model is trained against, and a `kernel.config` field packing several
-    // knobs into one string cannot be read as features at all.
+    // One column per knob: uhd_gen reads kernel.* columns as features and hashes the header.
     const auto kernelNames = kernelColumns(results);
 
     if(options.header)
@@ -1320,31 +1235,15 @@ int runBench(const std::vector<std::string>& args)
         {
             std::cout << ",kernel." << knob;
         }
-        // RFC 0019.13 §8.3 names the timing columns of the result envelope --
-        // `minTimeMs`, `avgTimeMs`, `stddevMs`, `iters` -- and reads them by name, so
-        // this header spells them that way and not in snake_case. `robustMeanMs` is not
-        // one of §8.3's columns but is the name `export-benchmarks` and the uhd_gen
-        // corpus already use for the same statistic; a second spelling for it would
-        // make a harvested CSV unreadable by `uhd_gen evaluate --target robustMeanMs`.
-        // `numerically_valid`/`validation` sit beside `is_valid`/`skip_reason` rather than
-        // replacing them: RFC 0019 §13.2 keeps a candidate that ran-but-is-wrong and a
-        // candidate that never ran as different facts, and one column cannot carry both.
-        // Three-valued text, not a boolean, so "not checked" cannot be read back as "valid".
+        // Timing column names follow RFC 0019.13 §8.3 (and `robustMeanMs` matches uhd_gen), so
+        // they are camelCase. `numerically_valid` is three-valued text, kept separate from
+        // `is_valid` (RFC 0019 §13.2).
         std::cout << ",engine,rank,succeeded,is_valid,numerically_valid,validation,skip_reason,"
                      "minTimeMs,avgTimeMs,robustMeanMs,stddevMs,iters,converged,workspace_bytes\n";
     }
 
-    // Every variant is emitted, including the ones that lost and the ones that failed. A
-    // ranking model is trained on the comparison, so a corpus of winners teaches it nothing;
-    // and a configuration that cannot run is a fact about the engine worth keeping.
-    //
-    // Read `rank` as advisory and train on the times. Configurations are routinely separated
-    // by less than run-to-run variation -- on gfx1100 the two conv block sizes came within
-    // 0.3% of each other and their order flipped between identical runs at every stability
-    // threshold tried, including an exact tie. That is not noise to be tightened away; there
-    // is no difference there to resolve. A model fitted to the winner would be fitting the
-    // coin flip, which is why RFC 0019.13 §5.6 ranks on per-problem normalised time and why
-    // `stddevMs` is emitted beside every measurement rather than folded into it.
+    // Emit every variant, including losers and failures: ranking needs the comparison.
+    // Treat `rank` as advisory; near-ties flip between runs, so train on times (§5.6).
     for(size_t index = 0; index < results.size(); ++index)
     {
         const auto& result = results[index];
@@ -1357,11 +1256,8 @@ int runBench(const std::vector<std::string>& args)
         {
             std::cout << "," << knobFor(result, knob);
         }
-        // RFC 0019.13 §7.4 / §8: a pair that was not timed is written with is_valid=False and
-        // a populated skip_reason rather than dropped. Pre-filtering saves benchmark time and
-        // destroys the record of what was filtered, which is the record coverage auditing
-        // needs -- "which variants were never eligible, and why" is unanswerable from a file
-        // containing only the ones that ran. Training excludes them by filtering on is_valid.
+        // RFC 0019.13 §7.4/§8: untimed pairs are kept with is_valid=False and a skip_reason
+        // for coverage auditing; training filters on is_valid.
         const bool timed = result.succeeded && result.iterationsRun > 0;
         std::string skipReason;
         if(!result.succeeded)
@@ -1371,8 +1267,7 @@ int runBench(const std::vector<std::string>& args)
         }
         else if(result.iterationsRun == 0)
         {
-            // Reported as a success with nothing measured. Emitting it as valid would put a
-            // zero time in the training set, which reads as an infinitely fast kernel.
+            // Emitting this as valid would put a zero time in the training set.
             skipReason = "not_timed: autotune reported success without running an iteration";
         }
 
@@ -1394,8 +1289,7 @@ int runBench(const std::vector<std::string>& args)
 
 int main(int argc, char* argv[])
 {
-    // The graph, the plugins and the device are all external input; a throw escaping main is
-    // a terminate with no diagnostic, which on a fleet is a row that silently never appears.
+    // Report escaping exceptions instead of terminating without a diagnostic.
     try
     {
         return runBench(std::vector<std::string>(argv, argv + argc));

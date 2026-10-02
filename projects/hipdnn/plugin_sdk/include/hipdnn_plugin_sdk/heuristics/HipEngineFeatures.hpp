@@ -17,16 +17,13 @@
 namespace hipdnn_plugin_sdk::heuristics
 {
 
-/// @brief Resolves the stream's device and memoizes immutable hardware properties.
+/// @brief Resolves the stream's device and memoizes its hardware properties.
 ///
-/// Default-stream tokens (null, hipStreamLegacy, hipStreamPerThread) name the calling
-/// thread's current device, not a stream object; getDeviceFromStream() is the one place
-/// that knows that. Handing hipStreamLegacy to hipStreamGetDevice() instead makes HIP
-/// dereference the token as a stream.
+/// Uses getDeviceFromStream() because default-stream tokens (null, hipStreamLegacy,
+/// hipStreamPerThread) are not stream objects hipStreamGetDevice() can dereference.
 inline const hipDeviceProp_t& predictionDevice(hipStream_t stream)
 {
-    // -1, not 0: a query that reports success without writing the ordinal must be caught
-    // below, not silently become device 0's properties.
+    // -1 so a query that succeeds without writing the ordinal is caught, not device 0.
     hipDevice_t device = -1;
     const auto status = getDeviceFromStream(stream, &device);
     if(status != hipSuccess || device < 0)

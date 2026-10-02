@@ -31,44 +31,21 @@ namespace asm_sdpa_engine
 namespace
 {
 
-/// What this build of the engine was, for a model that claims to have measured it.
-///
-/// `<provider>/asm-sdpa-fwd/<digest>`, where the digest is computed at configure time over
-/// everything that decides which forward kernel runs and how it is launched: the vendored
-/// FORWARD kernels, the CSVs codegen turns into their config table, codegen itself, and the
-/// forward selection/launch sources -- text hashed line-ending-normalized, so a CRLF and an
-/// LF checkout of one commit agree (AsmSdpaSelectorRevision.cmake names each input and why).
-///
-/// A deployed L1 model records this exact string as RFC 0019 §4.1's
-/// `trained_against.selector_revision`, and the loader refuses a model whose recorded
-/// value is not the one the provider reports. The string is therefore an expiry rule, and
-/// it has to name what actually moves the measurements it is protecting.
-///
-/// It used to name the provider release. That is too wide in one direction and too narrow
-/// in the other: `0.2.0 -> 0.2.1` for a change that cannot touch this engine expired both
-/// shipped models -- symptom: UNAVAILABLE on every engine-selection query -- while a
-/// vendored kernel swap under a fixed version expired nothing, which is the silent
-/// direction, because L1 is the score compared ACROSS engines and a stale estimate changes
-/// which engine is selected rather than merely misreporting a number. The git hash was
-/// already rejected for the first reason; the release version is the same mistake, one
-/// step smaller.
-///
-/// A backward-only kernel drop leaves this alone by construction: a backward kernel cannot
-/// move a forward throughput number, and the digest does not read one.
+/// `<provider>/asm-sdpa-fwd/<digest>`: a configure-time digest of everything that decides
+/// which forward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A deployed L1
+/// model must record this exact string as `trained_against.selector_revision` (RFC 0019
+/// §4.1) or the loader refuses it.
 #ifndef HKP_ASM_SDPA_FWD_REVISION
-// A build that did not compute the digest must not silently mint a revision that outlives
-// a kernel change; it reports one no shipped model can match instead.
+// Without a digest, report a revision no shipped model can match.
 #define HKP_ASM_SDPA_FWD_REVISION "undetermined"
 #endif
 constexpr const char* SELECTOR_REVISION
     = "hip-kernel-provider/asm-sdpa-fwd/" HKP_ASM_SDPA_FWD_REVISION;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// Resolves AsmSdpaEngine::L1_MODEL_IDS through the descriptor catalog the provider has
-/// already parsed (RFC 0019 Open Question 7, RESOLVED). Never throws: with no descriptor
-/// tree installed the catalog is empty, nothing resolves, and the engine reports
-/// UNAVAILABLE exactly as it did before any model existed. Each resolved model binds
-/// under the metric its own `score.metric` declares; the table names ids, not metrics.
+/// Resolves AsmSdpaEngine::L1_MODEL_IDS through the provider's descriptor catalog. Never
+/// throws: with no descriptor tree nothing resolves and the engine reports UNAVAILABLE.
+/// Each model binds under the metric its own `score.metric` declares.
 void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
@@ -81,9 +58,8 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
         }
         catch(const std::exception& error)
         {
-            // A compiled-in literal, so this is an authoring bug in this file rather than
-            // anything a deployment can cause. Logged and skipped rather than thrown: a
-            // throw here would take the whole provider down over one unusable model.
+            // A bad compiled-in literal is an authoring bug; log and skip rather than
+            // take the whole provider down.
             HIPDNN_PLUGIN_LOG_ERROR("asm sdpa: declared L1 model id '"
                                     << id << "' for arch '" << arch
                                     << "' is not a UUID: " << error.what());
@@ -210,8 +186,8 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     }
     catch(const std::exception& error)
     {
-        // An unreadable device or an unbuildable feature row is a missing answer, not a
-        // claim of bad performance: applicability is untouched (§11.2).
+        // A missing answer, not a claim of bad performance; applicability is untouched
+        // (§11.2).
         result.reason = error.what();
         return result;
     }

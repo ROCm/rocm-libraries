@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""RFC 0019.13 §11.2 regret, and the four ways it silently lies.
+"""RFC 0019.13 §11.2 regret evaluation.
 
-Every test here pins one arithmetic or bookkeeping property that, if it broke, would
-produce a *plausible* number rather than an error:
-
-- a model that always picks the oracle must score exactly 0, and one that always picks
-  the worst must score the hand-computed shortfall -- the two ends that calibrate the
-  scale;
-- both objectives must yield non-negative regret, because a flipped direction turns a
-  30% loss into a small positive-looking figure;
-- the held-out split must move whole PROBLEMS: a row-wise split leaves the oracle row
-  in training, so the evaluation side's "best" is the best of a subset and the regret
-  collapses toward zero;
-- a corpus with no device identity must say so, because the same graph on two GPUs
-  conflated into one problem produces an oracle no candidate on the slower card could
-  have reached;
-- an `is_valid=False` row has no timing, so it must never become the oracle -- a
-  blank-as-zero would make it the unbeatable minimum of every problem it appears in.
+Each test pins a property whose breakage yields a plausible number, not an error.
 """
 from __future__ import annotations
 
@@ -89,11 +74,7 @@ def worst_scorer(target: str, objective: str):
 
 
 def evaluate_all(df: pd.DataFrame, scorer, **kwargs):
-    """Score every problem, so a test's arithmetic is over rows it wrote itself.
-
-    The split is exercised on its own in the split tests; mixing it into every
-    arithmetic test would mean each expected value depended on a hash.
-    """
+    """Score every problem (no split), so expected values do not depend on a hash."""
     kwargs.setdefault("eval_fraction", 1.0)
     return evaluate_corpus(df, scorer, **kwargs)
 
@@ -145,9 +126,7 @@ def test_worst_picking_model_scores_the_hand_computed_regret():
     assert regret["max"] == pytest.approx(1.0)
     # Both problems exceed 5%, so the tail is everything.
     assert result.report["metrics"]["regret_tail"]["fraction"] == 1.0
-    # The oracle is dead last under this model, so strict recall@1 is 0 and even @3
-    # cannot save it on a two-candidate problem... except k=3 >= |V(p)|, which is a
-    # tautological hit and is reported as such.
+    # Strict recall@1 misses; k=3 >= |V(p)| is a trivial hit and reported as such.
     assert result.report["metrics"]["topk_recall"]["strict"]["1"] == 0.0
     assert result.report["metrics"]["topk_recall"]["trivial"]["3"] == 1.0
 
@@ -182,11 +161,9 @@ def test_regret_is_non_negative_under_both_objectives():
 
 
 def test_backwards_objective_fails_loudly_instead_of_printing():
-    """A negative regret means the direction is wrong; every figure would be inverted."""
+    """A negative regret means the objective direction is inverted."""
     with pytest.raises(ObjectiveDirectionError, match="backwards"):
-        # A pick of 1.0 against an "oracle" of 4.0 under `min`: 4.0 is not the minimum
-        # of anything containing 1.0, so this is what a flipped direction looks like
-        # from inside the metric -- it would otherwise print -0.75 as a regret.
+        # A pick below the `min` oracle is impossible; it would print -0.75 as regret.
         regret_of(picked=1.0, oracle=4.0, objective="min")
     with pytest.raises(ObjectiveDirectionError, match="backwards"):
         regret_of(picked=4.0, oracle=1.0, objective="max")
@@ -207,7 +184,6 @@ def test_ranking_direction_follows_the_objective():
     lower_is_better = evaluate_all(df, score, target="minTimeMs", objective="min")
     higher_is_better = evaluate_all(df, score, target="minTimeMs", objective="max")
 
-    # Nothing about the scorer changed, only the direction the report reads it in.
     assert lower_is_better.problems[0].picked_value == pytest.approx(1.0)
     assert higher_is_better.problems[0].picked_value == pytest.approx(10.0)
     assert lower_is_better.problems[0].regret == pytest.approx(0.0)
@@ -225,8 +201,7 @@ def test_invalid_rows_are_never_the_oracle():
         [
             {"benchmark": "g1", "kernel": "ok_fast", "minTimeMs": 2.0},
             {"benchmark": "g1", "kernel": "ok_slow", "minTimeMs": 3.0},
-            # Exactly what `export-benchmarks` writes for a candidate that would not
-            # compile: identity and features kept, every timing column empty.
+            # What `export-benchmarks` writes for a failed compile: timings empty.
             {
                 "benchmark": "g1",
                 "kernel": "failed",
@@ -269,10 +244,7 @@ def test_an_invalid_row_carrying_a_stale_timing_is_still_excluded():
 
 
 def test_a_numerically_wrong_row_is_never_the_oracle():
-    """RFC 0019 §13.2: a candidate shown to compute the wrong answer has no timing for the
-    right one. A direct corpus can still carry the wrong answer's (fast) timing, which would
-    become the oracle and charge every correct pick a regret. An unchecked verdict stays.
-    """
+    """RFC 0019 §13.2: wrong-answer timings are dropped; unchecked ones stay."""
     df = make_corpus(
         [
             {"benchmark": "g1", "kernel": "checked", "minTimeMs": 2.0},
@@ -332,8 +304,7 @@ def test_two_devices_are_two_problems():
     assert result.report["grouping"]["columns"] == ["benchmark", "device"]
     assert result.report["grouping"]["degraded"] is False
     assert result.report["metrics"]["problems_scored"] == 2
-    # Conflated, the oracle would be 1.0 and the slow card's perfect pick would be
-    # charged 10.0/1.0 - 1 = 9.0 of regret it had no way to avoid.
+    # Conflated, the slow card's perfect pick would be charged 10.0/1.0 - 1 = 9.0.
     assert result.report["metrics"]["top1_regret"]["max"] == pytest.approx(0.0)
     assert not any("GROUPING" in warning for warning in result.warnings)
 
@@ -362,7 +333,7 @@ def test_missing_device_column_degrades_loudly():
 
 
 def test_empty_device_column_degrades_loudly_too():
-    """The sibling exporter writes an empty string for pre-change logs, not a NaN."""
+    """An unknown device is exported as an empty string, not NaN."""
     df = make_corpus(
         [
             {"benchmark": "g1", "device": "", "kernel": "k1", "minTimeMs": 1.0},
@@ -422,14 +393,7 @@ def test_split_never_returns_an_empty_slice():
 
 
 def test_split_moves_whole_problems_not_rows():
-    """The property a row-wise split violates, stated directly.
-
-    Every candidate of an evaluated problem has to be on the evaluation side. If the
-    split ran over rows, some of a problem's candidates would sit in training, the
-    evaluation-side oracle would be the best of what remained, and a model that picked
-    a mediocre kernel would look correct because the better one was not there to
-    compare against.
-    """
+    """Every candidate of an evaluated problem must be on the evaluation side."""
     rows = []
     for problem in range(12):
         for candidate, time_ms in enumerate([1.0, 4.0, 4.0, 4.0]):
@@ -442,8 +406,7 @@ def test_split_moves_whole_problems_not_rows():
             )
     df = make_corpus(rows)
 
-    # A model that always ranks the LAST candidate first: it never picks the 1.0 row,
-    # so with the full candidate set every scored problem has regret 4/1 - 1 = 3.0.
+    # Never picks the 1.0 row, so every scored problem has regret 4/1 - 1 = 3.0.
     def last_first(frame: pd.DataFrame) -> np.ndarray:
         return -np.arange(len(frame), dtype=float)
 
@@ -460,26 +423,18 @@ def test_split_moves_whole_problems_not_rows():
     assert result.report["split"]["eval_problems"] == 3
     assert result.report["metrics"]["problems_scored"] == 3
     for problem in result.problems:
-        # The invariant: four candidates were measured for this problem, four were
-        # scored. A row-wise split would show 1, 2 or 3 here.
         assert problem.candidates == 4
         assert problem.oracle_value == pytest.approx(1.0)
         assert problem.regret == pytest.approx(3.0)
     assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(3.0)
 
-    # And the split is recorded, so the figure is reproducible from the report alone.
+    # Recorded, so the figure is reproducible from the report alone.
     assert result.report["split"]["seed"] == 3
     assert len(result.report["split"]["eval_problem_keys"]) == 3
 
 
 def test_a_row_wise_split_would_report_a_materially_better_number():
-    """What the previous test is defending against, computed explicitly.
-
-    Simulating the leak by hand -- dropping the oracle row of each problem, exactly
-    what a row-wise split does to a fraction of them -- turns a regret of 3.0 into a
-    regret of 0.0. The two numbers are not close, which is why the split unit is not a
-    detail.
-    """
+    """Dropping each oracle row, as a row-wise split does, turns regret 3.0 into 0.0."""
     rows = []
     for problem in range(12):
         for candidate, time_ms in enumerate([1.0, 4.0, 4.0, 4.0]):
@@ -559,11 +514,10 @@ def test_top_k_recall_counts_the_oracles_rank():
 
 
 def test_tie_aware_recall_forgives_an_indistinguishable_second_choice():
-    """§11.2's whole point: two kernels within noise, either choice costs nothing."""
+    """§11.2: two kernels within noise; either choice costs nothing."""
     df = make_corpus(
         [
-            # 1.000 vs 1.002 -- a 0.2% difference, inside both the 1% tolerance and the
-            # +-2 standard errors implied by stddevMs=0.05 over 100 iterations.
+            # 0.2% apart: inside the 1% tolerance and the +-2 standard-error band.
             {"benchmark": "g1", "kernel": "a", "minTimeMs": 1.000, "stddevMs": 0.05},
             {"benchmark": "g1", "kernel": "b", "minTimeMs": 1.002, "stddevMs": 0.05},
             {"benchmark": "g1", "kernel": "c", "minTimeMs": 3.000, "stddevMs": 0.05},
@@ -577,8 +531,7 @@ def test_tie_aware_recall_forgives_an_indistinguishable_second_choice():
     report = evaluate_all(df, prefers_b, target="minTimeMs", objective="min").report
     recall = report["metrics"]["topk_recall"]
 
-    # Strict says the model missed. Tie-aware says it did not, and the regret -- the
-    # metric §11.2 actually trusts -- agrees with tie-aware: 1.002/1.000 - 1 = 0.002.
+    # Strict misses; tie-aware hits, and regret agrees: 1.002/1.000 - 1 = 0.002.
     assert recall["strict"]["1"] == 0.0
     assert recall["tie_aware"]["1"] == 1.0
     assert report["metrics"]["top1_regret"]["mean"] == pytest.approx(0.002)
@@ -620,12 +573,7 @@ def test_noise_band_is_not_applied_to_a_target_in_other_units():
 
 
 def test_a_corpus_without_stddev_names_the_missing_column_not_the_units():
-    """§8.3 makes stddevMs required; without it the band is inert, not inapplicable.
-
-    The target here IS a millisecond timing, so the units reason is simply false. The
-    band was permanently off for every corpus `generate` produced, and the report gave
-    the wrong explanation for it.
-    """
+    """§8.3 makes stddevMs required; without it the band is inert, not inapplicable."""
     df = make_corpus(
         [
             {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
@@ -653,8 +601,7 @@ def test_a_corpus_without_stddev_names_the_missing_column_not_the_units():
 def test_the_report_carries_the_references_11_4_reads_the_model_against():
     df = make_corpus(
         [
-            # Corpus order is the order the engine enumerated its catalog in, which is
-            # the priority/id order Stage 1 ships: static ordering takes the slow one.
+            # Corpus order is the shipped priority order: static takes the slow one.
             {"benchmark": "g1", "kernel": "shipped_first", "minTimeMs": 2.0},
             {"benchmark": "g1", "kernel": "actually_best", "minTimeMs": 1.0},
         ]
@@ -735,8 +682,7 @@ def test_a_regime_that_regresses_against_static_order_is_named():
     result = evaluate_all(df, prefers_second, target="minTimeMs", objective="min")
     metrics = result.report["metrics"]
 
-    # Aggregate: the model's (0 + 0.5)/2 against static order's (4.0 + 0)/2, so the
-    # aggregate says "shipped it" and only the per-regime split says otherwise.
+    # Aggregate: model (0 + 0.5)/2 beats static (4.0 + 0)/2; only per-regime catches it.
     assert metrics["top1_regret"]["mean"] == pytest.approx(0.25)
     assert metrics["references"]["static_order"]["top1_regret"][
         "mean"
@@ -776,8 +722,7 @@ def test_per_regime_regret_when_the_corpus_carries_a_regime():
         df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
     ).report["metrics"]["per_regime"]
 
-    # decode: 3/1 - 1 = 2.0.  prefill: 1.1/1 - 1 = 0.1. The aggregate mean of 1.05
-    # describes neither, which is exactly why §11.2 makes this table the primary form.
+    # decode: 3/1 - 1 = 2.0.  prefill: 1.1/1 - 1 = 0.1.
     assert per_regime["decode"]["mean_regret"] == pytest.approx(2.0)
     assert per_regime["prefill"]["mean_regret"] == pytest.approx(0.1)
 
@@ -874,10 +819,8 @@ def _scaled_scorer(factor: float):
 
 
 def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale():
-    # The point of §11.2's calibration block: this model's regret is 0 and its
-    # recall@1 is 1.0, so every ranking metric in the report says it is flawless.
-    # It is also 50% high on every prediction, which is what decides a cross-engine
-    # comparison under RFC 0019 §11.3. Only the calibration figures can see it.
+    # Regret 0 and recall@1 1.0, yet 50% high on every prediction, which decides
+    # cross-engine arbitration (RFC 0019 §11.3). Only calibration sees it.
     result = evaluate_all(
         _calibration_corpus(),
         _scaled_scorer(1.5),
@@ -901,9 +844,8 @@ def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale()
 
 
 def test_the_bias_warning_names_the_direction():
-    # "Over" and "under" are not interchangeable: an over-predicting engine wins
-    # arbitrations it should lose, an under-predicting one is passed over for work it
-    # would have done best. A sign inversion here is invisible in every other metric.
+    # Over-predicting engines win arbitrations they should lose; under-predicting ones
+    # lose work they would do best. No other metric shows the sign.
     over = evaluate_all(
         _calibration_corpus(),
         _scaled_scorer(1.5),
@@ -972,10 +914,8 @@ def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
 
 
 def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
-    # A `calibrated: false` model's score is an ordering key. Subtracting it from a
-    # measurement produces a number, and that number means nothing -- so the report
-    # must decline rather than print it. §11.2 requires these figures only of a
-    # calibrated score.
+    # An uncalibrated score is only an ordering key; comparing it to a measurement
+    # is meaningless.
     report = evaluate_all(
         _calibration_corpus(),
         _scaled_scorer(1.5),
@@ -989,14 +929,13 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
     assert not any(
         "CALIBRATED SCORE IS BIASED" in warning for warning in report["warnings"]
     )
-    # And it is no longer declared missing, because a calibrated model does get them.
     assert not any(
         "calibration metrics" in entry for entry in report["not_implemented"]
     ), "§11.2 calibration is implemented; it must not still be listed as a gap"
 
 
 def _negative_time_problem():
-    """Measured [1, 2]; the model predicts a time of -0.2 for the faster and 1.0 for the slower."""
+    """Measured [1, 2]; predicted times -0.2 (faster) and 1.0 (slower)."""
     corpus = make_corpus(
         [
             {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
@@ -1010,9 +949,7 @@ def _negative_time_problem():
 
 
 def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
-    """The runtime discards a non-positive recovered score of a physical metric and ranks
-    that candidate last, so it runs the 2.0 kernel: regret 1.0. Ranking the -0.2 as the
-    smallest time reported a perfect pick the engine never makes."""
+    """The runtime ranks a non-positive physical score last: it runs the 2.0 kernel."""
     corpus, scorer = _negative_time_problem()
     report = evaluate_all(
         corpus,
@@ -1030,8 +967,7 @@ def test_a_score_the_runtime_discards_ranks_last_and_is_not_calibrated():
 
 
 def test_a_metric_less_identity_score_may_be_signed():
-    """An ordering key with no metric and no log/sqrt transform is not a physical quantity,
-    so the runtime ranks a negative score like any other: the -0.2 is the pick."""
+    """A non-physical ordering key ranks a negative score normally: -0.2 is the pick."""
     corpus, scorer = _negative_time_problem()
     report = evaluate_all(
         corpus,
@@ -1054,9 +990,7 @@ def _trained(keys=None, trained_on="training.json"):
 
 
 def test_a_renamed_copy_of_the_training_corpus_is_not_held_out():
-    """T5: the file name differed, so a byte-identical renamed copy of the training corpus
-    was reported `held_out`. Only problem identity decides; without recorded keys the
-    answer is `unknown`, and with them the copy's shared problems are a leak."""
+    """Only problem identity, not the file name, decides held-out status."""
     from uhd_gen.evaluate import _holdout_integrity
 
     evaluated = [["identical-problem", "board"]]
@@ -1074,9 +1008,7 @@ def test_a_renamed_copy_of_the_training_corpus_is_not_held_out():
 
 
 def test_keys_without_device_identity_compare_on_the_graph_alone():
-    """A degraded grouping keys on the graph only: a shared graph might have been measured
-    on another device, so it proves nothing either way; no shared graph is still disjoint.
-    """
+    """Without device identity, a shared graph proves nothing; disjoint graphs do."""
     from uhd_gen.evaluate import _holdout_integrity
 
     trained = _trained([["g1", "board"]])

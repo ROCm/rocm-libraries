@@ -5,10 +5,8 @@
  * @file TestGraphSize.cpp
  * @brief Covers the benchmarking ceiling's arithmetic.
  *
- * The failure this guards is a ceiling that is merely too small: nothing errors, a problem too
- * large to time is admitted, and the corpus run stops finishing. So the properties checked are
- * that the width actually follows the dtype, that a tensor is charged the span its strides
- * address rather than its element count, and that no arithmetic wraps.
+ * An undersized charge admits problems too large to time, silently. Checks dtype width,
+ * stride span rather than element count, and saturation instead of wrap.
  */
 
 #include <gtest/gtest.h>
@@ -56,8 +54,7 @@ builders::GraphBytes
 
 TEST(TestGraphSize, WidthFollowsTheDataType)
 {
-    // A flat four bytes was right for every dtype then declared and enforced by nothing. fp64
-    // is the case that breaks it: charged as four, a problem twice the ceiling is admitted.
+    // Charged as four bytes, an fp64 problem twice the ceiling would be admitted.
     EXPECT_EQ(elementBytes(fb::DataType::DOUBLE), 8);
     EXPECT_EQ(elementBytes(fb::DataType::INT64), 8);
     EXPECT_EQ(elementBytes(fb::DataType::FLOAT), 4);
@@ -69,8 +66,7 @@ TEST(TestGraphSize, WidthFollowsTheDataType)
 
 TEST(TestGraphSize, SubByteTypesRoundUpRatherThanToZero)
 {
-    // Their packing belongs to the tensor, not the element. Rounding down to zero would make a
-    // block-scaled problem free at any size.
+    // Packing belongs to the tensor; rounding to zero would make block-scaled problems free.
     EXPECT_EQ(elementBytes(fb::DataType::FP4_E2M1), 1);
     EXPECT_EQ(elementBytes(fb::DataType::FP6_E2M3), 1);
     EXPECT_EQ(elementBytes(fb::DataType::INT4), 1);
@@ -78,8 +74,7 @@ TEST(TestGraphSize, SubByteTypesRoundUpRatherThanToZero)
 
 TEST(TestGraphSize, AnUnknownTypeIsChargedTheWidest)
 {
-    // The direction that fails safe: a type this code has not been taught must not be able to
-    // slip an enormous problem past the ceiling by being charged one byte.
+    // Fails safe: an unknown type must not slip a large problem past the ceiling.
     EXPECT_EQ(elementBytes(fb::DataType::UNSET), 8);
 }
 
@@ -94,17 +89,15 @@ TEST(TestGraphSize, ATensorCostsItsElementsTimesItsWidth)
 
 TEST(TestGraphSize, APaddedTensorIsChargedTheSpanTheBenchAllocates)
 {
-    // The bench sizes a buffer by its furthest addressable element, not its element count. A
-    // 2x2 fp32 tensor with a row stride of 4096 is 4 elements and a 4098-element allocation;
-    // charged as 16 bytes, a padded layout passed every ceiling.
+    // The bench allocates up to the furthest addressable element: 2x2 with row stride 4096 is
+    // a 4098-element allocation.
     const int64_t span = 1 + ((2 - 1) * 4096) + ((2 - 1) * 1);
     EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {4096, 1})), 2 * span * 4);
 }
 
 TEST(TestGraphSize, ATensorTheBenchCannotSizeIsOverEveryCeiling)
 {
-    // Strides that do not match the rank, or run backwards, have no span the bench will
-    // allocate; charging them anything finite would admit a problem that cannot be timed.
+    // Mismatched-rank or negative strides have no allocatable span.
     EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {1})),
               std::numeric_limits<int64_t>::max());
     EXPECT_EQ(graphBytes(graphOf({2, 2}, fb::DataType::FLOAT, {-2, 1})),
@@ -121,8 +114,7 @@ TEST(TestGraphSize, AStrideThatWrapsTheSpanSaturates)
 
 TEST(TestGraphSize, AnEnormousProblemSaturatesRatherThanWrapping)
 {
-    // A wrapped total reads as a small one, which admits exactly the problem the ceiling exists
-    // to exclude -- and the bigger the problem, the more likely the wrap.
+    // A wrapped total would read as small and be admitted.
     const int64_t huge = std::numeric_limits<int64_t>::max() / 4;
     EXPECT_EQ(graphBytes(graphOf({huge, huge}, fb::DataType::FLOAT)),
               std::numeric_limits<int64_t>::max());

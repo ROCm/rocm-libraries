@@ -15,10 +15,8 @@
 /// @file TestRegimeLabel.cpp
 /// @brief Which population a problem is reported under.
 ///
-/// The table these reproduce is the retired Python assembler's, which computed the same label
-/// from SDPA field names in C++'s absence. The point of the port is that the label now
-/// comes from the declaration, so the tests read declarations -- the shipped one as an artifact,
-/// and an inline one for the facets SDPA cannot yet express.
+/// Labels come from the declaration: the shipped SDPA one, plus inline declarations for facets
+/// SDPA does not express.
 
 using namespace hipdnn_corpus_gen;
 
@@ -36,8 +34,7 @@ OperationMetadata shippedSdpa()
     return *parsed.metadata;
 }
 
-/// Multi-head unless a caller says otherwise, so the shipped declaration's third facet is a
-/// constant across the phase and context cases below rather than a second thing moving in them.
+/// Multi-head by default, so the grouping facet stays fixed in the phase and context cases.
 ProblemPoint sdpaPoint(int64_t seqlenQ, int64_t seqlenK, int64_t headsKv = 32)
 {
     return ProblemPoint{{"batch", int64_t{1}},
@@ -54,9 +51,7 @@ ProblemPoint sdpaPoint(int64_t seqlenQ, int64_t seqlenK, int64_t headsKv = 32)
 
 TEST(TestRegimeLabel, TheShippedDeclarationSeparatesDecodeFromPrefill)
 {
-    // These two are the populations a single aggregate regret number hides: decode is memory
-    // bound on the KV cache, prefill is compute bound on the score matrix, and a model that is
-    // excellent on one can be useless on the other.
+    // Decode is KV-cache bandwidth bound, prefill compute bound; they must not share a label.
     const auto metadata = shippedSdpa();
     ASSERT_FALSE(metadata.regimeLabel.empty()) << "sdpa_fwd declares no regime_label";
 
@@ -68,9 +63,7 @@ TEST(TestRegimeLabel, TheShippedDeclarationSeparatesDecodeFromPrefill)
 
 TEST(TestRegimeLabel, TheShippedDeclarationSeparatesGroupedAttentionFromMultiHead)
 {
-    // How many query heads share one KV head decides how much of the cache a wavefront
-    // re-reads, which is the difference between a decode that is bandwidth bound and one that
-    // is not. Same phase, same context, three populations.
+    // Query heads per KV head decide how much cache is re-read.
     const auto metadata = shippedSdpa();
 
     EXPECT_EQ(regimeLabel(metadata, sdpaPoint(1, 4096, 32)), "decode_long_mha");
@@ -80,8 +73,7 @@ TEST(TestRegimeLabel, TheShippedDeclarationSeparatesGroupedAttentionFromMultiHea
 
 TEST(TestRegimeLabel, TheContextBoundaryIsInclusiveAtTheDeclaredValue)
 {
-    // 2048 is short and 2049 is long, per shapes.py's `seqlen_kv <= LONG_CONTEXT`. An off-by-one
-    // here moves whole archetypes between buckets and changes every per-regime row.
+    // 2048 is short and 2049 is long, matching shapes.py's `seqlen_kv <= LONG_CONTEXT`.
     const auto metadata = shippedSdpa();
     EXPECT_EQ(regimeLabel(metadata, sdpaPoint(8, 2048)), "append_short_mha");
     EXPECT_EQ(regimeLabel(metadata, sdpaPoint(8, 2049)), "append_long_mha");
@@ -89,18 +81,15 @@ TEST(TestRegimeLabel, TheContextBoundaryIsInclusiveAtTheDeclaredValue)
 
 TEST(TestRegimeLabel, ClausesCascadeSoLaterOnesNeedNotRestateTheEarlier)
 {
-    // seqlen_q == 1 against seqlen_k == 1 satisfies BOTH the decode clause and the prefill one.
-    // First match wins, so it is decode -- the reading that lets the facets be written as the
-    // cascade they are rather than as four mutually exclusive predicates, each restating its
-    // predecessors' negations.
+    // seqlen_q == 1 with seqlen_k == 1 matches both decode and prefill; first match wins, so
+    // clauses need not restate earlier negations.
     const auto metadata = shippedSdpa();
     EXPECT_EQ(regimeLabel(metadata, sdpaPoint(1, 1)), "decode_short_mha");
 }
 
 TEST(TestRegimeLabel, AnUnmatchedPointTakesTheDeclaredOtherwiseLabel)
 {
-    // Not a silent "other": an unlabelled population is a row in the regret table that nobody
-    // can act on, so the declaration has to name it.
+    // An unlabelled population is not actionable, so the declaration must name it.
     const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "0.1",
       "operation": "toy",
@@ -125,9 +114,8 @@ TEST(TestRegimeLabel, AnUnmatchedPointTakesTheDeclaredOtherwiseLabel)
 
 TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
 {
-    // The full shapes.py label is phase_context_grouping. The order is the declaration's, not a
-    // map's collation, because the label is what a reader greps for and what a manifest column
-    // sorts by -- "prefill_short_mha" and "mha_short_prefill" are not interchangeable to either.
+    // Declaration order, not map order: "prefill_short_mha" is what readers and the manifest
+    // column expect.
     const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "0.1",
       "operation": "toy_sdpa",
@@ -175,9 +163,7 @@ TEST(TestRegimeLabel, ThreeFacetsJoinInDeclarationOrder)
 
 TEST(TestRegimeLabel, AnAxisOverAnUndeclaredParameterIsALoadError)
 {
-    // The same §4.4 check constraints get. A facet referencing a parameter the operation does
-    // not have labels every point "otherwise" -- one bucket holding the whole corpus, reported
-    // as though it were a stratification.
+    // §4.4 check, as for constraints: otherwise every point falls into "otherwise".
     const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "0.1",
       "operation": "toy",
@@ -201,8 +187,6 @@ TEST(TestRegimeLabel, AnAxisOverAnUndeclaredParameterIsALoadError)
 
 TEST(TestRegimeLabel, AnOperationThatNamesNoPopulationsGetsAnEmptyLabel)
 {
-    // Coverage is "whatever has a declaration", so a declaration without this block must load
-    // and produce a corpus -- with no regime column of its own rather than an invented one.
     const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "0.1",
       "operation": "toy",
@@ -223,8 +207,7 @@ TEST(TestRegimeLabel, AnOperationThatNamesNoPopulationsGetsAnEmptyLabel)
 namespace
 {
 
-/// A small, fast search: every regime test drives the real walk over the shipped declaration,
-/// so the budget is what keeps them quick.
+/// A small budget keeps these real-walk tests quick.
 ExplorationRequest focusRequest()
 {
     ExplorationRequest request;
@@ -242,9 +225,8 @@ const ProblemOracle SERVES_EVERYTHING = [](const ProblemPoint&) { return true; }
 
 TEST(TestRegimeFocus, AFocusPinsAndTiesTheEqualitiesItsLabelRequires)
 {
-    // decode is `seqlen_q == 1`, mha is `heads_kv == heads`; short is an inequality and is left
-    // to the label check. Nothing else is fixed: a focus that pinned more than the label says
-    // would generate a narrower population than the one it was asked for.
+    // decode is `seqlen_q == 1`, mha is `heads_kv == heads`; short is an inequality left to the
+    // label check. Pinning more would narrow the population.
     const auto metadata = shippedSdpa();
     std::string error;
 
@@ -266,8 +248,7 @@ TEST(TestRegimeFocus, AFocusPinsAndTiesTheEqualitiesItsLabelRequires)
 
 TEST(TestRegimeFocus, ALabelNoDeclaredFacetSpellsIsRefused)
 {
-    // Searched for, it would spend the whole budget and come back saturated -- "the engine
-    // serves none of these" -- about a population that does not exist.
+    // Otherwise it would burn the budget and report a nonexistent population as saturated.
     const auto metadata = shippedSdpa();
     std::string error;
     EXPECT_FALSE(compileRegimeFocus(metadata, "decode_medium_mha", error).has_value());
@@ -277,9 +258,7 @@ TEST(TestRegimeFocus, ALabelNoDeclaredFacetSpellsIsRefused)
 
 TEST(TestRegimeFocus, AFocusedSearchProposesInsideTheRegime)
 {
-    // Multi-head decode: two equalities a walk over independent extents meets almost never.
-    // With them pinned and tied, most of what the walk proposes is already in the regime, and
-    // everything it returns is.
+    // Two equalities a free walk almost never meets; pinned and tied, results are all in-regime.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_short_mha", error);
@@ -300,7 +279,6 @@ TEST(TestRegimeFocus, AFocusedSearchProposesInsideTheRegime)
 
 TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
 {
-    // A point already in the pools, or in a corpus it must not repeat, is not a new problem.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "prefill_short_gqa", error);
@@ -321,8 +299,7 @@ TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
 
 TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
 {
-    // Long context is `seqlen_k > 2048`; an engine that serves nothing past 1024 has none. That
-    // is a finding for the caller, and it must read as saturation, not as a budget limit.
+    // Long context is `seqlen_k > 2048`; with none served this is saturation, not a budget limit.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);

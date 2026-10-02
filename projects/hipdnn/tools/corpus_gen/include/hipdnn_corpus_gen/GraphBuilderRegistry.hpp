@@ -19,18 +19,8 @@
 #include <vector>
 
 /// @file GraphBuilderRegistry.hpp
-/// @brief Calling the builder a metadata file names (RFC 0019.13 §4.3.6).
-///
-/// Dispatch is by `graph_builder.function`, so an operation is added by writing a metadata
-/// file rather than by changing the generator. What the generator needs is a way to call a
-/// C++ function whose name arrives as a string, which C++ cannot do by itself: hence a table.
-///
-/// Each entry adapts resolved arguments to a builder in GraphBuilders.hpp, which this tool
-/// owns. §4.3.6 points instead at the test SDK's fixtures; that section was written against
-/// their inventory rather than their contract, and the difference is load-bearing -- see the
-/// file comment on GraphBuilders.hpp. An adapter that guessed at a missing argument would be
-/// the same failure the resolver refuses: a graph that builds, benchmarks, and describes
-/// something other than what the row says. So an adapter takes what it was given or declines.
+/// @brief Name-to-adapter table for the builder a metadata file names (RFC 0019.13 §4.3.6).
+/// An adapter uses only the arguments it was given; a missing one is a refusal, never a guess.
 
 namespace hipdnn_corpus_gen
 {
@@ -52,35 +42,16 @@ struct BuildResult
 namespace detail
 {
 
-/// The FlatBuffers dtype a declared name denotes, or nullopt for a name nobody defined.
-///
-/// Declining is deliberate: a dtype silently defaulted to FLOAT would make every problem
-/// single-precision while the corpus recorded whatever the metadata claimed -- the exact
-/// failure that made an earlier version of this generator unable to reach an engine's
-/// half-precision kernels.
+/// The FlatBuffers dtype a declared name denotes, or nullopt for an unknown name (never a
+/// silent FLOAT default).
 inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     dataTypeFor(const std::string& name)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-    // Resolved against the SDK's own name table rather than a copy of it. An earlier copy here
-    // listed ten of the eighteen types the backend accepts, so a declaration naming fp4_e2m1 or
-    // any fnuz variant failed to resolve -- and failed the same way a typo does, which is not
-    // how "hipDNN cannot express this" should read. Deferring to the shared table also means a
-    // dtype added to the schema is nameable here without anyone remembering to add it twice.
-    //
-    // Keyed by the runtime's spellings only -- the ones `to_string(DataType)` produces, which are
-    // therefore the ones a corpus recorded from real runs holds, and the ones a UHD's generated
-    // `categorical_encoding` (RFC 0019 §6.5) ends up carrying a code for.
-    // The numpy spellings (`float32`, `float16`, `float64`) were deliberately dropped: a
-    // declaration using them resolved here to a perfectly good graph and then wrote `float32`
-    // into the corpus's `q.dtype` column, so the encoding generated from that corpus holds
-    // `float32` -- while the runtime binds `fp32`, a spelling that corpus never held, which has
-    // no code and is refused at scoring. That turned a one-word typo in an .opmeta.json into a
-    // corpus that only fails once a model fitted on it is scored, long after the run that
-    // produced it. `float16` is refused here for this exact reason -- it is the plausible
-    // near-miss for the `fp16` the runtime emits -- so accepting it here would have contradicted
-    // the runtime it feeds.
+    // Defers to the SDK's name table. Only runtime spellings (`to_string(DataType)`) and these
+    // aliases are accepted: numpy spellings like `float16` would put names in the corpus that
+    // the runtime's categorical encoding (RFC 0019 §6.5) never emits.
     static const std::map<std::string, std::string> s_aliases{
         {"fp32", "float"},
         {"fp64", "double"},
@@ -91,9 +62,8 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     const auto alias = s_aliases.find(name);
     const std::string canonical = alias == s_aliases.end() ? name : alias->second;
 
-    // NLOHMANN_JSON_SERIALIZE_ENUM answers with its first entry for a name it does not know,
-    // so an unknown dtype would silently become UNSET and produce tensors with no type at all.
-    // Converting back is what turns that into a refusal.
+    // NLOHMANN_JSON_SERIALIZE_ENUM maps an unknown name to its first entry (UNSET);
+    // the round trip turns that into a refusal.
     const auto type = nlohmann::json(canonical).get<DataType>();
     if(type == DataType::UNSET || nlohmann::json(type).get<std::string>() != canonical)
     {
@@ -102,20 +72,14 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     return type;
 }
 
-/// Reads a resolved argument as a dims list, by the name the metadata gave it.
-///
-/// By name rather than by position, and the difference is not cosmetic. RFC 0019.13 §4.2's own
-/// worked example declares `dims` before `strides`, while the builder it names takes
-/// `(strides, dims, ...)`. Positional dispatch would swap them and produce a tensor whose
-/// extents and strides are exchanged -- which still builds, still benchmarks, and describes a
-/// different problem. Names make the metadata's ordering its own business.
+/// Reads a resolved argument as a dims list, by name. Never by position: metadata argument
+/// order need not match the builder's (§4.2's example declares dims before strides).
 inline const std::vector<int64_t>* dims(const ArgumentResolution& resolved, const char* name)
 {
     const auto* argument = resolved.find(name);
     return argument == nullptr ? nullptr : std::get_if<std::vector<int64_t>>(&argument->value);
 }
 
-/// Reads a resolved argument as a dtype, by name.
 inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     dtype(const ArgumentResolution& resolved, const char* name)
 {
@@ -128,8 +92,7 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType>
     return declared == nullptr ? std::nullopt : dataTypeFor(*declared);
 }
 
-/// Reads a resolved argument as a boolean, by name. Absent reads as false, which matches the
-/// builders' own defaults for their optional flags.
+/// Reads a resolved argument as a boolean; absent reads as false, as the builders default.
 inline bool flag(const ArgumentResolution& resolved, const char* name)
 {
     const auto* argument = resolved.find(name);
@@ -146,7 +109,6 @@ inline bool flag(const ArgumentResolution& resolved, const char* name)
     return text != nullptr && (*text == "true" || *text == "1");
 }
 
-/// Reads a resolved argument as a declared enum name, by name.
 inline std::string enumName(const ArgumentResolution& resolved, const char* name)
 {
     const auto* argument = resolved.find(name);
@@ -158,14 +120,8 @@ inline std::string enumName(const ArgumentResolution& resolved, const char* name
     return declared == nullptr ? std::string{} : *declared;
 }
 
-/// Reads the causal diagonal's anchor, by name. Absent is TOP_LEFT -- the schema's default, so
-/// a declaration that never heard of this argument writes the graph it always wrote.
-///
-/// A spelling nobody defined is nullopt rather than TOP_LEFT, for the reason dataTypeFor
-/// declines: the two anchors mask different triangles whenever seqlen_q < seqlen_k, so a typo
-/// silently read as TOP_LEFT would build, benchmark and record a corpus of the wrong problem --
-/// and the engines that serve only the other anchor would be absent from the comparison with no
-/// line anywhere saying so.
+/// Reads the causal diagonal's anchor. Absent is TOP_LEFT (the schema default); an unknown
+/// spelling is nullopt, since the anchors mask different triangles when seqlen_q < seqlen_k.
 inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>
     diagonalAlignment(const ArgumentResolution& resolved, const char* name)
 {
@@ -187,13 +143,8 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>
     return std::nullopt;
 }
 
-/// Builds a tensor spec from a resolved dims/strides pair.
 /// @brief Assembles one tensor role from `<role>Dims`, `<role>Strides` and an element type.
-///
-/// Every builder below takes whole tensors, so the arguments come in threes. Naming the role
-/// once, rather than spelling out three lookups per tensor, is what keeps a nine-tensor
-/// operation like SDPA backward readable -- and it makes an undeclared stride a refusal instead
-/// of a silently packed default, which would quietly change the layout the corpus claims.
+/// Undeclared dims or strides are a refusal, not a packed default.
 inline std::optional<builders::TensorSpec>
     tensorRole(const ArgumentResolution& resolved,
                int64_t uid,
@@ -211,11 +162,9 @@ inline std::optional<builders::TensorSpec>
     spec.name = role;
     spec.dims = *d;
     spec.strides = *st;
-    // `<role>DataType`, when declared, overrides the operation's dtype for this one tensor:
-    // saved statistics such as RMSnorm's inverse RMS are fp32 whatever the activations are.
+    // `<role>DataType` overrides the dtype for one tensor, e.g. fp32 saved norm statistics.
     spec.dataType = dtype(resolved, (role + "DataType").c_str()).value_or(type);
-    // A declared `rank` spells the problem with trailing unit dimensions, as the forward norm
-    // adapters do; see padToDeclaredRank. Row-major, since a padded tensor has no other layout.
+    // A declared `rank` pads with trailing unit dims (see padToDeclaredRank), row-major.
     const auto declared = enumName(resolved, "rank");
     if(!declared.empty() && spec.dims.size() < static_cast<size_t>(std::stoll(declared)))
     {
@@ -225,13 +174,8 @@ inline std::optional<builders::TensorSpec>
     return spec;
 }
 
-/// @brief The graph's three element types: io as given, compute and intermediate as declared.
-///
-/// Defaulting all three to the io type describes a graph that accumulates in its storage type,
-/// and for fp16 or bf16 that is not what anyone runs -- mixed precision means fp16 operands with
-/// fp32 accumulation. It is also not merely unrealistic: MIOpen's convolution builder declines
-/// any node whose `compute_data_type` is not FLOAT, so a uniform-fp16 graph is refused outright
-/// and the corpus reports an engine that serves no half precision at all.
+/// @brief The graph's element types: io as given, compute and intermediate as declared.
+/// fp16/bf16 declarations need a FLOAT compute type: MIOpen's conv builder refuses any other.
 inline builders::GraphTypes graphTypesFrom(const ArgumentResolution& resolved,
                                            hipdnn_flatbuffers_sdk::data_objects::DataType io)
 {
@@ -277,10 +221,8 @@ inline builders::TensorSpec normEpsilon(int64_t uid)
     return spec;
 }
 
-/// One batchnorm tensor. The activations (x, y and their gradients) carry the declared dtype;
-/// the per-channel statistics and affine tensors carry `statsDataType` when declared, because
-/// both MIOpen and HIP_MLOPS take them only in fp32 whatever the activations are. Epsilon is
-/// a pass-by-value scalar.
+/// One batchnorm tensor. Activations carry the declared dtype; stats and affine tensors carry
+/// `statsDataType` if declared (MIOpen and HIP_MLOPS take them only in fp32).
 inline std::optional<builders::TensorSpec>
     batchnormRole(const ArgumentResolution& resolved,
                   int64_t uid,
@@ -296,10 +238,8 @@ inline std::optional<builders::TensorSpec>
         resolved, uid, role, activation ? io : dtype(resolved, "statsDataType").value_or(io));
 }
 
-/// @p dims padded with trailing unit dimensions to the declared `rank`, when one is declared.
-/// The same problem in a different spelling: a norm over the trailing dimension of
-/// [b, s, h] is the norm over h of [b, s, h, 1]. Engines whose kernels take only 4-D or 5-D
-/// tensors (HIP_MLOPS) serve the second spelling and refuse the first.
+/// @p dims padded with trailing unit dims to the declared `rank`, if any: the same problem,
+/// spelled for engines (HIP_MLOPS) that take only 4-D or 5-D tensors.
 inline std::vector<int64_t> padToDeclaredRank(const ArgumentResolution& resolved,
                                               std::vector<int64_t> dims)
 {
@@ -315,9 +255,8 @@ inline std::vector<int64_t> padToDeclaredRank(const ArgumentResolution& resolved
     return dims;
 }
 
-/// How many trailing dimensions a norm normalizes over once padded to the declared rank: the
-/// declared count plus every unit dimension the padding appended, which sit inside the
-/// normalized span. Left at the declared count, the graph contradicts its own scale shape.
+/// Normalized trailing-dim count after padding to the declared rank: the padded unit dims fall
+/// inside the normalized span, so they are added to @p declaredCount.
 inline int64_t paddedNormalizedDimCount(const ArgumentResolution& resolved,
                                         size_t declaredRank,
                                         int64_t declaredCount)
@@ -389,8 +328,7 @@ inline bool pointwiseModeAndScalars(const ArgumentResolution& resolved,
             return false;
         }
     }
-    // Only what the declaration states; an absent argument leaves the field null, as the
-    // schema intends.
+    // An absent argument leaves its field null, as the schema intends.
     const auto optional = [&resolved](const char* name) -> flatbuffers::Optional<float> {
         if(resolved.find(name) == nullptr)
         {
@@ -426,11 +364,8 @@ inline std::optional<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode>
     return mode;
 }
 
-/// Resolves a declared enumerator name against a FlatBuffers EnumNames table.
-///
-/// Refused rather than defaulted when the name is unknown: a corpus row claiming MUL while the
-/// graph adds is wrong in a way no column reveals. Note MIN and MAX are reserved words in the
-/// schemas, so the enumerators are MIN_OP and MAX_OP.
+/// Resolves a declared enumerator name against a FlatBuffers EnumNames table; false if
+/// unknown. MIN and MAX are reserved in the schemas, so the names are MIN_OP and MAX_OP.
 template <typename Enum>
 bool resolveEnum(const ArgumentResolution& resolved,
                  const char* name,
@@ -464,12 +399,7 @@ inline GraphBytes toBytes(const flatbuffers::FlatBufferBuilder& builder)
 /// One adapter: resolved arguments in, serialized graph out.
 using BuilderAdapter = std::function<BuildResult(const ArgumentResolution&)>;
 
-/// @brief The builders a metadata file may name.
-///
-/// Every entry is positional over the declared `arguments`, so a metadata file's argument
-/// order is part of its contract with the builder it names. That is checkable -- the adapter
-/// refuses a resolution that does not supply what it reads -- and it is why §4.4 check 5
-/// requires `graph_builder.function` to resolve.
+/// @brief The builders a metadata file may name (§4.4 check 5 requires the name to resolve).
 inline const std::map<std::string, BuilderAdapter>& builderRegistry()
 {
     static const std::map<std::string, BuilderAdapter> s_registry{
@@ -1083,9 +1013,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              const auto x = detail::tensorRole(resolved, 1, "x", *type);
              const auto y = detail::tensorRole(resolved, 2, "y", *type);
-             // The scale tensor carries its own element type; quantization exists precisely to
-             // make it differ from the data's, so defaulting it to dataType would describe a
-             // problem nobody asked for.
+             // Scale has its own dtype: quantization exists to make it differ from the data's.
              const auto scale = detail::tensorRole(resolved, 3, "scale", scaleType.value_or(*type));
              if(!x.has_value() || !y.has_value() || !scale.has_value())
              {
@@ -1150,8 +1078,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              const auto token = detail::tensorRole(resolved, 1, "token", *type);
              const auto weight = detail::tensorRole(resolved, 2, "weight", *type);
-             // Offsets are indices, not activations: they are integer-typed independently of
-             // the GEMM's element type.
+             // Offsets are indices, typed independently of the GEMM's element type.
              const auto offset = detail::tensorRole(
                  resolved,
                  3,
@@ -1370,9 +1297,7 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  return {{}, "layernormForward needs dims, strides, dataType"};
              }
-             // Scale and bias have x's rank, 1 everywhere but the normalized trailing
-             // dimension -- the frontend's convention, which reads the normalized dims off
-             // where scale is not 1. Epsilon is a pass-by-value scalar.
+             // Scale and bias: x's rank, 1 except the normalized trailing dim (normAffineDims).
              const auto x = detail::padToDeclaredRank(resolved, *d);
              const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
@@ -1456,18 +1381,15 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
     return s_registry;
 }
 
-/// @brief Builds the graph @p metadata describes for @p point.
-///
-/// The whole path in one call: resolve the declared arguments against the problem point, then
-/// hand them to the named builder. Both halves fail closed, and the message names which.
+/// @brief Builds the graph @p metadata describes for @p point: resolves the declared
+/// arguments, then calls the named builder. Either failure is reported in the error.
 inline BuildResult buildGraphFor(const OperationMetadata& metadata, const ProblemPoint& point)
 {
     const auto& registry = builderRegistry();
     const auto adapter = registry.find(metadata.graphBuilder.function);
     if(adapter == registry.end())
     {
-        // §4.4 check 5. A metadata file naming a builder nobody registered is a file that
-        // cannot produce a problem, and saying so names the missing adapter.
+        // §4.4 check 5: the metadata names a builder nobody registered.
         return {{}, "no builder registered for '" + metadata.graphBuilder.function + "'"};
     }
 

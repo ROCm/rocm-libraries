@@ -50,10 +50,8 @@ void EngineDescriptor::finalize()
                               "range of engine IDs");
     }
 
-    // Engine details load on the first read of an attribute derived from them, not here. A
-    // provider builds its knob list -- defaults included -- by ranking the engine's catalog,
-    // and finalize is also the first step of reading a prediction or a candidate page, neither
-    // of which reads a knob. Loading here made describing a prediction pay a cold ranking.
+    // Engine details load lazily: providers build the knob list by ranking the catalog, which
+    // prediction and candidate reads never need.
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
@@ -171,7 +169,7 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         getPrediction(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT:
-        // The effective metric: an unset one reads back as the default it means.
+        // Unset reads back as the default.
         getString(std::string(heuristics::resolveRankingMetric(_predictionMetric).name),
                   attributeType,
                   requestedElementCount,
@@ -532,7 +530,7 @@ void EngineDescriptor::setPredictionMetric(hipdnnBackendAttributeType_t attribut
               elementCount,
               arrayOfElements,
               "EngineDescriptor failed to set the prediction metric");
-    // Refused where the request is made (RFC 0019 §4.4), not when the engine is asked.
+    // Refuse an unregistered metric where the request is made (RFC 0019 §4.4).
     std::ignore = heuristics::resolveRankingMetric(metric);
     _predictionMetric = std::move(metric);
 }

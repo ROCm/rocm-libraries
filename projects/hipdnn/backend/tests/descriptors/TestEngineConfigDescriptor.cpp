@@ -201,9 +201,7 @@ TEST_F(TestEngineConfigDescriptor, RejectsForeignOrAmbiguousScoredConfigurations
     EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
 }
 
-// RFC 0019 §11.4: the configuration's ranking metric becomes EngineConfig.ranking_metric,
-// the field prediction and plan build read. It is refused when unregistered, readable before
-// finalize, and an unset one reads back as the default it means.
+// RFC 0019 §11.4: refused when unregistered, readable before finalize, unset reads as default.
 TEST_F(TestEngineConfigDescriptor, RankingMetricRoundTripsIntoTheSerializedConfig)
 {
     EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
@@ -245,8 +243,7 @@ TEST_F(TestEngineConfigDescriptor, RankingMetricRoundTripsIntoTheSerializedConfi
 
 TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAttributes)
 {
-    // Catalog enumeration belongs to the engine descriptor (RFC 0017 §3): an engine
-    // config is the thing you run, so it never becomes an enumeration-only descriptor.
+    // Catalog enumeration belongs to the engine descriptor, never an engine config (RFC 0017 §3).
     auto config = getEngineConfigDescriptor();
     const int64_t value = 1;
     for(const auto attribute : {HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT,
@@ -541,8 +538,7 @@ TEST_F(TestEngineConfigDescriptor, PredictionAttributeValidatesTheRequestBeforeA
     EXPECT_EQ(data.ptr, nullptr);
 }
 
-// The prediction is the plugin's answer about this exact configuration: the configuration
-// layer, with every constraint set so far, asked once and served from cache after that.
+// The request carries every constraint set so far.
 TEST_F(TestEngineConfigDescriptor, PredictionAsksForTheConfigurationLayerOnceAndCachesIt)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
@@ -617,8 +613,6 @@ TEST_F(TestEngineConfigDescriptor, PredictionAsksForTheConfigurationLayerOnceAnd
     EXPECT_FALSE(config->isFinalized()) << "Reading a prediction must not finalize the config";
 }
 
-// A setAttribute after a read must not serve the stale answer, and must not free the bytes
-// already handed out: the attribute documents them as valid for the descriptor's lifetime.
 TEST_F(TestEngineConfigDescriptor, ChangingTheConfigRebuildsThePredictionAndKeepsEarlierBytesValid)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;

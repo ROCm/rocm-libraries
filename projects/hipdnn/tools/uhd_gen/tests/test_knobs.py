@@ -1,16 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The knob report has to separate three things a build budget confuses.
-
-A knob that never varies, a knob that varies without mattering, and a knob that decides
-the answer all look alike in a KMD: three declared fields. They cost very differently --
-the first costs nothing, the second multiplies the AOT build for noise, and the third
-earns every kernel it asks for.
-
-These plant each case with a known answer and assert the report recovers it. A corpus
-whose structure is invented here rather than measured is the point: on real data every
-number is plausible and none is checkable.
-"""
+"""The knob report must recover constant, noise, and deciding knobs planted here."""
 from __future__ import annotations
 
 import random
@@ -49,15 +39,7 @@ _ENVELOPE = {
 
 
 def _corpus(problems: int = 60, seed: int = 5) -> pd.DataFrame:
-    """A corpus with one knob of each kind, planted.
-
-    - `kernel.block_m` DECIDES: which tile is fastest depends on the problem, so no
-      single value can be pinned without roughly doubling the time on half the corpus.
-    - `kernel.use_exp2_fast` is a uniform win: 1 is always at least as good, so pinning
-      to it costs exactly nothing.
-    - `kernel.waves_per_eu` is noise: no systematic effect.
-    - `kernel.block_n` never varies.
-    """
+    """`block_m` decides, `use_exp2_fast=1` always wins, `waves_per_eu` is noise."""
     rng = random.Random(seed)
     rows = []
     for i in range(problems):
@@ -91,7 +73,7 @@ def _knob(report: dict, name: str) -> dict:
 def test_knob_columns_are_the_kernel_axes_only():
     df = _corpus(4)
     df["q.seqlen_q"] = 512
-    # `$q.*` describes the problem: it cannot be chosen away and is not an AOT axis.
+    # `q.*` describes the problem; it is not an AOT axis.
     assert knob_columns(df) == [
         "kernel.block_m",
         "kernel.block_n",
@@ -101,9 +83,7 @@ def test_knob_columns_are_the_kernel_axes_only():
 
 
 def test_a_field_that_never_varies_is_named_as_constant():
-    # It costs no kernels, so it is not an AOT saving -- but it sits in the KMD claiming
-    # to be a variant axis, and a model may be ranking on a column that cannot separate
-    # anything. Silence about it would leave that undiscovered.
+    # Costs no kernels, but a model may be ranking on a column that separates nothing.
     report = analyse_knobs(_corpus())
     block_n = _knob(report, "kernel.block_n")
     assert block_n["constant"] is True
@@ -112,8 +92,6 @@ def test_a_field_that_never_varies_is_named_as_constant():
 
 
 def test_a_deciding_knob_is_expensive_to_pin():
-    # The planted structure: the right tile depends on the problem, so every single
-    # value is wrong on part of the corpus and pinning roughly doubles the time there.
     report = analyse_knobs(_corpus())
     block_m = _knob(report, "kernel.block_m")
 
@@ -125,7 +103,6 @@ def test_a_deciding_knob_is_expensive_to_pin():
 
 
 def test_a_noise_knob_is_nearly_free_to_pin():
-    # Varies, costs kernels, changes nothing: the case the AOT budget wants to find.
     report = analyse_knobs(_corpus())
     waves = _knob(report, "kernel.waves_per_eu")
 
@@ -137,7 +114,6 @@ def test_a_noise_knob_is_nearly_free_to_pin():
 
 
 def test_a_uniformly_better_value_costs_exactly_nothing():
-    # One value dominates everywhere, so only that value need ever be built.
     report = analyse_knobs(_corpus())
     exp2 = _knob(report, "kernel.use_exp2_fast")
 
@@ -146,15 +122,9 @@ def test_a_uniformly_better_value_costs_exactly_nothing():
 
 
 def test_pinning_never_silently_drops_a_problem():
-    """Coverage loss is not regret and must not be averaged into it.
-
-    A value that cannot serve a problem leaves the engine with no kernel for it. That is
-    categorically worse than a slower kernel, so it is counted separately and the best
-    value is chosen on coverage first.
-    """
+    """Coverage loss is counted apart from regret; best value favours coverage."""
     df = _corpus()
-    # Make block_m=256 the only choice for one problem, then delete every other
-    # candidate for it, so a pin to 64 or 128 cannot serve that problem at all.
+    # Leave prob0 only block_m=256, so pinning 64 or 128 cannot serve it.
     victim = df["benchmark"] == "prob0"
     df = df[~victim | (df["kernel.block_m"] == 256)]
 
@@ -170,13 +140,7 @@ def test_pinning_never_silently_drops_a_problem():
 
 
 def test_the_variant_curve_finds_the_cheap_covering_set():
-    """The AOT question: how few kernels per geometry suffice.
-
-    Twelve combinations are built here and only the tile actually matters, so a couple
-    of variants should reach near-zero regret. The assertion is on the shape -- fewer
-    variants than combinations, and flat by the end -- not on an exact count, which
-    would pin the greedy tie-break rather than the finding.
-    """
+    """Asserts the curve's shape, not an exact count, to avoid pinning tie-breaks."""
     report = analyse_knobs(_corpus())
     curve = report["variant_curve"]
 
@@ -200,7 +164,7 @@ def test_an_empty_corpus_is_refused_rather_than_reported():
         analyse_knobs(df)
 
 
-# ---- ranking: the sorted answer a kernel author acts on ----------------------
+# ---- ranking ----
 
 
 def _ranked(**kw):
@@ -208,18 +172,17 @@ def _ranked(**kw):
 
 
 def test_the_knob_that_decides_sorts_above_the_one_that_does_not():
-    """The list is ordered by consequence, so the top row is where kernels are earned."""
     ranked = _ranked()
     names = [r["short_name"] for r in ranked]
     assert names.index("block_m") < names.index("waves_per_eu")
 
 
 def test_a_constant_sorts_last_and_reads_as_a_defect_not_a_saving():
-    """It costs no kernels, so ranking it by cost would put a defect above real findings."""
+    """A constant costs no kernels, so it must not rank above real findings."""
     ranked = _ranked()
     assert ranked[-1]["short_name"] == "block_n"
     assert ranked[-1]["verdict"] == "CONSTANT"
-    # The reason a constant matters is that it breaks the model, not that it wastes a build.
+    # A constant matters because it breaks the model, not because it wastes a build.
     assert "6.3" in ranked[-1]["advice"]
 
 
@@ -229,12 +192,7 @@ def test_a_free_knob_is_named_droppable():
 
 
 def test_importance_is_reported_but_never_reorders_the_ranking():
-    """Tree gain is a second opinion: a heavily-split knob can still be free to pin.
-
-    If importance could reorder, a knob the model leans on would be recommended KEEP
-    even where the measurements say pinning it is free -- which is the exact mistake
-    the report exists to prevent.
-    """
+    """Tree gain is a second opinion: a heavily-split knob can still be free to pin."""
     report = analyse_knobs(_corpus())
     plain = [r["short_name"] for r in rank_knobs(report)]
     misleading = {
@@ -261,16 +219,11 @@ def test_author_report_names_the_edit_to_make():
     assert "block_n" in text.split("## What to change")[1]
 
 
-# ---- matched fields and orphaned problems: two ways a zero cost lies ---------
+# ---- matched fields and orphaned problems: where a zero pin cost misleads ----
 
 
 def _corpus_with_geometry(problems: int = 40, seed: int = 7) -> pd.DataFrame:
-    """A corpus carrying a field the matcher binds, beside a real knob.
-
-    `kernel.head_size` is the shape the kernel was built for, so every candidate for a
-    given problem shares it -- it varies across the corpus and never within a problem.
-    That is exactly what the gfx942 sweep produced for seqlen_q, head_size and dtype.
-    """
+    """Matcher-bound `kernel.head_size` (fixed within a problem) beside a real knob."""
     rng = random.Random(seed)
     rows = []
     for i in range(problems):
@@ -286,11 +239,9 @@ def _corpus_with_geometry(problems: int = 40, seed: int = 7) -> pd.DataFrame:
                     "robustMeanMs": t,
                     "kernel.block_m": block_m,
                     "kernel.head_size": head_size,
-                    # The twin in the problem namespace is what marks it graph-bound:
-                    # the matcher fixed the kernel's head_size to the graph's.
+                    # The `q.` twin marks head_size as graph-bound.
                     "q.head_size": head_size,
-                    # No `q.waves_per_eu` exists, and there is no such thing -- nothing
-                    # binds it. The pack's generator simply built one value per geometry.
+                    # Unbound: the generator built one value per geometry.
                     "kernel.waves_per_eu": 2 if head_size == 128 else 4,
                 }
             )
@@ -298,19 +249,12 @@ def _corpus_with_geometry(problems: int = 40, seed: int = 7) -> pd.DataFrame:
 
 
 def test_a_matched_field_is_not_reported_as_droppable():
-    """The defect the first real gfx942 run exposed.
-
-    head_size varies across the corpus and never within a problem, so pinning it has no
-    measurable cost -- the problems it orphans leave the comparison instead of scoring
-    badly in it. Ranked on cost alone it reads 0.00% and the report recommends dropping
-    it, which means shipping kernels for one head size.
-    """
+    """Pinning a matched field orphans problems, so its zero cost is not a saving."""
     ranked = {
         r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))
     }
     assert ranked["head_size"]["verdict"] == "MATCHED"
     assert ranked["head_size"]["tunable"] is False
-    # And the real knob beside it is still judged on its merits.
     assert ranked["block_m"]["verdict"] == "KEEP"
 
 
@@ -329,14 +273,7 @@ def test_a_matched_field_is_never_in_what_to_change():
 def _corpus_no_value_covers_everything(
     problems: int = 45, seed: int = 11
 ) -> pd.DataFrame:
-    """A knob that genuinely varies within every problem, yet cannot be pinned.
-
-    Each problem was built with two of the three tile values, rotating, so every problem
-    has a real choice while no single value exists everywhere. This is the shape a pack
-    takes when the generator prunes variants per geometry -- and it is the one where a
-    zero pin cost is most misleading, because the value that scores perfectly is the one
-    that simply is not there for a third of the corpus.
-    """
+    """Each problem offers two of three tiles, rotating, so none exists everywhere."""
     rng = random.Random(seed)
     rows = []
     for i in range(problems):
@@ -356,8 +293,7 @@ def _corpus_no_value_covers_everything(
 
 
 def test_pinning_that_orphans_problems_is_never_droppable():
-    """Zero regret over the problems a value can serve says nothing about the ones it
-    cannot. A knob is only free to pin if it orphans nothing."""
+    """A knob is only free to pin if it orphans no problem."""
     ranked = {
         r["short_name"]: r
         for r in rank_knobs(analyse_knobs(_corpus_no_value_covers_everything()))
@@ -372,13 +308,7 @@ def test_pinning_that_orphans_problems_is_never_droppable():
 
 
 def test_device_columns_are_not_knobs():
-    """A merged multi-board corpus carries `device.*`, and none of it is tunable.
-
-    The columns exist so one arch-keyed model can tell MI300X from MI325X. They are
-    facts about the card, not choices an AOT build makes, so they must never reach the
-    ranking -- a report suggesting a smaller `device.total_global_mem` would be
-    recommending different hardware.
-    """
+    """`device.*` columns describe the card, not a choice an AOT build makes."""
     df = _corpus_with_geometry()
     df["device.cu_count"] = 304
     df["device.total_global_mem"] = 192 * 1024**3
@@ -393,16 +323,7 @@ def test_device_columns_are_not_knobs():
 
 
 def test_a_field_the_pack_pinned_is_told_apart_from_one_the_graph_binds():
-    """Both look identical in the data -- constant within every problem -- and they need
-    opposite answers.
-
-    `head_size` is bound by the matcher: the kernel was built for that shape, and there
-    is nothing to do. `waves_per_eu` is not bound by anything; the generator chose one
-    value per geometry, so the model was never offered the choice and no sweep can say
-    whether it matters. That is the author's decision to revisit, so it has to be named
-    differently. The gfx942 pack has exactly this shape: waves_per_eu and persistent
-    vary within 0 of its 664 geometries.
-    """
+    """Both are fixed per problem; only a generator-pinned one is worth revisiting."""
     ranked = {
         r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))
     }
@@ -418,8 +339,6 @@ def test_a_field_the_pack_pinned_is_told_apart_from_one_the_graph_binds():
 
 
 def test_a_pinned_field_reaches_what_to_change_but_a_graph_bound_one_does_not():
-    """The author can act on a pinned field and cannot act on a graph-bound one, so only
-    the first belongs in the list of edits to make."""
     report = analyse_knobs(_corpus_with_geometry())
     text = format_author_report(report, rank_knobs(report), "eng")
     changes = text.split("## What to change")[1]

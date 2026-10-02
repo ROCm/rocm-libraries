@@ -5,17 +5,9 @@
  * @file TestEveryGraphBuilder.cpp
  * @brief Drives every registered builder through the registry, not just the shipped ones.
  *
- * The gap this closes: every other registry test iterates the *shipped declarations*, and only
- * seven operations have one. Fifteen of the twenty-two adapters were therefore registered,
- * reachable by name, and never once executed by the suite -- so their argument names, required
- * argument lists, enum resolution and tensor-uid assignment were unverified. That is exactly
- * where a role spelled `invRms` in the adapter and `inv_rms` in a future declaration hides,
- * and it would surface much later as "this operation mysteriously builds nothing".
- *
- * Each case below is a synthetic declaration naming one builder. The assertions are the ones
- * that catch a wrong adapter rather than a wrong graph: the build succeeds, the bytes are a
- * readable Graph, it has the tensor count that builder writes, the declared element type
- * reaches the header, and every tensor carries a distinct uid.
+ * Most builders have no shipped declaration, so each case is a synthetic one naming a single
+ * builder. Checks: it builds, the buffer verifies, tensor and node counts match, the declared
+ * dtype reaches the header, and tensor uids are distinct.
  */
 
 #include <gtest/gtest.h>
@@ -67,11 +59,8 @@ struct BuilderCase
 
     /// Tensors this builder types independently of the operands, by name.
     ///
-    /// Named per builder rather than globally: exempting "scale" everywhere would have quietly
-    /// stopped checking layernorm's scale, which *is* the declared type. The exemptions are
-    /// deliberate design decisions -- a normalization epsilon is an fp32 scalar whatever the
-    /// activations are, an MoE token offset is an index, and a block-scale factor has its own
-    /// declared scaleDataType, which is the entire point of quantization.
+    /// Per builder, not global: exempting "scale" everywhere would skip layernorm's scale,
+    /// which does take the declared type.
     std::set<std::string> foreignTypes;
 
     /// Nodes the graph holds: one for every builder but a fusion.
@@ -89,7 +78,7 @@ nlohmann::json declarationFor(const BuilderCase& builder)
     {
         arguments.push_back(argument);
     }
-    // Declared, not defaulted: an adapter that ignored it would otherwise pass by accident.
+    // Non-default, so an adapter that ignores it fails.
     arguments.push_back(scalar("dataType", "half"));
 
     return nlohmann::json{{"schema_version", "1.0"},
@@ -129,9 +118,7 @@ std::vector<nlohmann::json> withGeometry(std::vector<nlohmann::json> head,
 
 /// Every builder the registry knows, with the arguments its adapter actually reads.
 ///
-/// Tensor counts are the builder's own addTensor calls, so a builder that silently stopped
-/// writing an operand -- a batchnorm that lost its running statistics, say -- fails here rather
-/// than producing a graph that is merely a different operation.
+/// Tensor counts are the builder's own addTensor calls, so a dropped operand fails here.
 std::vector<BuilderCase> everyBuilder()
 {
     return {
@@ -266,8 +253,7 @@ TEST(TestEveryGraphBuilder, EveryBuilderBuildsAReadableGraph)
             = buildGraphFor(*parsed.metadata, ProblemPoint{{"placeholder", int64_t{1}}});
         ASSERT_TRUE(built.ok()) << builder.function << ": " << built.error;
 
-        // Verified, not merely non-empty: an adapter that assembled a malformed buffer would
-        // otherwise pass here and fail much later inside the frontend.
+        // Verified, not merely non-empty.
         const auto* graph = asGraph(built.bytes);
         ASSERT_NE(graph, nullptr) << builder.function << " produced an unreadable buffer";
         ASSERT_NE(graph->tensors(), nullptr) << builder.function << " wrote no tensors";
@@ -281,9 +267,7 @@ TEST(TestEveryGraphBuilder, EveryBuilderBuildsAReadableGraph)
 
 TEST(TestEveryGraphBuilder, EveryBuilderGivesItsTensorsDistinctUids)
 {
-    // Two operands sharing a uid is a graph that looks right and aliases two buffers. The
-    // nine-tensor SDPA backward adapter assigns uids by loop index, which is exactly the shape
-    // of code where an off-by-one collides two of them.
+    // Shared uids would alias two buffers.
     for(const auto& builder : everyBuilder())
     {
         const auto parsed = parseOperationMetadata(declarationFor(builder));
@@ -307,8 +291,7 @@ TEST(TestEveryGraphBuilder, EveryBuilderGivesItsTensorsDistinctUids)
 
 TEST(TestEveryGraphBuilder, EveryBuilderPropagatesTheDeclaredDataType)
 {
-    // A builder that hardcodes float would pass every structural check above while making the
-    // dtype column of every training row it produces a lie.
+    // A builder that hardcodes float would mislabel every row's dtype.
     for(const auto& builder : everyBuilder())
     {
         const auto parsed = parseOperationMetadata(declarationFor(builder));
@@ -337,8 +320,6 @@ TEST(TestEveryGraphBuilder, EveryBuilderPropagatesTheDeclaredDataType)
 
 TEST(TestEveryGraphBuilder, EveryRegisteredBuilderIsCoveredByThisFile)
 {
-    // Without this, adding a builder and forgetting to add a case leaves it in exactly the
-    // untested state the file exists to end -- and the suite would still be green.
     std::set<std::string> covered;
     for(const auto& builder : everyBuilder())
     {
@@ -353,9 +334,7 @@ TEST(TestEveryGraphBuilder, EveryRegisteredBuilderIsCoveredByThisFile)
 
 TEST(TestEveryGraphBuilder, AnAdapterMissingAnArgumentSaysWhichOne)
 {
-    // The refusal path, which is how a mistyped declaration is meant to be diagnosed. If the
-    // message did not name the argument, a nine-tensor operation would report only that
-    // something was missing.
+    // This is how a mistyped declaration is diagnosed.
     for(const auto& builder : everyBuilder())
     {
         if(builder.roles.empty())

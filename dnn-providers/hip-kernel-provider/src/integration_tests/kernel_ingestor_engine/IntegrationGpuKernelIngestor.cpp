@@ -242,10 +242,8 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(CONV_ENGINE_NAME);
     }
 
-    /// The block_size @p engine ranks first for a pointwise-add graph, read from the knob
-    /// default. That default follows the top-ranked kernel, which makes it the one place a
-    /// caller can observe a heuristic's choice without executing anything --
-    /// get_workspace_size reports a max across the catalog, not the selection.
+    /// The block_size @p engine ranks first for a pointwise-add graph. The knob default
+    /// follows the top-ranked kernel, so it exposes the choice without executing anything.
     int64_t rankedFirstBlockSize(int64_t engine)
     {
         auto graph = buildPointwiseAddGraph();
@@ -648,20 +646,10 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
     EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
 }
 
-// The model-backed pointwise pack (hipkernel:PointwiseModel) is embedded_source, which only
-// the unit binary can serve, so it is staged and validated there, not exercised here.
+// hipkernel:PointwiseModel is embedded_source, which only the unit binary can serve.
 
-/// The shipped engines are the ones with no way to prove themselves by outcome.
-///
-/// Every UHD failure path degrades to declared order, which is a legal ranking, so a test can
-/// only tell a working UHD from a discarded one if the two produce different kernels. For the
-/// shipped native engines they do not: every kernel carries priority=0, so declared order falls
-/// to the id tiebreak and lands on block_size=256, which is exactly what the native scorer picks.
-///
-/// So the assertion has to be on provenance, which RFC 0019 §12 puts in the selection trace.
-/// This matters more since a throwing scorer began degrading instead of propagating (§5 step 7):
-/// that failure used to be an exception and is now silent, and for this engine it is silent
-/// *and* returns the same kernel.
+/// Asserts on provenance (RFC 0019 §12 trace): for the shipped engines, declared-order
+/// fallback picks the same kernel as the native scorer, so the outcome can't tell them apart.
 TEST_F(IntegrationGpuKernelIngestor, TheShippedEngineRanksByItsOwnScorerNotByFallback)
 {
     const ScopedPluginLogCapture capture(this);

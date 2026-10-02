@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-# Every model here is a real artifact built by the shipping converter, which needs both.
+# Models are real artifacts built by the shipping converter, which needs these.
 pytest.importorskip("flatbuffers")
 pytest.importorskip("lightgbm")
 pytest.importorskip("pandas")
@@ -42,15 +42,13 @@ OTHER = "edc1d5b4-6f12-4a40-a749-403966474bc9"
 KERNEL_SIGNATURE = ("$kernel.block_size",)
 OPAQUE_SIGNATURE = ("$graph.work",)
 
-# Promoting a feature-reading model asks the shared evaluator for the build's feature
-# semantics revision (FeatureSemantics.hpp), exactly as training and evaluation already
-# ask it for the digest: without a built evaluator there is nothing to promote against.
+# Promotion reads the build's feature semantics revision from the built evaluator.
 pytestmark = pytest.mark.usefixtures("evaluator")
 
 
 @functools.cache
 def _hash(signature=KERNEL_SIGNATURE, encoding=None):
-    """The digest the loader recomputes, which is the only one promote now accepts."""
+    """The features digest the loader recomputes."""
     return compute_features_hash(
         list(signature),
         json.loads(encoding) if encoding else None,
@@ -67,7 +65,7 @@ def _weights(
     training_arches=None,
     num_features=None,
 ):
-    """A `tree_data` artifact the runtime would load: promote verifies what it installs."""
+    """A `tree_data` artifact the runtime would load."""
     ensemble = {
         "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
         "max_feature_idx": (num_features or len(signature)) - 1,
@@ -116,8 +114,7 @@ def _tree(root):
             ],
         },
     )
-    # The incumbent gfx942 ranker is installed: promotion reads a bound UHD's metric to
-    # decide whether the incoming one replaces it.
+    # Installed gfx942 ranker: promotion reads its metric to decide what it replaces.
     _installed(root / "old.uhd.json", OLD)
     return root
 
@@ -249,8 +246,7 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     provenance = snapshot_provenance(tree, engine=engine, arch=arch)
     signature = KERNEL_SIGNATURE
     if binding == "role":
-        # An engine-level model records the selector revision it was measured under, as
-        # every bench binding does, and reads only the graph.
+        # Engine-level models record their selector revision and read only the graph.
         provenance["selector_revision"] = "provider-1"
         signature = ("$graph.flops",)
     second = _model(
@@ -499,9 +495,7 @@ def _bind(tree, value):
 
 
 def test_a_new_metric_joins_the_arch_list_beside_the_incumbent(tmp_path):
-    """RFC 0019 §3.1: one UHD per metric under an arch key. A single id is a one-element
-    list, so binding a second metric turns it into two, and neither file is disturbed.
-    """
+    """RFC 0019 §3.1: a single id is a one-element list; neither file is disturbed."""
     tree = _tree(tmp_path / "tree")
     _installed(tree / "old.uhd.json", OLD, {"metric": "tflops", "calibrated": False})
     first = _files(tree)
@@ -550,9 +544,7 @@ def test_a_metric_less_ranker_replaces_only_the_metric_less_entry(tmp_path):
 
 
 def test_a_bound_uhd_the_tree_does_not_contain_cannot_be_classified(tmp_path):
-    """The metric lives in the UHD, not the UED, so an unreadable binding could be the
-    incoming metric's incumbent or another metric's model; either guess corrupts the map.
-    """
+    """The metric lives in the UHD, so an unreadable binding's metric is unknown."""
     tree = _tree(tmp_path / "tree")
     (tree / "old.uhd.json").unlink()
     model = _model(tmp_path / "model", tree, metric="time")
@@ -594,8 +586,7 @@ def test_a_score_must_name_a_registered_metric_in_its_own_direction(
 
 
 def test_a_static_order_declaring_criteria_is_refused_before_any_write(tmp_path):
-    """static_order ranks by UKD priority, then descriptor id, and takes no parameters; the
-    runtime refuses a body declaring `order`, so promote must not install one."""
+    """static_order takes no parameters; the runtime refuses a body with `order`."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     _write(
@@ -689,9 +680,7 @@ def _record_semantics(model, revision):
 def test_train_records_the_evaluators_revision_and_promote_refuses_it_elsewhere(
     tmp_path, evaluator, evaluator_reporting
 ):
-    """FeatureSemantics.hpp end to end: a model trained by a build computing revision N
-    records N, installs for that build, and is refused -- naming both revisions -- for a
-    build computing anything else, as the loader would refuse it."""
+    """Promote refuses a build computing another revision, naming both."""
     current = evaluator_feature_semantics_revision(evaluator)
     bumped = evaluator_reporting(current + 1)
     assert _train(tmp_path, "--feature-evaluator", bumped) == 0
@@ -724,9 +713,6 @@ def test_train_records_the_evaluators_revision_and_promote_refuses_it_elsewhere(
 def test_a_model_recording_no_feature_semantics_is_revision_1(
     tmp_path, evaluator_reporting, opaque
 ):
-    """Every model shipped before the revision existed records none, so absent means 1: it
-    promotes against a build computing 1 and is refused, naming both, by one computing 2.
-    """
     tree = _tree(tmp_path / "tree")
     if opaque:
         model = _opaque_model(tmp_path / "model")
@@ -758,10 +744,9 @@ def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
 
 
 def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
-    """A model for an engine with no UED: trained against a selector revision only.
+    """A model for an engine with no UED, trained against a selector revision only.
 
-    `declared` is the id the engine's description carried for the metric while the corpus
-    was collected (binding.uhd_id), i.e. the provider's declaration; None when it had none.
+    `declared` is the provider's declared id (binding.uhd_id), or None.
     """
     provenance = {"selector_revision": revision}
     doc = {
@@ -796,11 +781,7 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
 def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     tmp_path,
 ):
-    """AITER and MIOpen own no descriptor set: RFC 0019 4.1 / Open Question 7 binds their
-    model by a UUID declared in provider code, so promotion writes the document where the
-    loader scans and edits nothing. Before this, `select_engine` ended the run with
-    "expected one UED for --engine 'ASM_SDPA_ENGINE', found 0" -- after the model had
-    already trained (run 67929588)."""
+    """RFC 0019 §4.1: the model binds by a UUID declared in provider code."""
     tree = _tree(tmp_path / "tree")
     before = _read(tree / "engine.ued.json")
     model = _opaque_model(tmp_path / "model")
@@ -822,8 +803,7 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
 
 
 def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
-    """The UUID is the whole binding: the provider looks for exactly one, so a second
-    document carrying it makes the engine's model ambiguous rather than replaced."""
+    """The provider expects one document per UUID; a second would be ambiguous."""
     tree = _tree(tmp_path / "tree")
     _write(
         tree / "elsewhere" / "other.uhd.json",
@@ -845,9 +825,7 @@ def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
 
 
 def test_an_opaque_model_with_no_declared_id_is_refused_with_guidance(tmp_path):
-    """The engine reads only the ids its provider declares, so an id nobody declared would
-    install a model that is never read. Without a recorded declaration, --uhd-id is required.
-    """
+    """An id the provider never declared is never read, so --uhd-id is required."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "model", declared=None)
     with pytest.raises(PromoteError, match="--uhd-id tflops="):
@@ -870,8 +848,7 @@ def test_an_opaque_model_with_no_declared_id_is_refused_with_guidance(tmp_path):
 def test_an_opaque_model_under_an_undeclared_id_is_refused(
     tmp_path, declared, requested
 ):
-    """Promote never renames a model: one trained under another id is refused, and so is a
-    --uhd-id that contradicts the id the engine itself declared at collection."""
+    """Promote never renames: --uhd-id must match the id declared at collection."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "model", declared=declared)
     before = _files(tmp_path)
@@ -888,8 +865,7 @@ def test_an_opaque_model_under_an_undeclared_id_is_refused(
 
 
 def test_repromoting_an_identical_opaque_model_is_idempotent(tmp_path):
-    """D2: the declared UUID is one model. The same content promoted again -- for the same
-    or another arch directory -- binds what is installed and writes nothing new."""
+    """Same content, for the same or another arch, binds and writes nothing new."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "model")
     _apply(
@@ -905,8 +881,7 @@ def test_repromoting_an_identical_opaque_model_is_idempotent(tmp_path):
 
 
 def _shipped_asm_model(tree, arches, metric="tflops"):
-    """A fixed-id model where the build ships it: beside the provider, not where promote
-    would put it, under the provider's own file names."""
+    """A fixed-id model installed beside the provider, under its own file names."""
     directory = tree / "asm_sdpa_engine" / "descriptors" / "predict_engine" / "gfx950"
     artifact = _weights(signature=OPAQUE_SIGNATURE, training_arches=arches)
     directory.mkdir(parents=True)
@@ -935,10 +910,7 @@ def _shipped_asm_model(tree, arches, metric="tflops"):
 def test_a_retrained_fixed_id_model_replaces_the_shipped_one_where_it_is_installed(
     tmp_path,
 ):
-    """The provider declares the UUID per arch and metric, so the model installed under it
-    -- for this metric, trained for this arch -- is this slot's model wherever it lies.
-    Promote replaces it in place rather than refusing it for not being at the path promote
-    would have chosen, which left a hand-copy as the only way to ship an ASM retrain."""
+    """The provider declares the UUID per arch and metric, so replace it in place."""
     tree = _tree(tmp_path / "tree")
     shipped = _shipped_asm_model(tree, ["gfx950"])
     model = _opaque_model(tmp_path / "model")
@@ -967,9 +939,6 @@ def test_a_retrained_fixed_id_model_replaces_the_shipped_one_where_it_is_install
 def test_a_fixed_id_model_serving_another_slot_is_not_replaced(
     tmp_path, arches, metric
 ):
-    """In-place replacement is for this slot's model only: an installed model under the id
-    that another arch still scores with, or that estimates another metric, is refused.
-    """
     tree = _tree(tmp_path / "tree")
     _shipped_asm_model(tree, arches, metric)
     model = _opaque_model(tmp_path / "model")
@@ -984,8 +953,7 @@ def test_a_fixed_id_model_serving_another_slot_is_not_replaced(
 
 @pytest.mark.parametrize("config", [{}, {"x": 1}])
 def test_a_custom_library_configuration_is_promoted_only_when_empty(tmp_path, config):
-    """UhdParser admits an omitted or empty `custom_library.config` and refuses any other,
-    before the library is loaded; promote must not install what the engine refuses."""
+    """UhdParser refuses any non-empty `custom_library.config`."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "model")
     doc = _read(model / "heuristic.uhd.json")
@@ -1008,9 +976,7 @@ def test_a_custom_library_configuration_is_promoted_only_when_empty(tmp_path, co
 
 
 def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):
-    """sort_kernel_catalog ranks an engine's own enumerated configurations. An engine that
-    publishes none has nothing for that model to order, so the role is refused here rather
-    than installed and silently never consulted."""
+    """A catalog ranker is never consulted for an engine with no configurations."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "model")
     (model / "train_manifest.json").unlink()
@@ -1041,12 +1007,9 @@ def _row(kernel, **overrides):
 
 
 def test_emission_is_refused_while_a_candidate_carries_an_invalid_marker(tmp_path):
-    """RFC 0019 §13.4: package emission fails while any invalid marker is unresolved.
+    """RFC 0019 §13.4: emission fails while any invalid marker is unresolved.
 
-    The model cannot stand in for this. §13.2: the scorer cannot exclude a candidate, so a
-    kernel that is applicable and incorrect stays selectable through every path that does
-    not consult the model -- a knob pin, a winner that fails to build, any `static_order`
-    fallback. A learned demotion is a preference, and this is the last stage able to refuse.
+    A model can only demote a candidate (§13.2); this is the last stage to refuse.
     """
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
@@ -1067,21 +1030,15 @@ def test_emission_is_refused_while_a_candidate_carries_an_invalid_marker(tmp_pat
     with pytest.raises(PromoteError) as refusal:
         build_plan(model, tree)
 
-    # Named, because §13.2's remedy is a pack edit the author has to make by hand and
-    # "the corpus contains an invalid candidate" does not say which kernel or which problem.
+    # §13.2's remedy is a manual pack edit, so name the kernel and the problem.
     assert "kernel-b" in str(refusal.value) and "graph-7" in str(refusal.value)
     assert "output_mismatch" in str(refusal.value)
-    # The remedy the RFC gives, so the message is actionable on its own.
+    # The RFC's remedy, so the message is actionable on its own.
     assert "UMD" in str(refusal.value) and "UKD" in str(refusal.value)
 
 
 def test_an_invalid_candidate_blocks_promotion_without_being_erased(tmp_path):
-    """§13.2 keeps the invalid rows "in the dataset for diagnostics either way".
-
-    Promotion refusing and the corpus retaining the row are complementary: the refusal
-    stops the pack shipping, and the row is how the author finds out what to change. A
-    gate that pruned the corpus to clear itself would destroy that evidence.
-    """
+    """§13.2 keeps invalid rows in the dataset for diagnostics."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     corpus = _corpus(
@@ -1103,12 +1060,7 @@ def test_an_invalid_candidate_blocks_promotion_without_being_erased(tmp_path):
 
 
 def test_a_clean_corpus_promotes_and_an_undecided_one_promotes_with_a_warning(tmp_path):
-    """Only a decided failure blocks; an undecided verdict is reported, never silent.
-
-    Open Question 19(a) leaves the per-op reference open, so a corpus of nulls is today's
-    expected state and refusing it would block every promotion. It still has to be visible:
-    "we could not check" must not reach an author looking the same as "we checked".
-    """
+    """Only a decided failure blocks; an all-null corpus is expected (OQ 19a)."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     _corpus(tmp_path, [_row("kernel-a"), _row("kernel-b")])
@@ -1130,12 +1082,7 @@ def test_a_clean_corpus_promotes_and_an_undecided_one_promotes_with_a_warning(tm
 
 
 def test_a_model_with_no_visible_corpus_reports_that_it_was_not_gated(tmp_path):
-    """A promotion that could not read the markers says so rather than passing quietly.
-
-    Refusing outright would make an archived model unpromotable, and staying silent would
-    make an ungated promotion indistinguishable from a gated one -- which is the failure
-    §13.2 names: a missing check must never read as a passing check.
-    """
+    """A missing check must never read as a passing check (§13.2)."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
 
@@ -1145,11 +1092,7 @@ def test_a_model_with_no_visible_corpus_reports_that_it_was_not_gated(tmp_path):
 
 
 def test_an_explicit_corpus_outranks_the_sibling_default(tmp_path):
-    """`--corpus` names the corpus an archived model was trained from.
-
-    Without precedence a stale `corpus.json` left beside the model directory would decide
-    the gate, and a clean leftover file would wave through the run that found the defect.
-    """
+    """A stale `corpus.json` beside the model must not decide the gate."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     _corpus(tmp_path, [_row("kernel-a")])
@@ -1169,9 +1112,7 @@ def test_an_explicit_corpus_outranks_the_sibling_default(tmp_path):
 
 
 def test_a_failed_verdict_spelled_as_text_still_refuses_emission(tmp_path):
-    """Promotion reads the verdict with the reader every other entrance uses, so a corpus
-    that carries `numerically_valid` as CSV text is gated like one carrying a boolean,
-    rather than a known-wrong `"False"` passing as neither failed nor unchecked."""
+    """A verdict spelled as CSV text `"False"` reads as failed."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     _corpus(
@@ -1187,7 +1128,7 @@ MATCH_B = "22be5fe7-02a7-4ec2-b79c-e849951f8c24"
 
 
 def _packs(tree):
-    """One pack per arch, each with its own matcher, as a multi-arch engine ships them."""
+    """One pack per arch, each with its own matcher, as a multi-arch engine ships."""
     _write(tree / "a.umd.json", {"version": "1.0", "id": MATCH_A})
     _write(tree / "b.umd.json", {"version": "1.0", "id": MATCH_B})
     for arch, matcher, pack in (
@@ -1204,14 +1145,13 @@ def _packs(tree):
                 "matchers": [matcher],
             },
         )
-    # The gfx950 key binds a metric-less incumbent this promotion replaces; it must be
-    # installed for its metric to be read.
+    # The gfx950 key binds a metric-less incumbent this promotion replaces.
     _installed(tree / "other.uhd.json", OTHER)
     return tree
 
 
 def _multi_arch_model(root, tree, leaf=1.0):
-    """A model collected over both arches' packs: its provenance records both matchers."""
+    """A model collected over both arches' packs; its provenance has both matchers."""
     provenance = snapshot_provenance(tree, arch="default")
     assert [item["id"] for item in provenance["umd"]] == [MATCH_A, MATCH_B]
     model = _model(root, tree, provenance=provenance)
@@ -1224,9 +1164,7 @@ def _multi_arch_model(root, tree, leaf=1.0):
 
 
 def test_one_model_over_two_arches_packs_binds_both_arch_keys_as_one_model(tmp_path):
-    """R5 + D2: each arch ignores the matchers of the other arch's pack, so the model is
-    valid on both; the second promotion binds the installed copy rather than a second one,
-    and promoting it again changes nothing."""
+    """Each arch ignores the other pack's matchers; re-promoting changes nothing."""
     tree = _packs(_tree(tmp_path / "tree"))
     model = _multi_arch_model(tmp_path / "model", tree)
     _apply(build_plan(model, tree, arch="gfx942"))
@@ -1254,9 +1192,7 @@ def test_one_model_over_two_arches_packs_binds_both_arch_keys_as_one_model(tmp_p
 def test_an_arch_relevant_or_unowned_recorded_matcher_is_still_refused(
     tmp_path, change
 ):
-    """Only other arches' matchers are ignored. A recorded matcher this arch's pack uses
-    must still be compatible, and one no pack of the engine owns is a removed dependency.
-    """
+    """A matcher no pack of the engine owns is a removed dependency."""
     tree = _packs(_tree(tmp_path / "tree"))
     model = _multi_arch_model(tmp_path / "model", tree)
     if change == "incompatible":
@@ -1276,8 +1212,7 @@ def test_an_arch_relevant_or_unowned_recorded_matcher_is_still_refused(
 
 
 def test_one_id_with_different_content_is_refused_under_another_arch(tmp_path):
-    """D2: a UUID bound under several arch keys is one model, so a different model cannot
-    take the id for one arch while another arch keeps scoring with the installed one."""
+    """A UUID bound under several arch keys is one model."""
     tree = _packs(_tree(tmp_path / "tree"))
     model = _multi_arch_model(tmp_path / "model", tree)
     _apply(build_plan(model, tree, arch="gfx942"))
@@ -1289,7 +1224,7 @@ def test_one_id_with_different_content_is_refused_under_another_arch(tmp_path):
 
 
 def test_promote_writes_the_artifact_digest_the_trainer_left_out(tmp_path):
-    """R6: without a declared hash the runtime's model identity ignores the artifact bytes."""
+    """Without a declared hash the runtime's model identity ignores the bytes."""
     tree = _tree(tmp_path / "tree")
     plan = build_plan(_model(tmp_path / "model", tree), tree)
     _apply(plan)
@@ -1311,10 +1246,7 @@ def test_promote_writes_the_artifact_digest_the_trainer_left_out(tmp_path):
     ],
 )
 def test_an_artifact_the_runtime_would_refuse_is_never_installed(tmp_path, defect):
-    """R8: promote applies TreeDataAdapter's load checks to the bytes it installs: the
-    FlatBuffers verifier's structure (here, a string with no NUL terminator, which every
-    accessor still decodes), and the model's arity against its signature, which
-    EnginePredictor and UhdKernelHeuristic compare whatever the features_hash says."""
+    """Promote applies TreeDataAdapter's load checks: FlatBuffers structure, arity."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     data = _weights()
@@ -1341,9 +1273,7 @@ def test_an_artifact_the_runtime_would_refuse_is_never_installed(tmp_path, defec
 
 
 def test_a_grouped_artifact_is_refused_for_engine_prediction_only(tmp_path):
-    """R9: the runtime scores an L1 model's root ensemble alone, so a grouped artifact has no
-    engine-level meaning; as a catalog ranker it is the two-layer model it was built as.
-    """
+    """Only an L1 model's root ensemble is scored; catalog rankers may be grouped."""
     tree = _tree(tmp_path / "tree")
     model = _opaque_model(tmp_path / "opaque")
     (model / "model.bin").write_bytes(
@@ -1356,8 +1286,7 @@ def test_a_grouped_artifact_is_refused_for_engine_prediction_only(tmp_path):
     build_plan(catalog, tree)
 
 
-#: The gfx950 attention-dense engine as shipped when its rankers were found unloadable: a
-#: UED exposing two knobs over a KMD whose other fields its matcher binds from the graph.
+#: A gfx950 attention UED exposing two knobs over a KMD the graph binds the rest of.
 ATTENTION_UED = "4b3a0123-578f-4e9c-a965-b010a18ff107"
 ATTENTION_KMD = "589bc6c6-d94e-4400-95d7-3e517f9b6b67"
 ATTENTION_FIELDS = (
@@ -1374,8 +1303,8 @@ ATTENTION_FIELDS = (
     "block_m",
     "block_n",
 )
-#: Every `$kernel.*` axis the shipped gfx950 rankers (tflops and time alike) read, plus two of
-#: their graph columns -- one of them the problem-side twin of `$kernel.causal`.
+#: The `$kernel.*` axes the shipped gfx950 rankers read, plus two graph columns,
+#: one the problem-side twin of `$kernel.causal`.
 SHIPPED_RANKER_SIGNATURE = (
     "$kernel.block_m",
     "$kernel.block_n",
@@ -1447,11 +1376,7 @@ def _attention_ranker(root, tree, metric, signature, encoding=None):
 def test_the_shipped_gfx950_rankers_signature_is_refused_for_reading_unexposed_kernel_fields(
     tmp_path, metric
 ):
-    """RFC 0019 §6.3 check 2: the runtime drops a model whose `$kernel.*` axes are not knobs
-    of its UED, and ranks by declared order. Promote accepted exactly that model -- generation
-    fitted it on the collection UED, which exposes every KMD field -- so the shipped rankers
-    installed cleanly and were never used. The same model reading the graph's twin columns
-    and only the shipped knobs installs."""
+    """RFC 0019 §6.3 check 2: the runtime drops a model reading non-knob `$kernel.*`."""
     tree = _attention_tree(tmp_path / "tree")
     shipped = _attention_ranker(
         tmp_path / "shipped", tree, metric, SHIPPED_RANKER_SIGNATURE, SHIPPED_ENCODING
@@ -1492,10 +1417,7 @@ def test_a_kernel_axis_the_kmd_does_not_declare_is_refused_even_when_it_is_a_kno
 
 
 def test_a_features_hash_that_is_not_its_signatures_digest_is_refused(tmp_path):
-    """The loader recomputes the digest from the signature and drops the model on a mismatch.
-    Comparing the artifact's stored copy with the descriptor's proves only that one run
-    stamped both: a signature edited after training kept both stale copies in agreement.
-    """
+    """The loader recomputes the digest from the signature, so stored copies can lie."""
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     stale = _read(model / "heuristic.uhd.json")
@@ -1513,9 +1435,7 @@ def test_a_features_hash_that_is_not_its_signatures_digest_is_refused(tmp_path):
 def test_an_engine_level_model_for_a_descriptor_engine_must_record_its_selector_revision(
     tmp_path,
 ):
-    """The runtime holds a descriptor-backed engine's L1 model to the selector revision it
-    was measured under and reports UNAVAILABLE without one, so installing it ships a model
-    the engine never scores."""
+    """Without a selector revision the engine reports UNAVAILABLE and never scores."""
     tree = _tree(tmp_path / "tree")
     ued = _read(tree / "engine.ued.json")
     ued.pop("predict_engine")

@@ -42,12 +42,8 @@ public:
         return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME;
     }
 
-    /// What this build's forward dispatch is, as every shipped L1 model records it.
-    ///
-    /// Public because it is a contract value, not an implementation detail: a model whose
-    /// `trained_against.selector_revision` differs from this is refused at load, so the
-    /// string decides whether a shipped model is usable at all. Exposed so that rule can
-    /// be asserted rather than discovered when an engine reports UNAVAILABLE.
+    /// @brief The selector revision every L1 model for this engine must record; a model
+    /// whose `trained_against.selector_revision` differs is refused at load.
     static const char* selectorRevision();
 
     int64_t id() const override;
@@ -60,30 +56,12 @@ public:
                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
-    /// @brief The L1 models this engine binds: architecture to UHD UUID, one row per model.
+    /// @brief The L1 models this engine binds: architecture to UHD UUID (RFC 0019 OQ 7).
     ///
-    /// RFC 0019 Open Question 7 (RESOLVED): an engine that ships no UED binds its
-    /// `predict_engine` models by naming those UHDs' UUIDs in its provider's own engine
-    /// definition -- this table. The binding identity therefore comes from compiled-in
-    /// provider code, never from the document: a UHD keeps §4.1's shape and carries no
-    /// `engine`, `role` or `arch` member, and the loader resolves the id out of the
-    /// descriptor catalog it already parses, validating provenance exactly as it does for
-    /// a UED role reference (§3.1, §8.1).
-    ///
-    /// An architecture may appear on several rows, one per ranking metric (§4.4): the
-    /// metric each model answers in is its own `score.metric`, so the table names ids only
-    /// and a request in a metric no row's model declares is UNAVAILABLE rather than
-    /// answered in another metric. At most one model per (architecture, metric); a second
-    /// disables that metric for that architecture.
-    ///
-    /// gfx942 and gfx950 run different code objects at different throughput, so one
-    /// model cannot answer for both. An id nothing deploys resolves to nothing and the
-    /// engine reports UNAVAILABLE -- the behaviour it had before any model existed
-    /// (§11.2's "no declared model" row).
-    ///
-    /// To install a model, a deployer drops a `.uhd.json` carrying one of these ids, plus
-    /// its artifact, into any descriptor root this provider reads
-    /// (kernel_ingestor_engine::descriptorSearchDirectories()).
+    /// The binding identity comes from this compiled-in table, never from the document. An
+    /// architecture may have one row per ranking metric (§4.4); each model answers in its
+    /// own `score.metric`, and a second model for one (architecture, metric) disables it.
+    /// An id nothing deploys leaves the engine UNAVAILABLE.
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 2> L1_MODEL_IDS{{
         {"gfx942", "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370"}, // tflops
         {"gfx950", "8b61d0c9-24af-4d17-9e52-3a7c06b8f145"}, // tflops
@@ -113,8 +91,8 @@ public:
 private:
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    /// Resolved once at construction from @ref L1_MODEL_IDS; empty when no descriptor
-    /// tree is installed, which the engine reports as UNAVAILABLE rather than an error.
+    /// Resolved once at construction from @ref L1_MODEL_IDS; empty (UNAVAILABLE, not an
+    /// error) when no descriptor tree is installed.
     hipdnn_plugin_sdk::uhd::EngineModelBinding _l1Models;
 #endif
 };

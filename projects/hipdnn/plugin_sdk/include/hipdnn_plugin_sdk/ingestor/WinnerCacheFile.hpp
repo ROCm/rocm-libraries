@@ -67,19 +67,16 @@ constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
 /// self-correcting. This field is the independent per-line stamp: a foreign line (wrong
 /// version) appended to an otherwise valid shard is skipped instead of parsed.
 ///
-/// Version 2 added the four memory fields DeviceKey compares. A version-1 line carries only
-/// arch/warp/CU; decoding it with the memory fields defaulted to zero would yield a key no
-/// real device equals (or, worse, one an unresolved all-zero device does), so it is skipped.
+/// Version 2 added the memory fields DeviceKey compares; version-1 lines are skipped
+/// rather than decoded with those fields zeroed.
 constexpr int WINNER_LINE_FORMAT_VERSION = 2;
 
 /// True if @p component is usable verbatim as a path component: a non-empty run of ASCII
 /// letters, digits, '_' and '-'.
 ///
 /// Every base target id stripArchFeatures() can produce is of that form -- `gfx942`,
-/// `gfx90a`, `gfx1151`, the LLVM generic `gfx9-4-generic` -- and so is every descriptor id,
-/// which is UUID text. The check is a whitelist, so a separator, a dot, a colon, a control
-/// byte or a non-ASCII byte all fail it, which is what keeps a driver-supplied or
-/// author-supplied string inside the cache tree.
+/// `gfx90a`, `gfx1151`, `gfx9-4-generic` -- as is every UUID-text descriptor id. Being a
+/// whitelist keeps driver- or author-supplied strings inside the cache tree.
 inline bool isPlainPathComponent(std::string_view component)
 {
     return !component.empty() && std::all_of(component.begin(), component.end(), [](char c) {
@@ -89,9 +86,8 @@ inline bool isPlainPathComponent(std::string_view component)
     });
 }
 
-/// A JSON integer within [0, max of @p T], or nullopt. nlohmann's get<T>() accepts a float, a
-/// negative and an out-of-range value and static-casts all of them, which silently invents a
-/// device field the writer never recorded (and is UB for the out-of-range signed case).
+/// A JSON integer within [0, max of @p T], or nullopt. nlohmann's get<T>() would silently
+/// cast floats, negatives and out-of-range values.
 template <typename T>
 inline std::optional<T> readNonNegative(const nlohmann::json& parent, const char* field)
 {
@@ -130,49 +126,29 @@ inline std::string_view winnerCacheVersion()
 }
 
 /// Everything a persisted ranking's validity depends on that the `(graph, device)` entry
-/// key does not already carry.
-///
-/// RFC 0019 §9.2: "the UHD identity has to be in the path, because nothing else survives a
-/// restart. The moment rankings outlive the process, [the in-process argument] evaporates
-/// -- generation counters are process-local, and a restart happily reads entries written by
-/// a model that has since been replaced."
-///
-/// Every member carries a default initializer so a caller can name only what it has --
-/// `EngineIdentity{name}` for an engine with no UHD -- without tripping
-/// -Wmissing-field-initializers, which this build treats as an error.
+/// key does not carry (RFC 0019 §9.2: only what is in the path survives a restart).
+/// Default initializers let callers name only what they have, e.g. `EngineIdentity{name}`,
+/// without -Wmissing-field-initializers.
 struct EngineIdentity
 {
     // NOLINTBEGIN(readability-redundant-member-init) - the initializers are load-bearing, see above
     /// `EngineDescriptor::name`. Empty disables the on-disk cache entirely.
     std::string name = {};
 
-    /// `EngineDescriptor::revision`, the descriptor set's authored semantic revision. The
-    /// same value `CatalogKey` carries, so an in-memory entry and an on-disk one are
-    /// separated by the same event.
+    /// `EngineDescriptor::revision`; the same value `CatalogKey` carries.
     hipdnn_data_sdk::utilities::Version version{};
 
     /// The catalog-ranking UHD's descriptor id; empty when the engine ships no UHD and
     /// ranks on priority then id.
     std::string uhdId = {};
 
-    /// A content hash over every model this engine can resolve, NOT over the UHD document's
-    /// declared version. §9.2: "Hash the content, don't trust the id or a version field. A
-    /// regenerated model normally keeps the same UHD id ... and a hand-maintained version can
-    /// be forgotten." An artifact's content is its digest -- declared, or taken from its bytes
-    /// at load (engineModelHash()).
-    ///
-    /// Empty when the engine ships no heuristic. A native scorer has no artifact: its "model"
-    /// is code compiled into the provider, versioned by the build, which the data-SDK version
-    /// component already at the head of the path carries.
+    /// Content hash over every model this engine can resolve, not a declared version
+    /// (RFC 0019 §9.2). Empty when the engine ships no heuristic; a native scorer's model is
+    /// code, versioned by the data-SDK component at the head of the path.
     std::string modelHash = {};
 
-    /// False when some model this engine can resolve names an artifact that no digest
-    /// identifies: it declared no hash and had no bytes at load to digest (deployment is
-    /// separate from load, RFC 0019 §5). @ref modelHash then cannot tell that model's
-    /// later content apart from any other, so a persisted ranking could outlive the model
-    /// that produced it -- the on-disk cache is declined outright rather than keyed on an
-    /// identity that does not exist. A native scorer or static order has no artifact and
-    /// keeps its descriptor identity.
+    /// False when a resolvable model names an artifact with no digest (none declared, no
+    /// bytes at load). @ref modelHash cannot version it, so the on-disk cache is declined.
     bool contentIdentified = true;
     // NOLINTEND(readability-redundant-member-init)
 };
@@ -181,10 +157,8 @@ struct EngineIdentity
 /// `cacheRoot()/ingestor-winners/<data-sdk version>/<sanitized-engine>/<uhd id>/
 ///  <engine revision>-<model hash>/<base-arch>/winners.jsonl`.
 ///
-/// The last three components are RFC 0019 §9.2's "directory per heuristic build" with the
-/// engine revision folded in, and they are what makes invalidation a directory delete rather
-/// than an entry-by-entry staleness check: a new model or a new engine revision writes under
-/// a new directory, and the old one is simply unreachable.
+/// The last three components are RFC 0019 §9.2's "directory per heuristic build", so a
+/// new model or engine revision invalidates by writing to a new directory.
 ///
 /// The arch component is the stripped base target id VERBATIM: a user has to be able to
 /// find and delete one arch's cache by eye, so `gfx942` must read as `gfx942`. It is
@@ -192,18 +166,13 @@ struct EngineIdentity
 /// readability, and the arch has nothing to disambiguate, being drawn from a small set of
 /// known-good identifiers. An arch that is not a plain component is a driver anomaly:
 /// decline the disk cache rather than reshape the string into something that reads like a
-/// different arch. The UHD id is treated the same way and for the same reason -- it is UUID
-/// text, already a plain component.
+/// different arch. The UHD id (UUID text) is checked the same way.
 ///
-/// The model hash is truncated to its first 16 hex digits. It is an invalidation token, not
-/// an integrity check (the adapters verify the artifact against its full declared checksum
-/// when they load it), and 64 bits of it keeps the component short enough that a deep cache
-/// root does not push the shard past a filesystem's path limit.
+/// The model hash is truncated to 16 hex digits: an invalidation token, not an integrity
+/// check, kept short to stay under filesystem path limits.
 ///
-/// The device is NOT keyed on the HIP ordinal anywhere in this path or in `WinnerKey`,
-/// per §9.2: "Device 0 is a different GPU on a different machine, and can be a different GPU
-/// after a reboot." Arch selects the shard; `DeviceKey` carries the rest of the device
-/// identity (warp size, CU count, memory properties) inside each record.
+/// The device is never keyed on the HIP ordinal (RFC 0019 §9.2): arch selects the
+/// shard, and `DeviceKey` in each record carries the rest of the device identity.
 ///
 /// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, if
 ///     @p gcnArchName does not strip to a plain component, or if @p engine has no content
@@ -228,9 +197,8 @@ inline std::filesystem::path winnerCacheShardPath(const EngineIdentity& engine,
         return {};
     }
 
-    // "no-uhd" and "unhashed" are distinct directories, not a shared default: an engine that
-    // gains a UHD must not inherit the rankings measured while it had none, since those were
-    // produced by a different selection path over the same candidates.
+    // Distinct from "unhashed": an engine that gains a UHD must not inherit rankings
+    // measured by a different selection path.
     const std::string uhdComponent
         = detail::isPlainPathComponent(engine.uhdId) ? engine.uhdId : "no-uhd";
     const std::string buildComponent
@@ -272,10 +240,8 @@ inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
 /// `DescriptorLoader.hpp` (`formatUuid`/`parseUuid`).
 inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerRecord& record)
 {
-    // Structured binding, not member access: DeviceKey compares every DeviceProperties field,
-    // so a field this codec does not persist makes every reloaded key unequal to the live one
-    // and the disk cache silently never hits. Growing the struct stops this compiling until
-    // the codec (and WINNER_LINE_FORMAT_VERSION) follow.
+    // Structured binding so growing DeviceProperties stops this compiling until the codec
+    // (and WINNER_LINE_FORMAT_VERSION) persist the new field; DeviceKey compares them all.
     const auto& [gcnArchName,
                  warpSize,
                  multiProcessorCount,

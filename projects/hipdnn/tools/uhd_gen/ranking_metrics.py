@@ -2,15 +2,9 @@
 # SPDX-License-Identifier: MIT
 """The ranking-metric registry (RFC 0019 §4.4), mirrored from the data SDK.
 
-`hipdnn_data_sdk/utilities/RankingMetrics.hpp` is the registry the runtime enforces: a
-UHD's `score.metric` must name an entry, its `objective` must be that entry's direction,
-and a prediction value must be valid in that metric. This copy exists so a descriptor
-the tool emits is one the loader accepts; it must match the C++ table row for row.
-
-`label` is the tool's own column: the corpus field a model of this metric trains on.
-RFC 0019 §13.4 fixes it per metric -- `tflops` is the binding layer's FLOPs over
-`avgTimeMs`, `time` is `avgTimeMs` itself -- so an author names the metric and never
-pairs a label with the wrong direction.
+Must match `hipdnn_data_sdk/utilities/RankingMetrics.hpp` row for row, or the loader
+refuses emitted descriptors. `label` is the corpus column a model of that metric trains
+on (RFC 0019 §13.4).
 """
 from __future__ import annotations
 

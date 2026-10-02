@@ -9,23 +9,12 @@
 #include <limits>
 
 /// @file GraphSize.hpp
-/// @brief How much memory a generated problem would need, from the graph itself.
-///
-/// Separate from MetadataCorpus.hpp, which owns the engine-backed oracle and therefore links
-/// the frontend. This is arithmetic over a serialized graph and nothing else, so it can be
-/// tested without a device -- which matters, because the failure mode is a number that is
-/// merely too small rather than an error.
+/// @brief Memory a generated problem needs, computed from the serialized graph alone.
 namespace hipdnn_corpus_gen
 {
 
-/// Bytes one element of @p type occupies, rounded up for the sub-byte types.
-///
-/// Was a flat four, with a comment asserting that no dtype a corpus uses exceeds it. That was
-/// true of every declaration then written and enforced by nothing: adding float64 to one would
-/// have halved the ceiling silently, and a ceiling that is too low admits problems too large to
-/// benchmark, which is the failure it exists to prevent. Sub-byte types round up to one because
-/// their packing is a property of the tensor rather than of the element, and over-counting
-/// keeps this a ceiling.
+/// Bytes one element of @p type occupies. Sub-byte types round up to one so the result
+/// stays an upper bound.
 inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -55,30 +44,16 @@ inline int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType type)
         return 1;
     case DataType::UNSET:
     default:
-        // Charged the widest, so a type this function has not been taught cannot slip a huge
-        // problem past the ceiling.
+        // Charge the widest so an unknown type cannot slip past the ceiling.
         return 8;
     }
 }
 
-/// @brief Total bytes the tensors of @p bytes need allocated.
+/// @brief Total bytes the tensors of @p bytes need allocated (the §4.3.2 bench ceiling).
 ///
-/// The benchmarking ceiling §4.3.2 describes: a problem whose tensors do not fit cannot be
-/// timed, so it cannot enter a corpus at any budget. Computed rather than declared, because it
-/// is a property of the device and the dtype rather than of the operation, and because no
-/// per-dimension window can express it. Without it the search faithfully proposes convolutions
-/// that are applicable, enormous, and take minutes each.
-///
-/// Each tensor is charged its strided span -- `1 + sum((dim_i - 1) * stride_i)` elements, the
-/// furthest addressable offset plus one -- because that is what the bench allocates
-/// (hipdnn_bench::elementSpan). The element count is the same number only for a packed tensor:
-/// three 2x2 fp32 tensors with a row stride of 4096 were charged 48 bytes against the 49176
-/// the bench needed, so a padded layout passed any ceiling.
-///
-/// Saturates rather than overflowing: a problem large enough to wrap the arithmetic is
-/// certainly over any real ceiling, and a wrapped total would read as a small one. A tensor
-/// that cannot be sized -- a non-positive extent, a negative stride, strides that do not match
-/// its rank -- saturates too: the bench refuses it, so no budget can admit it.
+/// Each tensor is charged its strided span, `1 + sum((dim_i - 1) * stride_i)` elements, to
+/// match hipdnn_bench::elementSpan. Saturates at INT64_MAX on overflow or on a tensor that
+/// cannot be sized (non-positive extent, negative stride, rank-mismatched strides).
 inline int64_t graphBytes(const builders::GraphBytes& bytes)
 {
     constexpr auto SATURATED = std::numeric_limits<int64_t>::max();

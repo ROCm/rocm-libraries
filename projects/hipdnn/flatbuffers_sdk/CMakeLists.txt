@@ -178,14 +178,9 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )
 
-    # Python bindings for the one schema uhd_gen writes. Generated into the tool's
-    # own `_generated/` rather than a shared location: uhd_gen is pip-installable, so
-    # a sibling top-level package would not travel with the wheel, and prepending its
-    # own copy to sys.path is what keeps a stale install from shadowing the bindings
-    # that match this schema (see uhd_gen/__init__.py).
-    #
-    # Only this one. Every other schema is consumed exclusively from C++, and
-    # generating Python for all of them would ship a package nothing imports.
+    # Python bindings for the one schema uhd_gen writes, generated into the tool's own
+    # `_generated/` so they ship in its wheel (see uhd_gen/__init__.py). Other schemas are
+    # consumed only from C++.
     hipdnn_generate_flatbuffer_python(
         NAME uhd_gen
         TARGET hipdnn_flatbuffers_sdk
@@ -236,10 +231,8 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
 
-        # Same shape as the cache-key header, for the same reasons: the node-operand
-        # visitor is driven by the `cache_uid` and `work_data_dependent` annotations,
-        # which flatc's C++ output does not expose. gen_node_operands.py imports
-        # gen_cache_key.py's schema reader, so a change to either script regenerates it.
+        # Same shape as the cache-key header: driven by `cache_uid` / `work_data_dependent`
+        # annotations flatc's C++ output does not expose. Also depends on gen_cache_key.py.
         set(_node_operands_header
             "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h"
         )

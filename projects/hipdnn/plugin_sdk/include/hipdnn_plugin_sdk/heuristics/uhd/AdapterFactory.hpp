@@ -22,21 +22,16 @@ namespace hipdnn_plugin_sdk::uhd
 
 /// @brief Construct the adapter @p cfg names, or nullptr if it cannot be built.
 ///
-/// An unavailable scorer leaves the caller's applicability decision intact: kernel
-/// selection falls back to declared order; engine prediction returns no estimate.
-///
-/// `static_order` is not a scorer and yields nullptr by design -- selection ranks it with
-/// the declared-order comparator instead of building an adapter.
-///
-/// `onnx` is not supported here: its runtime is not a dependency of every provider.
+/// nullptr never changes applicability. `static_order` always yields nullptr (it is ranked
+/// by declared order), as does `onnx`, whose runtime not every provider links.
 inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
 {
     if(cfg.adapterType == "tree_data")
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            // The score's transform and metric travel with the objective: a grouped model
-            // chooses its group itself, so it applies RFC 0019 §8.3's score rule itself.
+            // A grouped model chooses its group, so it applies RFC 0019 §8.3's score rule
+            // itself and needs the transform and metric.
             return TreeDataAdapter::load(cfg.modelArtifactPath,
                                          cfg.featuresHash,
                                          cfg.modelHash,
@@ -49,16 +44,13 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            // The digest travels with the path for every artifact adapter: it is the
-            // model's content identity (declared, or taken at parse), and a table scored
-            // under an identity its bytes do not have poisons every cache keyed on it.
+            // modelHash is the content identity caches key on; the adapter verifies it.
             return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "native")
     {
-        // Resolves a scorer the engine registered in-process; nothing is loaded from disk
-        // (RFC 0019 §7.1).
+        // In-process scorer; nothing is loaded from disk (RFC 0019 §7.1).
         if(!cfg.nativeSymbol.empty())
         {
             return NativeAdapter::resolve(
@@ -68,13 +60,8 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
 
     else if(cfg.adapterType == "custom_library")
     {
-        // The platform loader supports the compiled-scorer escape hatch on every host.
         if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
         {
-            // modelHash travels with the path, exactly as it does for tree_data above. It
-            // did not, and the omission was invisible: the L1 predictor hashed the same .so
-            // itself before calling here, so only the kernel-ranking role -- which has no
-            // such pre-check -- dlopen'ed an artifact whose declared digest nothing compared.
             return CustomLibraryAdapter::load(cfg.modelArtifactPath,
                                               cfg.customLibrarySymbol,
                                               cfg.featuresSignature.size(),

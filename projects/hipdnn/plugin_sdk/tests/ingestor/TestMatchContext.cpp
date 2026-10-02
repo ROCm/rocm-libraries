@@ -54,13 +54,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         CatalogKeyInequalityCase{"DifferentGraphId", CatalogKey{makeGraphId(2), 0}},
         CatalogKeyInequalityCase{"DifferentDeviceId", CatalogKey{makeGraphId(1), 1}},
-        // RFC 0019 §9.2 keys the cached ranking on an inventory generation counter so a
-        // ranking cannot outlive the descriptor set that produced it. This build has no
-        // in-process counter -- engines load once at startup -- so the engine descriptor
-        // set's own revision carries that duty, and a bumped revision must not read an
-        // entry the previous one ranked. A patch bump counts: the engine's authored
-        // semantics are what the revision tracks, and this key cannot tell which part of a
-        // bump changed behaviour.
+        // RFC 0019 §9.2: the engine descriptor revision stands in for the inventory
+        // generation counter, so any bump, patch included, must miss.
         CatalogKeyInequalityCase{"DifferentEngineMajorVersion",
                                  CatalogKey{makeGraphId(1), 0, {1, 0, 0}}},
         CatalogKeyInequalityCase{"DifferentEnginePatchVersion",
@@ -89,11 +84,7 @@ TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesDifferentDeviceIds)
     EXPECT_NE(hash(onDeviceZero), hash(onDeviceOne));
 }
 
-/// Equality alone would still let a bumped revision land in the previous one's bucket and
-/// be rejected only on the subsequent comparison; that is correct but wastes the bucket. The
-/// real reason to assert it, though, is that folding a version into a hash invites packing
-/// the three components into one number, and every cheap packing collides two versions that
-/// must stay apart -- here 1.10.0 against 2.0.0 under a `major * 10 + minor` fold.
+/// A cheap packing such as `major * 10 + minor` would collide 1.10.0 with 2.0.0.
 TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesEngineVersionsThatPackAlike)
 {
     const CatalogKeyHash hash;

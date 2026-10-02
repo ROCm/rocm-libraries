@@ -2,26 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 /// @file UhdModelGen.cpp
-/// @brief Emits the trained-model artifacts the pointwise_model descriptor pack names.
+/// @brief Emits the pointwise_model pack's tree_data UHD and its hand-written model artifact.
 ///
-/// A tree_data heuristic (RFC 0019 §7) is a descriptor naming a model artifact. The
-/// descriptor is text and could be committed; the artifact cannot. Both are generated here
-/// anyway, because `features_hash` ties them together: computing it with the runtime's own
-/// function is what stops a committed descriptor drifting from the signature beside it the
-/// moment the feature set changes.
-///
-/// The "training" here is a two-leaf tree written by hand. That is the point: the pack
-/// exists to prove a model-backed UHD is loaded and ranks the catalog, not to be a good
-/// model. A real one comes from `tools/uhd_gen` and a benchmark corpus.
-///
-/// Output is byte-identical run to run -- no timestamps, no ordering from a hash map --
-/// because a build step whose output churns re-triggers everything downstream of it.
-///
-/// Links the flatbuffers SDK and the plugin SDK's feature extractor. Deliberately not the
-/// test SDK, whose `GbdtModelTestBuilder` does much the same thing: a shipped tool must not
-/// depend on test scaffolding. The feature extractor is a different matter and is used on
-/// purpose -- computing the signature hash with the same code the runtime validates against
-/// is what makes a mismatch impossible by construction rather than by inspection.
+/// Both are generated so `features_hash` comes from the runtime's own function and cannot
+/// drift from the signature. Output must be byte-identical run to run, or the build
+/// re-triggers everything downstream.
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
@@ -42,10 +27,7 @@ namespace
 
 namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 
-/// The one feature. `$kernel.*` is all this model can see: the pointwise graph matcher
-/// binds tensor uids rather than sizes, so there is no useful `$q.*` to split on. A real
-/// pack would want problem features too -- read this as a demonstration of the mechanism,
-/// not of a well-chosen feature set.
+/// Only `$kernel.*` is usable: the pointwise matcher binds tensor uids, not sizes.
 const std::vector<nlohmann::json> SIGNATURE = {"$kernel.block_size"};
 
 /// The fixture UED's catalog-ranking model, resolved before generation.
@@ -53,11 +35,8 @@ constexpr const char* UHD_ID = "5a1c0000-0000-4000-8000-000000000002";
 constexpr const char* MODEL_FILE = "pointwise_model.bin";
 constexpr const char* UHD_FILE = "pointwise_model.uhd.json";
 
-/// Prefers the small block where the native scorer (`hipkernel.pointwise.score`, which
-/// returns `block_size`) prefers the large one. The disagreement is the whole point: it is
-/// what lets a test tell a ranking model apart from the declared-order fallback, which the
-/// pack's kernel ids are arranged to send the other way.
-///
+/// Prefers the small block, the opposite of the native scorer and the declared order, so a
+/// test can tell this model's ranking apart from both.
 ///   block_size <= 96  -> 9.0   (the 64 kernel)
 ///   block_size >  96  -> 1.0   (the 256 kernel)
 void writeModel(const std::filesystem::path& path, const std::string& featuresHash)
@@ -92,13 +71,11 @@ void writeModel(const std::filesystem::path& path, const std::string& featuresHa
         0.0, // base_score
         1.0, // learning_rate: leaf values are already final, as LightGBM emits them
         builder.CreateString("hand-authored"),
-        // Fixed, not the build time: a changing timestamp would rewrite the artifact on
-        // every configure and re-trigger everything staged downstream of it.
+        // Fixed, not the build time, so the artifact is reproducible.
         builder.CreateString("1970-01-01T00:00:00Z"),
         0, // num_training_samples: nothing was measured
         builder.CreateString("regression"),
-        // Empty: no architecture was trained against, so nothing should read as
-        // out-of-distribution (RFC 0019 §9.3) on any device.
+        // Empty: nothing reads as out-of-distribution (RFC 0019 §9.3) on any device.
         builder.CreateVector(arches),
         builder.CreateString("0.0.0"));
 
@@ -109,8 +86,8 @@ void writeModel(const std::filesystem::path& path, const std::string& featuresHa
               static_cast<std::streamsize>(builder.GetSize()));
 }
 
-/// The `trained_against` record: id and revision of the UED, KMD and UMDs this model is
-/// generated for, read from the descriptor set whose `default` catalog ranker names this UHD.
+/// The `trained_against` record for the descriptor set whose `default` catalog ranker
+/// names this UHD.
 nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& roots)
 {
     using namespace hipdnn_plugin_sdk::ingestor;
@@ -122,8 +99,7 @@ nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& root
     };
     for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {
-        // The role maps each arch to a list of UHDs, one per metric; the generated model is
-        // bound when its id is anywhere in the `default` list.
+        // Each arch maps to a list of UHDs, one per metric.
         const auto models = set.engine.sortKernelCatalog.find("default");
         if(models == set.engine.sortKernelCatalog.end()
            || std::none_of(models->second.begin(), models->second.end(), [](const auto& id) {
@@ -145,17 +121,7 @@ nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& root
         "Model fixture UED did not resolve from the supplied descriptor roots");
 }
 
-/// Writes the descriptor itself, which under the current schema IS the UHD -- a text file
-/// with the fields inline, not a stub naming a binary that holds them.
-///
-/// Still generated rather than committed, for the reason the model is: `features_hash` is
-/// computed here with the runtime's own function, so the pair cannot drift. A committed
-/// copy would be free to disagree with the signature beside it, and the runtime would then
-/// refuse the model at load with nothing pointing at which of the two moved.
-///
-/// The fixed fields are streamed as text in a fixed order; only the two structured values,
-/// the signature and the provenance, are serialized through nlohmann::json. The output is
-/// read back by DescriptorLoader in the same build.
+/// Writes the UHD text with fields in a fixed order, for reproducible output.
 void writeUhd(const std::filesystem::path& path,
               const std::string& featuresHash,
               const nlohmann::json& provenance)
@@ -173,13 +139,11 @@ void writeUhd(const std::filesystem::path& path,
     json << R"(  "features_hash": ")" << featuresHash << "\",\n";
     json << "  \"objective\": \"max\",\n";
 
-    // Not calibrated and no metric: 9.0 and 1.0 are ordering, not throughput, so this score
-    // means nothing against another engine's (RFC 0019 §12.3) and ranks no registered
-    // metric -- it is its engine's metric-less `sort_kernel_catalog` ranker (§4.4). The
-    // leaf values are the score itself, so nothing has to be undone to read them.
+    // Uncalibrated and metric-less: the leaf values only order kernels, so this is the
+    // engine's metric-less `sort_kernel_catalog` ranker (RFC 0019 §4.4, §12.3).
     json << "  \"score\": { \"calibrated\": false, \"transform\": \"identity\" },\n";
 
-    // Relative: resolved against this file's own directory, wherever the pack is staged.
+    // Relative to this file's directory, wherever the pack is staged.
     json << R"(  "tree_data": { "artifact": ")" << MODEL_FILE << "\" }\n";
     json << "}\n";
 
@@ -209,9 +173,7 @@ int main(int argc, char** argv)
         const auto provenance = snapshotProvenance(roots);
         std::filesystem::create_directories(outputDir);
 
-        // The runtime rejects a UHD whose declared hash disagrees with the signature it
-        // carries, so computing it here with the runtime's own function is what keeps the
-        // pair consistent by construction.
+        // The runtime rejects a UHD whose hash disagrees with its signature.
         const std::string featuresHash
             = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(SIGNATURE);
 

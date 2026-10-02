@@ -2,20 +2,9 @@
 # SPDX-License-Identifier: MIT
 """A measured row's numerical-correctness verdict, read the same way at every entrance.
 
-RFC 0019 §13.2: "A timing is only a training label once the candidate is known correct",
-and a candidate shown wrong "is written with its measurement suppressed and an explicit
-invalid marker". The verdict is tri-state and sits beside `is_valid`, never folded into it:
-`is_valid` says a measurement came back, `numerically_valid` says whether anything showed
-the result to be wrong. True is checked-correct, False is checked-wrong, and None (null) is
-"nothing could decide" -- the honest state of every corpus collected without a reference,
-so it is admissible but never spelled as True. Its reason travels beside it as `validation`.
-
-One reader for every entrance -- `generate`'s collection and label gate, direct `train`,
-dataset publication, L1 immediate import, evaluation and promotion -- because a wrong-but-
-fast kernel holds the best time in its group: any entrance that reads its timing as a label
-trains the selector to prefer it.
-
-Stdlib and pandas only: `uhd_gen.dataset` imports this without the training stack.
+Tri-state and separate from `is_valid` (RFC 0019 §13.2): True checked-correct, False
+checked-wrong (timings suppressed), None undecided. Every entrance must use this reader,
+or a wrong-but-fast kernel becomes a label. Pandas only: `uhd_gen.dataset` imports it.
 """
 from __future__ import annotations
 
@@ -28,10 +17,9 @@ import pandas as pd
 VERDICT = "numerically_valid"
 #: The reason the verdict was reached (`output_mismatch: ...`, `no_reference: ...`).
 REASON = "validation"
-#: The measured timings a known-wrong row must not carry. Everything a label is derived
-#: from (`tflops`, `gbs`) is derived from `avgTimeMs`, so suppressing these suppresses it.
+#: Timings a known-wrong row must not carry; every derived label comes from these.
 SUPPRESSED_TIMINGS = ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs")
-#: Labels derived from the timings above, cleared with them where a row already carries one.
+#: Labels derived from the timings above, cleared with them when present.
 DERIVED_LABELS = ("tflops", "gbs")
 
 _SPELLINGS = {
@@ -47,9 +35,7 @@ _SPELLINGS = {
 def numerical_verdict(value) -> bool | None:
     """The tri-state verdict a row carries; ValueError for anything that is not one.
 
-    Accepts the spellings a corpus actually arrives in: JSON booleans/null, NumPy booleans
-    and NaN from a pandas frame, `pd.NA` from Parquet, and the text a CSV column holds.
-    Never coerces a number: `1` is not a correctness verdict.
+    Accepts bool/NaN/pd.NA and CSV text spellings; never coerces a number.
     """
     if value is None or value is pd.NA:
         return None
@@ -76,11 +62,7 @@ def numerical_reason(value) -> str | None:
 
 
 def known_wrong(frame: pd.DataFrame) -> pd.Series:
-    """Rows a correctness check showed to compute the wrong answer.
-
-    A corpus without the column was collected before there was a check; every row is then
-    undecided, not wrong.
-    """
+    """Rows a correctness check showed wrong; none if the column is absent (undecided)."""
     if VERDICT not in frame.columns:
         return pd.Series(False, index=frame.index, dtype=bool)
     return (
@@ -89,11 +71,7 @@ def known_wrong(frame: pd.DataFrame) -> pd.Series:
 
 
 def suppress_timings(row: dict) -> dict:
-    """Null every timing and derived label on a known-wrong row; the row itself stays.
-
-    Only the columns the row carries are touched, so a row that never had a derived rate
-    is not given an explicit null for one.
-    """
+    """Null every timing and derived label the known-wrong row carries; keep the row."""
     for column in (*SUPPRESSED_TIMINGS, *DERIVED_LABELS):
         if column in row:
             row[column] = None

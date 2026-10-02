@@ -71,10 +71,8 @@ _KERNEL_REFERENCE = "$kernel."
 def kernel_axes(signature: list) -> set[str]:
     """The KMD fields a signature reads through `$kernel.*`, by base name.
 
-    `$kernel.tile[0]` reads the field `tile`, and a reference nested in a computed entry
-    counts as much as a bare one. These are the axes RFC 0019 §6.3 check 2 admits a model
-    on, so generation's proposal, its check of an authored recipe and promotion's install
-    gate all read them here rather than each deciding what a signature "uses".
+    `$kernel.tile[0]` reads `tile`; nested references count. The single definition of the
+    axes RFC 0019 §6.3 check 2 admits a model on.
     """
     return {
         reference[len(_KERNEL_REFERENCE) :].split("[", 1)[0]
@@ -88,13 +86,9 @@ def require_admissible_kernel_axes(
 ) -> None:
     """Refuse a signature the runtime would refuse to rank with (RFC 0019 §6.3 check 2).
 
-    `UhdKernelHeuristic` admits a model only when every `$kernel.*` axis is a field of the
-    engine's KMD AND a knob of the UED that binds it; otherwise it logs, drops the model and
-    ranks by priority, then id. The UED meant is the SHIPPING one -- generation collects
-    against a UED exposing every KMD field, and a model fitted there reads axes the shipped
-    engine never lets a caller vary. A field the matcher binds from the graph (dtype, head
-    counts, causal...) is a fact about the problem: the model reads it from the graph's own
-    column, which carries the same value, never from `$kernel.*`.
+    Every `$kernel.*` axis must be a KMD field AND a knob of the shipping UED (not the
+    collection UED, which exposes every field). Graph-bound fields belong in the graph's
+    own column.
     """
     axes = kernel_axes(signature)
     undeclared = sorted(axes - set(kmd_fields))
@@ -138,18 +132,10 @@ def compute_features_hash(
     categorical_encoding: dict | None = None,
     executable: str | Path | None = None,
 ) -> str:
-    """The descriptor's `features_hash`, from the routine the loader verifies it with.
+    """The descriptor's `features_hash`, asked of the evaluator the loader verifies with.
 
-    RFC 0019 §6.3 requires generation and verification to share ONE definition of this
-    digest, and that definition is FeatureExtractor::computeHash. So the digest is asked
-    for rather than recomputed here: the evaluator canonicalises the AST and the
-    categorical vocabulary and hashes them itself. Zero rows, because §6.5 folds only the
-    signature and the codes into the digest -- no corpus is needed to ask for it.
-
-    This module used to carry a second, pure-Python implementation. It agreed with C++
-    only because a test pinned the same literal digest on both sides; a change to either
-    canonicalisation would have shipped a descriptor the runtime refuses to load rather
-    than failing a test here.
+    RFC 0019 §6.3 allows one definition (FeatureExtractor::computeHash), so it is never
+    recomputed in Python. No rows are needed: §6.5 hashes only signature and codes.
     """
     digest, _, _ = _run_feature_evaluator(
         signature, categorical_encoding, [], executable
@@ -179,8 +165,7 @@ def derive_categorical_encoding(
 ) -> dict[str, dict[str, int]]:
     """Stable per-reference codes, preserving the exact published string values.
 
-    An absent binding (a column no row publishes, or a row that does not publish it) has no
-    code: it reaches the evaluator as JSON null, never as a vocabulary entry.
+    Absent bindings get no code; they reach the evaluator as JSON null.
     """
     encoding = {}
     for column in feature_cols:
@@ -211,9 +196,7 @@ def derive_categorical_encoding(
 def _is_absent(value) -> bool:
     """A binding the row does not publish: None, or pandas' NaN/NA filling for a missing key.
 
-    Published values are finite (the §8.3 envelope rejects anything else), so a NaN in a
-    corpus frame is the hole pandas leaves when rows of different operations publish
-    different names -- a conv-fwd row has no `dy`. Arrays are values, never absent.
+    Published values are finite (§8.3), so NaN means absent. Arrays are never absent.
     """
     if value is None:
         return True
@@ -227,21 +210,14 @@ def _is_absent(value) -> bool:
 EVALUATOR_NAME = "hipdnn_uhd_features"
 EVALUATOR_ENV_VAR = "HIPDNN_UHD_FEATURE_EVALUATOR"
 
-#: Where a build or an install puts the evaluator, relative to a search root: `bin` is
-#: CMAKE_INSTALL_BINDIR under an install prefix (and a virtualenv), `build/bin` is an
-#: in-tree build beside the sources.
+#: Evaluator locations under a search root: install/venv `bin`, or in-tree `build/bin`.
 _EVALUATOR_RELATIVE_DIRS = ("bin", "build/bin")
 
 
 def _evaluator_search_roots() -> list[Path]:
-    """Roots derived from where this package sits, never from an absolute path.
+    """Roots relative to this package and sys.prefix, so the search survives remounts.
 
-    A batch script that named the executable absolutely worked on the login node and
-    broke inside the container, where the same tree is mounted at a different root. Every
-    root here is relative to this file (or to the interpreter's own prefix), so the search
-    moves with the checkout. Four parents reaches `tools/`, `projects/hipdnn/`,
-    `projects/` and the checkout root -- far enough for a `build/` beside the sources,
-    short enough not to wander into whatever shared directory holds the checkout.
+    Four parents reach the checkout root without wandering above it.
     """
     package = Path(__file__).resolve().parent
     return [Path(sys.prefix), *package.parents[:4]]
@@ -250,14 +226,7 @@ def _evaluator_search_roots() -> list[Path]:
 def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
     """Locate the shared evaluator: explicit path, then environment, then build, then PATH.
 
-    Every signature needs it now, raw references included: RFC 0019 §6.3 leaves the digest
-    with one definition, and that definition is in the binary. Guessing one in Python would
-    put a plausible but unverified hash in a shipped descriptor, which fails much later and
-    much further away, at load time on a user's machine.
-
-    A name that was supplied and cannot be run is an error rather than a reason to keep
-    looking: silently falling through to a different binary than the one asked for is how
-    a typo becomes a model stamped by something nobody chose.
+    An explicitly requested executable that cannot run is an error, not a fall-through.
     """
     for source, requested in (
         (" (--feature-evaluator)", str(executable) if executable else None),
@@ -289,13 +258,9 @@ def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
 
 
 def evaluator_feature_semantics_revision(executable: str | Path | None = None) -> int:
-    """What the feature values this evaluator computes MEAN (`FeatureSemantics.hpp`).
+    """The evaluator's feature semantics revision (`FeatureSemantics.hpp`).
 
-    Asked of the binary rather than restated here, for the reason `compute_features_hash`
-    is: a Python copy of the constant would agree with C++ only until someone bumped one
-    side. uhd_gen stamps it into `trained_against.feature_semantics_revision` at train time
-    and refuses to promote or evaluate a model recording another, exactly as the loader
-    refuses to bind one. An empty signature and no rows: the answer depends on neither.
+    Asked of the binary rather than mirrored in Python, so it cannot drift from C++.
     """
     return _run_feature_evaluator([], None, [], executable)[2]
 
@@ -308,10 +273,7 @@ def _run_feature_evaluator(
 ) -> tuple[str, list[list[float]], int]:
     """The only crossing into FeatureExtractor, which owns both the digest and the values.
 
-    Entries are parsed before the request is built so an unauthorable signature fails with
-    this module's message (which names the offending entry) instead of a subprocess exit
-    code. That parse is authoring validation, not a second canonicalisation: the bytes that
-    get hashed are the ones the evaluator dumps, never the ones serialised here.
+    Entries are parsed first only for a readable error; the evaluator does the hashing.
     """
     parsed = [parse_signature_entry(entry) for entry in signature]
     request = {
@@ -334,9 +296,7 @@ def _run_feature_evaluator(
     try:
         response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
-        # Every response carries it. An evaluator that omits it was built before the
-        # revision existed, and what such a build computes is revision 1 by definition --
-        # the same rule that reads a UHD recording none as revision 1.
+        # An evaluator that omits it predates the field: revision 1 by definition.
         revision = response.get("feature_semantics_revision", 1)
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
             raise ValueError(
@@ -365,9 +325,7 @@ def evaluate_feature_maps(
 ) -> tuple[str, list[list[float]]]:
     """Feature maps (name -> value, None for absent) through the runtime's FeatureExtractor.
 
-    A map that leaves a bare reference unbound fails the whole batch, exactly as the engine
-    refuses that row; `value_or_default`/`present` over an absent name evaluate as they do
-    at runtime. That is the only definition of "this signature evaluates" there is.
+    An unbound bare reference fails the whole batch, as the engine refuses that row.
     """
     digest, values, _ = _run_feature_evaluator(
         signature, categorical_encoding, rows, executable
@@ -383,14 +341,11 @@ def evaluate_feature_rows(
 ) -> tuple[str, list[list[float]]]:
     """One batch through the exact C++ expression implementation used at runtime.
 
-    Every referenced name goes over as JSON null where the row does not publish it,
-    including a column no row has: absence is the evaluator's to interpret, and NaN is not
-    JSON at all.
+    Unpublished names go over as JSON null; absence is the evaluator's to interpret.
     """
     columns = [reference[1:] for reference in signature_references(signature)]
     present = [column for column in columns if column in df.columns]
-    # to_dict preserves full floating-point precision and native list-valued bindings. With
-    # no referenced column present it returns no records at all, not one empty map per row.
+    # to_dict keeps full precision and lists, but yields no records for zero columns.
     records = (
         df[present].to_dict(orient="records")
         if present

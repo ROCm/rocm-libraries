@@ -78,14 +78,9 @@ inline Error
                                              backendModes.data()),
         "Failed to set mode on the engine heuristic descriptor.");
 
-    // HeuristicMode::A/B name prediction POLICIES, not backend modes. RFC 0007
-    // §5.3.2 makes the ordered policy list the only channel for policy selection,
-    // so hash the requested policy names into HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT
-    // here instead of asking the backend to infer a chain from the mode. Config
-    // stays first (HIPDNN_HEUR_CONFIG_PATH rules keep winning) and StaticOrdering
-    // stays last (the fallback that always succeeds). When no prediction mode is
-    // requested the attribute is left unset so HIPDNN_HEUR_POLICY_ORDER and the
-    // backend's built-in default keep their precedence (RFC 0007 §5.3.3).
+    // A/B name prediction policies, not backend modes (RFC 0007 §5.3.2): send them as the
+    // policy order, between Config and StaticOrdering. Without them leave the attribute unset
+    // so HIPDNN_HEUR_POLICY_ORDER and the backend default apply (RFC 0007 §5.3.3).
     std::vector<int64_t> policyOrder;
     for(const auto& mode : modes)
     {

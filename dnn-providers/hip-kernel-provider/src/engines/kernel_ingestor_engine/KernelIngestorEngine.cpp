@@ -24,12 +24,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 std::filesystem::path descriptorSearchDirectory()
 {
-    // Three sources, in falling order of specificity. Env var first: it's the only one an
-    // operator or test can set (tests and run-from-build-dir use it, like the ASM engine's
-    // HIPDNN_AITER_ASM_DIR). The SDK's reader has already dropped it if it does not name a
-    // real directory -- a stale value is common (install-tree CTestTestfile.cmake bakes in
-    // the build's staging path, which won't exist on a test machine), and trusting it
-    // blindly would load nothing at all -- so an empty replacement means "fall through".
+    // 1. HIPDNN_DESCRIPTOR_DIR. The SDK reader already drops a value that is not a real
+    //    directory (stale build paths are common), so empty means fall through.
     if(const auto replacement
        = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().replacement;
        !replacement.empty())
@@ -121,9 +117,8 @@ void registerNativeIngestorSymbols()
 
 const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 {
-    // Memoized: the descriptor-backed engines and every opaque engine's declared L1 model
-    // (resolveDeclaredEnginePredictions) come out of the same trees, and walking them
-    // once per consumer would both cost a second parse and let two consumers disagree.
+    // Memoized: descriptor engines and opaque engines' declared L1 models read the same
+    // trees; one parse keeps them from disagreeing.
     static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog
         = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
 

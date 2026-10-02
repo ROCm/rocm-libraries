@@ -15,7 +15,7 @@ namespace hipdnn_corpus_gen
 
 TEST(TestEngineCoverage, TheShippedTableParses)
 {
-    // What it lists is data, not contract; that CorpusGen can read it at all is the contract.
+    // The contents are data; only that CorpusGen can parse it is asserted.
     std::ifstream file(HIPDNN_CORPUS_GEN_OPERATIONS_DIR "/engines.json");
     ASSERT_TRUE(file.good()) << "engines.json is not beside the declarations";
     EngineCoverageTable table;
@@ -61,7 +61,7 @@ TEST(TestEngineCoverage, AnEntryWithNoCoverageIsSearched)
 
 TEST(TestEngineCoverage, APackClaimWithNoReasonIsRefused)
 {
-    // An entry stops a search; one nobody can check is what the table exists to avoid.
+    // An entry disables search, so it must say why.
     EngineCoverageTable table;
     std::string error;
     EXPECT_FALSE(parseEngineCoverage(
@@ -82,8 +82,7 @@ TEST(TestEngineCoverage, AnUnknownCoverageKindIsRefusedNotDefaulted)
 
 TEST(TestEngineCoverage, ADocumentWithNoEnginesObjectIsRefused)
 {
-    // A misspelled top-level key must not read as an empty table, which would silently turn
-    // every pack-only engine back into a searched one.
+    // A misspelled top-level key must not read as an empty table.
     EngineCoverageTable table;
     std::string error;
     EXPECT_FALSE(parseEngineCoverage(nlohmann::json::parse(R"({"engine": {}})"), table, error));
@@ -92,8 +91,7 @@ TEST(TestEngineCoverage, ADocumentWithNoEnginesObjectIsRefused)
 
 TEST(TestEngineCoverage, AnUnlistedEngineIsAbsentFromTheTable)
 {
-    // CorpusGen keeps a default-constructed entry, which searches, for an engine the table
-    // does not name.
+    // CorpusGen then uses a default entry, which searches.
     EngineCoverageTable table;
     std::string error;
     ASSERT_TRUE(parseEngineCoverage(

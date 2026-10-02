@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The categorical encoding is derived from the corpus and ships with the model.
+"""Tests for the corpus-derived categorical encoding shipped in the descriptor.
 
-RFC 0019 §4/§6.5: the string-to-code map belongs to the descriptor, beside the
-signature it encodes, not to a global table both languages have to be kept in step
-with by hand. Which makes three things load-bearing, and this file pins each:
-
-  - the map is keyed by the full `$reference`, because two columns can share a
-    trailing field name and not a vocabulary;
-  - the map the descriptor ships is the map the model was FITTED with, or the
-    thresholds mean something the runtime will never reproduce;
-  - a corpus with no string column produces exactly the descriptor and exactly the
-    features_hash it produced before any of this existed, because an empty map is not
-    a contract change.
+RFC 0019 §4/§6.5.
 """
 from __future__ import annotations
 
@@ -22,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-# Optional heavyweight training dependencies. Imported before uhd_gen.__main__, which
-# pulls them in transitively, so a missing dep is a skip rather than a collection error.
+# Skip (not a collection error) when optional training deps are missing; must run
+# before importing uhd_gen.__main__, which imports them.
 pytest.importorskip("lightgbm")
 pd = pytest.importorskip("pandas")
 pytest.importorskip("flatbuffers")
@@ -105,7 +95,7 @@ def _manifest(output_dir: Path) -> dict:
 
 
 # --------------------------------------------------------------------------------
-# Numeric-only: the shape every shipped model has today
+# Numeric-only corpora
 # --------------------------------------------------------------------------------
 
 NUMERIC_FEATURES = ["kernel.block_size", "device.cu_count"]
@@ -128,22 +118,18 @@ def _numeric_corpus(path: Path) -> Path:
 
 
 def test_numeric_only_corpus_derives_no_encoding(tmp_path):
-    """A numeric column already IS a number. An entry for one would tell the runtime to
-    encode something it must read straight through."""
+    """Numeric columns are read straight through, so they get no map entry."""
     frame = pd.read_csv(_numeric_corpus(tmp_path / "bench.csv"))
 
     assert derive_categorical_encoding(frame, NUMERIC_FEATURES) == {}
 
 
-# `evaluator` from here down: every test below either trains or recomputes a digest, and
-# RFC 0019 §6.3 leaves both with one definition, in the shared hipdnn_uhd_features binary.
+# Tests that train or recompute a digest need `evaluator`: the hipdnn_uhd_features
+# binary is the single definition of both (RFC 0019 §6.3).
 def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(
     tmp_path, evaluator
 ):
-    """The acceptance case for every model already in the field: no string column, so
-    the descriptor and the hash are byte for byte what they were before the map
-    existed. The digest folds in only a truthy encoding, and this is what
-    makes that matter."""
+    """An empty encoding must not change the descriptor or the features_hash."""
     output_dir = tmp_path / "model"
 
     assert (
@@ -156,7 +142,6 @@ def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(
 
     signature = build_features_signature(NUMERIC_FEATURES)
     assert descriptor["features_signature"] == signature
-    # The hash as it was computed before the argument existed, character for character.
     assert descriptor["features_hash"] == compute_features_hash(
         signature, executable=evaluator
     )
@@ -166,8 +151,7 @@ def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(
 
 
 def test_manifest_records_the_empty_map(tmp_path, evaluator):
-    """Unlike the descriptor: the manifest is provenance, and "this corpus had no
-    categorical column" is a fact about the run, not an absence to be inferred."""
+    """Unlike the descriptor, the manifest records an empty map explicitly."""
     output_dir = tmp_path / "model"
 
     assert (
@@ -184,13 +168,8 @@ def test_manifest_records_the_empty_map(tmp_path, evaluator):
 
 
 def test_two_columns_sharing_a_field_name_keep_separate_vocabularies():
-    """`kernel.dtype` and `q.attention_dense.dtype` share a trailing name and nothing
-    else. Keying by the field name would merge two vocabularies into one map, and every
-    row of one column would then be encoded through the other's numbering.
-
-    The two spellings differ only in case on purpose: the map ships with the model, so
-    the runtime looks up the bytes the corpus held. Folding here would emit a key no
-    lookup ever hits."""
+    """Values differ only in case on purpose: keys must keep the corpus bytes, since
+    the runtime looks them up verbatim."""
     frame = pd.DataFrame(
         {
             "kernel.dtype": ["BF16", "FP16", "BF16"],
@@ -217,9 +196,7 @@ def test_keys_are_full_references_not_field_names():
 
 
 def test_codes_are_deterministic_across_derivations():
-    """Sorted order, from 0. A model.bin bakes these numbers into its split thresholds,
-    so a map that renumbered between two runs over the same corpus would silently
-    re-point every threshold."""
+    """Codes follow sorted order from 0; model.bin thresholds depend on them."""
     frame = pd.DataFrame(
         {"kernel.pipeline": ["pingpong", "intrawave", "v3", "intrawave"]}
     )
@@ -232,9 +209,7 @@ def test_codes_are_deterministic_across_derivations():
 
 
 def test_mixed_column_is_rejected():
-    """Codes are positions, so a raw number in a categorical column collides with
-    whichever value took that code -- and the collision is invisible: the model trains,
-    saves, and ranks two different things as one."""
+    """A raw number would silently collide with the string assigned that code."""
     frame = pd.DataFrame({"kernel.pipeline": ["intrawave", 3]})
 
     with pytest.raises(ValueError, match="mixes strings with"):
@@ -252,8 +227,7 @@ PIPELINES = ["intrawave", "pingpong"]
 
 
 def _string_corpus(path: Path) -> Path:
-    """A corpus whose target depends strongly on a string column, so the model has to
-    split on it."""
+    """Corpus whose target depends strongly on a string column, forcing a split."""
     block = _varying(64, 256)
     pipeline = _varying(PIPELINES[1], PIPELINES[0], period=2)
     return _corpus(
@@ -276,23 +250,13 @@ def _string_corpus(path: Path) -> Path:
 
 
 def test_a_string_has_no_number_without_a_derived_encoding():
-    """The premise of the two tests below, asserted rather than assumed.
-
-    There is no process-wide table any more, so a string reaching the numeric path with
-    nothing to consult cannot be encoded by anything: a run that reaches training at all
-    reached it through the derived map. This replaces an assertion that the frozen global
-    table happened to lack 'pipeline' -- the table is gone, and the guarantee is now
-    structural rather than a gap in one particular table.
-    """
+    """Premise of the tests below: strings can only be encoded via a derived map."""
     with pytest.raises(ValueError, match="no categorical_encoding declares"):
         encode_feature_value("$kernel.pipeline", "intrawave")
 
 
 def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path, evaluator):
-    """Training succeeds where the global table would have raised, and the descriptor
-    carries exactly the distinct values the column held -- no more (a vocabulary wider
-    than the corpus claims codes nothing was fitted on) and no fewer (the runtime now
-    throws on a declared reference whose value is missing from its map)."""
+    """The shipped map is exactly the column's distinct values, as fitted."""
     output_dir = tmp_path / "model"
     csv = _string_corpus(tmp_path / "bench.csv")
 
@@ -302,14 +266,12 @@ def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path, evaluator):
     assert descriptor["categorical_encoding"] == {
         "$kernel.pipeline": {"intrawave": 0, "pingpong": 1}
     }
-    # Exactly the distinct values present, keyed by the reference in the signature.
     frame = pd.read_csv(csv)
     assert set(descriptor["categorical_encoding"]["$kernel.pipeline"]) == set(
         frame["kernel.pipeline"].unique()
     )
     assert "$kernel.pipeline" in descriptor["features_signature"]
 
-    # And it is the map the fit used: the manifest records the same object.
     assert (
         _manifest(output_dir)["categorical_encoding"]
         == descriptor["categorical_encoding"]
@@ -317,8 +279,7 @@ def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path, evaluator):
 
 
 def test_encoding_is_folded_into_the_features_hash(tmp_path, evaluator):
-    """RFC 0019 §6.5: a changed map changes what the model reads while leaving the
-    signature text identical, so the hash has to cover it."""
+    """RFC 0019 §6.5: the map changes what the model reads but not the signature."""
     output_dir = tmp_path / "model"
 
     assert (
@@ -336,7 +297,7 @@ def test_encoding_is_folded_into_the_features_hash(tmp_path, evaluator):
 
 
 def test_evaluation_scores_through_the_shipped_encoding(tmp_path, evaluator):
-    """Changing shipped categorical codes invalidates the artifact's feature contract."""
+    """Changing shipped categorical codes invalidates the features_hash."""
     output_dir = tmp_path / "model"
     csv = _string_corpus(tmp_path / "bench.csv")
 
@@ -357,9 +318,7 @@ def test_evaluation_scores_through_the_shipped_encoding(tmp_path, evaluator):
 
 
 def test_a_value_outside_the_shipped_map_is_refused(tmp_path, evaluator):
-    """The runtime throws when a declared reference carries a value its map lacks, so
-    the training-side scorer must not quietly hand LightGBM a NaN and return an
-    ordinary leaf for it."""
+    """Matches the runtime, which throws rather than scoring an unmapped value."""
     output_dir = tmp_path / "model"
     csv = _string_corpus(tmp_path / "bench.csv")
 

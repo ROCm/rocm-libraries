@@ -42,12 +42,8 @@ using hipdnn_data_sdk::utilities::RankingMetric;
 
 thread_local std::array<char, 1024> lastError{};
 
-// File-scope logging callback / level, set through the C-ABI-shaped
-// SetLoggingCallback / SetLogLevel below. registerPlugin() installs a callback
-// that forwards to the backend logger, so lines from this module reach the same
-// sink as the rest of the backend. Same identity contract as the Config
-// built-in: the last writer wins, and that is fine because every callback
-// forwards to one process-wide sink.
+// Set through SetLoggingCallback / SetLogLevel below. Last writer wins, which is fine
+// because every callback forwards to the one backend sink.
 hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
 hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
 
@@ -156,10 +152,8 @@ bool usableConfig(const EngineConfig* config, int64_t engineId)
     return true;
 }
 
-// The metric this finalize ranks by. A version 1 host predates metrics and meant TFLOPS;
-// a version 2 host names the metric, and a table too short to carry the field is read
-// the same way as version 1 rather than past its end. nullptr: a name no registry row
-// matches, which cannot be ranked because it has no direction.
+// The metric this finalize ranks by. Version 1 hosts, and tables too short for the field,
+// mean TFLOPS. nullptr for an unregistered name, which has no direction to rank by.
 const RankingMetric* requestedMetric(const hipdnnHeuristicHostCallbacks_t& host)
 {
     constexpr auto METRIC_END
@@ -186,8 +180,7 @@ const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
     const auto expectedKind = kind == HIPDNN_ENGINE_PREDICTION_ENGINE
                                   ? PredictionKind::ENGINE
                                   : PredictionKind::CONFIGURATION;
-    // The host already refuses an answer in another metric; checking again costs nothing
-    // and keeps a value from being compared against numbers of a different quantity.
+    // The host already rejects other metrics; re-check so different quantities never compare.
     if(prediction->engine_id() != engineId || prediction->kind() != expectedKind
        || prediction->status() != PredictionStatus::AVAILABLE || prediction->metric() == nullptr
        || prediction->metric()->string_view() != metric.name
@@ -464,10 +457,8 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         {
             return HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED;
         }
-        // RFC 0019 §11.2: the quick policy (ModeA) ranks by L1 alone and never evaluates
-        // L2 — not even to fill in the winner's kernel, which plan build chooses by the
-        // same metric (RFC 0019 Open Question 21, option (b)). The thorough policy (ModeB)
-        // asks each engine for L2 first and falls back to L1 where L2 has no answer.
+        // RFC 0019 §11.2: ModeA ranks by L1 alone and never evaluates L2; ModeB uses each
+        // engine's L2 and falls back to L1.
         desc.ranked.reserve(desc.engineIds.size());
         bool available = false;
         for(const auto id : desc.engineIds)
@@ -505,9 +496,8 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         }
         if(!available)
         {
-            // A static order returned from here would read as a ranking by the metric it
-            // is not, so decline and let the next policy (normally static ordering) say
-            // what it is (RFC 0019 §11.2).
+            // Nothing scored: decline rather than return a static order that reads as a ranking
+            // (RFC 0019 §11.2).
             PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
                                    "%s declined: no engine serves '%.*s' at %s",
                                    desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
@@ -517,11 +507,9 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             desc.ranked.clear();
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
-        // Scored engines first, best-first in the metric's direction; ties and the
-        // unscored tail follow the static rules (RFC 0019 §11.2), not candidate-arrival
-        // order, which is neither those rules nor deterministic. The static rules are the
-        // operator's HIPDNN_HEUR_FALLBACK_ENGINE_ORDER where it names an engine, then the
-        // built-in vendor precedence for any engine it does not name.
+        // Scored engines first, best-first in the metric's direction; ties and the unscored tail
+        // follow the static rules (HIPDNN_HEUR_FALLBACK_ENGINE_ORDER, then vendor precedence),
+        // never arrival order (RFC 0019 §11.2).
         std::vector<int64_t> builtInOrder = desc.engineIds;
         hipdnn_data_sdk::utilities::sortEngineIds(builtInOrder);
         std::vector<int64_t> staticOrder
@@ -560,9 +548,7 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
                       }
                       return staticRank.at(left.id) < staticRank.at(right.id);
                   });
-        // An unscored engine may hold a perfectly good model for another metric, or (under
-        // ModeA) an L2 model this policy declined to pay for; its place is vendor
-        // precedence, not merit, and the result does not show that, so say it once.
+        // Unscored engines are placed by static order, not merit; say so once.
         const auto tail = std::find_if(desc.ranked.begin(),
                                        desc.ranked.end(),
                                        [](const RankedEngine& row) { return !row.available; });

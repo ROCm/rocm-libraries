@@ -38,24 +38,21 @@ struct Model
     std::string reason;
 };
 
-/// @brief Compile and validate the L1 model one resolved UED role names.
-/// Touches the filesystem and rebuilds the feature contract, so the owning engine
-/// caches the result for its lifetime rather than repeating it per query.
+/// @brief Compile and validate the L1 model a resolved UED role names.
+/// Touches the filesystem; callers cache the result rather than calling per query.
 inline std::shared_ptr<const Model> model(const UhdConfig& config)
 {
     auto loaded = std::make_shared<Model>();
     try
     {
-        // Optional by construction: parseUhdConfig and the schema require trained_against
-        // only for a model carrying a feature signature, so a native or custom_library
-        // model that featurizes from its own bindings legally omits it.
+        // trained_against is required only with a feature signature; native and
+        // custom_library models may omit it.
         if(config.trainedAgainst.is_object())
         {
             parser_detail::provenance(config.trainedAgainst, "L1 UHD trained_against");
         }
-        // Not this build's features, so not this build's answer: UNAVAILABLE, exactly as a
-        // stale selector revision is (§11.2). The loader refuses such a model before it is
-        // ever bound; this catches a config that reached the binding by another path.
+        // Features from another revision: UNAVAILABLE, like a stale selector revision
+        // (RFC 0019 §11.2). Covers configs that bypassed the loader's check.
         if(auto mismatch
            = featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
            !mismatch.empty())
@@ -101,11 +98,8 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
                 throw std::invalid_argument(
                     "UHD model artifact is unreadable or exceeds size bound");
             }
-            // No custom_library digest check here: CustomLibraryAdapter::load verifies the
-            // bytes before it maps the image, for whichever role binds it. This copy ran
-            // only on the L1 path, which is how the kernel-ranking role ended up dlopening
-            // an unverified .so, and a second implementation of the same rule is what let
-            // the two drift apart in the first place.
+            // custom_library digest is verified by CustomLibraryAdapter::load for every
+            // role; do not duplicate it here.
         }
         else if(config.nativeSymbol.empty())
         {
@@ -118,10 +112,8 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
                                                             : PredictionStatus::INVALID;
             loaded->reason = "UHD adapter is unavailable or its model failed validation";
         }
-        // R9: a grouped tree_data model decides per group, and an L1 estimate is one row per
-        // graph -- there is no per-row contract saying which group a graph's row belongs to,
-        // so score() would answer from the root ensemble alone, which is not what was
-        // trained or evaluated. Refused as a contract failure (INVALID) until one exists.
+        // Grouped tree_data models are INVALID here: an L1 row has no group, so score()
+        // would use only the root ensemble, which is not what was trained.
         else if(config.adapterType == "tree_data" && loaded->adapter->groupFeatureIndex() >= 0)
         {
             loaded->reason = "grouped tree_data artifact cannot be bound to the predict_engine "
@@ -145,10 +137,8 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
 }
 
 /// @brief Check that a resolved role model agrees with the engine asking for it.
-/// Descriptor provenance is not rechecked here: the UUID and major/minor rule of
-/// RFC 0019 §8.1 already ran in the loader, which is what binds this UHD to this UED.
-/// @param metric The registered metric the request asks in; the model must estimate
-///               exactly that one (RFC 0019 §4.4: metrics never substitute for each other).
+/// Descriptor provenance (RFC 0019 §8.1) is checked by the loader, not here.
+/// @param metric The requested metric; the model must estimate exactly it (RFC 0019 §4.4).
 inline void validateBinding(const UhdConfig& config,
                             const std::string& engine,
                             const std::string& arch,
@@ -160,14 +150,8 @@ inline void validateBinding(const UhdConfig& config,
     {
         throw std::invalid_argument("UHD attachment does not match engine, role, or architecture");
     }
-    // RFC 0019 §11.1: an L1 estimate is compared across engines, so it is bound only when it
-    // is a calibrated estimate of the requested registered metric, ranked in that metric's
-    // direction, with a transform this runtime can invert back into the metric's units. The
-    // transform check asks score_transform's vocabulary rather than restating it: a second,
-    // narrower spelling of a closed set the parser already gates (parseUhdConfig) is two
-    // vocabularies to keep in step, and a descriptor an author could load and then not bind.
-    // What keeps the estimate *physical* is not the list but the metric-validity check at
-    // the evaluation site below, which is transform-agnostic.
+    // L1 estimates are compared across engines (RFC 0019 §11.1), so require a calibrated
+    // estimate of the requested metric, in its objective, with an invertible transform.
     const auto* registered = hipdnn_data_sdk::utilities::findRankingMetric(config.scoreMetric);
     if(registered == nullptr || config.scoreMetric != metric || !config.scoreCalibrated
        || config.objective != hipdnn_data_sdk::utilities::objectiveOf(*registered)
@@ -191,21 +175,13 @@ inline void validateBinding(const UhdConfig& config,
 } // namespace prediction_detail
 
 /// @brief Describe or evaluate a graph-only engine estimate in one ranking metric.
-/// A UHD reaches an engine only through a binding that lives in compiled code -- the
-/// UED's `predict_engine` role map for a descriptor-backed engine (RFC 0019
-/// §3.1), or the UUID a provider names in its own engine definition for an engine that
-/// ships no UED (RFC 0019 Open Question 7, RESOLVED). There is no discovery here and no
-/// document claims an engine. Description never loads or evaluates a model. Missing
-/// coverage and malformed models leave engine applicability unchanged. Binding/features
-/// JSON is emitted only for description, not policy evaluation.
-/// @param metric The registered metric the request asks in. Every result carries it, and
-///               a model estimating any other metric is never asked (RFC 0019 §11.4).
-/// @param config The bound model, or a default-constructed config when nothing binds
-///               one: description still names the binding an author must train
-///               against, which is how the first model is bootstrapped.
-/// @param compiled @p config compiled by prediction_detail::model() and cached by the
-///                 caller; null whenever nothing is deployed for this architecture.
-///                 Only read when @p evaluate, so description cannot touch a model.
+/// Description never loads or evaluates a model; binding/features JSON is emitted only
+/// for description. Missing coverage or a bad model never changes engine applicability.
+/// @param metric The requested metric; models of any other metric are never asked.
+/// @param config The bound model, or a default config when none is bound (description
+///               still names the binding to train against).
+/// @param compiled @p config compiled by prediction_detail::model(); null when nothing is
+///                 deployed. Read only when @p evaluate.
 /// @returns A physical value in @p metric's registered units only for AVAILABLE predictions.
 inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     predictEngine(int64_t engineId,
@@ -235,23 +211,15 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
                    {"metric", metric},
                    {"arch", targetArch},
                    {"selector_revision", selectorRevision},
-                   // What a model collected from this description would
-                   // be trained against. An engine with no descriptors
-                   // has exactly this and nothing else (§4.1, Open
-                   // Question 7), so it is written here rather than
-                   // left to a caller that has nothing to add: a
-                   // description carrying no trained_against at all
-                   // cannot be turned into a UHD, which is where every
-                   // opaque L1 collection stopped (run 67929509).
+                   // Always emitted: a description without trained_against
+                   // cannot be turned into a UHD.
                    {"trained_against", {{"selector_revision", selectorRevision}}}};
             if(!config.uhdId.empty())
             {
                 binding["uhd_id"] = config.uhdId;
             }
-            // A descriptor-backed engine ADDS its set to trained_against on top of this
-            // (GenericEngine::getPrediction): it is trained against both the descriptors it
-            // loaded and the provider build that ran them, and binds a model only when that
-            // model recorded this selector_revision (GenericEngine's constructor).
+            // Descriptor-backed engines add their descriptor set to trained_against
+            // (GenericEngine::getPrediction).
             result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();
@@ -280,8 +248,8 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         std::vector<double> row;
         try
         {
-            // Let the expression evaluator enforce lazy defaults and branches: a
-            // missing variable in an unselected branch is not a coverage failure.
+            // A missing variable in an unselected branch is not a coverage failure, so
+            // let the evaluator decide.
             row = compiled->extractor->extract(features);
         }
         catch(const JsonLogicError& error)
@@ -309,19 +277,10 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     return result;
 }
 
-/// @brief One engine's L1 binding: the models bound to it per (metric, architecture), the
-/// pairs whose bound model this build refused, and the compiled-model cache those queries
-/// share.
-///
-/// A binding always comes from compiled code, never from the document. A
-/// descriptor-backed engine fills it from its UED's `predict_engine` role map,
-/// which the loader resolves (RFC 0019 §3.1); an engine that ships no UED fills it from
-/// the UUIDs its provider names in its own engine definition (RFC 0019 Open Question 7,
-/// RESOLVED). Either way the UHD keeps §4.1's shape -- no `engine`, `role` or `arch`
-/// member -- so no document can attach itself to an engine by claiming one. The metric is
-/// the one the UHD itself declares, never the binder's.
-///
-/// Held by the engine, so a model is compiled once and shared by every later query.
+/// @brief One engine's L1 models per (metric, architecture), refused pairs, and a shared
+/// compiled-model cache.
+/// Bindings come only from compiled code (UED role map or provider engine definition),
+/// never from a UHD document. Thread-safe for concurrent predict() after binding.
 class EngineModelBinding
 {
 public:
@@ -333,15 +292,9 @@ public:
     }
 
     /// @brief Record a (metric, architecture) whose bound model this build will not use.
-    ///
-    /// RFC 0019 §11.2 separates two refusals, and @p status is which one this is:
-    ///   - UNAVAILABLE -- "I do not answer this question". The model is fine, it just is
-    ///     not this build's: a model trained against another provider revision (§4.1
-    ///     `trained_against.selector_revision`) or on features another revision computes
-    ///     (`trained_against.feature_semantics_revision`) says nothing about this one.
-    ///   - INVALID -- "I answer, and the answer is bad". A model that is present and
-    ///     failed its contract is a claim: do not pick me.
-    /// @param reason Surfaced verbatim to the caller, so it must name what was compared.
+    /// @param status UNAVAILABLE for a model built for another revision; INVALID for one
+    ///               that failed its contract (RFC 0019 §11.2).
+    /// @param reason Surfaced verbatim to the caller; name what was compared.
     void markUnusable(const std::string& metric,
                       const std::string& arch,
                       hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status,
@@ -351,9 +304,7 @@ public:
     }
 
     /// @brief This engine's L1 prediction in @p metric for @p arch, described or evaluated.
-    /// @param metric The registered metric the request asks in. Only models of that metric
-    ///               are considered, and arch fallback stays inside it: a (gfx942, time)
-    ///               request falls back to (default, time), never to another metric.
+    /// @param metric The requested metric; arch fallback never crosses to another metric.
     /// @param arch The device `gcnArchName`, feature suffix included.
     /// @param evaluate False describes the binding without touching a model.
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
@@ -365,8 +316,7 @@ public:
                 const FeatureExtractionContext& features,
                 bool evaluate) const
     {
-        // RFC 0019 §8.3: the longest matching architecture wins, with `default` used
-        // only when nothing more specific matched.
+        // Longest matching architecture wins; `default` only as fallback (RFC 0019 §8.3).
         std::string selectedArch;
         const UhdConfig* selected = nullptr;
         const Refusal* refused = nullptr;
@@ -383,8 +333,7 @@ public:
                 }
             }
         }
-        // `>=`, not `>`: a refusal at the same specificity as a bound model wins, so an
-        // exact-arch failure can never silently fall through to another arch's model.
+        // `>=`, not `>`: a refusal at the same specificity as a bound model wins.
         if(const auto refusals = _refused.find(metric); refusals != _refused.end())
         {
             for(const auto& [target, refusal] : refusals->second)
@@ -397,8 +346,6 @@ public:
                 }
             }
         }
-        // Nothing outside this binding can attach a model to the engine, so an engine
-        // with no bound model for this metric and architecture simply has none.
         static const UhdConfig s_unbound;
         const bool evaluateModel = evaluate && refused == nullptr;
         std::shared_ptr<const prediction_detail::Model> compiled;
@@ -419,9 +366,7 @@ public:
         {
             result.status = refused->status;
             result.reason = refused->reason;
-            // A disabled model still took the description branch to get here. Ranking is
-            // not a description request, so the payload it built is dropped rather than
-            // serialized across the plugin ABI for every candidate engine.
+            // Refused models took the description branch; drop its payload when ranking.
             if(evaluate)
             {
                 result.binding_json.clear();
@@ -438,16 +383,9 @@ private:
         std::string reason;
     };
 
-    /// Compiling a UHD rebuilds its feature contract and reads its artifact off disk.
-    /// A usable model is compiled once and shared by every later query on this engine.
-    /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
-    /// an artifact that is still being installed, or a transient read error, must not
-    /// disable the model for the rest of the provider's lifetime.
-    ///
-    /// Keyed by the model's UUID, not the arch key that bound it (D2): one UUID bound under
-    /// several architecture keys is one model, so it is compiled once and shared. Coverage
-    /// per architecture is the artifact's `training_arches`, checked per query. A config
-    /// built in memory without an id falls back to its arch key.
+    /// Caches only successful compiles, so an artifact still being deployed can recover
+    /// (RFC 0019 §5). Keyed by UUID (arch key if none), so one UUID bound under several
+    /// arches compiles once.
     std::shared_ptr<const prediction_detail::Model> compiledModel(const std::string& metric,
                                                                   const std::string& arch,
                                                                   const UhdConfig& config) const

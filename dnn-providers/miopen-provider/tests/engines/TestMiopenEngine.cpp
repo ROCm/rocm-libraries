@@ -629,10 +629,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
-/// RFC 0019 Open Question 7 (RESOLVED) plus §11.2: with nothing deployed for the UUID its
-/// container declared -- the state of every machine that has not installed a model -- the
-/// engine answers UNAVAILABLE. Absence is a normal outcome, never an exception and never
-/// a crash, and it costs the engine nothing.
 TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
 {
     SKIP_IF_NO_DEVICES();
@@ -656,11 +652,8 @@ TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
     EXPECT_EQ(prediction.metric, "tflops");
 }
 
-/// MIOpen selects its own solution, so it has no exact configuration of ours to predict:
-/// RFC 0019 §11.2's "A only (opaque)" row. Declining must stay a decline rather than
-/// becoming an error once the engine started answering the ENGINE query, and it carries
-/// the requested metric: the backend rejects any answer, a decline included, whose metric
-/// differs from the request.
+/// The decline must carry the requested metric: the backend rejects any answer, a decline
+/// included, whose metric differs from the request.
 TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
 {
     SKIP_IF_NO_DEVICES();
@@ -683,10 +676,7 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
     EXPECT_EQ(prediction.metric, "time");
 }
 
-/// Each engine declares one model per ranking metric, bound for every architecture. The
-/// two MIOpen engines are different engines with different performance, and a `tflops`
-/// and a `time` model are different models, so every id is distinct: one id shared by
-/// two declarations would silently make one answer with the other's model.
+/// One id shared by two declarations would silently make one answer with the other's model.
 TEST(TestMiopenEngine, EachEngineDeclaresADistinctWellFormedModelIdPerMetric)
 {
     std::set<std::string> seen;
@@ -695,9 +685,7 @@ TEST(TestMiopenEngine, EachEngineDeclaresADistinctWellFormedModelIdPerMetric)
         std::set<std::string> metrics;
         for(const auto& [metric, id] : *declared)
         {
-            // An unregistered metric or a malformed literal would not fail the build -- it
-            // would silently mean "this engine never binds that model" -- so both are
-            // checked here.
+            // Neither a bad metric nor a malformed UUID literal would fail the build.
             EXPECT_NE(hipdnn_data_sdk::utilities::findRankingMetric(metric), nullptr) << metric;
             EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
                 << id;
@@ -730,8 +718,6 @@ EnginePredictionT predictConv(const MiopenEngine& engine,
     return engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, evaluate);
 }
 
-/// The binding a collection run records for @p engine: the description, which never
-/// touches a model.
 nlohmann::json describedBinding(const MiopenEngine& engine,
                                 HipdnnMiopenHandle& handle,
                                 const std::string& metric = "tflops")
@@ -755,8 +741,7 @@ std::vector<std::string> revisionSegments(const std::string& revision)
     return parts;
 }
 
-/// @p revision with segment @p index replaced, i.e. the revision a build differing only
-/// in that input would report.
+/// @p revision with segment @p index replaced.
 std::string withSegment(const std::string& revision, size_t index, const std::string& value)
 {
     auto parts = revisionSegments(revision);
@@ -776,9 +761,8 @@ bool isSemver(const std::string& text)
 
 } // namespace
 
-/// R1: the selector revision is the compatibility key a deployed model must match, so it
-/// may carry only deliberately versioned inputs. The build's commit used to be in it,
-/// which made committing a trained model invalidate that model at the next configure.
+/// The selector revision is a model's compatibility key, so it may carry only deliberately
+/// versioned inputs; a commit in it would invalidate a model at the next commit.
 TEST(TestMiopenEngine, SelectorRevisionIsTheVersionedPolicyAndNeverTheCommit)
 {
     SKIP_IF_NO_DEVICES();
@@ -789,8 +773,7 @@ TEST(TestMiopenEngine, SelectorRevisionIsTheVersionedPolicyAndNeverTheCommit)
     // Collection records trained_against from the same string the loader compares.
     EXPECT_EQ(binding.at("trained_against").at("selector_revision").get<std::string>(), revision);
 
-    // `miopen-provider/<semver>/<engine>-<policy>/miopen-<x.y.z>`: every segment is a
-    // versioned input, and none has room for a build id.
+    // `miopen-provider/<semver>/<engine>-<policy>/miopen-<x.y.z>`.
     const auto parts = revisionSegments(revision);
     ASSERT_EQ(parts.size(), 4u) << revision;
     EXPECT_EQ(parts[0], "miopen-provider");
@@ -804,17 +787,14 @@ TEST(TestMiopenEngine, SelectorRevisionIsTheVersionedPolicyAndNeverTheCommit)
         EXPECT_EQ(revision.find(commit), std::string::npos) << revision;
     }
 
-    // Stable: another instance of the same engine in the same build reports the same key,
-    // and only the engine segment separates two engines.
+    // Stable across instances; only the engine segment separates two engines.
     EXPECT_EQ(describedRevision(MiopenEngine(2, "test:miopen", {}), handle), revision);
     const auto other = describedRevision(MiopenEngine(1, "test:other", {}), handle);
     EXPECT_NE(other, revision);
     EXPECT_EQ(withSegment(other, 2, parts[2]), revision);
 }
 
-/// 0.2(b): collection promotes a first model under the id the engine declares for the
-/// metric it collected, so the description names that id before anything is deployed --
-/// and names the requested metric's id, never another metric's.
+/// The description names the requested metric's declared id before anything is deployed.
 TEST(TestMiopenEngine, DescriptionNamesTheModelIdDeclaredForTheRequestedMetric)
 {
     SKIP_IF_NO_DEVICES();
@@ -834,8 +814,7 @@ TEST(TestMiopenEngine, DescriptionNamesTheModelIdDeclaredForTheRequestedMetric)
 namespace
 {
 
-/// The UHD a deployer publishes under a declared id: a calibrated tree_data model over
-/// one feature every graph binds, answering 42 in @p metric wherever it is trained.
+/// A calibrated tree_data UHD over one feature every graph binds, answering 42 in @p metric.
 nlohmann::json deployedL1Document(const std::string& id,
                                   const std::string& metric,
                                   const std::string& selectorRevision)
@@ -855,12 +834,9 @@ nlohmann::json deployedL1Document(const std::string& id,
             {"trained_against", {{"selector_revision", selectorRevision}}}};
 }
 
-/// Deploys models for the container's declared ids into a fresh descriptor root, points
-/// the engine at it the way an operator does (HIPDNN_DESCRIPTOR_DIR), and queries the
-/// real engines. Returns every failed expectation, one per line; empty on success.
-///
-/// Must run in a process where no engine has declared an id yet: the engine parses its
-/// descriptor roots once per process, on the first such construction.
+/// Deploys models for the declared ids under HIPDNN_DESCRIPTOR_DIR and queries the real
+/// engines. Returns failed expectations, one per line. Must run in a process where no
+/// engine has declared an id yet: descriptor roots are parsed once per process.
 std::string deployedModelScenario()
 {
     using namespace hipdnn_data_sdk::utilities;
@@ -873,8 +849,7 @@ std::string deployedModelScenario()
     };
 
     HipdnnMiopenHandle handle;
-    // What collection records: the description of an engine that declares nothing, so
-    // the catalog is not parsed yet.
+    // Engines declaring nothing do not parse the catalog yet.
     const auto engineBinding
         = describedBinding(MiopenEngine(MIOPEN_ENGINE_ID, MIOPEN_ENGINE_NAME, {}), handle);
     const auto engineRevision = engineBinding.at("selector_revision").get<std::string>();
@@ -961,23 +936,16 @@ std::string deployedModelScenario()
 
 } // namespace
 
-/// 0.1 + 0.2(b) end to end: a model deployed under the container's declared id, recorded
-/// against the revision the engine describes, answers through the real engine for a conv
-/// graph; the same deployment recorded against another MIOpen release or selector policy
-/// is refused, and a model whose metric is not the one its id is declared for never
-/// answers.
+/// A model matching the described revision answers; one recorded against another MIOpen
+/// release or selector policy, or under another metric's id, is refused.
 TEST(TestMiopenEngine, DeployedModelsForTheDeclaredIdsAnswerThroughTheEngine)
 {
     SKIP_IF_NO_DEVICES();
 
-    // The engine parses its descriptor roots once per process, on the first engine that
-    // declares an id -- which other cases here, and every container, construct first.
-    // Only a fresh process can be pointed at this case's tree; "threadsafe" re-executes
-    // the binary for this one case rather than forking one that has already parsed.
+    // Descriptor roots are parsed once per process, so this case needs a fresh one;
+    // "threadsafe" re-executes the binary rather than forking an already-parsed process.
     GTEST_FLAG_SET(death_test_style, "threadsafe");
-    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
-    // diagnostic is attributed to this expansion site rather than to the GoogleTest
-    // header, so -isystem does not suppress it and -Werror makes it fatal.
+    // EXPECT_EXIT's expansion has a switch with no default label; -isystem doesn't cover it.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wswitch-default"
     EXPECT_EXIT(

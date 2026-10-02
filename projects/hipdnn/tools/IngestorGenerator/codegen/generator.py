@@ -104,10 +104,8 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
-    # RFC 0019 §4.1: the UHD is the whole descriptor -- `adapter` plus the adapter's own
-    # member -- and a non-static adapter must say which way its score orders. The legacy
-    # `kind`/`payload` pair is an unknown key to the loader, which drops the heuristic and
-    # leaves the engine ranking by priority with nothing to say why.
+    # RFC 0019 §4.1: a non-static adapter must declare its objective. The loader drops a
+    # UHD using the legacy `kind`/`payload` keys.
     return {
         "version": "1.0",
         "id": ids["uhd"],
@@ -131,8 +129,7 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        # RFC 0019 §3.1: a UED binds its models through role maps keyed by architecture;
-        # the loader refuses the legacy bare `heuristic` pointer outright.
+        # RFC 0019 §3.1: the loader rejects the legacy bare `heuristic` pointer.
         ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)

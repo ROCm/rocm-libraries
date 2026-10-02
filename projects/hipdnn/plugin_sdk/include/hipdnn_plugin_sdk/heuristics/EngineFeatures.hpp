@@ -45,8 +45,7 @@ inline std::optional<int64_t>
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-// Everything below publishes UHD feature symbols, which exist only with the kernel ingestor:
-// the feature extractor evaluates the descriptor expression language it ships.
+// UHD features need the kernel ingestor, whose expression language the extractor evaluates.
 
 namespace detail
 {
@@ -92,8 +91,7 @@ inline bool floatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     }
 }
 
-/// Every extent present and positive, so a count over them is the problem's size: a
-/// missing, negative or zero extent leaves the work unknown, never 0.
+/// Every extent present and positive; otherwise the work is unknown, never 0.
 inline bool shaped(const Tensor* value, size_t minimumRank)
 {
     return value != nullptr && value->dims() != nullptr && value->dims()->size() >= minimumRank
@@ -102,8 +100,8 @@ inline bool shaped(const Tensor* value, size_t minimumRank)
               });
 }
 
-/// A shaped floating-point operand. The matrix-product families (Matmul, convolutions,
-/// attention) count floating-point multiply-adds only; that gate predates the other types.
+/// A shaped floating-point operand: the matrix-product families (Matmul, convolutions,
+/// attention) count floating-point multiply-adds only.
 inline bool dimensions(const Tensor* value, size_t minimumRank)
 {
     return value != nullptr && floatingPoint(value->data_type()) && shaped(value, minimumRank);
@@ -219,8 +217,7 @@ std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
     {
         if(bottomRight)
         {
-            // The declared corpus formula applies to Sq <= Sk; no half-rectangle
-            // approximation when Sq > Sk, whose actual mask has empty rows.
+            // The formula assumes Sq <= Sk; with Sq > Sk the mask has empty rows.
             if(sq > sk)
             {
                 return std::nullopt;
@@ -238,10 +235,9 @@ std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
            * (static_cast<double>(dq) + static_cast<double>(dv));
 }
 
-// One overload per node type. Convention: a multiply-add is 2, an elementwise operation 1
-// per element, a transcendental 1; the per-element constants are the declared convention,
-// not a count of any implementation's instructions. Changing one changes a published
-// feature's meaning, so it bumps FEATURE_SEMANTICS_REVISION (FeatureSemantics.hpp).
+// One overload per node type. Convention: a multiply-add is 2, an elementwise operation or
+// transcendental 1 per element. Changing a constant changes a published feature's meaning
+// and must bump FEATURE_SEMANTICS_REVISION.
 
 /// `2 * c.numel * k`: the batch broadcast is inside `c.numel`.
 inline std::optional<double>
@@ -441,17 +437,15 @@ std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
     return op == nullptr ? std::nullopt : nodeFlops(graph, *op);
 }
 
-/// Logical work of @p node (principle: the problem's work, the same for every engine).
-/// Unknown -- never 0 -- when a dimension is, when the type has no convention, or when
-/// @p dataDependent: the node's published `data_dependent` verdict, that operand contents
-/// (routing offsets, ragged lengths, page tables) decide the work.
+/// Logical work of @p node, the same for every engine. Unknown, never 0, when a dimension
+/// is, when the type has no convention, or when @p dataDependent (operand contents such as
+/// routing offsets, ragged lengths or page tables decide the work).
 inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, bool dataDependent)
 {
     using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
     const auto type = node.attributes_type();
-    // These three published FLOPs before the content-dependence rule existed. Their own
-    // refusals already cover every annotated operand, but a ragged operand would newly
-    // hide a count shipped models were trained on, so for them the rule is not applied.
+    // Exempt from the data-dependence rule: shipped models were trained on these counts,
+    // and their own refusals already cover every annotated operand.
     const bool predatesContentRule = type == NodeAttributes::MatmulAttributes
                                      || type == NodeAttributes::ConvolutionFwdAttributes
                                      || type == NodeAttributes::SdpaAttributes;
@@ -501,9 +495,7 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, 
         return flopsOf(graph, node.attributes_as_BlockScaleQuantizeAttributes());
     case NodeAttributes::BlockScaleDequantizeAttributes:
         return flopsOf(graph, node.attributes_as_BlockScaleDequantizeAttributes());
-    // MoE: the rows each expert multiplies follow the routing offsets' contents (the
-    // required offsets make every such node data-dependent above). Custom ops: an opaque
-    // payload no convention can count.
+    // MoE rows follow the routing offsets' contents; custom ops are opaque.
     case NodeAttributes::MoeGroupedMatmulAttributes:
     case NodeAttributes::MoeGroupedMatmulBwdAttributes:
     case NodeAttributes::CustomOpAttributes:
@@ -548,11 +540,9 @@ inline std::optional<double> elementBits(hipdnn_flatbuffers_sdk::data_objects::D
     }
 }
 
-/// The graph's logical footprint: every non-virtual tensor once, numel x element size,
-/// fractional for sub-byte types. Neither the allocation (strides, alignment, packing,
-/// workspace) nor measured traffic. Unknown when any such tensor's size is: a missing or
-/// negative extent, an unset type, or a ragged tensor, whose offsets rather than its dims
-/// decide how many elements it holds.
+/// The graph's logical footprint: each non-virtual tensor once, numel x element size
+/// (fractional for sub-byte types); not allocation size or memory traffic. Unknown when any
+/// tensor's size is: a missing or negative extent, an unset type, or a ragged tensor.
 inline std::optional<double> logicalBytes(const Graph& graph)
 {
     double bytes = 0.0;
@@ -580,12 +570,10 @@ inline std::optional<double> logicalBytes(const Graph& graph)
     return bytes;
 }
 
-/// Publishes one node's operands through the schema-generated visitor
-/// (node_operands_generated.h), so every node type is covered without per-op code:
+/// Publishes one node's operands through the generated visitor (node_operands_generated.h):
 ///   <prefix>.<role>.{data_type, rank, numel, virtual, dims[i], strides[i]} per tensor operand
 ///   <prefix>.<name> per scalar attribute, <prefix>.<name>[i] per vector attribute element
-/// Names and values match what the hand-written Matmul/ConvolutionFwd/SDPA binders
-/// published, which shipped models read.
+/// Shipped models read these names; keep them stable.
 class NodeFeatureBinder
 {
 public:
@@ -600,8 +588,8 @@ public:
 
     void tensor(std::string_view role, int64_t uid, bool workDataDependent)
     {
-        // The annotation is about the uid's contents, so it counts even when the
-        // referenced tensor is missing from the graph.
+        // The annotation concerns the uid's contents, so it counts even if the tensor is
+        // missing from the graph.
         _dataDependent = _dataDependent || workDataDependent;
         const auto* value = detail::tensor(_graph, uid);
         if(value == nullptr)
@@ -685,10 +673,9 @@ private:
     bool _dataDependent = false;
 };
 
-/// Publishes @p node's operands, `<prefix>.data_dependent`, and the derived SDPA flags, and
-/// returns the `data_dependent` verdict so the work model reads the value it published.
-/// Publishes nothing, and returns false, for a node without attributes or of a type this
-/// build predates.
+/// Publishes @p node's operands, `<prefix>.data_dependent`, and derived SDPA flags; returns
+/// the `data_dependent` verdict. Publishes nothing and returns false for a node without
+/// attributes or of an unknown type.
 inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
                              const Graph& graph,
                              const Node& node,
@@ -700,8 +687,7 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
         return false;
     }
     features.bind(prefix + ".data_dependent", binder.dataDependent());
-    // Derived rather than schema fields, so no generated visitor reports them; the
-    // shipped SDPA models read both.
+    // Derived flags, not schema fields; shipped SDPA models read both.
     if(const auto* op = node.attributes_as_SdpaAttributes())
     {
         features.bind(prefix + ".has_attention_mask", op->attn_mask_tensor_uid().has_value());
@@ -713,27 +699,16 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
 }
 } // namespace detail
 
-/// @brief Publishes the canonical device and graph features of one problem: every feature
-///        whose value is fixed by (graph, device) alone, without kernel enumeration.
+/// @brief Publishes the device and graph features fixed by (graph, device) alone.
 ///
-/// The half of engineFeatures() that does not read an engine configuration, and the one a
-/// `sort_kernel_catalog` ranker binds (with the graph-match tokens and kernel metadata): a
-/// ranked catalog is cached per (graph, device, engine version, ranking metric), so nothing
-/// it is ranked on may depend on the configuration a later request carries.
-///
-/// Work features, each absent -- never 0 -- when unknown:
-///   graph.nodes[i].flops         the node's logical work (detail::logicalFlops).
-///   graph.flops                  sum of every node's work, virtual intermediates included;
-///                                absent when any node's work is unknown.
-///   graph.flops_by_type.<Type>   per NodeAttributes member: the sum over nodes of that type,
-///                                0 when the graph has none, absent when any one is unknown.
-///   graph.logical_bytes          logical footprint of the non-virtual tensors (numel x
-///                                element size, fractional for sub-byte types). Not the
-///                                allocation size and not measured memory traffic.
-///   graph.arithmetic_intensity   graph.flops / graph.logical_bytes, when both are published
-///                                and the bytes are positive.
-/// Every graph-level aggregate is absent when the graph opts into execute-time override
-/// shapes: its declared shapes need not be the ones executed.
+/// Must not read the engine configuration: `sort_kernel_catalog` rankings are cached per
+/// (graph, device, engine version, ranking metric). Work features, absent (never 0) when
+/// unknown, and all graph-level ones absent when the graph allows execute-time shapes:
+///   graph.nodes[i].flops         detail::logicalFlops
+///   graph.flops                  sum over all nodes, virtual intermediates included
+///   graph.flops_by_type.<Type>   sum per NodeAttributes member, 0 when none
+///   graph.logical_bytes          detail::logicalBytes
+///   graph.arithmetic_intensity   graph.flops / graph.logical_bytes, when bytes > 0
 template <typename TProperties>
 inline uhd::FeatureExtractionContext
     problemFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
@@ -848,12 +823,9 @@ inline uhd::FeatureExtractionContext
     return features;
 }
 
-/// @brief Publishes problemFeatures() plus the `constraint.*` features of @p config: the
-///        engine-level (L1) feature set.
-///
-/// Constraints are what the request pins: its workspace bound (`constraint.workspace_limit`)
-/// and every other knob it sets (`constraint.knobs.<name>`), except the benchmarking knob,
-/// which chooses how to select rather than what may be selected.
+/// @brief problemFeatures() plus the engine-level (L1) `constraint.*` features of @p config:
+///        `constraint.workspace_limit` and `constraint.knobs.<name>` for every pinned knob
+///        except the benchmarking knob, which chooses how to select, not what.
 template <typename TProperties>
 inline uhd::FeatureExtractionContext
     engineFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,

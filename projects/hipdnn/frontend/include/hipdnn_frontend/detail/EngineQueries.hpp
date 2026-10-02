@@ -4,11 +4,8 @@
 #pragma once
 
 /// @file
-/// Generation-tool surfaces for engine inspection (RFC 0019 Open Question 12,
-/// RFC 0017 §2). Catalog enumeration and calibrated predictions are read from the
-/// ENGINE and ENGINECFG backend descriptors; they are deliberately not part of the
-/// public Graph API, because a consumer selects engines through the heuristic
-/// descriptor, never by walking a kernel catalog.
+/// Generation-tool surfaces for engine inspection (RFC 0019 Open Question 12). Not part of
+/// the public Graph API: consumers select engines through the heuristic descriptor.
 
 #include <HipdnnBackendFlatbufferData.h>
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
@@ -109,11 +106,8 @@ inline Error applyCandidateScope(hipdnnBackendDescriptor_t engineDesc,
     return {};
 }
 
-/// The value one wire KnobSetting carries, or nullopt when there is none to take. Union
-/// payloads are optional in FlatBuffers, so a buffer whose KnobSetting names IntValue (or
-/// FloatValue, StringValue) with no payload table behind it passes VerifyBuffer, and the
-/// typed accessor then returns null. That is checked here, before any dereference, rather
-/// than trusted to the verifier.
+/// The value one wire KnobSetting carries, or nullopt when there is none. FlatBuffers
+/// unions are optional, so a tagged value with no payload passes VerifyBuffer.
 inline std::optional<KnobValueVariant>
     decodeKnobValue(const hipdnn_flatbuffers_sdk::data_objects::KnobSetting& setting)
 {
@@ -153,8 +147,7 @@ inline Error
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    // The metric is part of the answer's identity: an engine answers in the metric the
-    // query named or not at all, so a value in any other metric is never converted.
+    // An answer in another metric is rejected, never converted.
     const auto expectedKind = kind == PredictionKind::ENGINE ? fb::PredictionKind::ENGINE
                                                              : fb::PredictionKind::CONFIGURATION;
     if(source.engine_id() != engineId || source.kind() != expectedKind || source.metric() == nullptr
@@ -260,12 +253,9 @@ inline Error
     return {};
 }
 
-/// Generation-tool surface. Reads a calibrated prediction from the descriptor that
-/// defines its kind: the engine descriptor for an engine-level estimate, an engine
-/// config descriptor for the exact configuration its knobs describe. The answer is in
-/// @p metric's registered units; an engine with no model for that metric reports
-/// UNAVAILABLE rather than substituting another. Missing models never affect engine
-/// applicability.
+/// Generation-tool surface. Reads a calibrated prediction, in @p metric's units, from the
+/// engine descriptor (engine kind) or an engine config descriptor (configuration kind). An
+/// engine with no model for @p metric reports UNAVAILABLE; applicability is unaffected.
 inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
                                  int64_t engineId,
                                  EnginePrediction& prediction,
@@ -358,10 +348,8 @@ inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
         *fb::GetEnginePrediction(data.ptr), engineId, kind, *rankingMetric, prediction);
 }
 
-/// Generation-tool surface. Lists the predictions an engine can answer on this graph:
-/// every registered metric at both kinds is described without evaluating a model, and a
-/// (kind, metric) pair is reported when a model is bound to it and the binding is not
-/// INVALID. Nothing new crosses the ABI; this is the description query run per metric.
+/// Generation-tool surface. Lists the (kind, metric) pairs an engine can answer on this
+/// graph: those with a bound, non-INVALID model. No model is evaluated.
 inline Error getPredictionCapabilities(hipdnnBackendDescriptor_t graphDesc,
                                        int64_t engineId,
                                        std::vector<PredictionCapability>& capabilities)
@@ -386,11 +374,9 @@ inline Error getPredictionCapabilities(hipdnnBackendDescriptor_t graphDesc,
     return {};
 }
 
-/// Generation-tool surface. Enumerates actual applicable catalog entries, not guessed
-/// knob combinations. `scope` restricts the matched catalog; unset knobs are
-/// unconstrained, and default knob values never restrict discovery. limit is in
-/// [1, 10000]. Returned EngineCandidate::variant is accepted by add_engine_variants().
-/// Engines that cannot enumerate return an error explicitly, not an empty catalog.
+/// Generation-tool surface. Enumerates applicable catalog entries; unset `scope` knobs are
+/// unconstrained and limit is in [1, 10000]. EngineCandidate::variant is accepted by
+/// add_engine_variants(). Engines that cannot enumerate return an error, not an empty page.
 inline Error getEngineCandidates(hipdnnBackendDescriptor_t graphDesc,
                                  int64_t engineId,
                                  EngineCandidatePage& page,

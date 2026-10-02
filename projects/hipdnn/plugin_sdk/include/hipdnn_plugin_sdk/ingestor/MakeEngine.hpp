@@ -121,23 +121,9 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 
 /// @brief The engine facts a cached ranking's validity depends on, for `EngineIdentity`.
 ///
-/// The model hash is a digest over EVERY heuristic @p set can resolve, not over one of them:
-/// which model ranks is decided per architecture at first rank() (RFC 0019 §8.3), long after
-/// this runs, and a shard is keyed by arch but a cache directory is not. Hashing all of them
-/// means the directory changes when ANY of them changes, which over-invalidates a little --
-/// a gfx1151-only model change also retires gfx942's records -- and under-invalidates never.
-///
-/// The kernels are deliberately NOT hashed in, unlike engineSelectorRevision() above: a pack
-/// gaining a kernel is what the coverage gate is for, and retiring every measured ranking on
-/// it would cost a GPU sweep to re-learn an order the records already hold.
-///
-/// Empty when the engine ships no heuristic at all: there is no model content to version,
-/// and `winnerCacheShardPath()` renders that as its own directory.
-///
-/// `model_hash` is the artifact's content digest -- declared, or taken from the bytes
-/// present when the UHD was parsed (uhd::parseUhdConfig) -- so replacing a model's weights
-/// changes this hash even when its UHD declares none. A model with an artifact but no
-/// digest has no content identity; engineContentIdentified() reports that.
+/// Digests every heuristic @p set can resolve: the per-arch choice happens at first
+/// rank(), but the cache directory is not arch-keyed. Kernels are excluded; a new kernel is
+/// the coverage gate's concern. Empty when the engine ships no heuristic.
 inline std::string engineModelHash(const DescriptorSet& set)
 {
     const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
@@ -199,9 +185,8 @@ inline bool engineContentIdentified(const DescriptorSet& set)
 /// @brief What identifies this engine to the caches that outlive one ranking.
 inline EngineIdentity engineIdentity(const DescriptorSet& set)
 {
-    // The resolved default ranker's id (DescriptorSet::heuristic), which the loader keeps in
-    // step with EngineDescriptor::heuristicId; read off the descriptor so a set built in memory
-    // without the loader still identifies its cache directory.
+    // Read off the descriptor (the loader keeps it in step with DescriptorSet::heuristic) so
+    // a set built in memory still identifies its cache directory.
     std::string uhdId;
     if(set.engine.heuristicId.has_value())
     {
@@ -223,18 +208,11 @@ inline EngineIdentity engineIdentity(const DescriptorSet& set)
 /// @param describedBy Names the engine in the graph_match resolution failure and in the
 ///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
 ///        caller that already moved `set.engine` out must pass it, or both name nothing.
-/// @param engine The engine's identity -- scoped name, revision, UHD id and model content
-///        hash -- which locates its on-disk winner-cache shard and versions its in-memory
-///        catalog cache. Defaulted from @p set like @p describedBy; a caller that already
-///        moved `set.engine` out must pass it explicitly (see engineIdentity()), or the
-///        state manager gets an empty name and disables its disk cache.
-/// @param knobs The UED's declared knobs, carrying RFC 0019 §6.3 check 2 into the
-///        heuristic factory. Defaulted from @p set for the same reason as the two above,
-///        and for the same reason a caller that already moved `set.engine` out must pass
-///        it: read from a moved-from UED the list is empty, and an empty list compares
-///        equal to the axes of a model that reads no `$kernel.*` feature -- so the check
-///        that is supposed to catch a knob/axis disagreement instead passes vacuously,
-///        or, once a model does read one, refuses every model an engine ever ships.
+/// @param engine The engine's identity, locating its winner-cache shard and versioning its
+///        catalog cache. Defaulted from @p set; pass it if `set.engine` was moved out, or
+///        the disk cache is disabled.
+/// @param knobs The UED's declared knobs for RFC 0019 §6.3 check 2. Defaulted from @p set;
+///        pass it if `set.engine` was moved out, or the check passes vacuously.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
@@ -255,10 +233,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         knobs = set.engine.knobs;
     }
-    // Read from `set.schema` before the move below hands it to the state manager: RFC 0019
-    // §6.3 check 2's first assertion needs the KMD's declared fields, and a moved-from
-    // schema declares none -- which would refuse every model that reads a `$kernel.*`
-    // feature, exactly the way an empty knob list would.
+    // Read before `set.schema` is moved below: a moved-from schema declares no fields and
+    // would fail RFC 0019 §6.3 check 2 for every model reading `$kernel.*`.
     std::unordered_set<std::string> kmdFields;
     for(const auto& field : set.schema.fields)
     {

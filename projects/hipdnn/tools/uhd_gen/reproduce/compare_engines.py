@@ -1,14 +1,7 @@
 """Cross-engine comparison of L1 collections over one corpus.
 
-Each engine's `uhd_gen generate --role predict_engine` run writes a `corpus.csv`
-of measured immediate throughput, one row per (graph, device). Joined on the `benchmark`
-id -- the UUID5 the corpus mints from the canonical graph document, which is stable
-across engines and runs -- those files answer the question the heuristics exist for:
-for each problem, which engine is actually fastest, and by how much.
-
-The manifest of the corpus supplies the regime, so the answer can be read per population
-rather than as one aggregate that hides a model excellent on prefill and useless on decode
-(RFC 0019.13 §11.2).
+Joins each engine's `predict_engine` `corpus.csv` on `benchmark` (stable across engines)
+to show which engine is fastest per problem, per manifest regime (RFC 0019.13 §11.2).
 
 Usage:
     python compare_engines.py --manifest corpus/manifest.json \
@@ -59,9 +52,7 @@ def main() -> int:
         measured = (
             frame[frame.get("tflops").notna()] if "tflops" in frame else frame.iloc[0:0]
         )
-        # One engine can carry several rows per graph (per device, per repeat). The engine's
-        # number for a problem is its best measured throughput, which is what a selector that
-        # picks this engine would deliver once its own knobs are settled.
+        # An engine's number for a problem is its best measured throughput across rows.
         for benchmark, group in measured.groupby("benchmark"):
             best[str(benchmark)][label] = float(group["tflops"].max())
 

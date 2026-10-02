@@ -6,34 +6,24 @@
 #SBATCH --time=12:00:00
 #SBATCH --output=%x-%j.log
 #
-# Generate layer-2 (sort_kernel_catalog) and layer-1 (predict_engine) heuristics
-# for one engine against a STAGED corpus -- `hipdnn_corpus_gen`'s output, not a corpus the
-# generator proposes for itself.
+# Generate layer-2 (sort_kernel_catalog) and layer-1 (predict_engine) heuristics for one
+# engine against a STAGED corpus (`hipdnn_corpus_gen`'s output).
 #
-# Ordering is load-bearing (uhd_gen README, "Engine-level immediate predictions"): L2 is
-# trained and installed FIRST, because it decides which kernel an immediate run executes,
-# and L1's labels are measurements of exactly that run. UHD_ROLES=l1 skips L2 for an
-# opaque engine (AITER, MIOpen), which has no catalog to rank.
+# L2 is trained and installed FIRST: it picks the kernel an immediate run executes, and L1's
+# labels measure that run. UHD_ROLES=l1 skips L2 for an opaque engine (AITER, MIOpen).
 #
-# A MIOpen convolution run: UHD_PROVIDERS=miopen-provider UHD_ENGINE=MIOPEN_ENGINE
-# UHD_ROLES=l1 UHD_METRICS=tflops+time UHD_GRAPHS=<conv corpus root>. Its declared UHD ids
-# (per metric) are passed to generate, and its models are promoted under `default`.
+# MIOpen convolution: UHD_PROVIDERS=miopen-provider UHD_ENGINE=MIOPEN_ENGINE UHD_ROLES=l1
+# UHD_METRICS=tflops+time UHD_GRAPHS=<conv corpus root>.
 #
-# Sharding: UHD_SHARDS/UHD_SHARD take an interleaved slice of the corpus (every Nth graph,
-# offset by the shard index), so each shard keeps the whole shape distribution instead of
-# one contiguous alphabetical block of it. Shards collect and train independently; their
-# rows are merged by `uhd_gen.dataset` afterwards when a single model is wanted.
-#
-# The #SBATCH lines are defaults; the site's partition, account and GPU constraint are
-# passed at submission (reproduce/README.md, "What every job needs").
+# UHD_SHARDS/UHD_SHARD take an interleaved slice (every Nth graph); merge shards afterwards
+# with `uhd_gen.dataset`. #SBATCH lines are defaults; pass site settings at submission
+# (reproduce/README.md).
 set -uo pipefail
 
 BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
 SRC=/tmp/uhd/src
-# The descriptor root the provider packs as `product`. Unset keeps the provider's own
-# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
-# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
-# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+# Descriptor root packed as `product`, relative to the checkout; unset keeps the provider's
+# shipped root.
 PRODUCTION_ROOT_ARGS=()
 [ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
     PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
@@ -41,17 +31,11 @@ BUILD=/tmp/uhd/build
 OUT=/tmp/uhd/out
 ENGINE=${UHD_ENGINE:?set UHD_ENGINE to a registered engine name, e.g. hipkernel:Gfx950AttentionDense}
 GRAPHS=${UHD_GRAPHS:?set UHD_GRAPHS to a staged corpus directory}
-# `+`-separated, not comma: sbatch's own --export parser splits its value on commas, so
-# UHD_ROLES=l2,l1 arrives as UHD_ROLES=l2 plus a stray empty l1 -- and the run then collects
-# and trains L2 and silently skips L1 entirely.
+# `+`-separated, not comma: sbatch's --export splits its value on commas.
 ROLES=${UHD_ROLES:-l2+l1}
-# Ranking metrics to train, `+`-separated for the same reason (RFC 0019 §4.4): one UHD per
-# metric per role from one run. Unset keeps generate's default (tflops, with the metric-less
-# fallback for an engine publishing no work count) and the `<role>/model/` layout; several
-# metrics write `<role>/model_<metric>/`. UHD_L2_METRICS / UHD_L1_METRICS override
-# UHD_METRICS for one role: a catalog enumeration page publishes no graph.flops yet, so an
-# L2 `tflops` label is refused only after the whole collection has been paid for, while
-# `time` trains, and L1's immediate measurement carries both.
+# Ranking metrics, one UHD per metric per role (RFC 0019 §4.4). Unset keeps generate's
+# default and the `<role>/model/` layout. UHD_L2_METRICS / UHD_L1_METRICS override per role
+# (catalog pages publish no graph.flops, so L2 needs `time`).
 L2_METRICS=${UHD_L2_METRICS:-${UHD_METRICS:-}}
 L1_METRICS=${UHD_L1_METRICS:-${UHD_METRICS:-}}
 L2_METRIC_ARGS=()
@@ -62,21 +46,16 @@ SHARDS=${UHD_SHARDS:-1}
 SHARD=${UHD_SHARD:-0}
 ARCH=${UHD_ARCH:-gfx942}
 KEEP=${UHD_KEEP:-/exchange/uhd-gen-${SLURM_JOB_ID:-manual}}
-# Providers to build, `+`-separated for the same reason. `miopen-provider` adds
-# MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC (convolutions), built against the MIOpen the
-# ROCm install ships; `hip-kernel-provider` is rocKE/AITER. Either or both.
+# Providers to build. `miopen-provider` adds MIOPEN_ENGINE(_DETERMINISTIC);
+# `hip-kernel-provider` is rocKE/AITER.
 PROVIDERS=${UHD_PROVIDERS:-hip-kernel-provider}
-# The L1 role-map arch. MIOpen declares its ids under `default` (one model per metric
-# covers every arch it was trained on; an untrained arch answers "no coverage"), so its
-# models are promoted there.
+# The L1 role-map arch. MIOpen declares its ids under `default`, so its models go there.
 case "$ENGINE" in
     MIOPEN_ENGINE|MIOPEN_ENGINE_DETERMINISTIC) L1_ARCH=${UHD_L1_ARCH:-default} ;;
     *) L1_ARCH=${UHD_L1_ARCH:-$ARCH} ;;
 esac
-# sbatch's --output lands in the job's OWN view of the submit directory, which inside a
-# --container-remap-root container is thrown away with the container: a job that dies
-# before it copies anything into $KEEP leaves nothing to read, and every diagnosis costs
-# another full run. Tee from here, before anything can fail.
+# Tee into $KEEP before anything can fail: under --container-remap-root, sbatch's --output
+# file is discarded with the container.
 mkdir -p "$KEEP"
 exec > >(tee "$KEEP/job-${SLURM_JOB_ID:-manual}.log") 2>&1
 step() { echo; echo "===== $* ====="; date -Is; }
@@ -91,11 +70,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq 2>&1 | tail -1
 apt-get install -y -qq git cmake ninja-build python3.12-venv python3-dev 2>&1 | tail -2
 export PIP_CACHE_DIR=/tmp/pipcache
-# pytest is a CONFIGURE-time dependency of the provider since the descriptor-packaging
-# restructure: hkp_register_tests refuses to configure when the interpreter cannot import
-# it (HkpPackaging.cmake:1232). Installed here rather than disabling the tests, because a
-# build that silently drops its packaging tests is how a staging defect reaches a
-# collection run.
+# pytest is a configure-time dependency: hkp_register_tests refuses to configure without it.
 python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpack \
     lightgbm pandas "scikit-learn>=1.3.0" pyarrow flatbuffers numpy pytest 2>&1 | tail -1
 for c in git cmake ninja python3; do
@@ -104,39 +79,26 @@ done
 
 step "source: $BRANCH"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
-# --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
-# clone has no ancestor for it to apply against ("Repository lacks these prerequisite
-# commits"), even on a node whose mirror is current rather than stale.
+# --depth 200, not 1: a bundle needs ancestor commits to apply against.
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
-# A bundle whose branch merged another one carries prerequisites that the merged-INTO
-# branch cannot reach on its own, so a clone of $BRANCH alone fails the apply with
-# "Repository lacks these prerequisite commits". UHD_PREREQ_REFS names the other
-# branches (space separated); they are fetched unshallowed, because the prerequisite can
-# sit deeper than the tip.
+# UHD_PREREQ_REFS: other branches (space separated) holding a bundle's prerequisite commits;
+# fetched unshallowed, since a prerequisite can sit deeper than the tip.
 for ref in ${UHD_PREREQ_REFS:-}; do
     git -C "$SRC" fetch --unshallow origin "$ref" >> /tmp/uhd/clone.log 2>&1 \
         || git -C "$SRC" fetch origin "$ref" >> /tmp/uhd/clone.log 2>&1 \
         || { echo "FATAL: prerequisite ref $ref did not fetch"; tail -5 /tmp/uhd/clone.log; exit 1; }
 done
 if [ -n "${UHD_BUNDLE:-}" ]; then
-    # The compute sites do not all resolve github.com to the same mirror: a node can clone a
-    # branch tip hours behind the one `git ls-remote` reports from the login node. A bundle
-    # carries the exact commits from the machine that pushed them, so verification cannot
-    # silently test a different tree than the one under review.
-    # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
-    # fetch asks for exactly that and checks out FETCH_HEAD.
+    # Mirrors can lag; a bundle pins the exact commits. Its tip is HEAD, not a branch ref.
     git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
         && git -C "$SRC" checkout --detach FETCH_HEAD >> /tmp/uhd/clone.log 2>&1 \
         || { echo "FATAL: bundle $UHD_BUNDLE did not apply"; tail -8 /tmp/uhd/clone.log; exit 1; }
 fi
 git -C "$SRC" log --oneline -1
-# An engine with no UED reads only the UHD ids its provider declares, one per metric, and its
-# description reports the one for the requested metric -- generate defaults to that. Passing
-# the declared table (declared_ids.sh) as well makes a declaration that drifted from it fail
-# the run instead of training a model nobody reads. UHD_IDS=tflops=<uuid>+time=<uuid>
-# overrides the table.
+# Pass the declared ids (declared_ids.sh) so a drifted engine declaration fails the run.
+# UHD_IDS=tflops=<uuid>+time=<uuid> overrides the table.
 source "$SRC/projects/hipdnn/tools/uhd_gen/reproduce/declared_ids.sh"
 mapfile -t ID_ARGS < <(uhd_id_args "${UHD_IDS:-$(declared_uhd_ids "$ENGINE" "$ARCH")}" "${L1_METRICS:-tflops}")
 echo "declared ids: ${ID_ARGS[*]:-none (a UED engine, or ids reported by the engine description)}"
@@ -162,10 +124,8 @@ echo "configure rc=$?"
 grep -B2 -A10 "CMake Error" /tmp/uhd/configure.log | head -30 || tail -3 /tmp/uhd/configure.log
 
 step "build"
-# ALL, not a target list: the descriptors every engine is registered from are staged by
-# `add_custom_target(... ALL)` rules (hip_kernel_provider_descriptors, hkp_descriptor_staging,
-# hkp_packaging_*), which a `--target <list>` build skips, registering only a fraction of
-# the engines.
+# Build ALL: descriptor staging rides on `add_custom_target(... ALL)` rules that a
+# `--target <list>` build skips.
 cmake --build "$BUILD" -j "$(nproc)" > /tmp/uhd/build.log 2>&1
 BLD=$?; echo "build rc=$BLD"
 if [ "$BLD" -ne 0 ]; then grep -n -B2 -A20 "^FAILED:" /tmp/uhd/build.log | head -50; exit 1; fi
@@ -177,29 +137,20 @@ FEATURE_EVAL=$(find "$BUILD" -name hipdnn_uhd_features -type f -perm -u+x | head
 # Every provider built installs its plugin into the one engine-plugin directory.
 PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -name "libmiopen_plugin*.so" \) \
     -path "*plugins*" | head -1)")
-# The generator benchmarks against a COPY of --descriptor-tree, and HIPDNN_DESCRIPTOR_DIR
-# REPLACES the search roots rather than adding to them. A kpack archive lives once per arch
-# at the arch root and every descriptor climbs out of its own folder to reach it, so the
-# tree handed to the generator must be the root that owns kpack -- copying one engine's
-# folder leaves its kernels unresolvable and every pinned configuration comes back
-# config_not_applicable.
-# The shipped (product) tree for this arch, never test_arch_content: that tree also holds
-# kpack archives, sorts first, and carries none of the provider's engines, so taking it
-# finds no UED for the engine.
+# HIPDNN_DESCRIPTOR_DIR replaces the search roots and descriptors reach the per-arch kpack by
+# climbing, so the generator needs the root that owns kpack. Never test_arch_content, which
+# carries no provider engines.
 TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*/arch_content/*/$ARCH/kpack" \
     -not -path "*/test_arch_content/*" | head -1)
 TREE_ROOT=${TREE_ROOT%/kpack}
 if [ -z "$TREE_ROOT" ] && [ -n "${ID_ARGS[*]:-}" ]; then
-    # An engine with declared UHD ids and no descriptor pack (ASM_SDPA_ENGINE) has no kpack
-    # tree when production packaging is dormant for this arch -- the shipped pack declares
-    # gfx950 only, so a gfx942 build packs nothing. Its models are staged loose into the
-    # provider's production tree, which the loader walks either way.
+    # Declared-id engine with no pack for this arch (ASM_SDPA_ENGINE on gfx942): stage its
+    # models loose into the provider's production tree.
     TREE_ROOT=$(find "$BUILD" -type d -path "*/engines/arch_content/hip-kernel-provider" \
         -not -path "*/test_arch_content/*" | head -1)
 fi
 if [ -z "$TREE_ROOT" ] && [[ "+$PROVIDERS+" != *"+hip-kernel-provider+"* ]]; then
-    # MIOpen alone ships no descriptors: its L1 models are installed into (and read from)
-    # a root of their own.
+    # MIOpen alone ships no descriptors: its models get a root of their own.
     TREE_ROOT="$OUT/descriptors"
     mkdir -p "$TREE_ROOT"
 fi
@@ -211,12 +162,8 @@ for path in "$BENCH" "$LIST_ENGINES" "$FEATURE_EVAL" "$PLUGIN_DIR" "$TREE_ROOT";
     [ -e "$path" ] || { echo "FATAL: a required runtime path is missing"; exit 1; }
 done
 
-# AITER resolves its .co catalog from HIPDNN_AITER_ASM_DIR, falling back to the AITER_ASM_DIR
-# compile definition -- which is the INSTALL path (/opt/rocm/lib/...), empty in a build tree.
-# Without it a run admits its graphs and then fails every execution with "failed to load
-# kernel module from /opt/rocm/.../fwd_hd128_bf16_rtne.co". The directory wanted is the
-# one holding the arch subdirectories, so it is chosen by looking for the arch inside it
-# rather than by name alone: the build carries more than one directory called asm_kernels.
+# AITER's compiled-in fallback is the install path, empty in a build tree. Pick the
+# asm_kernels directory that holds this arch; the build has more than one.
 AITER_ASM=""
 while read -r candidate; do
     [ -d "$candidate/$ARCH/fmha_v3_fwd" ] && { AITER_ASM="$candidate"; break; }
@@ -242,10 +189,7 @@ python3 - "$GRAPHS" "$PROBLEMS" "$SHARDS" "$SHARD" <<'PYEOF'
 import json, pathlib, shutil, sys
 source, target, shards, shard = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 
-# Manifest row order first, filename sort only as a fallback. The manifest is already
-# regime-spread by the assembler's `select`, so sharding on it needs no assumption about
-# names; the old sort worked only because the names happened to sort by regime, which is an
-# undocumented dependency on a naming scheme that has since changed.
+# Manifest row order (already regime-spread) first; filename sort only as a fallback.
 manifest = source / "manifest.json"
 graphs = []
 if manifest.is_file():
@@ -264,8 +208,7 @@ if not graphs:
         if graphs:
             break
 
-# Interleaved, not contiguous: a contiguous block of a regime-spread order would hand one
-# shard every decode problem and another every prefill one.
+# Interleaved, not contiguous, so every shard gets every regime.
 mine = graphs[shard::shards]
 for path in mine:
     shutil.copy2(path, target / path.name)
@@ -275,8 +218,7 @@ COUNT=$(ls "$PROBLEMS" | wc -l)
 [ "$COUNT" -gt 0 ] || { echo "FATAL: empty shard"; exit 1; }
 
 step "what this engine admits"
-# The census is the cost model for everything below: L2 times every candidate of every
-# admitted graph, so the admitted count -- not the corpus size -- sets the wall clock.
+# L2 times every candidate of every admitted graph, so the admitted count sets the wall clock.
 ADMITTED=0
 CENSUS_START=$(date +%s)
 for problem in "$PROBLEMS"/*.json "$PROBLEMS"/*.fb; do
@@ -293,8 +235,7 @@ echo "admitted $ADMITTED of $COUNT in $(( $(date +%s) - CENSUS_START ))s"
 [ "$ADMITTED" -gt 0 ] || { echo "FATAL: the engine serves none of this shard"; exit 1; }
 
 cd "$SRC/projects/hipdnn/tools" || exit 1
-# A heartbeat, because L2 over thousands of graphs is hours of silence otherwise and the
-# rate is the only thing that says whether the shard count was right.
+# Heartbeat: L2 is hours of silence otherwise.
 ( while sleep 600; do
       echo "  [heartbeat $(date -Is)] rows=$(wc -l < "$OUT/l2/rows.csv" 2>/dev/null || echo 0) $(tail -1 "$OUT/l2.stdout" 2>/dev/null | cut -c1-120)"
   done ) & HEARTBEAT=$!
@@ -318,8 +259,7 @@ fi
 
 if [[ "+$ROLES+" == *"+l1+"* ]]; then
     step "LAYER 1 - predict_engine over $ADMITTED graphs"
-    # After L2 is installed: an immediate run executes whatever the installed catalog
-    # ranker picked, so these labels describe the selector that will ship.
+    # After L2 is installed, so these labels describe the selector that will ship.
     L1_START=$(date +%s)
     python3 -m uhd_gen generate \
         --graphs "$PROBLEMS" \
@@ -335,12 +275,9 @@ if [[ "+$ROLES+" == *"+l1+"* ]]; then
 fi
 
 step "VERIFY - the runtime admits what was installed"
-# Offline evaluation scores a model the runtime may still refuse (an axis the UED does not
-# expose, a stale selector revision): it then ranks by declared order and nothing here would
-# say so. Ask the built loader and the engine itself, with logging on, before trusting any
-# number above. The validator covers descriptor-backed engines only; an engine binding its
-# models by declared id (ASM_SDPA_ENGINE) is checked through its prediction below; promote
-# replaced its shipped model in place, so the prediction should name the new model.
+# Offline evaluation can score a model the runtime still refuses; ask the built loader and
+# engine. The validator covers descriptor-backed engines; declared-id engines are checked by
+# their prediction.
 VALIDATE=$(find "$BUILD" -name hipdnn_validate_descriptors -type f -perm -u+x | head -1)
 {
     if [ -n "$VALIDATE" ] && [ -z "${ID_ARGS[*]:-}" ] \
@@ -365,9 +302,7 @@ for dir in l1 l2; do
     [ -d "$OUT/$dir" ] && cp -r "$OUT/$dir" "$KEEP/" 2>/dev/null
     cp "$OUT/$dir.stdout" "$OUT/$dir.stderr" "$KEEP/" 2>/dev/null
 done
-# A generate that refuses to train preserves its collected corpus beside --output-dir, and
-# that directory dies with the container unless it is kept: the measurements are the
-# expensive part.
+# Keep a refused generate's preserved corpus: the measurements are the expensive part.
 for preserved in "$OUT"/.uhd-generate-*; do
     [ -d "$preserved" ] && cp -r "$preserved" "$KEEP/preserved-$(basename "$preserved")" 2>/dev/null
 done

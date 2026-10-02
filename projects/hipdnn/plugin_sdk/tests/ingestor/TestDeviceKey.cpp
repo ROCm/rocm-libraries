@@ -53,11 +53,8 @@ TEST(TestIngestorDeviceKey, TheHashedFieldSetIsPinnedAtCompileTime)
 
 TEST(TestIngestorDeviceKey, TwoBoardsOfOneArchSharingCuCountStillGetDifferentKeys)
 {
-    // The case that motivated widening the struct. One arch spans several boards, and
-    // boards exist that carry the same compute-unit count and different memory. Keyed
-    // on arch, warp size and CUs alone these two collide, and a ranking benchmarked on
-    // the smaller-bandwidth card is served to the faster one as if it had been measured
-    // there -- silently, because a cache hit looks exactly like a correct answer.
+    // Same arch and CU count, different memory: a shared key would serve one board's
+    // measured ranking to the other.
     auto slower = propertiesFor("gfx942");
     slower.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
     slower.memoryBusWidth = 8192;
@@ -192,12 +189,8 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // ---- the $device.* vocabulary ------------------------------------------------------
 //
-// One arch spans several boards and a UHD is arch-keyed, so a gfx942 model is trained on
-// a corpus merged from MI300X, MI325X and MI308X. Two things read the device facts and
-// they have to agree: FeatureExtractor binds them at scoring time, and the benchmark
-// recorder writes them as `device.*` columns into that corpus. A name in one and not the
-// other is a feature trained on a column the runtime cannot produce, or a binding no
-// corpus ever held -- neither throws, and both yield a model that is quietly wrong.
+// FeatureExtractor binds these names at scoring time and the benchmark recorder writes them
+// as `device.*` corpus columns; the two must agree name for name.
 
 TEST(TestIngestorDeviceVocabulary, EveryNameIsBoundExactlyOnce)
 {
@@ -241,10 +234,8 @@ TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsDerivedFromClockAndWidth)
 
 TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsZeroRatherThanWrongWhenUnresolved)
 {
-    // hipGetDeviceProperties leaves 0 on fields it cannot answer. Multiplying those out
-    // would report a device with zero bandwidth as though it were measured, so the
-    // derived value stays 0 and a signature reading it sees the same "unknown" the
-    // inputs carry.
+    // hipGetDeviceProperties leaves unknown fields 0; the derived value must stay 0
+    // (unknown) whenever an input is.
     auto properties = propertiesFor("gfx942");
     EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 0.0);
 

@@ -383,9 +383,8 @@ int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx9
     return ranked.front().getIntMetadata("block_size");
 }
 
-/// A `predict_engine` model resolves through uhd::NativeScorerRegistry, which is a
-/// different registry from the ScoreRegistry a catalog ranker's comparator uses, so
-/// ScopedSymbols above cannot stand in for this one.
+/// `predict_engine` scorers resolve through uhd::NativeScorerRegistry, not the ScoreRegistry
+/// that ScopedSymbols fills.
 const std::string L1_SCORER_SYMBOL = "descriptorloader.l1_scorer";
 
 double l1Score(const double* values, size_t count)
@@ -410,25 +409,19 @@ public:
     ScopedL1Scorer& operator=(const ScopedL1Scorer&) = delete;
 };
 
-/// The `objective` the registry fixes for @p metric. Read from the registry rather than
-/// spelled per fixture, because the parser refuses any other pairing: a fixture that got
-/// it wrong would test the rejection instead of what it set out to.
+/// The `objective` the registry fixes for @p metric; the parser refuses any other pairing.
 std::string objectiveFor(const std::string& metric)
 {
     return std::string(hipdnn_data_sdk::utilities::objectiveOf(
         *hipdnn_data_sdk::utilities::findRankingMetric(metric)));
 }
 
-/// What a test's "provider" reports as its build identity. An opaque engine's model is
-/// bound only when it recorded this exact string (RFC 0019 §4.1
-/// `trained_against.selector_revision`), so the mismatch cases vary it deliberately.
+/// The provider build an opaque engine's model must record exactly
+/// (RFC 0019 §4.1 `trained_against.selector_revision`).
 const std::string L1_SELECTOR_REVISION = "test-provider/1.2.3/opaque-untuned-v1/library-4.5";
 
-/// An L1 UHD carrying only what RFC 0019 §4.1 gives a UHD. There is no `engine`, `role`
-/// or `arch` member to write -- the parser rejects one as an unknown key -- so what binds
-/// this model to an engine is entirely the engine's own declaration of its id
-/// (Open Question 7, RESOLVED). What the document does record is the provider build it
-/// was measured on, which is the one thing the loader can check for itself.
+/// An L1 UHD with only RFC 0019 §4.1 fields: it cannot name an engine, role or arch, so only
+/// the engine's declaration binds it.
 ///
 /// @param selectorRevision The provider build this model claims to have been measured on.
 /// @param metric The registered metric the model predicts in.
@@ -449,9 +442,8 @@ nlohmann::json declaredL1Document(const std::string& id,
             {"trained_against", {{"selector_revision", selectorRevision}}}};
 }
 
-/// The declaration an opaque engine's provider compiles in, in the shape the loader takes.
-/// An architecture repeated in @p entries lists a second id for it -- one per metric, each
-/// UHD naming its own (RFC 0019 §11.4).
+/// An opaque engine's compiled-in declaration. A repeated arch lists a second id, one per
+/// metric (RFC 0019 §11.4).
 std::map<std::string, std::vector<DescriptorId>>
     declaration(const std::vector<std::pair<std::string, std::string>>& entries)
 {
@@ -463,9 +455,8 @@ std::map<std::string, std::vector<DescriptorId>>
     return declared;
 }
 
-/// The set's native UHD again under @p id, declaring @p metric, calibrated. Native and
-/// signature-less, so resolving it needs nothing beyond the catalog: what the cases using
-/// it exercise is the per-metric indexing alone.
+/// The set's native UHD under @p id, declaring @p metric, calibrated. Native and
+/// signature-less, so it resolves from the catalog alone.
 nlohmann::json metricUhd(Documents& documents, const std::string& id, const std::string& metric)
 {
     auto uhd = documentOfType(documents, ".uhd.json");
@@ -490,8 +481,8 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.schema.fields.size(), 2u);
     ASSERT_TRUE(set.heuristic.has_value());
     EXPECT_EQ(set.heuristic->nativeSymbol, SCORE_SYMBOL);
-    // A model artifact is a path relative to the .uhd.json that declared it, so the
-    // descriptor has to carry that directory -- nothing downstream can recover it.
+    // A model artifact path is relative to its .uhd.json, so the descriptor must carry
+    // that directory.
     EXPECT_EQ(set.heuristic->baseDir, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
@@ -556,12 +547,9 @@ TEST(TestDescriptorLoader, ChangedKernelMatcherDisablesOnlyTheAffectedArchitectu
 namespace
 {
 
-/// makeSetDocuments' engine split into a gfx942 pack and a gfx950 pack that share the graph
-/// matcher and each use their own kernel matcher, plus a `predict_engine` model bound under
-/// both arch keys by one UUID (D2). The model records the matchers of every pack -- what
-/// enginePredictionProvenance publishes, so what every collected L1 model records.
-///
-/// The model is the last document, so a case can amend what it recorded.
+/// makeSetDocuments split into gfx942 and gfx950 packs, each with its own kernel matcher,
+/// plus one `predict_engine` model bound under both arches that records every pack's
+/// matchers. The model is the last document, so a case can amend it.
 Documents twoArchPackDocuments(const std::string& engineName, const std::string& modelId)
 {
     auto documents = makeSetDocuments('1', engineName);
@@ -587,9 +575,8 @@ Documents twoArchPackDocuments(const std::string& engineName, const std::string&
 
 } // namespace
 
-/// R5 with D2: an L1 model collected over both packs records both kernel matchers, and each
-/// arch key checks only the matchers its own packs use. The other arch's matcher is
-/// ignored there, not refused, so the one model is valid under both keys it is bound to.
+/// Each arch key checks only the matchers its own packs use; the other arch's recorded
+/// matcher is ignored there, not refused.
 TEST(TestDescriptorLoader, AMultiArchModelRecordingEveryPacksMatchersIsValidOnEachBoundArch)
 {
     const auto modelId = testUuid('1', 'c');
@@ -608,10 +595,8 @@ TEST(TestDescriptorLoader, AMultiArchModelRecordingEveryPacksMatchersIsValidOnEa
     EXPECT_EQ(toString(bound.at("gfx950").id), modelId);
 }
 
-/// The other side of the arch-scoped rule: what the bound arch's packs use is still checked.
-/// A recorded matcher the arch uses, now at an incompatible revision, refuses the model on
-/// that arch alone; a recorded matcher no pack of the engine uses any more refuses it on
-/// every arch, because the model was trained against a matcher this engine does not have.
+/// A bumped matcher the arch uses refuses the model on that arch only; a recorded matcher no
+/// pack uses any more refuses it on every arch.
 TEST(TestDescriptorLoader, ArchScopedMatcherProvenanceStillRefusesWhatTheBoundArchUses)
 {
     const auto modelId = testUuid('1', 'c');
@@ -684,9 +669,7 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
     auto& engineDocument = documentOfType(documents, ".ued.json");
     const auto uhdId = engineDocument.at("sort_kernel_catalog").at("default").get<std::string>();
 
-    // Same ranker under two arches, and a metric-declaring model under the second role --
-    // the one a `predict_engine` UHD must be. What matters here is that the shape parses and
-    // every reference resolves, not that the rankers differ.
+    // Same ranker under two arches; a `predict_engine` model must declare a metric.
     const auto predictionId = testUuid('1', 'c');
     engineDocument["sort_kernel_catalog"] = {{"gfx942", uhdId}, {"default", uhdId}};
     engineDocument["predict_engine"] = {{"default", predictionId}};
@@ -701,20 +684,13 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
     EXPECT_EQ(engine.predictEngine.size(), 1u);
     ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
     EXPECT_EQ(sets.front().enginePredictionsByMetric.at("tflops").count("default"), 1u);
-    // The resolved single reference every existing consumer reads is the default entry's
-    // ranker, and never the prediction model: that one ranks engines, not kernels.
+    // heuristicId is the default entry's ranker, never the prediction model.
     ASSERT_TRUE(engine.heuristicId.has_value());
     EXPECT_EQ(engine.sortKernelCatalog.at("default").front(), *engine.heuristicId);
 }
 
-/// RFC 0019 §8.3 resolves the exact gcnArchName, then `default`, then nothing. An arch-named
-/// entry is a claim about that architecture, not about every architecture, so it must not become
-/// the single reference consumers read as the universal model.
-///
-/// It used to, whenever the map held exactly one entry -- on the reasoning that one model means
-/// one model. The consequence was a gfx950-only UHD ranking every device, including ones it says
-/// nothing about, with nothing in the output to show it. The candidates stay in
-/// heuristicsByMetric, where rank() resolves them against the running device.
+/// RFC 0019 §8.3: an arch-named entry applies only to that arch, so a lone one must not
+/// become the engine's default; it stays in heuristicsByMetric for rank() to resolve.
 TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
 {
     const ScopedSymbols symbols;
@@ -734,17 +710,13 @@ TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
     EXPECT_FALSE(engine.heuristicId.has_value())
         << "a model named only for gfx950 was promoted to the engine's default";
 
-    // But it is still reachable: discarding it would leave the engine ranking by declared order
-    // even on gfx950, which is the architecture it does have a model for.
+    // Still reachable, so gfx950 keeps its model.
     ASSERT_EQ(sets.front().heuristicsByMetric.count(""), 1u);
     EXPECT_EQ(sets.front().heuristicsByMetric.at("").count("gfx950"), 1u);
 }
 
-/// RFC 0019 §3.1: a scoring role maps an arch key to one UHD per metric, so a `time` model
-/// ships beside a `tflops` one without either replacing the other. The list names models,
-/// not metrics: each lands under the metric its own UHD declares, whatever its position.
-/// With no metric-less ranker listed, the `tflops` one is the engine's default ranker --
-/// never `time`, which would answer a throughput request with a time ordering.
+/// RFC 0019 §3.1: each listed UHD lands under the metric it declares, whatever its position.
+/// With no metric-less ranker, the `tflops` one is the default ranker, never `time`.
 TEST(TestDescriptorLoader, ResolvesOneUhdPerMetricFromOneArchEntry)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("per_metric"));
@@ -786,11 +758,8 @@ TEST(TestDescriptorLoader, ResolvesOneUhdPerMetricFromOneArchEntry)
     EXPECT_EQ(toString(*set.engine.heuristicId), tflopsId);
 }
 
-/// Two UHDs claiming one metric on one arch key leave no rule to choose between them, and
-/// taking either would make the ranking depend on list order. That metric is disabled on
-/// that key -- and only it: the metric-less ranker listed beside them still resolves, is
-/// still the default ranker, and still decides a `tflops` request, picking its winner (256)
-/// rather than the declared-order head (64).
+/// Two UHDs claiming one metric on one arch disable that metric there only: the metric-less
+/// ranker beside them still picks its winner (256), not the declared-order head (64).
 TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
 {
     const ScopedSymbols symbols;
@@ -822,9 +791,8 @@ TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
     EXPECT_EQ(firstBlockSize(set), 256);
 }
 
-/// The same rule on the L1 role: two `predict_engine` models claiming one metric on one arch
-/// key would make the engine's cross-engine number depend on list order, so neither answers
-/// for that metric there. The engine itself stays loaded.
+/// Same rule for `predict_engine`: neither colliding model answers for that metric, and the
+/// engine stays loaded.
 TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
 {
     auto recorder
@@ -851,9 +819,8 @@ TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
         << recorder.getRecordedLogsAsString();
 }
 
-/// RFC 0020 §4.6: a scoring role's value is one UUID or a list of distinct ones. A repeated
-/// id reads as a second model where there is one, so the UED is refused; the bare-string
-/// spelling every existing UED uses still means a one-element list, so none needs rewriting.
+/// RFC 0020 §4.6: a scoring role is one UUID or a list of distinct ones. A repeated id
+/// refuses the UED; a bare string is a one-element list.
 TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
 {
     auto recorder
@@ -881,9 +848,7 @@ TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
         << recorder.getRecordedLogsAsString();
 }
 
-/// The L1 role became `predict_engine` when it became per metric (RFC 0019 §3.1). The old
-/// key is not an alias -- a UED still carrying it is refused like any unknown key, rather
-/// than loading with its L1 model silently unbound.
+/// The retired L1 role key is refused as unknown, not loaded with its model silently unbound.
 TEST(TestDescriptorLoader, RejectsAnEngineSpellingTheRetiredPredictionRole)
 {
     auto recorder
@@ -904,10 +869,8 @@ TEST(TestDescriptorLoader, RejectsAnEngineSpellingTheRetiredPredictionRole)
         << recorder.getRecordedLogsAsString();
 }
 
-/// The score block's free-text units field became `metric` (RFC 0019 §4.4): a metric names a
-/// registered quantity whose units and direction hipDNN owns. The old field is
-/// refused rather than read as a metric, so a UHD authored against it fails where it was
-/// authored; the engine naming it outlives it, ranking by declared order.
+/// RFC 0019 §4.4: the score block names a registered `metric`. A `units` field is refused,
+/// and the engine falls back to declared order.
 TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
 {
     auto recorder
@@ -927,9 +890,8 @@ TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
         << recorder.getRecordedLogsAsString();
 }
 
-/// static_order has no parameters: it always ranks by UKD priority, then descriptor id. A body
-/// declaring `order` asked for criteria nothing implements, so it is refused where it was
-/// authored rather than loaded and ranked by something other than what it says.
+/// static_order always ranks by UKD priority, then descriptor id, so an `order` body asks
+/// for criteria nothing implements.
 TEST(TestDescriptorLoader, RejectsAStaticOrderBodyDeclaringCriteria)
 {
     auto recorder
@@ -1903,9 +1865,8 @@ TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
 namespace
 {
 
-/// Turns the set's UHD into a tree_data one naming @p artifact, and writes the tree.
-///
-/// Returns the directory, so a case can create or withhold the artifact afterwards.
+/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
+/// artifact itself is left to the caller.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
                                              const std::string& artifact)
@@ -1924,8 +1885,7 @@ std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
     return root;
 }
 
-/// Contents are irrelevant: the loader checks that the path resolves to a file, and the
-/// artifact is only parsed later, by the adapter, in a test that builds a real one.
+/// Contents are irrelevant: the loader only checks that the path is a file.
 void writeArtifact(const std::filesystem::path& path)
 {
     std::filesystem::create_directories(path.parent_path());
@@ -1934,10 +1894,7 @@ void writeArtifact(const std::filesystem::path& path)
 
 } // namespace
 
-/// A model-backed UHD whose artifact shipped loads with the engine intact.
-///
-/// The baseline the failure cases are read against: without it, "the engine survived"
-/// proves nothing, because an engine that never had a model survives too.
+/// Baseline for the failure cases: a present artifact loads the model, not just the engine.
 TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
 {
     const ScopedSymbols symbols;
@@ -1950,23 +1907,14 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
     EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
-    // The path the descriptor named, resolved. Asserted by filename rather than by the
-    // literal "model.bin": UhdParser resolves the artifact against the `.uhd.json` that
-    // declared it, so what survives here is an absolute path, deliberately.
+    // UhdParser resolves the artifact against the declaring `.uhd.json`, so the path is
+    // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
 }
 
-/// The whole RFC 0019 §4 header survives the parse.
-///
-/// These fields used to live in a FlatBuffer the loader never opened, so nothing here could
-/// be wrong. They are the descriptor's own now, and every one of them changes what the
-/// heuristic computes: a dropped inline expression silently removes a feature the model was
-/// trained on, a dropped `categorical_encoding` entry silently renumbers a category, and a
-/// dropped `score` block silently relabels the metric a caller compares across engines.
-///
-/// The §6.4 `derived` block this case once also covered is gone: an expression is a
-/// signature entry now (slot 1 below), so it is carried and hashed as itself.
+/// RFC 0019 §4: every header field changes what the heuristic computes, so each must
+/// survive the parse.
 TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
 {
     const ScopedSymbols symbols;
@@ -1976,9 +1924,8 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
         = {"$kernel.block_size",
            nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"),
            "$q.dtype"};
-    // Keyed by the whole reference, and on a `$q.*` token deliberately: the encoding must
-    // survive the parse without adding a `$kernel.*` axis, which is what RFC 0019 §6.3
-    // check 2 measures the UED's knobs against.
+    // Keyed on a `$q.*` token so the encoding adds no `$kernel.*` axis for RFC 0019 §6.3
+    // check 2.
     const hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding
         = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
 
@@ -1991,8 +1938,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     heuristic["features_hash"]
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding);
     heuristic["trained_against"] = provenanceOf(documents);
-    // max with a calibrated score: the pair a cross-engine consumer may act on, and the
-    // one combination where `calibrated` is not its default, so the boolean parse is real.
+    // `calibrated: true` is not the default, so this proves the boolean is parsed.
     heuristic["objective"] = "max";
     heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
     heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
@@ -2019,12 +1965,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     EXPECT_EQ(parsed.categoricalEncoding.at("$q.dtype").at("bf16"), 1);
 }
 
-/// A cost-target UHD is ordinary: `min` on an uncalibrated `time` score parses and is kept.
-///
-/// The direction is fixed by the metric the author names, because only they know what their
-/// model predicts -- a model fitted on TFLOPS ranks descending, one fitted on time ascending.
-/// Neither is a fallback for the other, and dropping `min` on the floor would silently
-/// invert every ranking a time model produces.
+/// The metric fixes the direction: dropping `min` would invert every time model's ranking.
 TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
 {
     const ScopedSymbols symbols;
@@ -2053,20 +1994,13 @@ TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
     EXPECT_EQ(parsed.objective, "min");
     EXPECT_EQ(parsed.score.metric, "time");
     EXPECT_FALSE(parsed.score.calibrated);
-    // Kept for requests in `time`, but never the engine's default ranker: that is the
-    // metric-less ranker, else the `tflops` one, so a time model cannot silently decide a
-    // request that asked for throughput.
+    // The default ranker is the metric-less one, else `tflops`, never `time`.
     EXPECT_FALSE(sets.front().heuristic.has_value());
 }
 
-/// An `objective` contradicting the metric's registered direction is a load error, not a
-/// preference.
-///
-/// RFC 0019 §4.4: the metric fixes the direction -- `tflops` is higher-wins by registration
-/// -- and `objective` only restates it. A descriptor claiming `min` on `tflops` would rank
-/// its own catalog one way while engine selection compares its numbers the other. Caught
-/// at parse (RFC 0019.13 §15.1): at comparison time the symptom is an inverted choice
-/// between two engines, with nothing left to attribute it to.
+/// RFC 0019 §4.4: the metric fixes the direction and `objective` only restates it. A
+/// contradiction is caught at parse; at comparison time it would silently invert engine
+/// selection.
 TEST(TestDescriptorLoader, RejectsAnObjectiveContradictingTheScoreMetric)
 {
     const ScopedSymbols symbols;
@@ -2123,8 +2057,7 @@ TEST(TestDescriptorLoader, RejectsStringifiedFeatureExpressions)
     EXPECT_EQ(firstBlockSize(sets.front()), 64);
 }
 
-/// A missing artifact degrades rather than dropping: RFC 0019 §5 keeps the engine
-/// selecting, by declared order, and the warning is what says why.
+/// RFC 0019 §5: the engine keeps selecting by declared order; the warning says why.
 TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
 {
     const ScopedSymbols symbols;
@@ -2137,11 +2070,9 @@ TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
 }
 
-/// R6: a UHD declaring no artifact hash is identified by the bytes present at load, so
-/// replacing its weights changes the engine's model identity -- the directory its persisted
-/// rankings live under -- and its selector revision, with no descriptor edit at all. With
-/// nothing deployed there is no content identity, and the persistent cache is declined; a
-/// native ranker has no artifact and keeps its descriptor identity.
+/// With no declared hash, the artifact bytes at load are the model identity. With no
+/// artifact deployed the persistent cache is declined; a native ranker keeps its descriptor
+/// identity.
 TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdentity)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("undeclared_weights"));
@@ -2178,8 +2109,7 @@ TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngi
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_escapes"));
     const auto tree = dir.path() / "tree";
     writeModelHeuristicSet(tree, "test:model_escapes", "../outside.bin");
-    // Present, so the case is containment and not absence: without the file, the
-    // existence check would reject it too and prove nothing about the boundary.
+    // Present, so only containment, not existence, can reject it.
     writeArtifact(dir.path() / "outside.bin");
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
@@ -2190,9 +2120,8 @@ TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngi
 
 TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTree)
 {
-    // The boundary is the tree, not the descriptor's own folder: one archive ships per
-    // arch shard at the shard root, so a nested descriptor legitimately climbs out of
-    // its folder to reach a shared artifact.
+    // The boundary is the tree, not the descriptor's folder: a nested descriptor may reach
+    // a shared artifact at the shard root.
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
     writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.bin");
@@ -2204,10 +2133,7 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTr
     EXPECT_EQ(sets.front().engine.name, "test:model_nested");
 }
 
-/// RFC 0019 §11.2: a `predict_engine` model reaches an engine through the UED role
-/// map, so it is loaded exactly like a ranking model and gets exactly the same pre-flight.
-/// The boundary check used to run over the ranking map only, which let a prediction model
-/// name an artifact outside the tree and defer the failure to the first query.
+/// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
 TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
 {
     const ScopedSymbols symbols;
@@ -2233,8 +2159,7 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
     documents.push_back({".uhd.json", std::move(prediction)});
     writeDocuments(tree, documents);
-    // Present, so the case is containment and not absence: without the file, the
-    // existence check would reject it too and prove nothing about the boundary.
+    // Present, so only containment, not existence, can reject it.
     writeArtifact(dir.path() / "outside.bin");
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
@@ -2243,19 +2168,14 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
     ASSERT_EQ(sets.front().unavailableEnginePredictionArches.count("tflops"), 1u);
     EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
-    // Disabling a model never costs the engine, nor its catalog ranking: the ranking UHD
-    // is still loaded and still picks its winner (256), not the declared-order head (64)
-    // that EscapingModelArtifactIsDisabledWithoutDroppingTheEngine sees when the ranking
-    // model itself is the one disabled.
+    // The ranking UHD still loads and picks its winner (256), not the declared-order head.
     EXPECT_TRUE(sets.front().heuristic.has_value());
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
 }
 
-/// RFC 0019 Open Question 7 (RESOLVED): an engine with no UED declares its L1 model's
-/// UUID in provider code, and the loader resolves it out of the catalog it already
-/// parses. End to end, because "resolves" is only half the claim -- what the engine owes
-/// the policy is a calibrated number in the requested metric it can be ranked on.
+/// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
+/// Checked end to end, through a calibrated score in the requested metric.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
 {
     const ScopedL1Scorer scorer;
@@ -2272,8 +2192,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
     ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
     ASSERT_EQ(resolved.byMetric.at("tflops").size(), 1u);
     EXPECT_TRUE(resolved.refused.empty());
-    // Backfilled from the declaration, exactly as resolveDescriptorSets backfills them from a
-    // UED role map: the document itself said none of this.
+    // Backfilled from the declaration; the document names no engine, role or arch.
     const auto& model = resolved.byMetric.at("tflops").at("default");
     EXPECT_EQ(model.engineName, "test:opaque");
     EXPECT_EQ(model.role, "predict_engine");
@@ -2298,9 +2217,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
     EXPECT_EQ(prediction.uhd_id, modelId);
 }
 
-/// An opaque engine has no UED, KMD or UMD, so a model claiming to be trained against a
-/// descriptor set has nothing to be compatible with -- RFC 0019 §8.1's rule, not an
-/// exemption from it. The refusal is per model: the engine keeps every other one.
+/// RFC 0019 §8.1: an opaque engine has no UED, KMD or UMD, so a model recording one is
+/// refused. Only that model is refused; the engine keeps the others.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused)
 {
     const ScopedL1Scorer scorer;
@@ -2330,8 +2248,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused
     const auto& refusals = resolved.refused.at("tflops");
     EXPECT_EQ(refusals.count("gfx950"), 0u);
     ASSERT_EQ(refusals.count("gfx942"), 1u);
-    // A present model that failed its contract is a claim -- "do not pick me" -- not the
-    // silence an absent one reports (RFC 0019 §11.2).
+    // A present model that failed its contract is INVALID, not the UNAVAILABLE of an absent
+    // one (RFC 0019 §11.2).
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
     EXPECT_EQ(refusals.at("gfx942").status, PredictionStatus::INVALID);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot satisfy"));
@@ -2357,13 +2275,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused
         PredictionStatus::AVAILABLE);
 }
 
-/// RFC 0019 §4.1 `trained_against.selector_revision`, refused on mismatch: L1 is the one
-/// score compared ACROSS engines, so an estimate measured on another build of the
-/// provider does not merely misreport a number -- it changes which engine is selected.
-///
-/// Two engines over one catalog, which is the shape of a provider serving two engine ids
-/// (MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC): each carries its own model, each
-/// reports its own revision, and one engine's model is not usable by the other.
+/// RFC 0019 §4.1: a mismatched `trained_against.selector_revision` is refused, since L1
+/// scores decide between engines. Two engines over one catalog each own their model.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsRefused)
 {
     const ScopedL1Scorer scorer;
@@ -2408,16 +2321,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsR
     EXPECT_EQ(prediction.reason, refusal.reason);
 }
 
-/// A model that records no revision at all cannot be matched to any build, so it fails
-/// its contract rather than merely belonging to another one -- INVALID, not UNAVAILABLE,
-/// and visibly refused rather than silently absent: the deployer has to be told their
-/// model is being ignored.
-///
-/// A signature-less native model is the shape this reaches the binding through, and the
-/// only one: RFC 0019 §4.1 makes `trained_against` optional exactly for a model that
-/// featurizes from its own bindings. A feature-consuming UHD that simply drops
-/// `trained_against` never parses at all (parseUhdConfig refuses it), so that is a load
-/// error reported against the file, not a binding refusal.
+/// A model recording no revision matches no build: INVALID and logged, not UNAVAILABLE.
+/// Only a signature-less native model can omit `trained_against` and still parse.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRefused)
 {
     const ScopedL1Scorer scorer;
@@ -2451,10 +2356,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRef
                                           "records no trained_against.selector_revision"));
 }
 
-/// FeatureSemantics.hpp for a declared model: the check runs where selector_revision's does
-/// and refuses the same way -- UNAVAILABLE, the model is not bad, it is not this build's --
-/// with a reason naming both revisions. A document recording no revision is revision 1,
-/// which is how today's shipped ASM SDPA models load unedited.
+/// FeatureSemantics.hpp: a declared model trained on another feature-semantics revision is
+/// UNAVAILABLE, with both revisions in the reason. An absent revision means 1.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemanticsIsUnavailable)
 {
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
@@ -2515,10 +2418,9 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemantic
 namespace
 {
 
-/// makeSetDocuments with its ranker turned into a feature-reading tree_data model, plus a
-/// feature-reading `predict_engine` model under the UED role map: one model per scoring
-/// role, both recording @p revision in `trained_against` (nothing when nullopt). Only
-/// resolution is under test, so neither artifact exists.
+/// makeSetDocuments with a feature-reading tree_data ranker and `predict_engine` model, both
+/// recording @p revision (none when nullopt). Neither artifact exists; only resolution is
+/// tested.
 Documents featureSemanticsDocuments(const std::string& engineName, std::optional<int64_t> revision)
 {
     auto documents = makeSetDocuments('1', engineName);
@@ -2553,10 +2455,8 @@ Documents featureSemanticsDocuments(const std::string& engineName, std::optional
 
 } // namespace
 
-/// FeatureSemantics.hpp for UED role-mapped models: L2 (`sort_kernel_catalog`) and L1
-/// (`predict_engine`) read the same published features, so both are refused at the point
-/// descriptor provenance is, naming both revisions, and the engine keeps its declared-order
-/// fallback. Absent means revision 1, the shape of every model shipped before it existed.
+/// FeatureSemantics.hpp: both scoring roles read the same features, so both are refused on a
+/// revision mismatch and the engine falls back to declared order. Absent means revision 1.
 TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEveryScoringRole)
 {
     using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
@@ -2602,10 +2502,8 @@ TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEvery
     EXPECT_EQ(firstBlockSize(stale), 64);
 }
 
-/// The revision governs what published feature values mean, so a ranker that reads none --
-/// a native comparator over kernel metadata, compiled into this same build -- is never
-/// refused by it, whatever it records. Otherwise a bump would disable every shipped
-/// signature-less ranker for a change it cannot observe.
+/// The revision governs published feature values, so a ranker reading none is never
+/// refused by it, whatever it records.
 TEST(TestDescriptorLoader, ASignatureLessRankerIsNotRefusedByFeatureSemantics)
 {
     const ScopedSymbols symbols;
@@ -2623,9 +2521,8 @@ TEST(TestDescriptorLoader, ASignatureLessRankerIsNotRefusedByFeatureSemantics)
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
 }
 
-/// No descriptor tree installed is the normal state of a machine that has not deployed a
-/// model yet, so a declared id that resolves to nothing is silence, never an error and
-/// never a refusal: RFC 0019 §5 separates deployment from load.
+/// No tree installed is normal before deployment: an unresolved declared id is silence, not
+/// an error or a refusal (RFC 0019 §5).
 TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNothing)
 {
     const ScopedL1Scorer scorer;
@@ -2649,13 +2546,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNo
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
 }
 
-/// The prohibition the declaration mechanism preserves: a UHD cannot describe what it
-/// attaches to. DeclaredEnginePredictionResolvesAndScores already loads a document with
-/// no `engine`, `role` or `arch` member; this is the other half -- one that tries to grow
-/// such a member does not load at all, so discovery by document claim has no way in.
-/// `trained_against.selector_revision` is not a way back in: it names a provider build,
-/// never an engine, and it is checked only after a declared id has already selected the
-/// model.
+/// Only the engine's declaration binds a UHD. `trained_against.selector_revision` names a
+/// provider build, never an engine.
 TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
 {
     const ScopedL1Scorer scorer;
@@ -2680,11 +2572,8 @@ TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key"));
 }
 
-/// RFC 0019 §11.4: an opaque engine declares one L1 model per metric for one architecture,
-/// and each answers only in its own metric. The declaration names models, never metrics, so
-/// the metric a model serves is read off its UHD. A declared UHD naming no metric has nothing
-/// to be indexed or refused under, so it is dropped -- loudly, and without becoming a
-/// refusal that would read as "this engine's model is bad" for some metric it never named.
+/// RFC 0019 §11.4: a declared model's metric is read off its UHD. One naming no metric is
+/// dropped with an error, not recorded as a refusal.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
 {
     const ScopedL1Scorer scorer;
@@ -2698,8 +2587,7 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
     writeDocument(dir.path(),
                   {".uhd.json", declaredL1Document(timeId, L1_SELECTOR_REVISION, "time")});
     auto metricless = declaredL1Document(metriclessId);
-    // The whole block, not just the metric: a calibrated score naming no metric never parses,
-    // and this case needs a model that loads and only then fails to name a metric.
+    // Drop the whole block: a calibrated score without a metric would not parse.
     metricless.erase("score");
     writeDocument(dir.path(), {".uhd.json", std::move(metricless)});
 
@@ -2747,10 +2635,8 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
     }
 }
 
-/// D2 for a declared model: one UUID declared for gfx942 and gfx950 is one model, bound
-/// under both keys with one content identity and no duplicate-identity refusal. Coverage is
-/// the artifact's `training_arches`: trained on gfx942 only, it answers there and is
-/// UNAVAILABLE on gfx950 with the reason saying so.
+/// One UUID declared for two arches is one model with one content identity; its
+/// `training_arches` limits where it answers.
 TEST(TestDescriptorLoader, ADeclaredModelBoundForTwoArchesAnswersOnlyWhereItWasTrained)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_d2"));

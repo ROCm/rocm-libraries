@@ -117,18 +117,9 @@ typedef enum
      * @brief Ranking metric the prediction policies order engines by (HIPDNN_TYPE_CHAR,
      * extension; RFC 0019 §11.4).
      *
-     * A registered metric name from hipdnn_data_sdk/utilities/RankingMetrics.hpp
-     * ("tflops", "time"); an unregistered name is rejected with HIPDNN_STATUS_BAD_PARAM
-     * when set, and an empty string means the default. The effective metric is stamped
-     * into every EngineConfig in HIPDNN_ATTR_ENGINEHEUR_RESULTS, so plan build ranks the
-     * chosen engine's catalog by the same metric.
-     *
-     * Resolution priority at finalize time (highest first):
-     *   1. HIPDNN_HEUR_RANKING_METRIC env var.
-     *   2. This descriptor attribute, if set.
-     *   3. Default: "tflops".
-     *
-     * Reading it after finalize returns the effective metric.
+     * A name registered in hipdnn_data_sdk/utilities/RankingMetrics.hpp; others fail with
+     * HIPDNN_STATUS_BAD_PARAM. Empty means "tflops"; HIPDNN_HEUR_RANKING_METRIC overrides it.
+     * Every result EngineConfig carries the effective metric, which reads return after finalize.
      */
     HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT = 107,
 
@@ -158,20 +149,15 @@ typedef enum
      */
     HIPDNN_ATTR_ENGINECFG_PREDICTION_EVALUATE_EXT = 204,
 
-    /** @brief Read-only configuration-kind prediction for the knobs on this configuration,
-     * returned as one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT whose root is
-     * hipdnn_flatbuffers_sdk.data_objects.EnginePrediction. The buffer lives until the
-     * descriptor is destroyed. Readable on a knob-only configuration that was never
-     * finalized, which is how constraints are expressed without engine initialization.
+    /** @brief Read-only configuration-kind prediction for this configuration's knobs, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Readable on an unfinalized, knob-only configuration.
      */
     HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT = 205,
 
     /** @brief Ranking metric this configuration is predicted and built in (HIPDNN_TYPE_CHAR,
-     * extension; RFC 0019 §11.4). Becomes EngineConfig.ranking_metric: the metric
-     * HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT answers in and the one the engine ranks its own
-     * catalog by at plan build. A registered name, rejected with HIPDNN_STATUS_BAD_PARAM
-     * otherwise; empty means the default, "tflops". Reading it returns the effective metric
-     * and is allowed before finalize.
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops". Readable before finalize; reads return the effective metric.
      */
     HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT = 206,
 
@@ -465,12 +451,9 @@ typedef enum
      */
     HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT = 1009,
 
-    /** @brief Read-only engine-kind prediction for this engine on its operation graph,
-     * in the metric named by HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT, returned as one
-     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT whose root is
-     * hipdnn_flatbuffers_sdk.data_objects.EnginePrediction. The buffer lives until the
-     * descriptor is destroyed. Engines with no universal engine descriptor, or no model
-     * for the metric, report PredictionStatus::UNAVAILABLE rather than failing.
+    /** @brief Read-only engine-kind prediction in HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT, as
+     * one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Engines without a model report UNAVAILABLE rather than failing.
      */
     HIPDNN_ATTR_ENGINE_PREDICTION_EXT = 1010,
 
@@ -492,20 +475,16 @@ typedef enum
      */
     HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT = 1013,
 
-    /** @brief Read-only EngineDetails carrying candidate_page, returned as one
-     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT. The buffer lives until the descriptor is
-     * destroyed. Total count is explicit; an offset beyond the count is invalid, never
-     * silently truncated. Engines that cannot enumerate their catalog report
-     * HIPDNN_STATUS_NOT_SUPPORTED rather than an empty page. This is a generation-tool
-     * surface: enroll the returned knob tuples in ordinary engine configs to run them.
+    /** @brief Read-only EngineDetails carrying candidate_page, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT that lives until the descriptor is destroyed. An
+     * offset beyond the total count is invalid. Engines that cannot enumerate report
+     * HIPDNN_STATUS_NOT_SUPPORTED rather than an empty page.
      */
     HIPDNN_ATTR_ENGINE_CANDIDATES_EXT = 1014,
 
     /** @brief Ranking metric HIPDNN_ATTR_ENGINE_PREDICTION_EXT answers in (HIPDNN_TYPE_CHAR,
-     * extension; RFC 0019 §11.4). A registered name, rejected with HIPDNN_STATUS_BAD_PARAM
-     * otherwise; empty means the default, "tflops". An engine never answers in another
-     * metric: without a model for this one its prediction is UNAVAILABLE. Set before
-     * finalizing the engine descriptor; reading it returns the effective metric.
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops"; no other metric is substituted. Set before finalize.
      */
     HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT = 1015,
 

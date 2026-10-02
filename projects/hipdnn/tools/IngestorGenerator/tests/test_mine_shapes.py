@@ -110,8 +110,6 @@ class TestPublishedCsv:
     def test_every_dtype_spelling_normalises_the_same_as_the_other_readers(
         self, tmp_path
     ):
-        """Every spelling `DTYPE_SPELLINGS` recognises must normalise to the same
-        canonical value the graph and rocKE-bench readers produce."""
         for spelling, canonical in (
             ("bf16", "bf16"),
             ("bfloat16", "bf16"),
@@ -728,17 +726,7 @@ class TestEveryRequestSemanticSurvivesMining:
 
 
 class TestShapeDirectory:
-    """`--shape-dir` reads whatever a publisher handed over.
-
-    This is the coverage the retired Python corpus assembler's own suite held: that
-    directory was the model pool's only source, and with the assembler deleted the
-    behaviour is pinned here, where the reader now lives.
-
-    A directory is a POINTER, not a format: the three tabular forms and hipDNN graph
-    JSON are all read from one flag, because a publisher who mixes them is the ordinary
-    case and a tree that mines as zero rows is indistinguishable from one nobody pointed
-    at.
-    """
+    """`--shape-dir` reads graph JSON and every tabular form from one directory."""
 
     def _mine(self, tmp_path: Path, *extra, arch="gfx942") -> tuple[int, str, list]:
         out = tmp_path / "shapes.json"
@@ -801,8 +789,7 @@ class TestShapeDirectory:
     def test_a_row_missing_a_required_field_is_not_a_shape_row(
         self, published, tmp_path
     ):
-        """A publisher's tree holds README tables and index files too. Those are skipped,
-        not mined as shapes with invented dimensions."""
+        """Non-shape records (README tables, index files) are skipped."""
         (published / "index.json").write_text(
             json.dumps([{"model": "Llama-3-8B", "notes": "see ticket"}])
         )
@@ -814,9 +801,7 @@ class TestShapeDirectory:
         assert len(shapes) == 1
 
     def test_a_graph_document_is_left_to_the_graph_reader(self, published, tmp_path):
-        """`from_shape_dir` begins with `from_graph_corpus`, so a graph in the tree is
-        mined ONCE -- as a graph. Reading it a second time as a record would double the
-        weight of whichever regime it lands in."""
+        """A graph is mined once, as a graph, not again as a record."""
         (published / "g.json").write_text(
             json.dumps(
                 {
@@ -860,8 +845,7 @@ class TestShapeDirectory:
     def test_a_row_naming_another_arch_is_dropped_but_an_unnamed_one_is_kept(
         self, published, tmp_path
     ):
-        """Most publishers record a shape, not a target. Refusing the rows that name no
-        arch would mine nothing from the common case."""
+        """Rows naming no arch are kept: most publishers record no target."""
         (published / "a.csv").write_text(
             "batch,heads_q,seqlen_q,seqlen_kv,head_dim,arch\n"
             "1,32,4096,4096,128,gfx942\n"
@@ -876,9 +860,7 @@ class TestShapeDirectory:
     def test_an_unknown_mask_spelling_is_refused_rather_than_guessed(
         self, published, tmp_path
     ):
-        """`bottom_right` is a genuinely different mask from top-left causal. Mapping it
-        here would put a differently-masked problem in the corpus under the row's name.
-        """
+        """`bottom_right` differs from top-left causal, so it is not mapped."""
         (published / "a.csv").write_text(
             "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
             "1,32,4096,4096,128,bottom_right\n"
@@ -899,13 +881,7 @@ class TestShapeDirectory:
 
 
 class TestQueryCsv:
-    """`--out-query-csv` is the handoff to `hipdnn_corpus_gen --model-shapes`.
-
-    It is a NARROWING -- the mined record is the union of what four sources carry, and
-    the CSV is what one operation declaration can express -- so what it drops is counted
-    and named. A model pool that silently shrinks is indistinguishable from a miner
-    nobody pointed at anything.
-    """
+    """`--out-query-csv`, the handoff to `hipdnn_corpus_gen --model-shapes`."""
 
     def _mine(self, tmp_path: Path, rows: str) -> tuple[int, str, list[str]]:
         published = tmp_path / "pub"
@@ -956,9 +932,7 @@ class TestQueryCsv:
         ]
 
     def test_a_tabular_row_is_written_top_left(self, tmp_path):
-        """A tabular source cannot say bottom-right -- `MASK_TYPE` deliberately carries no
-        spelling for it -- but the column is written anyway, because the declaration's
-        argument resolution is strict about a parameter it reads being present."""
+        """Tabular sources cannot say bottom-right; the column is still written."""
         rc, log, lines = self._mine(
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n"
         )
@@ -966,9 +940,7 @@ class TestQueryCsv:
         assert lines[1].split(",")[-3] == "top_left"
 
     def test_generate_stats_is_always_false(self, tmp_path):
-        """Every source records inference forwards; none says a shape also ran as a training
-        forward, so the column is written as false rather than left for the tool to refuse.
-        """
+        """Sources record inference forwards only."""
         rc, log, lines = self._mine(
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n"
         )
@@ -976,8 +948,7 @@ class TestQueryCsv:
         assert lines[1].split(",")[-2] == "false"
 
     def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
-        """`sdpa_fwd` declares no window parameter, so a swin shape cannot be written --
-        but it is reported, not discarded in silence."""
+        """`sdpa_fwd` declares no window parameter."""
         rc, log, lines = self._mine(
             tmp_path,
             "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
@@ -1000,9 +971,7 @@ class TestQueryCsv:
         assert "the model pool would be empty" in log
 
     def test_a_graph_keeps_its_bottom_right_anchor(self, tmp_path):
-        """A graph states its anchor, and `_mask_from_attributes` reports it. Where
-        Sq != Sk the two anchors compute different outputs, so writing top-left here
-        would hand the corpus tool a different problem under the graph's name."""
+        """Where Sq != Sk the two anchors compute different outputs."""
         graphs = tmp_path / "graphs"
         graphs.mkdir()
         (graphs / "g.json").write_text(

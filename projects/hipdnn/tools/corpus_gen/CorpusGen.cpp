@@ -5,12 +5,8 @@
  * @file CorpusGen.cpp
  * @brief Generates an engine's problem corpus from declarations (RFC 0019.13 §4, §5).
  *
- * Inputs: a directory of operation declarations, and an engine. Output: the problems that
- * engine accepts, as serialized graphs, plus one benchmark invocation per problem.
- *
- * Nothing here knows what a convolution is. The operations are `*.opmeta.json` files, the
- * exploration is the same for all of them, and the engine is consulted rather than modelled --
- * so an operation is added by writing a file and an engine is characterised by being asked.
+ * Operations are `*.opmeta.json` declarations explored uniformly; the engine is asked, not
+ * modelled. Output: the problems the engine accepts, as graphs plus one bench command each.
  */
 
 #include <hipdnn_corpus_gen/CorpusManifest.hpp>
@@ -56,12 +52,8 @@ using hipdnn_corpus_gen::ProblemPoint;
 
 /// @brief The name the graph document carries: the operation, its regime, and its parameters.
 ///
-/// Also the file's stem, the `--problem-id` in `commands.txt` and the key in `<op>.problems.csv`:
-/// one name everywhere, because scoring joins bench output by file stem to measurements by
-/// manifest `name`. It is the key an L2 collection joins on -- L2 mints its own graph ids, so the id this tool stamps is not
-/// available there and the name is all that is left. That makes uniqueness the requirement:
-/// every parameter is spelled out rather than abbreviated, because two problems that differ
-/// only in a field the name elided would join to one row and be reported as one.
+/// Also the file stem, `--problem-id` and `<op>.problems.csv` key. Scoring and L2 collection
+/// join on this name alone, so it must be unique: every parameter is spelled out.
 std::string
     graphNameFor(const std::string& operation, const std::string& regime, const ProblemPoint& point)
 {
@@ -79,10 +71,8 @@ std::string
 
 /// @brief Every engine the loaded plugins registered, as (id, name).
 ///
-/// Used to refuse an engine nobody registered before any problem is offered to it. Without
-/// that check a misspelled `--engine-name` still hashes to a well-formed id, every problem is
-/// declined by every engine, and the run ends in an empty corpus that reads exactly like an
-/// engine that serves nothing.
+/// Used to reject an unregistered engine: a misspelled name still hashes to a valid id and
+/// would silently yield an empty corpus.
 std::vector<std::pair<int64_t, std::string>> loadedEngines(hipdnnHandle_t handle)
 {
     std::vector<std::pair<int64_t, std::string>> engines;
@@ -149,17 +139,12 @@ struct Options
     std::string probe;
     int64_t engineId = 0;
     bool haveEngineId = false;
-    /// Engines that must ALSO serve every problem (`--also-engine-name`), so the corpus is the
-    /// shapes every named engine runs -- what a cross-engine comparison needs, since a problem
-    /// one engine declines scores nothing in it. Resolved to registered ids before use.
+    /// Engines that must also serve every problem (`--also-engine-name`); resolved to ids.
     std::vector<std::string> alsoEngineNames;
     std::vector<int64_t> alsoEngineIds;
 
-    /// Deliberate consent to generate without asking an engine anything. Naming an engine is
-    /// otherwise required, because the alternative is a corpus whose applicability is inferred
-    /// rather than tested, and that inference fails silently: which shapes an engine declines
-    /// correlates with head_dim, dtype, causal and sequence length -- the same axes performance
-    /// varies along -- so what survives benchmarking is a biased subsample, not a thinned one.
+    /// Explicit opt-out of engine verification. Without an engine the corpus is only what the
+    /// declarations express, and engine refusals correlate with performance axes.
     bool withoutEngine = false;
 
     ExplorationRequest exploration;
@@ -170,28 +155,22 @@ struct Options
     /// Where the model pool comes from: CSVs of `q.<parameter>` columns.
     std::vector<std::filesystem::path> modelShapes;
 
-    /// Corpus size per operation, 0 meaning "everything the pools hold". A floor in intent and
-    /// a ceiling in fact: an engine that serves 664 problems yields 664 whatever is asked for.
+    /// Corpus size per operation; 0 means everything the pools hold. Never padded.
     int64_t count = 0;
 
     std::map<std::string, double> shares = hipdnn_corpus_gen::defaultShares();
 
-    /// `q.<parameter>=<value>` clauses, applied to every source alike.
     std::vector<std::string> keep;
 
-    /// Manifests whose graphs must not appear here -- the comparison set, held out by
-    /// construction rather than by trusting a random split.
+    /// Manifests whose graphs must not appear here (the held-out comparison set).
     std::vector<std::filesystem::path> excludeCorpora;
 
-    /// Problems owed to named regimes: `--regime-quota` applies to every operation (key ""),
-    /// `--regime-quotas` names operations. A caller that has measured where a model is weak
-    /// asks for more of that population here, rather than for more of everything.
+    /// Per-operation regime quotas; key "" (from `--regime-quota`) applies to every operation.
     std::map<std::string, std::map<std::string, int64_t>> regimeQuotas;
     std::vector<std::filesystem::path> regimeQuotaFiles;
     std::string quotaError;
 
-    /// Benchmarking ceiling in bytes across a problem's tensors. 256 MiB by default: large
-    /// enough for real layers, small enough that no single problem dominates a corpus run.
+    /// Ceiling in bytes across a searched problem's tensors.
     int64_t maxBytes = 256LL * 1024 * 1024;
 };
 
@@ -403,15 +382,6 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
     return true;
 }
 
-/// Renders a problem point as `name=value` pairs for the benchmark's --query.
-///
-/// Passed on the command line rather than left in an index for the harvest to join against.
-/// A timing whose parameters live in another file is a timing that can be joined to the wrong
-/// problem, and nothing in the row would show it.
-
-/// Renders a problem point as `q.*` columns, which is the half of a training row the corpus
-/// owns and the form RFC 0019.13 §7 requires.
-
 int runGenerator(const std::vector<std::string>& args)
 {
     Options options;
@@ -429,15 +399,8 @@ int runGenerator(const std::vector<std::string>& args)
         std::cerr << options.quotaError << "\n";
         return 1;
     }
-    // An engine is required, and the way out of it has to be said out loud. Generating without
-    // one is not a cheaper way to do the same thing: the declared oracle answers "can this
-    // operation express the problem", never "does anything run it", so the corpus is a superset
-    // of what any engine serves. Narrowing it offline with --keep or --kdp-root only moves the
-    // inference, it does not test it -- a pack records what was built, not what the matcher
-    // accepts. The cost is not wasted GPU time (a declined problem fails at plan time, before a
-    // single dispatch); it is that the survivors are skewed toward one end of the shape
-    // distribution and nothing downstream reports the skew. AITER's first gfx950 L1 was trained
-    // on such a corpus and under-predicted by 285 TFLOPS.
+    // An engine is required unless explicitly waived: without one the corpus is a superset of
+    // what any engine serves, and the survivors of benchmarking are a skewed sample.
     if(options.haveEngineId && options.withoutEngine)
     {
         std::cerr << "--without-engine contradicts --engine-name/--engine-id; pick one\n";
@@ -469,8 +432,7 @@ int runGenerator(const std::vector<std::string>& args)
     }
     if(!options.probe.empty() && !options.haveEngineId)
     {
-        // A probe reports which engines rank a point, so without one there is nothing to
-        // probe *for*; the declared half of the answer is what a plain run already prints.
+        // A probe reports which engines accept a point, so it needs an engine.
         std::cerr << "--probe needs --engine-name (or --engine-id)\n";
         return 1;
     }
@@ -478,8 +440,7 @@ int runGenerator(const std::vector<std::string>& args)
     const auto declarations = hipdnn_corpus_gen::loadOperationDirectory(options.operationsDir);
     for(const auto& error : declarations.errors)
     {
-        // Reported, never skipped silently: a declaration that does not load is an operation
-        // missing from the corpus, which looks identical to an engine that does not serve it.
+        // A declaration that fails to load would otherwise look like an engine refusal.
         std::cerr << "metadata error: " << error << "\n";
     }
     if(declarations.operations.empty())
@@ -523,8 +484,7 @@ int runGenerator(const std::vector<std::string>& args)
         }
     }
 
-    // Parsed against the declarations, not against a fixed list: the facets are whatever the
-    // loaded operations declare, and a clause outside them is refused rather than ignored.
+    // Clauses are validated against the loaded declarations' parameters.
     std::vector<std::string> declaredParameters;
     for(const auto& entry : selected.operations)
     {
@@ -541,9 +501,8 @@ int runGenerator(const std::vector<std::string>& args)
         return 1;
     }
 
-    // Quotas, resolved per operation and compiled before anything is searched: a regime no
-    // declared facet can spell would otherwise cost a whole search and then be reported as
-    // saturated -- "the engine serves none" -- when it does not exist at all.
+    // Compile quotas up front: an unspellable regime would otherwise search, then report as
+    // saturated.
     for(const auto& path : options.regimeQuotaFiles)
     {
         std::ifstream file(path);
@@ -612,9 +571,7 @@ int runGenerator(const std::vector<std::string>& args)
         }
     }
 
-    // Held out by construction. `benchmark` is content-derived, so the check is a set
-    // difference over ids -- a random split would leave the comparison graphs in the training
-    // corpus often enough to flatter every model trained on it.
+    // `benchmark` ids are content-derived, so exclusion is an exact set difference.
     std::set<std::string> excluded;
     for(const auto& path : options.excludeCorpora)
     {
@@ -635,16 +592,12 @@ int runGenerator(const std::vector<std::string>& args)
         }
     }
 
-    // Created only when an engine was named. Without one the whole run is device-free, and
-    // opening a handle would make a corpus that needs no GPU fail on a machine without one.
-    // MIOpen answers applicability by counting solutions, and in immediate mode it first runs
-    // its AI solver predictor (TunaNet) to order them -- which dominates every convolution
-    // query here while changing nothing this tool reads: a count above zero. Off, MIOpen counts
-    // through its WTI fallback instead; on gfx942 the two gave the identical corpus, query for
-    // query. Set only when the caller has not, so it can still be turned back on.
+    // Only with an engine, so engine-free runs need no GPU. MIOpen's AI solver predictor
+    // dominates applicability queries without changing the solution count this tool reads, so
+    // disable it unless the caller set it.
     if(options.haveEngineId)
     {
-        // Portable (POSIX `setenv` does not exist on Windows); an empty value counts as unset.
+        // An empty value counts as unset.
         if(hipdnn_data_sdk::utilities::getEnv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK").empty())
         {
             hipdnn_data_sdk::utilities::setEnv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK", "0");
@@ -702,8 +655,7 @@ int runGenerator(const std::vector<std::string>& args)
             release();
             return 1;
         }
-        // The registry's id, not the name's hash: they agree today, and taking the registered
-        // value means they never have to.
+        // Use the registered id rather than the name's hash.
         options.engineId = requested->first;
         resolvedEngine = requested->second;
         for(const auto& name : options.alsoEngineNames)
@@ -728,8 +680,7 @@ int runGenerator(const std::vector<std::string>& args)
         return 1;
     }
 
-    // What shape generation records about an engine's coverage, beside the declarations.
-    // Absent means nothing is recorded and every engine is searched.
+    // Recorded engine coverage from `engines.json`; absent means search every engine.
     hipdnn_corpus_gen::EngineCoverageEntry coverage;
     std::string coverageEngine = resolvedEngine;
     {
@@ -755,8 +706,7 @@ int runGenerator(const std::vector<std::string>& args)
                 release();
                 return 1;
             }
-            // The corpus is what EVERY named engine serves, so it is bounded by the narrowest
-            // coverage: one engine whose coverage is its pack makes the whole corpus the pack's.
+            // The corpus must be served by every named engine, so the narrowest coverage wins.
             std::vector<std::string> named{resolvedEngine};
             named.insert(
                 named.end(), options.alsoEngineNames.begin(), options.alsoEngineNames.end());
@@ -789,13 +739,8 @@ int runGenerator(const std::vector<std::string>& args)
 
     if(!options.probe.empty())
     {
-        // One point, every stage named. The generator reports aggregates, and an aggregate
-        // cannot say why a particular problem was refused -- which is the question that
-        // actually arises when a corpus comes back empty.
-        //
-        // A probe names bare field values, so which operation they belong to has to come from
-        // somewhere else. Taking the first loaded declaration would answer a question about an
-        // operation the caller never named, and report it as though it were about theirs.
+        // Explain what happens to one point at each stage. Probe fields name no operation, so
+        // exactly one must be selected.
         if(selected.operations.size() != 1)
         {
             std::cerr << "--probe needs --operation: " << selected.operations.size()
@@ -820,8 +765,7 @@ int runGenerator(const std::vector<std::string>& args)
             else if(parameter != nullptr
                     && parameter->type == hipdnn_corpus_gen::ParameterType::BOOL)
             {
-                // Parsed as the bool the declaration says it is. Read as an integer, `1` built a
-                // graph with the flag unset, so a probe of a causal problem tested a plain one.
+                // Parse bools as bools; an integer `1` would build a graph with the flag unset.
                 point[name] = text == "true" || text == "1";
             }
             else
@@ -875,9 +819,8 @@ int runGenerator(const std::vector<std::string>& args)
         return 0;
     }
 
-    // Filters run inside the search, ahead of the engine, so the search's target is spent on
-    // points that survive them. Exclusion needs the id the graph will be written under, which
-    // is content-derived, so it is computed exactly as emission computes it.
+    // Filters run inside the search so its target is spent on surviving points. The exclusion
+    // id must be computed exactly as emission computes it.
     int64_t heldOutDuringSearch = 0;
     const hipdnn_corpus_gen::CorpusFilter searchFilter = [&](const std::string& operation,
                                                              const ProblemPoint& point) {
@@ -918,16 +861,14 @@ int runGenerator(const std::vector<std::string>& args)
 
     const auto start = std::chrono::steady_clock::now();
 
-    // Discovered once, offered to every operation: a pack says which operation it describes by
-    // whether the declaration can read its fields at all, so there is no pack-to-operation
-    // mapping to maintain and no list of packs per operation to keep in step.
+    // Every pack is offered to every operation; a declaration accepts a pack by being able to
+    // read its fields.
     const auto packPaths = hipdnn_corpus_gen::discoverPacks(options.packRoots);
 
     int64_t total = 0;
     int64_t requested = 0;
     std::vector<hipdnn_corpus_gen::ManifestEntry> manifestRows;
-    /// Keyed `<operation>|<point>`, because two operations may describe a point identically and
-    /// their graphs are not interchangeable.
+    /// Keyed `<operation>|<point>`: two operations may describe a point identically.
     std::map<std::string, hipdnn_corpus_gen::IdentifiedGraph> stamped;
     std::map<std::string, int64_t> allocationTotals;
     std::map<std::string, int64_t> droppedTotals;
@@ -935,15 +876,13 @@ int runGenerator(const std::vector<std::string>& args)
     int64_t excludedRows = 0;
     std::vector<std::string> shortfall;
     bool searchCapped = false;
-    /// A shortfall some combination did not demonstrate was forced on it -- saturation is the
-    /// only accepted reason to return fewer problems than `--count` asked for.
+    /// A shortfall not shown to be saturation; only saturation may return fewer than `--count`.
     bool shortfallUnproven = false;
     /// Per operation and regime: what a quota asked, what the pools held before a focused
     /// search, what the search added, and what the cut took.
     nlohmann::json quotaReports = nlohmann::json::object();
     /// A quota left short without its focused search being shown saturated.
     std::vector<std::string> quotaShort;
-    /// Whether the search found any served problem beyond the pack and model shapes.
     bool searchFoundMore = false;
     std::ofstream commands;
     std::filesystem::path root;
@@ -977,15 +916,9 @@ int runGenerator(const std::vector<std::string>& args)
         result.metadataPath = operationEntry.first;
         result.operation = metadata.operation;
 
-        // One engine test for all three sources: a pack geometry or a recorded model shape the
-        // engine declines is not a corpus row any more than a swept one is, and finding that out
-        // at collection time costs a sweep.
-        //
-        // The byte ceiling is the search's alone. The search proposes extents up to the numeric
-        // ceiling on every axis, so without one it would propose tensors no device can hold. The
-        // pack and model lists are real workloads -- a pack geometry is a kernel the engine
-        // ships -- and a default sized for the search dropped 133 of rocKE's 664 served shapes.
-        // Every named engine is asked, primary first; a problem is served only if all serve it.
+        // Every source passes the same engine test; a problem is served only if every named
+        // engine serves it. The byte ceiling applies only to the search: pack and model shapes
+        // are real workloads.
         std::vector<int64_t> askedEngines{options.engineId};
         askedEngines.insert(
             askedEngines.end(), options.alsoEngineIds.begin(), options.alsoEngineIds.end());
@@ -1007,10 +940,8 @@ int runGenerator(const std::vector<std::string>& args)
         const auto oracle = everyEngine(/*maxBytes=*/0);
         const auto searchOracle = everyEngine(options.maxBytes);
 
-        // Every admitted point's graph, built once here and looked up again at emission.
-        // Stamping before selection is what makes `--exclude-corpus` exact: the id is the key
-        // the held-out set names, so dropping an excluded point afterwards would leave
-        // `--count` short and say nothing about why.
+        // Graphs are built and stamped at admission, before selection, so `--exclude-corpus`
+        // filters by final id and `--count` is not left short afterwards.
         const auto admit = [&](hipdnn_corpus_gen::PoolEntry& entry, bool alreadyAdmitted) {
             if(!hipdnn_corpus_gen::keeps(keep, entry.point))
             {
@@ -1030,11 +961,8 @@ int runGenerator(const std::vector<std::string>& args)
                 {
                     return false;
                 }
-                // Named and identified before it is written, never after. A graph that reaches
-                // the bench without an id is not rejected -- `GraphDescriptor::finalize` mints
-                // a random v4 for it -- so the corpus would be measured under a different
-                // identity on every run and nothing would report an error. See
-                // GraphIdentity.hpp.
+                // Stamp the identity before writing: an id-less graph gets a random id from
+                // `GraphDescriptor::finalize`, changing every run. See GraphIdentity.hpp.
                 known = stamped
                             .emplace(key,
                                      hipdnn_corpus_gen::stampGraphIdentity(
@@ -1050,20 +978,9 @@ int runGenerator(const std::vector<std::string>& args)
             return true;
         };
 
-        // Three pools, one admission. The sweep says what the declaration can express, the
-        // pack says what the engine was compiled for, and the model shapes say what anyone
-        // runs; none of the three is a superset of the others.
-        //
-        // Pack and model shapes first, because they are finite lists and cheap to check: every
-        // one the engine accepts is a problem the search does not have to find. The search is
-        // then grown only toward what they left short of `--count`, and what it returns excludes
-        // points they already hold. It still walks through those points: they are served, and
-        // treating them as refused would cut the walk off from exactly the region it is in.
-        //
-        // A source whose share is 0 is not collected at all. Gathered anyway, it held points the
-        // corpus would never take, cut the search's target by them, kept the search from
-        // returning them, and won them from the enabled sources in deduplication: a disabled
-        // model pool naming one of two kernel geometries left a corpus of one.
+        // Pack and model shapes are admitted first (finite and cheap); the search then fills
+        // only the remainder, excluding but still walking through already-pooled points. A
+        // source with share 0 is not collected at all, or it would displace enabled sources.
         const auto enabled = [&](const char* source) {
             return hipdnn_corpus_gen::sourceEnabled(options.shares, source);
         };
@@ -1126,9 +1043,8 @@ int runGenerator(const std::vector<std::string>& args)
         const hipdnn_corpus_gen::ProblemOracle alreadyPooled = [&](const ProblemPoint& point) {
             return pooled.count(hipdnn_corpus_gen::detail::describe(point)) > 0;
         };
-        // The pack is the whole of what a pack-coverage engine serves; a search could only
-        // rediscover it. A sweep with no share has nothing to contribute either. In both cases
-        // nothing is explored, and nothing is short about that.
+        // A pack-coverage engine serves exactly its pack, so it is not searched; neither is a
+        // sweep with no share.
         const bool searched = !coverageIsPack && enabled("sweep");
         if(searched)
         {
@@ -1163,13 +1079,11 @@ int runGenerator(const std::vector<std::string>& args)
         std::cerr << result.operation << ": " << problems.size() << " problems";
         if(result.buildFailures > 0)
         {
-            // A metadata bug, not an engine refusal, and the difference matters: the first
-            // makes an operation look unsupported when it is undeclared.
+            // A metadata bug, not an engine refusal.
             std::cerr << " (" << result.buildFailures
                       << " failed to build: " << result.firstBuildError << ")";
         }
-        // Coverage as measured, not asserted: how many distinct feasible points the search
-        // reached, and how many cells the corpus spreads them over.
+        // Distinct feasible points reached, and cells the corpus spreads them over.
         for(const auto& combination : result.corpus.combinations)
         {
             if(combination.stats.distinct > 0)
@@ -1191,8 +1105,7 @@ int runGenerator(const std::vector<std::string>& args)
         {
             std::cerr << "\n  " << skipped;
         }
-        // Collected, not printed: the sweep is short against its own remainder, and whether the
-        // corpus is short is only known after selection. Reported only if it is.
+        // Sweep shortfalls are reported only if the corpus ends up short after selection.
         for(const auto& reason : result.corpus.shortfall)
         {
             shortfall.push_back(result.operation + ": " + reason);
@@ -1222,10 +1135,8 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
-        // A regime the pools hold too few of is searched again, focused: its declared
-        // equalities pinned so the walk proposes only points that can carry the label. Only the
-        // shortfall is asked for, and everything the search finds still passes the engine, the
-        // declared constraints, --keep and --exclude-corpus exactly as the first pass did.
+        // Under-filled regimes are searched again with their declared equalities pinned, for
+        // the shortfall only, through the same engine and filters.
         const auto quotas = quotasFor.find(result.operation);
         std::map<std::string, hipdnn_corpus_gen::RegimeSearchResult> focused;
         std::map<std::string, int64_t> pooledBefore;
@@ -1253,8 +1164,7 @@ int runGenerator(const std::vector<std::string>& args)
                 pooledBefore[regime] = have;
                 if(have >= asked || coverageIsPack)
                 {
-                    // A pack-coverage engine serves exactly its pack; a search could only
-                    // rediscover it, so a short quota there is the engine's limit.
+                    // A pack-coverage engine serves only its pack; searching cannot help.
                     continue;
                 }
                 auto found
@@ -1297,8 +1207,7 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
-        // Spread a cut over every categorical combination as well as the regime, so a count
-        // below the pools' size takes a proportional share of each dtype, layout and mode.
+        // Spread a cut over categorical combinations as well as regimes.
         for(auto& pool : pools)
         {
             for(auto& entry : pool.second)
@@ -1325,10 +1234,8 @@ int runGenerator(const std::vector<std::string>& args)
         std::map<std::string, int64_t> dropped;
         const auto deduplicated = hipdnn_corpus_gen::deduplicate(pools, options.shares, dropped);
 
-        // 0 means everything the pools hold, which is the honest default: a corpus is bounded
-        // by what the engine serves, not by a number anyone picked. Asking for more than that
-        // does not invent shapes -- `allocate` is capped by each pool's capacity -- so the
-        // shortfall is recorded against `requested` and nothing is filled.
+        // 0 means everything the pools hold. Larger requests are never filled: `allocate` is
+        // capped by pool capacity and the shortfall is recorded against `requested`.
         int64_t count = options.count;
         if(count == 0)
         {
@@ -1342,9 +1249,8 @@ int runGenerator(const std::vector<std::string>& args)
         std::map<std::string, hipdnn_corpus_gen::RegimeQuotaOutcome> quotaOutcome;
         const auto& owed
             = quotas != quotasFor.end() ? quotas->second : std::map<std::string, int64_t>{};
-        // With quotas, "everything the pools hold" would bury them: 0 means the quotas alone.
-        // So the cut is asked for nothing beyond them -- a quota short of its regime stays short
-        // rather than being padded from another -- while what was requested is their sum.
+        // With quotas and count 0, the corpus is the quotas alone; a short quota stays short
+        // rather than being padded from another regime.
         int64_t cut = count;
         if(!owed.empty() && options.count == 0)
         {
@@ -1403,8 +1309,7 @@ int runGenerator(const std::vector<std::string>& args)
             continue;
         }
 
-        // An index beside the graphs, so a row's q.* values can be recovered from its problem
-        // id without re-running the generator.
+        // Maps problem id to q.* values without re-running the generator.
         std::ofstream index(root / (result.operation + ".problems.csv"));
         bool wroteHeader = false;
 
@@ -1413,9 +1318,7 @@ int runGenerator(const std::vector<std::string>& args)
             const auto& graph = stamped.at(result.operation + "|"
                                            + hipdnn_corpus_gen::detail::describe(entry.point));
 
-            // Stem == manifest `name`, as the corpus contract has always had it: scoring joins
-            // bench output (keyed by file stem) to measurements (keyed by `name`), and a file
-            // named anything else joins to nothing without an error.
+            // Stem must equal manifest `name`: scoring joins bench output by stem.
             const auto name = graph.name + ".fb";
             std::ofstream problem(root / "graphs" / name, std::ios::binary);
             problem.write(reinterpret_cast<const char*>(graph.bytes.data()),
@@ -1429,8 +1332,7 @@ int runGenerator(const std::vector<std::string>& args)
             row.file = "graphs/" + name;
             row.operation = result.operation;
             row.regimeAxes = metadata.regimeLabel;
-            // The tensor footprint the byte budget admitted it on, not the file size: the
-            // latter is a few kilobytes for every graph and says nothing about the problem.
+            // Tensor footprint, not file size.
             row.bytes = hipdnn_corpus_gen::graphBytes(graph.bytes);
             manifestRows.push_back(std::move(row));
 
@@ -1466,13 +1368,10 @@ int runGenerator(const std::vector<std::string>& args)
 
     if(!root.empty())
     {
-        // Written even when empty, because the absence of a manifest and a manifest recording
-        // nothing are different findings and only the second one says which inputs were read.
+        // Written even when empty, so the run's inputs are still recorded.
         hipdnn_corpus_gen::ManifestContext manifest;
         manifest.seed = options.exploration.seed;
-        // What was asked for, per operation and summed. Reported, never filled: a corpus of
-        // 664 problems from an engine that serves 664 is complete, and the gap between this
-        // and the row count is the only place that shows.
+        // What was asked for; never filled, so the gap to the row count is the shortfall.
         manifest.requested = requested;
         manifest.allocation = allocationTotals;
         manifest.duplicatesDropped = droppedTotals;
@@ -1494,7 +1393,6 @@ int runGenerator(const std::vector<std::string>& args)
             = options.engineName.empty() ? nlohmann::json() : nlohmann::json(options.engineName);
         if(!options.alsoEngineNames.empty())
         {
-            // Every problem is served by each of these as well as by `engine`.
             manifest.reports["also_engines"] = options.alsoEngineNames;
         }
         manifest.reports["excluded"] = excludedRows;
@@ -1507,10 +1405,7 @@ int runGenerator(const std::vector<std::string>& args)
             manifest.reports["shortfall"] = shortfall;
         }
 
-        // Stamped so the corpus carries its own provenance. A reader months later cannot tell
-        // an engine-verified corpus from a declaration-wide one by looking at the rows -- both
-        // are just problems -- and the difference decides whether the survivors of a
-        // benchmarking run are a sample or a selection.
+        // Rows alone cannot tell an engine-verified corpus from a declaration-wide one.
         manifest.reports["engine_verified"] = options.haveEngineId;
         if(coverageIsPack)
         {

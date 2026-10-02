@@ -101,10 +101,8 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
 }
 
-/// RFC 0019 Open Question 7 (RESOLVED) plus §11.2: with nothing deployed for the UUIDs
-/// this engine declares -- the state of every machine that has not installed a model --
-/// the engine answers UNAVAILABLE. Absence is a normal outcome, never an exception and
-/// never a crash, whether or not a descriptor tree exists to look in.
+/// RFC 0019 §11.2: with no declared model deployed, the engine answers UNAVAILABLE rather
+/// than throwing, whether or not a descriptor tree exists.
 TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
@@ -121,9 +119,6 @@ TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
     EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
 }
 
-/// The declaration surface itself. A malformed or duplicated literal would not fail the
-/// build -- it would silently mean "this architecture never binds a model", or "gfx950
-/// answers with gfx942's model" -- so the compiled-in table is checked here.
 TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
 {
     std::set<std::string> seenArch;
@@ -138,37 +133,28 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
     }
 }
 
-/// The expiry rule every shipped L1 model is judged against.
-///
-/// A model records this string and the loader refuses one that does not match, so what the
-/// revision NAMES decides which changes expire a model. It used to name the provider
-/// release, which is wrong in both directions: `0.2.0 -> 0.2.1` for a change that cannot
-/// touch this engine expired both shipped models, and a vendored kernel swap under a fixed
-/// version expired nothing -- the silent direction, since a stale L1 estimate changes which
-/// ENGINE is selected. It is now a digest over the forward kernels, the CSVs that describe
-/// them and the forward dispatch sources.
+/// A model whose recorded revision mismatches is refused, so the revision must track the
+/// forward kernels and dispatch sources, not the provider release.
 TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
 {
     const std::string revision = AsmSdpaEngine::selectorRevision();
     const std::string prefix = "hip-kernel-provider/asm-sdpa-fwd/";
     ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
 
-    // A build that did not compute the digest reports "undetermined", which no shipped
-    // model can match -- deliberately, but it means the CMake wiring has been dropped.
+    // "undetermined" here means the CMake wiring that computes the digest was dropped.
     const std::string digest = revision.substr(prefix.size());
     EXPECT_EQ(digest.size(), 16u) << revision;
     EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
         return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
     })) << revision;
 
-    // The regression itself: no provider version component, in any form.
+    // No provider version component, in any form.
     EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
     EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
 }
 
-/// Every answer carries the metric it was asked in, the decline included: the backend
-/// rejects a response whose metric differs from the request, so a decline without one
-/// would read as a broken engine rather than an absent model.
+/// The backend rejects a response whose metric differs from the request, so even a decline
+/// must carry the requested metric.
 TEST_F(TestAsmSdpaEngine, ConfigurationDeclineCarriesTheRequestedMetric)
 {
     auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
@@ -190,9 +176,8 @@ TEST_F(TestAsmSdpaEngine, ConfigurationDeclineCarriesTheRequestedMetric)
         "tflops");
 }
 
-/// RFC 0019 §4.4: no metric substitution. This engine ships throughput models only, so a
-/// request in `time` is unanswered even on an architecture whose `tflops` model is
-/// deployed -- converting one into the other would invent a number no model predicted.
+/// RFC 0019 §4.4: no metric substitution. Only `tflops` models ship, so `time` stays
+/// unanswered even where a `tflops` model is deployed.
 TEST_F(TestAsmSdpaEngine, NoModelForTheRequestedMetricIsUnavailableNotSubstituted)
 {
     SKIP_IF_NO_DEVICES();
@@ -208,8 +193,8 @@ TEST_F(TestAsmSdpaEngine, NoModelForTheRequestedMetricIsUnavailableNotSubstitute
     EXPECT_EQ(prediction.metric, "time");
 }
 
-/// A metric the registry does not know has no direction to rank by. It is a bad request,
-/// not a missing model, so it must not come back looking like an ordinary UNAVAILABLE.
+/// An unregistered metric is a bad request, not a missing model, so it throws rather than
+/// returning UNAVAILABLE.
 TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
 {
     auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
@@ -238,8 +223,7 @@ std::string_view builtDigest()
     return revision;
 }
 
-/// A shipped model records the revision verbatim, so its form is a contract: a build that
-/// did not compute the digest reports "undetermined", which no model can match.
+/// Shipped models record the revision verbatim, so its form is a contract.
 TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigits)
 {
     const std::string_view digest = builtDigest();
@@ -251,19 +235,15 @@ TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigit
     }
 }
 
-/// One commit is one selector, whatever the checkout's line endings: a Windows (CRLF) and a
-/// Linux (LF) checkout that disagree each refuse the models the other trained. The
-/// fixtures are this engine's tree written both ways, and the build's own revision is the
-/// one both must report.
+/// The fixtures are this engine's tree written with LF and with CRLF; both must report the
+/// build's own revision, or Windows and Linux builds refuse each other's models.
 TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
 {
     EXPECT_EQ(std::string_view(fixtures::REVISION_CRLF), std::string_view(fixtures::REVISION_LF));
     EXPECT_EQ(builtDigest(), std::string_view(fixtures::REVISION_LF));
 }
 
-/// The revision expires every deployed model, so it must move for each change to what
-/// decides the forward kernel or its arguments (else a stale L1 estimate picks the engine),
-/// and for nothing else (else every model expires for a change that cannot touch it).
+/// Each forward selection input must move the revision; everything else must not.
 TEST(TestAsmSdpaSelectorRevision, MovesForEveryForwardSelectionInputAndNothingElse)
 {
     const std::string_view base(fixtures::REVISION_LF);

@@ -491,7 +491,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-/// Admits every kernel, so the catalog holds both dtypes -- the case an ordinal exists for.
+/// Admits every kernel, so the catalog holds both dtypes.
 inline bool acceptEveryKernel(const MatchContext& /*context*/,
                               const BoundTokens& /*bound*/,
                               const KernelDefinition& /*kernel*/)
@@ -501,9 +501,7 @@ inline bool acceptEveryKernel(const MatchContext& /*context*/,
 
 TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsAnOrdinal)
 {
-    // Supersedes GetCustomKnobsSkipsFieldsWithNoIntegerValues, which pinned the gap rather
-    // than a contract: a string field was advertised as nothing, so the two block_size=64
-    // kernels this catalog holds could not be told apart through the knob surface.
+    // The two block_size=64 kernels differ only in dtype, so it must be advertised.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
@@ -518,7 +516,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsA
         knobs.begin(), knobs.end(), [](const auto& knob) { return knob.knob_id == DTYPE; });
     ASSERT_NE(dtype, knobs.end());
     ASSERT_TRUE(dtype->constraint.AsIntConstraint() != nullptr);
-    // "FLOAT" then "HALF": the engine's distinct values in the order that numbers them.
+    // Ordinals number the engine's distinct values: 0 is "FLOAT", 1 is "HALF".
     auto advertised = dtype->constraint.AsIntConstraint()->valid_values;
     std::sort(advertised.begin(), advertised.end());
     EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
@@ -537,8 +535,7 @@ TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatVal
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     // The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} and the score is the block size, so
-    // unpinned the winner is 256 FLOAT. Pinning dtype alone -- ordinal 1, "HALF" -- selects
-    // a kernel the block_size knob cannot reach on its own: 64 names two of them.
+    // unpinned the winner is 256 FLOAT; block_size alone cannot reach 64 HALF.
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig = makeIntKnobEngineConfig(fbb, DTYPE, 1);
     const TestGraph graph(makeGraphId(0x96));
@@ -2021,22 +2018,9 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
            "filtered set re-benchmarked, not served from the narrow subset";
 }
 
-/// RFC 0019 §5 step 8 fixes the basis a ranking is decided on at the CANONICAL candidate
-/// set -- "every kernel the matchers admitted for this graph, before any knob filter
-/// narrows it" -- so a record that covers a narrowed request but not the whole catalog is
-/// refused for BOTH. Orderability used to be re-decided against the narrowed set here,
-/// independently of the same decision in sortedCatalog(), and that is the divergence: one
-/// record served a measured order to the narrowed run and a heuristic order to the whole
-/// one, over candidates both runs share, so the same two kernels came back in opposite
-/// relative order depending only on a constraint that removed a third.
-///
-/// Narrowed by the workspace limit rather than a knob pin because both go through
-/// applyConstraints() and the limit is the only one that can leave more than one candidate
-/// here: the engine exposes a single integer knob over three distinct block sizes, so a pin
-/// always leaves exactly one kernel and makes any ordering question vacuous.
-///
-/// Falsifying mutation: order from `orderIfFullyCovered(*record, filtered)` again instead of
-/// from `catalog.measuredRecord`, and the narrowed run serves kernel_128.
+/// RFC 0019 §5 step 8: coverage is decided against the canonical candidate set, before any
+/// knob filter, so a record covering only a narrowed run is refused for it too. Narrowed by
+/// the workspace limit because a block_size pin always leaves a single kernel.
 TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarrowedRunToo)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -2051,9 +2035,8 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarro
     const TestGraph graph(makeGraphId(0xD8));
     const auto properties = testDeviceProperties();
 
-    // A prior run measured only the two small kernels, and ranked kernel_128 ahead of
-    // kernel_64 -- the opposite of the heuristic's priority order, so which order was used
-    // is visible in the workspace of the plan that comes back.
+    // The record covers only the two small kernels and ranks kernel_128 first, against the
+    // heuristic's order, so the returned plan's workspace shows which order was used.
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
@@ -2537,11 +2520,8 @@ TEST(TestIngestorGenericPlanBuilder,
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
-/// A UHD is arch-keyed, so one gfx942 model serves every gfx942 board. A corpus merged
-/// from MI300X, MI325X and MI308X therefore has to carry what each board IS, not only
-/// which one a row came from -- otherwise the model averages over hardware it cannot
-/// see. These columns are that record, written through the same deviceFeatureValues()
-/// the extractor binds, so a column and a features_signature entry cannot drift apart.
+/// One arch-keyed UHD serves every board of that arch, so each row carries the device's
+/// facts, written through the same deviceFeatureValues() the extractor binds.
 TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheDeviceFacts)
 {
     auto recorder
@@ -2601,8 +2581,7 @@ TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheD
     EXPECT_DOUBLE_EQ(row["device.peak_memory_bandwidth"].get<double>(),
                      peakMemoryBandwidth(properties));
 
-    // `device` is the identity, and stays envelope rather than becoming a feature: a
-    // model splitting on which card a row came from has memorised the fleet.
+    // The device identity stays envelope: a model splitting on it memorises the fleet.
     EXPECT_FALSE(row.contains("device.arch"));
     EXPECT_FALSE(row.contains("device.gcn_arch_name"));
 }
@@ -2776,10 +2755,8 @@ bool isSweepEnvelope(const std::string& key)
 
 TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSweepPublish)
 {
-    // The property a trained `sort_kernel_catalog` model depends on: for one (graph, device,
-    // match bindings, kernel), every name an enumeration page or a sweep row publishes is
-    // bound by the live ranker, to the same value. A model is fitted on the first two and
-    // scored through the third.
+    // A `sort_kernel_catalog` model is fitted on enumeration pages and sweep rows and scored
+    // through the live ranker, so all three must bind every name to the same value.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const ScopedSymbols symbols(
@@ -2863,9 +2840,8 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
     }
     EXPECT_EQ(sweepRows, 3U);
 
-    // Runtime: a model whose signature reads every scalar the corpus carries, ranking the
-    // same catalog through the live UhdKernelHeuristic. A whole list has no scalar binding;
-    // its indexed elements are published beside it and read instead.
+    // Runtime: a model reading every scalar the corpus carries. A list has no scalar binding;
+    // its indexed elements are read instead.
     std::vector<nlohmann::json> signature;
     std::vector<std::string> names;
     hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding;

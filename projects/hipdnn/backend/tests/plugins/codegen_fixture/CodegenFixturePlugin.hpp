@@ -28,11 +28,8 @@
 /// The engine here computes nothing: it reports itself inapplicable to every
 /// graph, so the backend never asks it for a plan.
 ///
-/// Its optional capabilities pin the generated entry points' three answers:
-/// candidate enumeration keeps the SDK default and declines (NOT_APPLICABLE);
-/// an engine-level prediction keeps the SDK default and succeeds with an
-/// UNAVAILABLE answer; a configuration-level prediction declines, since the
-/// engine has no configurations to predict.
+/// Optional capabilities: candidate enumeration declines (NOT_APPLICABLE), engine-level
+/// prediction succeeds with UNAVAILABLE, configuration-level prediction declines.
 namespace codegen_fixture
 {
 

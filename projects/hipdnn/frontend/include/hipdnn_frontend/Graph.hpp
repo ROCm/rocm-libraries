@@ -503,9 +503,7 @@ private:
     /// HIPDNN_HEUR_RANKING_METRIC and the backend default to decide.
     std::string _rankingMetric;
 
-    // Heuristic results arrive with the metric already stamped by the backend. A
-    // configuration the Graph builds itself for an explicit engine must carry it too, or
-    // that engine picks its kernel at plan build by the default metric instead.
+    // Explicit-engine configs must carry the metric too; heuristic results already do.
     Error applyRankingMetric(hipdnnBackendDescriptor_t engineConfigDesc) const
     {
         if(_rankingMetric.empty())
@@ -6629,19 +6627,13 @@ public:
     /**
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
-     * The metric names what "best" means (RFC 0019 §4.4): @c "tflops" ranks by calibrated
-     * throughput, higher first; @c "time" by predicted milliseconds, lower first. It
-     * reaches every engine heuristic descriptor this Graph creates, where the prediction
-     * policies (HeuristicMode::A/B) rank engines by it and each result configuration
-     * carries it into plan build, and every engine configuration the Graph builds for an
-     * explicit engine. An engine with no model for the metric is ranked after those that
-     * have one; no other metric is substituted. HIPDNN_HEUR_RANKING_METRIC, when set,
-     * overrides this for heuristic selection. Takes effect on the next heuristic query or
-     * plan creation.
+     * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
+     * Applies to later heuristic queries and explicit-engine configurations; engines with no
+     * model for the metric rank last. HIPDNN_HEUR_RANKING_METRIC overrides it for heuristic
+     * selection.
      *
      * @param metric A registered ranking metric name
-     * @return ErrorCode::INVALID_VALUE, with the metric unchanged, for a name the
-     *         registry does not know
+     * @return ErrorCode::INVALID_VALUE, with the metric unchanged, for an unregistered name
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error set_ranking_metric(std::string metric)

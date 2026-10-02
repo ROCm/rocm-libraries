@@ -23,8 +23,8 @@
 namespace hipdnn_plugin_sdk::uhd
 {
 
-/// Device and kernel metadata have reserved namespaces. Problem bindings already
-/// carry the names published by the engine; no synthetic query namespace is added.
+/// Variables for feature extraction. Kernel metadata lives under `kernel.`; problem
+/// bindings use the engine's published names unprefixed.
 class FeatureExtractionContext
 {
 public:
@@ -96,13 +96,9 @@ private:
 };
 
 /// Compiles a `features_signature` once and evaluates it per selection.
-///
-/// Entries that read no `$kernel` symbol are evaluated once per selection (prepare()); only the
-/// kernel-dependent entries are re-evaluated per candidate (extractKernelInto()), which is the
-/// split RFC 0019 §9.3 asks for. A bare reference, which is every entry uhd_gen emits for a raw
-/// field, is read straight from the bindings; an inline expression is evaluated by the
-/// descriptor expression language. The workspace belongs to a selection, not the extractor, so
-/// cached engines are safe to use concurrently.
+/// prepare() evaluates non-kernel entries once; extractKernelInto() re-evaluates only
+/// `$kernel` entries per candidate (RFC 0019 §9.3). The Workspace is per selection, so one
+/// extractor may be used concurrently.
 class FeatureExtractor
 {
 public:
@@ -188,8 +184,7 @@ public:
         return getMissingKmdFields(fields).empty();
     }
     /// The `$kernel.*` fields the signature reads that @p fields does not declare, each once.
-    /// A reference is covered by its declared field (`tile` for `$kernel.tile[0]`) or by a
-    /// field declared under the reference's full name.
+    /// `$kernel.tile[0]` is covered by `tile` or by `tile[0]`.
     std::vector<std::string>
         getMissingKmdFields(const std::unordered_set<std::string>& fields) const
     {
@@ -211,12 +206,8 @@ public:
         return missing;
     }
 
-    /// The KMD field a `$kernel.*` reference reads, or nullopt for any other reference.
-    ///
-    /// An element of a list field is bound as `<field>[<i>]` (one name per element, as the
-    /// runtime binds kernel metadata), but the field the KMD declares -- and the knob the UED
-    /// exposes -- is `<field>`. Admission compares that declared name; extraction still reads
-    /// the indexed one. Comparing the whole suffix refused every model reading a list field.
+    /// The KMD field a `$kernel.*` reference reads (index stripped: `tile[0]` -> `tile`),
+    /// or nullopt for any other reference.
     static std::optional<std::string> kernelFieldOf(const std::string& reference)
     {
         constexpr std::string_view PREFIX = "$kernel.";
@@ -228,8 +219,8 @@ public:
         return std::string(field.substr(0, field.find('[')));
     }
 
-    /// Compact, sorted-key JSON AST plus the optional sorted categorical vocabulary.
-    /// This preserves hashes of existing canonical raw-reference signatures.
+    /// Hash of the compact sorted-key JSON signature plus the sorted categorical vocabulary.
+    /// The format must stay stable: deployed models record this hash.
     static std::string computeHash(const std::vector<nlohmann::json>& signature,
                                    const CategoricalEncoding& encoding = {})
     {
@@ -261,9 +252,8 @@ public:
     }
 
 private:
-    /// Feature @p i as the number the model reads. A bare reference to an encoded field reads
-    /// its declared code; any other string, an unbound symbol, or an expression that did not
-    /// resolve makes the whole row unscorable rather than substituting a value.
+    /// Feature @p i as a number. Encoded categorical strings read as their code; any other
+    /// string or unresolved value throws (the row is unscorable; no value is substituted).
     double evaluate(size_t i, const VariableContext& ctx) const
     {
         const auto& reference = _expressions.reference(i);

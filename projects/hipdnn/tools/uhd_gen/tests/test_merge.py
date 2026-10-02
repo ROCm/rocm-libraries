@@ -1,16 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Joining sweeps from several boards of one architecture.
-
-A UHD is arch-keyed, so one gfx942 model serves MI300X, MI325X, MI308X and MI300A, and
-the corpus it trains on should hold all of them. The runtime already separates them --
-a problem is `(benchmark, device)` and `device` is the DeviceKey hash -- so the join
-itself is a concatenation.
-
-What needs defending is the two ways it goes wrong without saying so: a corpus whose
-columns do not match, which trains a NaN as a fact about one machine, and the same board
-merged twice, which silently doubles its weight.
-"""
+"""Joining sweeps from several boards of one architecture."""
 from __future__ import annotations
 
 import sys
@@ -48,7 +38,6 @@ def _corpus(
 
 
 def test_two_boards_join_into_one_corpus(tmp_path):
-    """The whole point: one arch-keyed model, several boards' measurements."""
     a = _corpus(tmp_path / "a.csv", "aaaa")
     b = _corpus(tmp_path / "b.csv", "bbbb")
 
@@ -56,15 +45,13 @@ def test_two_boards_join_into_one_corpus(tmp_path):
 
     assert len(merged) == 16
     assert report["devices"] == ["aaaa", "bbbb"]
-    # Problem identity is the pair, so the same graph on two boards is two problems --
-    # which is exactly why merging does not conflate their oracles.
+    # A problem is (benchmark, device), so one graph on two boards is two problems.
     assert report["problems"] == 8
     assert not report["repeated_devices"]
 
 
 def test_a_column_present_in_only_one_corpus_is_refused(tmp_path):
-    """The silent failure. Concatenating leaves the column NaN precisely where one
-    machine's rows are, so the model learns the absence as a property of that board."""
+    """The column would be NaN on one board's rows and train as a fact about it."""
     a = _corpus(tmp_path / "a.csv", "aaaa")
     b = _corpus(tmp_path / "b.csv", "bbbb", extra={"device.total_global_mem": 192})
 
@@ -84,8 +71,7 @@ def test_the_refusal_names_the_column_and_the_fix(tmp_path):
 
 
 def test_the_same_board_twice_is_warned_about_not_refused(tmp_path, caplog):
-    """Resampling one noisy card is legitimate, but those rows share problem identity,
-    so that board ends up weighted more heavily than the others in every figure."""
+    """Resampling a board is legitimate but gives it extra weight."""
     a = _corpus(tmp_path / "a.csv", "aaaa")
     b = _corpus(tmp_path / "b.csv", "aaaa")
 
@@ -99,8 +85,7 @@ def test_the_same_board_twice_is_warned_about_not_refused(tmp_path, caplog):
 
 
 def test_a_corpus_without_a_device_column_is_refused(tmp_path):
-    """Without the device half of the key both boards collapse into one oracle, and
-    every regret figure computed from the result is too small."""
+    """Without `device`, boards collapse into one oracle and regret reads too small."""
     a = _corpus(tmp_path / "a.csv", "aaaa")
     frame = pd.read_csv(a).drop(columns=["device"])
     stripped = tmp_path / "stripped.csv"
@@ -126,9 +111,7 @@ def test_an_empty_corpus_is_refused(tmp_path):
 
 
 def test_the_merged_corpus_still_groups_per_board(tmp_path):
-    """The join has to survive the thing that consumes it: resolve_grouping keys on
-    (benchmark, device), and a merge that lost the device column or collided its values
-    would silently halve the problem count."""
+    """`resolve_grouping` still keys the merged corpus on (benchmark, device)."""
     from uhd_gen.evaluate import resolve_grouping
 
     merged, _ = merge_corpora(

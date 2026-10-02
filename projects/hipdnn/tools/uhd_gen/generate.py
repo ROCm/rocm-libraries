@@ -199,15 +199,8 @@ def _write_json(path: Path, value) -> None:
 def _absent_as_null(value):
     """Raw collected rows, with every non-finite float replaced by null.
 
-    `allow_nan=False` is the right guard for a model, a provenance snapshot or a manifest:
-    NaN is not JSON, and a number that cannot be written is a number that should not have
-    been computed. It is the wrong guard for the raw measurement log, where a missing
-    optional field -- `stddevMs` on a single-iteration run, `iters` on a run that reported
-    none -- arrives as NaN through pandas and means "absent", which JSON spells null.
-
-    Without this, an engine that measured its whole corpus successfully loses the lot at
-    the final write: run 67929365 collected 600 gfx950 graphs and died on
-    "Out of range float values are not JSON compliant: nan" after the measurement was done.
+    A missing optional field (`stddevMs`, `iters`) arrives as NaN through pandas and means
+    "absent"; left as NaN, `allow_nan=False` would refuse the whole log at the final write.
     """
     if isinstance(value, float) and not math.isfinite(value):
         return None
@@ -250,10 +243,8 @@ def write_collection(
 ) -> dict:
     """Write what a measuring run produced so a later `--collection` can train from it.
 
-    Everything training reads from a collection is here, and nothing training decides is:
-    no split, no feature recipe, no model. For an engine-immediate collection the binding
-    is checked now, so a collection that cannot train (mixed selector revisions within one
-    run) is refused while it is still one run's problem rather than a merge's.
+    Records measurements only, no training decisions. An immediate collection's binding is
+    checked now, so a run mixing selector revisions is refused before any merge.
     """
     immediate = role == ROLE
     selector_revision = None
@@ -294,13 +285,11 @@ def write_collection(
         "collection_knobs": collection_knobs,
         "graphs": graph_inputs,
         "commands": commands,
-        # Graphs skipped within the --max-graph-failures budget, each with its error: what
-        # this collection does not cover, recorded where training will read it.
+        # Graphs skipped within the --max-graph-failures budget, each with its error.
         "failed_graphs": list(failed_graphs or []),
     }
     if shard:
-        # Which slice of its corpus this is: N shards of one corpus are N collections, and
-        # together -- not alone -- they are the corpus's measurement.
+        # N shards of one corpus are N collections; only together are they the corpus.
         manifest["shard"] = shard
     _write_json(stage / COLLECTION_MANIFEST, manifest)
     return manifest
@@ -318,13 +307,10 @@ def parse_shard(text: str) -> tuple[int, int]:
 
 
 def _measurement_key(row: dict) -> tuple:
-    """What a measurement is of: a configuration on a shape, on an architecture.
+    """What a measurement is of: a configuration on a shape (graph id), on an arch.
 
-    A shape is a graph -- the graph id is content-derived, so the same geometry has the
-    same id wherever it was generated -- and the same shape on another arch is another
-    problem. A catalog sweep times many kernel configurations on one shape, and each is a
-    row of its own; an L1 row carries no configuration (the engine chose it), so its key
-    is the shape alone.
+    Graph ids are content-derived, so the same geometry has the same id wherever it was
+    generated. An L1 row carries no configuration, so its key is the shape alone.
     """
     return (
         str(row["benchmark"]),
@@ -337,17 +323,9 @@ def _measurement_key(row: dict) -> tuple:
 def one_measurement_per_shape(measured: list) -> tuple[list, int]:
     """Keep one measurement of each configuration on each shape: the newest session's.
 
-    `measured` is `(session, row)` in the order measured, a session being one run on one
-    device. Returns (rows, dropped). A configuration measured twice on a shape -- on two
-    GPUs of the arch, or in two collections -- is one training problem, not two: kept
-    twice it is weighted twice, and split across the held-out boundary it scores the
-    model on a problem it was trained on (the split keys on (graph, device), and another
-    GPU of the same arch is another device). Distinct configurations on the same shape
-    are distinct rows and are all kept. Older measurements stay in their collections;
-    this only picks the label.
-
-    A repeat taken under another binding (selector revision, descriptor set) is refused,
-    not superseded: dropping it would hide the mix the corpus check exists to refuse.
+    `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
+    kept twice is weighted twice and can straddle the holdout split, which keys on device.
+    A repeat under another binding is refused, not superseded, so a mix cannot hide.
     """
     newest: dict = {}
     binding: dict = {}
@@ -368,14 +346,8 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
 def load_collections(paths: list, *, role: str, sources: list) -> dict:
     """Merge recorded collections into one measurement per shape, the newest winning.
 
-    Collections are taken oldest to newest by `collected_at` (not the order named), and
-    `one_measurement_per_shape` keeps the newest measurement of each configuration on
-    each shape. The count of rows set aside is returned, so the model can say how much of
-    the store it did not use.
-
-    Refused rather than merged: different roles or engines, different trained_against
-    (a model is bound to one selector revision or descriptor set), different knob
-    addressing, and a requested metric a collection did not measure.
+    Ordered by `collected_at`, not the order named. Refuses to merge differing roles,
+    engines, bindings or knob addressing, or a collection missing a requested metric.
     """
     loaded = []
     for supplied in paths:
@@ -412,9 +384,8 @@ def load_collections(paths: list, *, role: str, sources: list) -> dict:
             raise ValueError(
                 f"{directory} did not measure {missing}; it holds {manifest['sources']}"
             )
-    # Each collection records the addressing its own candidates showed: a subset of the
-    # engine's numbering, which shards of one corpus split between them. Merged, refusing a
-    # pin two of them read differently.
+    # Each collection records only the ordinals its candidates showed (shards split them);
+    # merging refuses a pin two collections read differently.
     try:
         knob_encodings = addressing.merge_manifests(
             m.get("knob_encodings") for _, _, m in loaded
@@ -587,13 +558,9 @@ def collect_graph(
     engine_descriptor_id: str,
     addressing_table: dict | None = None,
 ) -> tuple[list[dict], set[str]]:
-    """One bench invocation per graph: the sweep enumerates and times in one process.
+    """One bench `--sweep --json` run per graph: enumerate and time in one process.
 
-    RFC 0019 §13.2: "Sweeping inside one process amortises" the plugin load, the graph
-    build and the kernel compilation that a process per row pays once each. The enumerate
-    call used to be a second process per graph that built the same catalog and threw the
-    timings away; `--sweep --json` now returns the catalog it timed, so one startup covers
-    both. The checks below are unchanged -- they simply read one response instead of two.
+    RFC 0019 §13.2: one process amortises plugin load, graph build and kernel compilation.
     """
     candidates: list[dict] = []
     seen_ids: set[str] = set()
@@ -615,9 +582,8 @@ def collect_graph(
         raise ValueError(
             "the sweep lacks a candidates array; it must report what it timed"
         )
-    # A sweep holds the whole catalog in one process, so there is no continuation to
-    # follow -- but the count is still checked, because a page limit silently truncating
-    # the catalog would train a model on a subset and call it complete.
+    # A sweep has no continuation, but a page limit truncating the catalog would silently
+    # train on a subset, so the count is still checked.
     if measured.get("next_offset") is not None or len(batch) != total:
         raise ValueError(
             "the sweep did not time the whole catalog; refusing silent truncation"
@@ -635,19 +601,16 @@ def collect_graph(
         candidates.append(candidate)
     if not candidates:
         raise ValueError(f"no matched candidates for graph {measured.get('graph_id')}")
-    # What each pinned integer addressed, learned from the engine's own answer. Accumulated
-    # across graphs because one graph's catalog shows only the values ITS candidates carry.
+    # Accumulated across graphs: one graph's catalog shows only the values its
+    # candidates carry.
     if addressing_table is not None:
         addressing.observe(candidates, addressing_table)
     rows = []
     published = set(_feature_map(first, "problem_features")) | set(
         _feature_map(first, "device_features")
     )
-    # The trade one process per graph accepts: a kernel that CRASHES takes the whole
-    # graph's rows with it rather than its own row. A kernel that merely fails to build or
-    # run does not -- autotune reports it as an unsucceeded result
-    # (makeCompileFailedResult and its siblings), so it still reaches the corpus as the
-    # failure it is.
+    # A crashing kernel loses the whole graph's rows; one that fails to build or run is
+    # reported as an unsucceeded result and still reaches the corpus.
     results = measured.get("results")
     if not isinstance(results, list):
         raise ValueError("sweep response lacks a results array")
@@ -657,9 +620,8 @@ def collect_graph(
         if identity in by_id:
             raise ValueError("one enrolled tuple must time exactly one candidate")
         by_id[identity] = result
-    # A bijection, checked both ways. Enumeration decided the candidate set, so a sweep that
-    # times a subset has silently dropped rows the corpus would then be missing without
-    # saying so, and one that times something else was not the catalog that was enumerated.
+    # Must be a bijection with the enumerated catalog: a subset silently drops rows, and
+    # anything else was not the catalog that was enumerated.
     if set(by_id) != {candidate["id"] for candidate in candidates}:
         raise ValueError("the sweep did not time exactly the catalog it reported")
     for candidate in candidates:
@@ -674,12 +636,8 @@ def collect_graph(
             raise ValueError(
                 "timing response must preserve the benchmark's is_valid verdict"
             )
-        # RFC 0019 §13.2: "A timing is only a training label once the candidate is known
-        # correct ... and records the verdict on the row." Required, not defaulted: a bench
-        # that emits no verdict has performed no check, and reading that as valid is exactly
-        # the inverted oracle the section exists to prevent. `null` is the honest verdict
-        # when the cross-check could decide nothing, and it is spelled differently from
-        # `true` precisely so it cannot be mistaken for one.
+        # RFC 0019 §13.2: the verdict is required, not defaulted; a missing one means no
+        # check ran. `null` means the check could decide nothing.
         if VERDICT not in result or not isinstance(result.get(REASON), str):
             raise ValueError(
                 "timing response must carry a numerical-validation verdict "
@@ -703,10 +661,8 @@ def collect_graph(
             "engine": first["engine_id"],
             "kernel": candidate["id"],
             "is_valid": result["is_valid"],
-            # A second column beside `is_valid`, never folded into it. `is_valid` means
-            # "a measurement was obtained" and §8.1 plus `evaluate`'s exclusion counters
-            # both read it that way; a row that ran and computed the wrong answer is a
-            # different fact from a row that never ran, and §13.2 keeps both.
+            # Separate from `is_valid` ("a measurement was obtained", §8.1): a wrong
+            # answer and a run that never happened are different facts (§13.2).
             VERDICT: verdict,
             REASON: result[REASON],
             "succeeded": result.get("succeeded"),
@@ -714,22 +670,14 @@ def collect_graph(
             "robustMeanMs": elapsed,
             "minTimeMs": result.get("min_time_ms"),
             "avgTimeMs": result.get("avg_time_ms"),
-            # RFC 0019.13 §8.3 makes `stddevMs` and `iters` columns of the result
-            # envelope and §8.5 records the spread "so it can be used, not merely
-            # stored": `evaluate`'s tie band keys on exactly these two names and is
-            # inert on a corpus that drops them.
+            # RFC 0019.13 §8.3/§8.5; `evaluate`'s tie band keys on these two names.
             "stddevMs": result.get("stddev_ms"),
             "iters": result.get("iterations"),
             "knob_settings": json.dumps(candidate["knob_settings"], sort_keys=True),
         }
         if verdict is False:
-            # §13.2: the row "is written with its measurement suppressed and an explicit
-            # invalid marker, so the model learns the failure surface instead of inferring
-            # one from absence". Suppressed here, at the one place the corpus row is built,
-            # so every consumer of it sees the same thing: `corpus.json`, `corpus.csv`, the
-            # `evaluate` regret pass that reads the corpus back, and any later retrain. A
-            # wrong-but-fast kernel holds the best time in its group, so leaving the number
-            # in place and relying on each consumer to filter is how it becomes the label.
+            # §13.2: suppressed here, where the row is built, so every consumer sees it
+            # suppressed; otherwise a wrong-but-fast kernel becomes the label.
             suppress_timings(row)
         for mapping in (
             first["problem_features"],
@@ -743,11 +691,8 @@ def collect_graph(
                 )
             row.update(mapping)
             published.update(mapping)
-        # RFC 0019.13 §8.3 (:1501-1506) derives throughput as `flops / time`, and §8.4
-        # names the same quantity as the target. Derived here, where the engine's own
-        # published `graph.flops` has just been merged in, so the corpus carries the
-        # calibrated column rather than leaving the caller to reconstruct it. The mean,
-        # not the robust mean: §11.2 (:2003) pins a calibrated score to `avgTimeMs`.
+        # RFC 0019.13 §8.3: throughput = flops / time. The mean, not the robust mean,
+        # because §11.2 pins a calibrated score to `avgTimeMs`.
         work, average = row.get("graph.flops"), row["avgTimeMs"]
         if _finite_positive(work) and _finite_positive(average):
             row["tflops"] = work / (average * 1e9)
@@ -760,9 +705,8 @@ def collect_immediate_graph(
 ) -> tuple[list[dict], set[str]]:
     """Measure one engine's ordinary no-search selection without inspecting its catalog.
 
-    The engine chooses its kernel at plan build with its ranker for the request's metric
-    (RFC 0019 §11.4), so an L1 label for `metric` is a measurement of the selection a
-    request for `metric` actually gets -- which is why the metric is part of the request.
+    The engine picks its kernel for the request's metric (RFC 0019 §11.4), so the metric is
+    part of the request.
     """
     if "--knob" in command or "enumerate" in command:
         raise ValueError("L1 collection cannot pin knobs or enumerate candidates")
@@ -789,28 +733,22 @@ def _catalog_label(
 ) -> tuple:
     """(declared metric, target, calibrated, timing statistic) for a catalog ranker.
 
-    RFC 0019 §13.4: each metric fixes its label, so the only choice left is whether the
-    corpus can supply it.
+    RFC 0019 §13.4: the metric fixes the label; this only checks the corpus supplies it.
     """
     label = ranking_metric(metric).label
     if label in usable.columns and bool(
         pd.to_numeric(usable[label], errors="coerce").gt(0).all()
     ):
-        # RFC 0019 §11.1 (:1501-1506) gives `sort_kernel_catalog` a cross-engine
-        # role, and §11.2's `B only` ranking row exists only for a score that is a
-        # comparable absolute quantity. `avgTimeMs` rather than the robust mean -- as the
-        # label itself, or as the time `tflops` is derived from -- because §11.2 (:2003)
-        # pins a calibrated score to the mean.
+        # Calibrated, so usable cross-engine (RFC 0019 §11.1, §11.2). `avgTimeMs`, not the
+        # robust mean, because §11.2 pins a calibrated score to the mean.
         return metric, label, True, LABEL_STATISTIC
     if not defaulted:
         raise ValueError(
             f"--metric {metric} needs a positive {label!r} on every measured candidate, and "
             "this corpus does not carry one (tflops needs the engine to publish graph.flops)"
         )
-    # A millisecond score ranks this engine's own catalog just as well and forfeits the
-    # cross-engine role -- legal under RFC 0019.13 §2.5 (:122-123) and §15.1 (:2387-2390),
-    # but a smaller model than the role is. It declares no metric: it estimates none, and
-    # is the engine's metric-less default ranker (RFC 0019 §3.1).
+    # Fallback: a millisecond score still ranks this engine's catalog (RFC 0019.13 §2.5)
+    # but forfeits the cross-engine role, so it declares no metric (RFC 0019 §3.1).
     logger.warning(
         "Not every measured candidate carries a positive graph.flops and avgTimeMs, so "
         "%s is trained on robustMeanMs/min with no score.metric and score.calibrated=false. "
@@ -826,9 +764,8 @@ def _catalog_label(
 def read_regime_manifest(manifest: Path) -> dict:
     """benchmark -> its regime columns, from one `hipdnn_corpus_gen` manifest.csv.
 
-    The manifest carries `regime` and then one column per facet the operation declares, up to
-    `source`. They go onto rows as envelope columns (`regime`, `regime.<facet>`,
-    `regime.operation`), never features.
+    Facet columns run from after `regime` up to `source`; they become envelope columns
+    (`regime`, `regime.<facet>`, `regime.operation`), never features.
     """
     labels: dict = {}
     with Path(manifest).open(newline="", encoding="utf-8") as handle:
@@ -846,20 +783,16 @@ def read_regime_manifest(manifest: Path) -> dict:
             labels[record["benchmark"]] = {
                 "regime": record["regime"],
                 **{f"regime.{facet}": record[facet] for facet in facets},
-                # Which declaration the label is under: a quota asks corpus_gen for a regime
-                # of one operation, and two operations may share a label.
+                # Two operations may share a regime label, so record which one.
                 **({"regime.operation": record["op"]} if record.get("op") else {}),
             }
     return labels
 
 
 def corpus_regimes(graph_paths) -> dict:
-    """Each graph's regime, as the corpus that generated it labelled it: benchmark -> columns.
+    """Each graph's regime, from its corpus's `manifest.csv`: benchmark -> columns.
 
-    `hipdnn_corpus_gen` writes `manifest.csv` beside `graphs/`. Its labels go onto every
-    measured row so `evaluate`'s per-regime table (RFC 0019.13 §11.2) exists for every model
-    trained from a collection, and a later sizing run can say which populations a model is
-    weak on without finding the corpus again.
+    Feeds `evaluate`'s per-regime table (RFC 0019.13 §11.2).
     """
     labels: dict = {}
     for directory in sorted(
@@ -879,8 +812,7 @@ def _measure(
 ) -> dict:
     """Run the benchmark over `--graphs` into `stage`: the measuring half of generate.
 
-    Returns exactly what training reads, so `--collect-only` can write it down and
-    `--collection` can hand the same values back without measuring.
+    Returns exactly what training reads, which `--collection` can later hand back.
     """
     if args.engine_id is None:
         raise ValueError("--engine-id is required to measure")
@@ -890,8 +822,7 @@ def _measure(
     graphs = discover_graphs(args.graphs)
     if args.shard:
         index, count = parse_shard(args.shard)
-        # Every N-th in path order, not a contiguous block: a corpus is written regime by
-        # regime, so a block would hand one GPU all the decode shapes.
+        # Strided, not contiguous: a corpus is written regime by regime.
         total = len(graphs)
         graphs = graphs[index::count]
         if not graphs:
@@ -903,12 +834,8 @@ def _measure(
         ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
         _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
         kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
-    # The tree this run measures is the ONE root the bench loads from: DIR replaces the
-    # provider's installed tree, while RUNTIME_DIR and PATH only add roots beside it, and
-    # the loader keeps the FIRST definition of an id. Inherited additive roots are
-    # cleared for both roles, and the measured tree goes in as the replacement, so an
-    # earlier root's selector can never stand in for the one being generated against --
-    # an L1 label is a measurement of the selection this tree makes, nothing else's.
+    # The bench must load only the measured tree: the loader keeps the first definition of
+    # an id, so additive roots are cleared and this tree replaces the provider's via DIR.
     environment = dict(os.environ)
     environment.pop("HIPDNN_DESCRIPTOR_PATH", None)
     environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
@@ -918,17 +845,9 @@ def _measure(
         collection_tree = stage / "collection_descriptors"
         shutil.copytree(tree, collection_tree)
         exposed = dict(ued)
-        # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
-        # equals the metadata tuple and every catalog entry is individually reachable.
-        # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
-        # and abort the run on the collision at _knob_tuple.
-        #
-        # Which of those fields ends up addressed BY AN ORDINAL is the engine's
-        # decision, not this tool's: a knob value is an int64 end to end, so the
-        # ingestor numbers each non-integer field over its own value set and reports
-        # the pin it chose on every enumerated candidate. The mapping is read back off
-        # the collection below (addressing.observe) rather than re-derived here, so
-        # there is no second numbering to disagree with the engine's.
+        # RFC 0019 §13.2: expose every KMD field so each catalog entry has a unique knob
+        # tuple. The engine numbers non-int fields; addressing.observe reads that
+        # numbering back rather than re-deriving it.
         exposed["knobs"] = [field["name"] for field in kmd["fields"]]
         _write_json(collection_tree / ued_path.relative_to(tree), exposed)
         _write_json(stage / "shipping_ued.json", ued)
@@ -940,9 +859,7 @@ def _measure(
         graph_rows = {source: [] for source in sources}
         graph_names = set()
         payload = graph.read_bytes()
-        # `hipdnn_bench` tells the two serialized forms apart by content rather than
-        # by extension, so a renamed file still loads; the staged copy follows the
-        # same rule and keeps whichever form the source was in.
+        # The bench detects the format by content, not extension; keep the source's form.
         binary = not payload.lstrip().startswith(b"{")
         saved_graph = (
             stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
@@ -954,11 +871,8 @@ def _measure(
             "sha256": hashlib.sha256(payload).hexdigest(),
         }
         graph_inputs.append(graph_input)
-        # One graph's failure costs that graph, not the run: a bench that crashes or a
-        # response that fails validation on one problem says nothing about the others.
-        # All of the graph's rows go together, for every device and metric, so the
-        # metrics' corpora stay over one problem set. The budget below still ends a run
-        # whose failures are systematic rather than incidental.
+        # A failing graph is skipped whole (every device and metric, so all corpora cover
+        # one problem set); the failure budget below catches systematic failures.
         try:
             if immediate and not binary:
                 graph_document = json.loads(payload.decode("utf-8"))
@@ -976,10 +890,8 @@ def _measure(
                     )
                 _write_json(saved_graph, graph_document)
             else:
-                # A serialized graph already carries its own id, and the bench preserves
-                # it across the deserialize/serialize round trip it does for L1, so there
-                # is nothing to inject: the identity the corpus records is the one the
-                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+                # A serialized graph carries its own id, which the bench preserves and
+                # reports as `graph_id`.
                 saved_graph.write_bytes(payload)
             command = [
                 bench,
@@ -1023,9 +935,8 @@ def _measure(
             logger.warning("graph %s skipped: %s", graph, error)
             continue
         if immediate and not args.collect_only and not any(rows.values()):
-            # Settled on the first measured graph, not after the corpus: the id an opaque
-            # engine reads is its declaration and does not vary by graph, so a run that could
-            # only train an unread model stops here. A collect-only run trains nothing.
+            # The id an opaque engine reads does not vary by graph, so check it on the
+            # first graph rather than after the corpus. Collect-only trains nothing.
             requested = _requested_uhd_ids(args.uhd_ids, list(sources))
             for source in sources:
                 if graph_rows[source]:
@@ -1076,9 +987,8 @@ def discover_graphs(supplied: list[str]) -> list[Path]:
     """The graph files `--graphs` names, sorted and each once.
 
     A `hipdnn_corpus_gen` root is read through its `manifest.json` graph list rather than
-    searched: the manifest sits beside the graphs, is JSON, and is not one of them (T6 --
-    collected as a graph, it aborted the run). A listed graph that is absent is an error,
-    because a silently shorter corpus is not the one the manifest describes.
+    searched (the manifest is JSON but not a graph); a listed graph that is missing is an
+    error.
     """
     graphs = set()
     for text in supplied:
@@ -1091,10 +1001,8 @@ def discover_graphs(supplied: list[str]) -> list[Path]:
         if manifest is not None and manifest.is_file():
             graphs.update(_manifest_graphs(manifest))
         elif path.is_dir():
-            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
-            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with `generate`
-            # only if that form is collected alongside hand-written JSON. A nested corpus
-            # root's manifest is not a graph either.
+            # `hipdnn_corpus_gen` writes binary FlatBuffers (`graphs/*.fb`); a nested
+            # corpus root's manifest is not a graph.
             graphs.update(
                 found
                 for found in [*path.rglob("*.json"), *path.rglob("*.fb")]
@@ -1147,11 +1055,9 @@ def _requested_uhd_ids(values: list[str], metrics: list[str]) -> dict[str, str]:
 def _declared_uhd_id(binding: dict, metric: str, requested: str | None) -> str | None:
     """The id an L1 model for `metric` must carry, or None to mint one.
 
-    An engine with no UED binds its models by UUIDs its provider declares per metric, and
-    its description reports the one for the requested metric as `binding.uhd_id`. Training
-    under any other id ships a model the engine never reads, so the declaration is the
-    default, a contradicting --uhd-id is refused, and with neither the run stops here --
-    after one graph, not after the whole corpus -- rather than minting an unread id.
+    A UED-less engine reads only the per-metric id its provider declares
+    (`binding.uhd_id`): a contradicting --uhd-id is refused, and with neither the run
+    stops rather than minting an id the engine never reads.
     """
     declared = binding.get("uhd_id")
     if "ued" in binding["trained_against"]:
@@ -1180,11 +1086,8 @@ def withheld_kernel_fields(
 ) -> list[dict]:
     """The KMD fields generation never offers as `$kernel.*` features, each with why.
 
-    The collection UED exposes every KMD field (RFC 0019 §13.2) so every catalog entry is
-    reachable while timing; the model, though, ships under the AUTHORED UED, and the runtime
-    admits it only if each `$kernel.*` axis is one of that UED's knobs. A field the matcher
-    binds from the graph is no loss: its value is on the problem side under the twin column
-    named here, which is where the model reads it.
+    The runtime admits a `$kernel.*` axis only if it is a knob of the shipping UED; a
+    graph-bound field is still readable through its problem-side twin.
     """
     twins = graph_bound_twins(published)
     withheld = []
@@ -1223,10 +1126,8 @@ def feature_recipe(
 ) -> tuple[list, list]:
     """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
 
-    `kmd_fields` is None for an engine-level run, which reads no kernel fields at all. For a
-    catalog run the proposal offers `$kernel.*` only for the shipping UED's knobs, and an
-    authored recipe reading any other kernel field is refused here, before training spends
-    hours on a model the runtime would not use.
+    `kmd_fields` is None for an engine-level run. For a catalog run, `$kernel.*` axes must
+    be shipping UED knobs, checked here before training rather than at promotion.
     """
     omitted = []
     if authored is not None:
@@ -1265,8 +1166,8 @@ def run_generate(args: argparse.Namespace) -> int:
     if args.workspace_limit is not None and (not immediate or args.workspace_limit < 0):
         logger.error("--workspace-limit requires %s and a nonnegative byte count", ROLE)
         return 1
-    # One timing run, one UHD per metric (RFC 0019 §13.4). Order is kept so the first
-    # metric named is the one whose collection proposes the shared feature recipe.
+    # One UHD per metric (RFC 0019 §13.4); the first metric named proposes the shared
+    # feature recipe.
     metrics = list(dict.fromkeys(args.metric or [DEFAULT_RANKING_METRIC]))
     single = len(metrics) == 1
     try:
@@ -1310,10 +1211,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError(
                     "--descriptor-tree must be an existing descriptor root (it may be empty)"
                 )
-        # The catalog sweep times every candidate once, whatever the metric: one timing
-        # run feeds every metric's label (RFC 0019 §13.4). An immediate run measures the
-        # engine's own kernel choice, which follows the requested metric, so each metric
-        # is its own measurement.
+        # One catalog sweep feeds every metric's label (RFC 0019 §13.4); an immediate
+        # run's kernel choice follows the metric, so each metric is measured separately.
         sources = metrics if immediate else [None]
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
@@ -1355,8 +1254,7 @@ def run_generate(args: argparse.Namespace) -> int:
                 )
                 superseded += dropped
         else:
-            # Measuring nothing: the rows, and everything training reads beside them, come
-            # back from the collections exactly as a measuring run would have produced them.
+            # Rows and everything training reads come back from the collections.
             measured = load_collections(
                 args.collection, role=args.role, sources=sources
             )
@@ -1385,8 +1283,8 @@ def run_generate(args: argparse.Namespace) -> int:
             measured["shipping_knobs"],
             measured["collection_knobs"],
         )
-        # What the shipping UED exposes and the KMD declares, as the measurement recorded them:
-        # the catalog admission rule (feature_recipe) checks the recipe against both.
+        # Shipping UED knobs and KMD fields as recorded; feature_recipe checks the recipe
+        # against both.
         knobs = list(shipping_knobs)
         kmd_fields = (
             None
@@ -1397,8 +1295,8 @@ def run_generate(args: argparse.Namespace) -> int:
         if immediate:
             for source in sources:
                 if rows[source]:
-                    # The engine's declaration, read off its own response: it does not vary by
-                    # graph, so the first row of each metric settles it, measured or collected.
+                    # The declared id does not vary by graph, so each metric's first row
+                    # settles it.
                     uhd_ids[source] = _declared_uhd_id(
                         json.loads(rows[source][0]["binding"]),
                         source,
@@ -1435,19 +1333,9 @@ def run_generate(args: argparse.Namespace) -> int:
             _write_json(corpora[source], _absent_as_null(rows[source]))
             frames[source] = frame
         _write_json(stage / "provenance.json", provenance)
-        # Three conditions, because they are three different facts about a candidate and
-        # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
-        # measurement came back, and `numerically_valid is not False` says nothing showed
-        # the result to be wrong. The last one is the label gate -- a wrong-but-fast kernel
-        # holds the best time in its group, so admitting it trains the ranker to prefer it.
-        # `ne(False)` rather than `eq(True)`: an undecidable verdict is null, and null is
-        # the pre-existing state of every corpus collected before there was a reference to
-        # check against (Open Question 19). Gating on it would train on nothing at all.
-        # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
-        # with its measurement suppressed and its marker, which is what §13.2 asks for.
-        # The verdict gates both roles: an engine whose immediate pick computed the wrong
-        # answer must not teach the estimator its time either. An immediate row is always
-        # `is_valid` (`normalize_row`), so only the verdict gates it.
+        # §13.2 label gate: ran (`succeeded`), measured (`is_valid`), and not known wrong.
+        # A null (undecidable) verdict passes. Excluded rows stay in the corpus files with
+        # their timings suppressed. An immediate row is always `is_valid`.
         usable = {}
         for source, frame in frames.items():
             keep = ~known_wrong(frame)
@@ -1456,16 +1344,9 @@ def run_generate(args: argparse.Namespace) -> int:
             usable[source] = frame[keep].copy()
         if any(candidates.empty for candidates in usable.values()):
             raise ValueError("the benchmark produced no successful valid timings")
-        # Checked here, the first moment it is knowable, rather than at the
-        # `problems_scored` gate below. Without this the run trains a model and evaluates
-        # it before dying on "held-out corpus has no evaluable candidate ranking" -- a true
-        # statement that names the symptom and not the cause, and whose documented remedy
-        # ("give the catalog a knob its matcher does not pin") is right for an engine whose
-        # variants were collapsed by an over-broad match and wrong for one whose kernel
-        # choice is a total function of the problem by design. Those two want opposite
-        # things, and only the second wants L1. The collected measurements survive into the
-        # preserved stage either way, which is the point: they are exactly the labels the
-        # L1 run needs, so the sweep is not wasted, only the role was.
+        # Refuse a deterministic catalog now, naming the cause, rather than failing after
+        # training on the "no evaluable candidate ranking" symptom; such an engine wants
+        # the L1 role, and the preserved stage keeps its measurements for that run.
         density = None
         if not immediate:
             density = candidate_density(usable[None])
@@ -1502,8 +1383,8 @@ def run_generate(args: argparse.Namespace) -> int:
         for source in sources:
             candidates = usable[source]
             if args.recall:
-                # Every shape the engine can ever be asked about is in the corpus: holding some
-                # out would ship a model that has not seen shapes it will certainly meet.
+                # A closed shape space: holding shapes out would hide ones the model will
+                # certainly meet.
                 train_frames[source] = candidates
             else:
                 split = split_problems(
@@ -1539,8 +1420,8 @@ def run_generate(args: argparse.Namespace) -> int:
         )
         withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
         if immediate:
-            # Leakage only; whether every entry evaluates on each graph's published features
-            # is the shared evaluator's answer, which training asks once the encoding exists.
+            # Leakage only; whether each entry evaluates on the published features is
+            # the shared evaluator's check during training.
             validate_signature(signature)
         unknown = {ref[1:] for ref in signature_references(signature)} - published
         if unknown:
@@ -1560,8 +1441,7 @@ def run_generate(args: argparse.Namespace) -> int:
             )
         _write_json(stage / "features.json", signature)
         models = []
-        # Each directory is named for the metric requested, which a metric-less fallback
-        # still answers to.
+        # Named for the requested metric, even when a metric-less fallback serves it.
         for requested, (declared, target, calibrated, statistic, source) in zip(
             metrics, labels
         ):
@@ -1614,8 +1494,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError(
                     f"training {requested} failed; no generated model was published"
                 )
-            # Recall scores every shape, all of them trained on: the question is how well the
-            # model reproduces the space it will serve, not how it extrapolates.
+            # Recall scores every (trained) shape: fit to the served space, not
+            # extrapolation.
             eval_args = [
                 "evaluate",
                 "--input",
@@ -1637,10 +1517,8 @@ def run_generate(args: argparse.Namespace) -> int:
             report_path = model_dir / "eval_report.json"
             report = json.loads(report_path.read_text(encoding="utf-8"))
             if not report["metrics"]["problems_scored"]:
-                # The density check above already refused a wholly deterministic catalog, so
-                # reaching here that way means the holdout alone came out single-candidate --
-                # a thin corpus rather than an inert engine. Say which, because the remedies
-                # differ and this message has historically been read as the other one.
+                # A wholly deterministic catalog was refused above, so this is a thin
+                # holdout, not an inert engine; say which, as the remedies differ.
                 if report["metrics"].get("deterministic_catalog"):
                     raise DeterministicCatalogError(
                         "every held-out problem has a single candidate, though the corpus as a "
@@ -1657,7 +1535,7 @@ def run_generate(args: argparse.Namespace) -> int:
                 tuple(key) for key in report["split"]["eval_problem_keys"]
             }
             training_keys = set(problem_keys(source_train, grouping))
-            # A held-out score must be held out; a recall score is by definition over trained shapes.
+            # Only a holdout run must keep evaluation disjoint from training.
             if not args.recall and training_keys & evaluated_keys:
                 raise ValueError("evaluation includes a problem seen during training")
             report["holdout_integrity"] = {
@@ -1684,28 +1562,25 @@ def run_generate(args: argparse.Namespace) -> int:
                 "schema": "uhd_gen.generation/2",
                 "trained_against": provenance,
                 "graphs": graph_inputs,
-                # Where the measurements came from when this run measured nothing, and how many
-                # rows were set aside so each configuration on a shape is trained on once.
+                # Source collections (when nothing was measured) and rows dropped as
+                # superseded repeats.
                 "collections": collections,
                 "superseded_rows": superseded,
-                # Graphs whose collection failed and were skipped, each with its error, within
-                # the --max-graph-failures budget; their staged copies stay under graphs/.
+                # Graphs skipped within the --max-graph-failures budget, each with its
+                # error; their staged copies stay under graphs/.
                 "failed_graphs": failed_graphs,
                 "max_graph_failures": args.max_graph_failures,
                 "commands": commands,
                 "features_signature": signature,
                 "omitted_proposals": omitted,
-                # KMD fields never offered as `$kernel.*` features, and why: the runtime admits only
-                # the shipping UED's knobs, and a graph-bound field is read from its problem twin.
+                # KMD fields never offered as `$kernel.*` features, and why.
                 "withheld_kernel_fields": withheld,
-                # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
-                # was trained, and the exact commands that trained and evaluated it.
+                # One entry per UHD: its metric (null if metric-less), model dir, and the
+                # exact train/evaluate commands.
                 "models": models,
                 "device_coverage": coverage,
-                # How much of this corpus the ranker could actually learn from. A run that
-                # reaches here had *some* contested problems, but "some" spans a model fitted
-                # on every problem and one fitted on four of them, and the metrics beside it
-                # report only the second without saying so.
+                # How much of the corpus is contested; the metrics alone don't say how
+                # many problems the ranker actually learned from.
                 "catalog_density": density.as_dict() if density else None,
                 "seed": args.seed,
                 "eval_fraction": None if args.recall else args.eval_fraction,
@@ -1714,10 +1589,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 "evaluation": "recall" if args.recall else "holdout",
                 "shipping_knobs": shipping_knobs,
                 "collection_knobs": collection_knobs,
-                # What each knob's pinned integer addressed, as the engine reported it on the
-                # candidates this corpus enumerated. Recorded for reading, not for use: the
-                # runtime derives its own numbering, and an ordinal in a stored row is
-                # unreadable without knowing which value it named.
+                # Each knob ordinal's value as the engine reported it; for reading only,
+                # since the runtime derives its own numbering.
                 "knob_encodings": knob_encodings,
                 "engine_id": engine_id,
                 "training_arches": arches,
@@ -1775,8 +1648,8 @@ def run_generate(args: argparse.Namespace) -> int:
         if not args.no_promote:
             parser = argparse.ArgumentParser()
             add_promote_arguments(parser)
-            # In sequence, each against the role map the previous one wrote: promotion adds a
-            # UHD beside the other metrics' and replaces only its own metric's.
+            # Sequentially, each against the role map the previous one wrote; promotion
+            # replaces only its own metric's UHD.
             for model_dir, corpus, identity in published_models:
                 promote_args = [
                     "--model-dir",
@@ -1806,13 +1679,8 @@ def run_generate(args: argparse.Namespace) -> int:
             )
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:
-        # The stage holds hours of benchmarking -- the collected corpus, the captured
-        # command output, and by this point often a trained model too. RFC 0019.13 §8.7:
-        # "measurements outlive the strategy that requested them", so a failure anywhere
-        # after collection reports where they are instead of deleting them. Every path
-        # that raises after `collect_graph` reaches here, including the empty-holdout
-        # check, which fires before the stage is renamed into place. It is removed only
-        # by the successful rename below, so nothing is left behind by a run that worked.
+        # RFC 0019.13 §8.7: measurements outlive the strategy, so a failure after
+        # collection reports the preserved stage instead of deleting it.
         if stage is not None and stage.exists():
             logger.error(
                 "%s; the collected corpus and any trained model are preserved at %s "

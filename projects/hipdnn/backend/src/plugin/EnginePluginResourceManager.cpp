@@ -92,9 +92,8 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-/// Union payloads are optional in FlatBuffers, so VerifyBuffer accepts a KnobSetting whose
-/// type tag names a value with no payload table behind it -- and UnPack() then dereferences
-/// that null payload. True when every tagged knob value in @p config has its payload.
+/// True when every tagged knob value in @p config has its payload. FlatBuffers unions are
+/// optional, so VerifyBuffer accepts a missing payload that UnPack() would dereference.
 bool everyKnobValueIsPresent(const hipdnn_flatbuffers_sdk::data_objects::EngineConfig* config)
 {
     if(config == nullptr || config->knobs() == nullptr)
@@ -578,9 +577,8 @@ std::vector<uint8_t>
     const auto plugin = _handleToPlugin.at(handle);
     const auto serializedGraph = graph->getSerializedGraph();
     hipdnnPluginConstData_t data{nullptr, 0};
-    // Reuse the details allocator/deallocator protocol, and establish ownership BEFORE
-    // entering the plugin: enumerateCandidates throws on a late failure that may already
-    // have written an allocation into `data`.
+    // Own the allocation before calling the plugin: enumerateCandidates may throw after
+    // writing one into `data`.
     const auto release = [&plugin, handle](hipdnnPluginConstData_t* owned) {
         if(owned->ptr != nullptr)
         {
@@ -634,8 +632,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     const auto it = _engineIdToHandle.find(engineId);
     THROW_IF_TRUE(
         it == _engineIdToHandle.end(), HIPDNN_STATUS_BAD_PARAM, "Prediction engine is not loaded");
-    // RFC 0019 §11.4: the request names its metric in the config; an unregistered one is
-    // refused here rather than handed to a plugin that cannot rank by it.
+    // RFC 0019 §11.4: refuse an unregistered metric before calling the plugin.
     const auto* requestedName = config.getEngineConfig().ranking_metric();
     const auto& metric = heuristics::resolveRankingMetric(
         requestedName == nullptr ? std::string_view{} : requestedName->string_view());
@@ -698,8 +695,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         return invalid("Malformed prediction response");
     }
     const auto* response = fb::GetEnginePrediction(data.ptr);
-    // Checked before anything reads the configuration, whatever the status: UnPackTo()
-    // below unpacks it for every status.
+    // Checked before UnPackTo() below, which runs for every status.
     if(!everyKnobValueIsPresent(response->engine_config()))
     {
         return invalid("Prediction configuration names a knob value it does not carry");
@@ -708,8 +704,8 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     {
         return invalid("Prediction engine or layer does not match the request");
     }
-    // An answer in another metric is a claim about a different quantity, never something
-    // to convert (RFC 0019 §4.4): it is invalid whatever its status.
+    // An answer in another metric is invalid whatever its status; it is never converted
+    // (RFC 0019 §4.4).
     const auto answered
         = response->metric() == nullptr ? std::string_view{} : response->metric()->string_view();
     if(answered != metric.name)

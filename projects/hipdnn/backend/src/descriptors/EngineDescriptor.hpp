@@ -40,13 +40,11 @@ private:
     int64_t _candidateOffset = 0;
     int64_t _candidateLimit = MAX_CANDIDATE_LIMIT;
     bool _predictionEvaluate = true;
-    /// Metric the engine-kind prediction is asked in (empty = default). Frozen at finalize
-    /// with the other inputs, so the one cached prediction below is always in this metric.
+    /// Metric for the engine-kind prediction (empty = default); frozen at finalize.
     std::string _predictionMetric;
     std::vector<std::shared_ptr<const KnobSettingDescriptor>> _candidateScope;
 
-    /// Computed on first read and owned by this descriptor, each behind its own flag so
-    /// ordinary details caching is untouched.
+    /// Computed on first read and owned by this descriptor.
     mutable std::vector<uint8_t> _candidatePage;
     mutable std::once_flag _candidatesOnce;
     mutable flatbuffers::DetachedBuffer _prediction;
@@ -55,8 +53,7 @@ private:
     /// Resolved with details; publication is guarded by _detailsOnce/_detailsLoaded.
     mutable std::string _engineName;
 
-    /// Queries the provider for engine details once, on the first read of an attribute
-    /// derived from them (knobs, behavior notes, name). finalize() does not load them.
+    /// Loads engine details once, on the first read of a details-derived attribute.
     void ensureDetailsLoaded() const;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,

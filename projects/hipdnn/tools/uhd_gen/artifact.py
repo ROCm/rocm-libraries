@@ -1,14 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The runtime's `tree_data` artifact checks, applied before any offline tool trusts the bytes.
+"""The runtime's `tree_data` artifact checks, for offline tools that read the same bytes.
 
-`TreeDataAdapter::loadFromBuffer` refuses an artifact whose declared digest differs, whose
-file identifier is not `HGBM`, which the FlatBuffers verifier rejects, or whose trees fail
-`prepareTrees`; the engine-level predictor and the kernel heuristic then refuse one whose
-feature count is not its signature's. An offline evaluator or promote that decodes the same
-file with fewer checks reports numbers for -- or installs -- a model the engine will never
-use, and the engine's only trace of that is one log line before it silently ranks by static
-order.
+Mirrors `TreeDataAdapter::loadFromBuffer` and the feature-count admission, so an offline
+tool never reports on or installs a model the engine would refuse.
 """
 from __future__ import annotations
 
@@ -31,15 +26,9 @@ class _Unverifiable(ValueError):
 class _GbdtModelVerifier:
     """`flatbuffers::Verifier` with its default options, running `VerifyGbdtModelBuffer`.
 
-    The generated Python accessors have no verifier: they read wherever an offset points
-    and only fail if Python happens to notice, so a string with no terminator, a vector
-    whose declared length overruns its neighbour or a misaligned scalar decodes happily
-    here and is refused by the engine. This is verifier.h and the generated `Verify`
-    methods of gbdt_model_generated.h, check for check and in the same order: every
-    offset, vtable, scalar field, vector, string terminator and nested table, with the
-    same alignment, depth and table-count limits. Positions are offsets into the buffer,
-    exactly as the C++ verifier computes them (`p - buf_`), so alignment is relative to
-    the buffer start there as here.
+    The generated Python accessors do no bounds checks, so this ports verifier.h and the
+    generated `Verify` methods check for check. Positions are offsets from buffer start,
+    as in C++ (`p - buf_`), so alignment matches.
     """
 
     _MAX_DEPTH = 64
@@ -61,8 +50,7 @@ class _GbdtModelVerifier:
             raise _Unverifiable(what)
 
     def _range(self, at: int, length: int, what: str) -> None:
-        # `Verify(elem, elem_len)`; positions here are never negative in C++ because they
-        # are size_t, so a negative one is the same out-of-range refusal.
+        # `Verify(elem, elem_len)`; C++ positions are size_t, so negative is out of range.
         self._check(
             0 <= at and length < self._size and at <= self._size - length,
             f"{what} at {at} (+{length}) lies outside the {self._size}-byte buffer",
@@ -230,11 +218,9 @@ def verify_gbdt_buffer(data: bytes) -> None:
 
 
 def verify_feature_count(num_features: int, signature_length: int, where) -> None:
-    """The runtime's arity admission: the artifact consumes exactly the signature's slots.
+    """The runtime's arity admission: `num_features` must equal the signature length.
 
-    EnginePredictor (`expectedFeatureCount() != featureCount()`) and UhdKernelHeuristic
-    both refuse the pair otherwise; a matching features_hash proves only that the contract
-    is the one trained against, not that the artifact reads that many columns.
+    A matching features_hash does not prove this; the engine checks it separately.
     """
     if num_features != signature_length:
         raise ValueError(
@@ -244,11 +230,7 @@ def verify_feature_count(num_features: int, signature_length: int, where) -> Non
 
 
 def artifact_digest(path: Path) -> str:
-    """`tree_data.hash` as the runtime compares it: bare lowercase hex SHA-256 of the file.
-
-    `sha256(buffer, size)` in Sha256.hpp returns no `sha256:` prefix, so neither does this;
-    a prefixed value would refuse every artifact it guards.
-    """
+    """`tree_data.hash` as the runtime compares it: bare lowercase hex SHA-256, no prefix."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
@@ -317,10 +299,8 @@ def verify_tree_artifact(
 ) -> bytes:
     """The bytes of a `tree_data` artifact the runtime would load, or ValueError saying why not.
 
-    Same order as `TreeDataAdapter::loadFromBuffer`: size, declared digest, identifier,
-    structure. The features-hash comparison is left to the caller, which holds the
-    descriptor's signature digest. `feature_count`, when given, is the signature's slot
-    count, which the artifact's `num_features` must equal (`verify_feature_count`).
+    Checks run in `TreeDataAdapter::loadFromBuffer` order. The caller compares the features
+    hash; `feature_count`, when given, must equal the artifact's `num_features`.
     """
     path = Path(path)
     data = path.read_bytes()

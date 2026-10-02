@@ -1,33 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""`uhd_gen size`: how many more unique shapes a model needs, and which regimes to take them from.
+"""`uhd_gen size`: how many more unique shapes a model needs, and from which regimes.
 
-Growing a training set is a loop -- collect, train, find it short, collect again -- and each
-round has to decide how much to measure. Guessing wastes GPU time in both directions, so the
-decision is made from the measurements already in hand:
-
-1. **A pinned test set.** Shapes held out of every fit, chosen once and reused every round, so
-   one round's numbers can be compared with the next's.
-2. **A learning curve.** The model is trained, exactly as `generate --collection` trains it,
-   on nested subsets of the other shapes, several random subsets per size, and every model is
-   scored on the same test set.
-3. **A ceiling, measured.** Where the store holds a shape measured more than once (another
-   collection, another GPU), the repeat and the label disagree by two measurement errors; a
-   model predicting the true value faces only the label's one. Taking the errors as
-   independent and alike, one measurement's error is the disagreement over sqrt(2), and the
-   ceiling is how often that falls within the tolerance. A target above it needs better
-   measurement, not more shapes.
-4. **A fit.** miss(n) = floor + a * n^-b over the curve, floor = 1 - ceiling, with an interval
-   from resampling the draws. Solved for the size a target needs.
-5. **An allocation.** Every regime first to a floor of shapes (RFC 0019.13's 30 per bucket),
-   the rest in proportion to where the model misses on the test set -- written as the
-   `--regime-quotas` file `hipdnn_corpus_gen` reads, so the next corpus is aimed.
-
-With `--previous`, the report also scores the last round's prediction against what this round
-achieved: the estimator is checked by the loop it drives.
-
-Engine-immediate (L1, `predict_engine`) models only: the per-row error a within-X% target is
-about is what an L1 predicts. A catalog ranker's accuracy is regret, sized by other means.
+Trains on nested subsets of the pool, scores each on a test set pinned across rounds,
+fits miss(n) = floor + a * n^-b with floor = 1 - the ceiling measured from repeats, and
+splits new shapes over regimes as `--regime-quotas` for `hipdnn_corpus_gen`.
+Engine-immediate (L1) models only: a catalog ranker's accuracy is regret, not row error.
 """
 from __future__ import annotations
 
@@ -61,7 +39,7 @@ SCHEMA = "uhd_gen.sizing/1"
 TEST_SET_SCHEMA = "uhd_gen.sizing_test_set/1"
 #: A regime this thin cannot be stratified or scored; RFC 0019.13's problem floor.
 REGIME_FLOOR = 30
-#: Test shapes a regime's own miss rate is worth, against the global rate, when shrunk.
+#: Pseudo-count of test shapes shrinking a regime's miss rate toward the global rate.
 SHRINKAGE = 10
 BOOTSTRAP = 200
 
@@ -123,7 +101,7 @@ def add_size_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--seed", type=int, default=0)
-    # The training every curve point runs: `generate --collection` with these.
+    # Passed through to the `generate --collection` run at every curve point.
     parser.add_argument("--descriptor-tree", required=True)
     parser.add_argument("--engine")
     parser.add_argument("--engine-id", type=int)
@@ -144,7 +122,7 @@ def add_size_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Pure pieces: the ceiling, the fit, the allocation. No training, no files.
+# Pure pieces: no training, no files.
 # ---------------------------------------------------------------------------------------------
 
 
@@ -153,16 +131,9 @@ def ceiling_from_repeats(
 ) -> dict:
     """How often a perfect model could land within `tolerance` of a label, from repeats.
 
-    `labels` is key -> (session, row) for the row training uses; `measurements` is every
-    (session, row) the store holds, a session being one collection on one device. A repeat is a
-    row of the same key from another session: another collection, another GPU. Returned as
-    {"repeats", "within", "median_abs_pct"}, or `within` None when no shape in `shapes` was
-    measured twice -- an unknown ceiling is reported as unknown, not assumed perfect.
-
-    A repeat and its label differ by two measurement errors; the label alone carries one. So
-    each disagreement is divided by sqrt(2) -- independent errors of equal spread -- before it
-    is compared with the tolerance. Scored undivided, the ceiling is what a second measurement
-    achieves, and a good model beats that.
+    A repeat is the same key from another session (collection x device). Disagreements
+    are divided by sqrt(2): a repeat carries two independent measurement errors.
+    `within` is None when nothing was measured twice; unknown is not assumed perfect.
     """
     errors = []
     for session, row in measurements:
@@ -204,9 +175,8 @@ def _positive(value) -> bool:
 def fit_curve(points: list, floor: float | None) -> dict | None:
     """miss(n) = floor + a * n^-b through (n, miss) points, by least squares in log-log.
 
-    `floor` is 1 - ceiling when the ceiling was measured. Unknown, it is searched for over
-    [0, min miss) and the best fit's floor reported as estimated. None when fewer than three
-    points stand clear of the floor -- a line through two points is not evidence of a slope.
+    A None `floor` is searched over [0, min miss). Returns None with fewer than three
+    points clear of the floor.
     """
 
     def solve(fixed: float):
@@ -259,14 +229,10 @@ def size_for(fit: dict, target_within: float) -> float | None:
 
 
 def allocate(new_shapes: int, regimes: dict, floor: int) -> dict:
-    """Split `new_shapes` over regimes: each first to `floor` training shapes, the rest by misses.
+    """Split `new_shapes` over regimes: `floor` each first, the rest by test misses.
 
-    `regimes` is regime -> {"train", "test", "misses"}. The remainder goes in proportion to
-    each regime's test-miss mass -- its test count times its miss rate, shrunk toward the
-    global rate so a regime with three test shapes does not get a third of the budget on the
-    strength of one miss. A regime nothing has tested gets its floor and no more: there is
-    no evidence yet of how it fares. Rounding goes to the largest remainders, so the quotas
-    sum to exactly what was asked (or to the floors, if they alone exceed it).
+    The rest follows test count x miss rate (shrunk toward the global rate), so untested
+    regimes get only their floor. Largest-remainder rounding makes quotas sum exactly.
     """
     deficits = {r: max(0, floor - info["train"]) for r, info in regimes.items()}
     rest = max(0, new_shapes - sum(deficits.values()))
@@ -318,10 +284,8 @@ def default_sizes(pool: int) -> list:
 def _load_everything(paths: list, metric: str) -> tuple[dict, list, dict]:
     """(labels, every measurement, the merge) for `metric`'s corpora in `paths`.
 
-    Labels are key -> (session, row) by the rule training applies -- the newest session to
-    measure a key -- decided here with the sessions kept, so the ceiling can tell a label from
-    its repeats. `load_collections` still does the merge, so everything it refuses (mixed
-    revisions, engines, a metric not measured) is refused here too.
+    Labels follow training's newest-session-wins rule but keep the session, so the
+    ceiling can tell a label from its repeats; `load_collections` validates the merge.
     """
     merged = load_collections(paths, role=ROLE, sources=[metric])
     loaded = []
@@ -407,8 +371,7 @@ def run_size(args: argparse.Namespace) -> int:
         label_column = ranking_metric(args.metric).label
         labels, measurements, merged = _load_everything(args.collection, args.metric)
 
-        # Regimes: the rows' own, then any manifest named for rows collected before they had
-        # one. Every regime a manifest names is known even if nothing in it was measured.
+        # Row regimes win; manifests fill older rows and add regimes nothing measured.
         regime_of, operation_of = {}, {}
         for manifest in args.corpus_manifest:
             for benchmark, columns in read_regime_manifest(Path(manifest)).items():
@@ -583,8 +546,7 @@ def run_size(args: argparse.Namespace) -> int:
         )
         floor = None if ceiling["within"] is None else 1.0 - ceiling["within"]
         if floor is not None and floor >= min(m for _, m in means):
-            # A model already past the ceiling: the repeats say the labels are noisier than
-            # the model's misses, so they cannot bound it. Estimated from the curve instead.
+            # Curve already beats the measured ceiling: the fit estimates its own floor.
             ceiling["binding"] = False
             ceiling["note"] = (
                 "the curve already exceeds the measured ceiling; the fit estimates "
@@ -671,15 +633,14 @@ def run_size(args: argparse.Namespace) -> int:
                         "within": args.target,
                     }
             if prediction is None:
-                # No target, or one more shapes cannot reach: the plan is the next doubling,
-                # and saying so is the recommendation's basis rather than a silent default.
+                # No reachable target: recommend the next doubling (the basis).
                 recommendation["basis"] = "next_doubling"
                 recommendation["new_shapes"] = len(pool)
                 prediction = {"training_shapes": 2 * len(pool), "within": doubled}
             else:
                 recommendation["basis"] = "target"
 
-        # Per regime, from the whole-pool model: where it misses, and how thin each regime is.
+        # Per regime, from the whole-pool model.
         regimes: dict = {}
         for regime in set(regime_of.values()) | set(shapes_by_regime):
             regimes[regime] = {"train": 0, "test": 0, "misses": 0, "errors": []}
@@ -705,8 +666,7 @@ def run_size(args: argparse.Namespace) -> int:
         new_shapes = recommendation.get("new_shapes") or 0
         labelled = {r: v for r, v in regimes.items() if r != "unlabelled"}
         quotas = allocate(new_shapes, labelled, args.floor) if labelled else {}
-        # Rows a corpus yields that training can use: a shape the bench could not time, or timed
-        # to no throughput, is asked for and lost, so a quota asks for that much more.
+        # Inflate quotas by the usable-row rate, since untimed shapes are lost.
         yielded = sum(
             _positive(row.get(label_column)) for _, row in labels.values()
         ) / max(1, len(labels))

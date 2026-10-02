@@ -126,17 +126,12 @@ public:
 
     /**
      * @brief Dispatches a prediction or description to the requested engine.
-     * @param handle Plugin handle for the graph's device.
-     * @param opGraph Operation graph to predict.
-     * @param engineConfig Engine identity, explicit selection constraints, and the
-     *        ranking metric (`ranking_metric`, empty = "tflops") to answer in.
-     * @param kind ENGINE never invokes CONFIGURATION as a fallback.
+     * @param engineConfig Engine identity, selection constraints, and `ranking_metric`
+     *        (empty = "tflops").
+     * @param kind ENGINE never falls back to CONFIGURATION.
      * @param evaluate False publishes binding/features without model evaluation.
-     * @return Owned prediction in the requested metric; unavailable models do not affect
-     *         applicability.
-     * @throws HipdnnPluginException BAD_PARAM for an unknown kind or an unregistered
-     *         metric, before any engine sees the request (RFC 0019 §4.4: an unknown
-     *         metric is refused where the request is made).
+     * @throws HipdnnPluginException BAD_PARAM for an unknown kind or unregistered metric,
+     *         before any engine sees the request (RFC 0019 §4.4).
      */
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle& handle,

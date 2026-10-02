@@ -36,9 +36,7 @@ bool matches(const MatchContext& context)
     return matchesGraph(POINTWISE_ADD, context).has_value();
 }
 
-/// The bound value at @p token as a string, or nullopt when the token is absent or holds
-/// something else. The mirror of tryGetBoundInt, which the SDK ships but has no string
-/// twin.
+/// String twin of the SDK's tryGetBoundInt: nullopt when absent or not a string.
 std::optional<std::string> boundString(const BoundTokens& bound, std::string_view token)
 {
     const auto entry = bound.find(std::string(token));
@@ -341,9 +339,7 @@ TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
 // Problem binding: the dims, dtypes and cost fields a UHD ranks on
 // ---------------------------------------------------------------------------
 //
-// Token names are written out as literals rather than composed from the pack's
-// constants: the string IS the contract a UHD's features_signature references, so a
-// rename must fail here rather than quietly rename both sides at once.
+// Token names are literals: they are the contract a UHD's features_signature references.
 
 TEST(TestPointwiseAddBinding, BindsEveryOperandDimPositionallyAndNoneItDoesNotHave)
 {
@@ -359,7 +355,7 @@ TEST(TestPointwiseAddBinding, BindsEveryOperandDimPositionallyAndNoneItDoesNotHa
         EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[1]"), 1);
         EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[2]"), 1);
         EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[3]"), 1);
-        // The rank-4 graph has no fifth axis; publishing one would be inventing a dim.
+        // Rank 4: no fifth axis.
         EXPECT_FALSE(tryGetBoundInt(*bound, prefix + ".dims[4]").has_value());
     }
 }
@@ -372,7 +368,7 @@ TEST(TestPointwiseAddBinding, BindsTheFifthDimOfARankFiveGraph)
     const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    // Dims are published from the tensor's own rank, not from a fixed count.
+    // Dims follow the tensor's own rank.
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.input_a.dims[4]"), 1);
 }
 
@@ -385,22 +381,17 @@ TEST(TestPointwiseAddBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnum
     const auto floatBound = matchesGraph(POINTWISE_ADD, floatFixture.context());
     const auto doubleBound = matchesGraph(POINTWISE_ADD, doubleFixture.context());
     ASSERT_TRUE(floatBound.has_value());
-    // This matcher gates no dtype -- only the kernel-scoped one does -- so the binding
-    // must spell dtypes past the two the shipped kernels are compiled for.
+    // This matcher gates no dtype, so dtypes beyond the shipped kernels' must still bind.
     ASSERT_TRUE(doubleBound.has_value());
 
-    // to_string(DataType)'s spelling, which is the vocabulary a UHD's generated
-    // `categorical_encoding` (RFC 0019 §6.5) is fitted on. EnumNameDataType would answer
-    // "FLOAT"/"DOUBLE" and `float32`/`float64` are the plausible near-misses; a corpus
-    // recorded from real runs holds none of the four, so a wrong spelling here costs the
-    // feature rather than warning.
+    // to_string(DataType)'s spelling, the vocabulary `categorical_encoding` is fitted on
+    // (not EnumNameDataType's "FLOAT"/"DOUBLE").
     EXPECT_EQ(boundString(*floatBound, "pointwise.input_a.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "pointwise.input_b.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "pointwise.output.dtype"), "fp32");
     EXPECT_EQ(boundString(*doubleBound, "pointwise.input_a.dtype"), "fp64");
 
-    // A string, never a pre-encoded number: the integer code space belongs to the feature
-    // extractor, and freezing it inside the matcher would let the two drift apart.
+    // A string, never a pre-encoded number.
     EXPECT_FALSE(tryGetBoundInt(*floatBound, "pointwise.input_a.dtype").has_value());
 }
 
@@ -411,9 +402,7 @@ TEST(TestPointwiseAddBinding, BindsFlopsAndBytesForTheOneElementTheKernelTouches
     const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    // By hand: the output is 1x1x1x1, so one element, and a binary add is one flop per
-    // output element -- 1 flop. Bytes reads both inputs and writes the output, one fp32
-    // element each: 3 * 4 = 12.
+    // By hand: one output element, one flop; three fp32 elements moved = 12 bytes.
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.bytes"), 12);
 }
@@ -426,17 +415,14 @@ TEST(TestPointwiseAddBinding, ByteCountFollowsTheOperandDtypeWidth)
     const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    // The same three elements at 8 bytes each = 24: the width is read off each tensor,
-    // not assumed to be the fp32 the shipped kernels happen to use.
+    // The same three elements at 8 bytes each.
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.bytes"), 24);
-    // flops is a pure shape count and must not move with precision.
+    // flops is a pure shape count.
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
 }
 
-/// RFC 0019 §13.6: a cost field with no exact form must be an upper bound or absent,
-/// never silently wrong. A sub-byte dtype has no per-element byte width at all -- its
-/// footprint is a property of the packing -- so `bytes` is omitted rather than rounded up
-/// to one byte, which would overstate an fp4 tensor by 2x.
+/// RFC 0019 §13.6: a sub-byte dtype has no per-element width, so `bytes` is omitted rather
+/// than rounded up.
 TEST(TestPointwiseAddBinding, OmitsBytesForADtypeWithNoStatableElementWidth)
 {
     const GraphFixture fixture(
@@ -446,14 +432,12 @@ TEST(TestPointwiseAddBinding, OmitsBytesForADtypeWithNoStatableElementWidth)
     ASSERT_TRUE(bound.has_value());
 
     EXPECT_FALSE(tryGetBoundInt(*bound, "pointwise.bytes").has_value());
-    // The dtype itself is still knowable, and flops does not depend on element width.
+    // dtype and flops do not depend on element width.
     EXPECT_EQ(boundString(*bound, "pointwise.input_a.dtype"), "fp4_e2m1");
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
 }
 
-/// The other half of the same rule: an unrecognized dtype has no runtime spelling, and
-/// binding to_string's "unknown" fallthrough would hand the UHD's `categorical_encoding`
-/// a spelling its corpus never held, and so one it carries no code for. Absent instead.
+/// An unrecognized dtype has no spelling a `categorical_encoding` can know, so it is absent.
 TEST(TestPointwiseAddBinding, OmitsDtypeAndBytesForAnUnsetDtype)
 {
     const GraphFixture fixture(
@@ -464,18 +448,13 @@ TEST(TestPointwiseAddBinding, OmitsDtypeAndBytesForAnUnsetDtype)
 
     EXPECT_FALSE(boundString(*bound, "pointwise.input_a.dtype").has_value());
     EXPECT_FALSE(tryGetBoundInt(*bound, "pointwise.bytes").has_value());
-    // Shape is unaffected by an unknown element type.
+    // Shape does not depend on the element type.
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.input_a.dims[0]"), 1);
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
 }
 
-/// RFC 0019 §13.6 requires `bytes` to sum each operand's OWN dtype width, and this pack
-/// cannot demonstrate the difference: its kernel is compiled for a single element type,
-/// so the matcher refuses any graph whose operands disagree (see the
-/// CrossOperandDtypeMismatch refusal above) and no mixed-dtype graph ever reaches the
-/// binding. The implementation reads each operand's dtype separately anyway, so a pack
-/// that later admits mixed precision inherits the right sum. This test pins the reason
-/// the stronger assertion is absent, so its absence is not read as an oversight.
+/// The pack's kernel has one element type, so mixed-dtype graphs never reach the binding and
+/// per-operand byte widths (RFC 0019 §13.6) cannot be observed here.
 TEST(TestPointwiseAddBinding, AMixedPrecisionGraphIsRefusedSoPerOperandWidthCannotBeObservedHere)
 {
     const GraphFixture fixture(

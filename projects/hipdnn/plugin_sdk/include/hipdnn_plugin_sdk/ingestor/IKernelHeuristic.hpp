@@ -27,38 +27,23 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Chooses which kernel within an engine to run. An implementation supplies only
-/// `score()`, ranking one kernel at a time without seeing the catalog, so filtering
-/// and ranking commute.
-/// RFC 0019.13 §15.2: what selection returns, per candidate -- the kernel's id and the score
-/// that ordered it, winner first.
+/// One ranked candidate, as returned by selection (RFC 0019.13 §15.2).
 struct ScoredKernel
 {
-    /// Which configuration. For a single-layer heuristic this is the complete answer.
+    /// For a single-layer heuristic this is the complete answer.
     DescriptorId kernelId;
     double score;
-    /// Which group, where the heuristic decides in two layers -- the solver, for MIOpen, whose
-    /// complete answer is a solver *and* a configuration. `groupFeature()` names what the number
-    /// is; NaN means the heuristic made no such decision.
-    ///
-    /// Per candidate rather than once per ranking, because §15.2 returns the sequence so that "a
-    /// winner that fails to build should fall to the runner-up" -- and a runner-up can sit in a
-    /// different group than the winner, so an answer carried only for the winner would be wrong
-    /// for exactly the case the sequence exists to serve.
-    ///
-    /// NaN rather than a sentinel such as -1: this is a feature value, and every real number is
-    /// a legal one, so no in-band number could mean "no group was decided".
+    /// The group chosen by a two-layer heuristic (e.g. MIOpen's solver); `groupFeature()` names
+    /// the field. Per candidate because a runner-up may sit in a different group than the
+    /// winner. NaN means no group was decided; every real number is a legal value.
     double group = std::numeric_limits<double>::quiet_NaN();
 };
 
 namespace detail
 {
 
-/// `priority` descending, then id ascending -- RFC 0019 §5 step 5's deterministic arbitration,
-/// and the order every degraded path falls back to.
-///
-/// Never discovery order: descriptor sets are found by scanning a directory, so discovery order
-/// varies by filesystem and would rank a package differently on two machines.
+/// `priority` descending, then id ascending (RFC 0019 §5 step 5). Never discovery order, which
+/// varies by filesystem.
 inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
 {
     std::vector<KernelDefinition> ordered(entries);
@@ -73,11 +58,7 @@ inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefin
     return ordered;
 }
 
-/// Declared order as §15.2's (id, score) pairs, reporting the 0 that RFC 0019 §5 step 7 gives
-/// "no measurement".
-///
-/// Shared by every path that degrades, so a fallback cannot come to describe itself one way in
-/// one place and another way elsewhere.
+/// Declared order as (id, score) pairs, scoring 0 for "no measurement" (RFC 0019 §5 step 7).
 inline std::vector<ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
 {
     std::vector<ScoredKernel> scored;
@@ -91,14 +72,16 @@ inline std::vector<ScoredKernel> asScored(const std::vector<KernelDefinition>& o
 
 } // namespace detail
 
+/// Chooses which kernel within an engine to run. An implementation supplies only
+/// `score()`, ranking one kernel at a time without seeing the catalog, so filtering
+/// and ranking commute.
 class IKernelHeuristic
 {
 public:
     virtual ~IKernelHeuristic() = default;
 
 private:
-    /// Set the first time a scorer throws. Mutable and atomic because ranking runs through a
-    /// shared_ptr<const> from any thread.
+    /// Mutable and atomic: ranking runs through a shared_ptr<const> from any thread.
     mutable std::atomic<bool> _reportedScorerFailure{false};
 
 public:
@@ -119,34 +102,11 @@ public:
     /// total, so a pack that returns NaN loses selection quality without costing
     /// determinism or reaching UB. Infinities are already well-ordered and pass through.
     ///
-    /// Virtual because an implementation may need the whole catalog at once where this
-    /// default needs only one kernel at a time. A model-backed heuristic has two such
-    /// needs: the problem and device parts of its feature row are the same for every
-    /// candidate and should be computed once, and a model that fails partway through must
-    /// abandon the whole ranking rather than leave a mix of real scores and sentinels,
-    /// which would be neither the model's order nor the fallback's.
-    /// RFC 0019.13 §15.2: what selection returns -- "an ordered sequence of `(UKD id, score)`,
-    /// winner first".
-    ///
-    /// By id rather than object or reference, and that is the whole point: "The result crosses
-    /// a plugin boundary. An object commits the ABI to a kernel-definition layout; a reference
-    /// couples the caller's lifetime to the catalog."
-    ///
-    /// The score travels with the id because the callers §15.2 names need it -- a knob query
-    /// reports the top-ranked value as its default, autotune walks the ranked list, and engine
-    /// selection reads the top score as the engine's figure of merit (§11.1). Returning order
-    /// alone makes the third impossible, which is what blocked §15 phase 7.
-    /// Namespace-scope, aliased here so both spellings resolve. It sits outside the class so
-    /// the shared fallback helper can be defined before the members that use it.
+    /// Results cross a plugin boundary as ids and scores (§15.2), never objects or references.
     using ScoredKernel = ingestor::ScoredKernel;
 
-    /// What decided the order, for the §12 trace: a compiled scorer, or nothing at all.
-    /// Overridden by the unranked fallback, which declines to rank.
-    /// Reports a scorer that threw, once per heuristic.
-    ///
-    /// Once, because the cause is a property of the descriptor set rather than of one graph: a
-    /// scorer reading a metadata field its catalog does not carry throws for every graph that
-    /// reaches it, and a message per selection would bury what it is reporting.
+    /// Logs a scorer failure once per heuristic; the cause is the descriptor set, so it would
+    /// otherwise repeat for every graph.
     void reportScorerFailureOnce(const char* what) const
     {
         if(_reportedScorerFailure.exchange(true))
@@ -158,24 +118,19 @@ public:
                                 << "Further occurrences for this heuristic are not logged.");
     }
 
+    /// What decided the order, for the §12 trace.
     virtual std::string traceDecidedBy() const
     {
         return "native";
     }
 
-    /// Which field `ScoredKernel::group` holds, or nothing when this heuristic decides in one
-    /// layer. Constant for a heuristic, so it is asked once rather than carried in every element
-    /// of every ranking.
-    ///
-    /// A caller needs it because the group is a feature *value*: the number 107 is actionable
-    /// only once something says it is a `kernel.solver_id`.
+    /// Which field `ScoredKernel::group` holds, or nothing for a single-layer heuristic.
     virtual std::optional<std::string> groupFeature() const
     {
         return std::nullopt;
     }
 
-    /// The ranking, in §15.2's form. Overriding this rather than rank() keeps one
-    /// implementation of the order: rank() is derived from it below.
+    /// The ranking in §15.2's form. Override this, not rank(), which derives from it.
     virtual std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                                  const MatchContext& context) const
     {
@@ -192,11 +147,8 @@ public:
         {
             for(const auto& entry : catalog.entries)
             {
-                // A non-finite score sorts last and is reported as 0, the value §5 step 7 gives
-                // "no measurement". Keeping the two keys separate is still necessary: NaN in the
-                // comparator is undefined behaviour, not merely a wrong order, because it compares
-                // false both ways and so is "equivalent" to everything while real scores stay
-                // ordered among themselves.
+                // A non-finite score sorts last and is reported as 0 (§5 step 7). The keys stay
+                // separate because NaN in the comparator is undefined behaviour.
                 const double raw = score(context, catalog.bound, entry);
                 const bool usable = std::isfinite(raw);
                 scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
@@ -206,17 +158,8 @@ public:
         }
         catch(const std::exception& e)
         {
-            // RFC 0019 §5 step 7: "No model, or the scorer errors -> rank by static_order
-            // (priority + id)." A scorer is arbitrary code named by a descriptor -- the shipped
-            // ones read kernel metadata, which throws when a KDP joins the engine with a kernel
-            // that omits the knob -- and this loop had no guard, so the exception propagated out
-            // through rank() and failed the request. Step 7 forbids exactly that: a malformed
-            // descriptor set "must not fail after the engine has already claimed applicability."
-            //
-            // The whole ranking degrades, not the candidates that happened to throw. A mix of
-            // real scores and sentinels is neither order, and step 7 asks for a degraded ranking
-            // rather than a partial one. UhdKernelHeuristic's model path had this guard from the
-            // start; the native path, which is what every shipped UHD uses, did not.
+            // RFC 0019 §5 step 7: a throwing scorer degrades the whole ranking to declared
+            // order; it must not fail the request, and a partial ranking is neither order.
             reportScorerFailureOnce(e.what());
             return detail::asScored(detail::declaredOrder(catalog.entries));
         }
@@ -233,11 +176,7 @@ public:
             return lhs.entry->kernelId < rhs.entry->kernelId;
         });
 
-        // RFC 0019 §12's selection trace, for every heuristic that ranks through this
-        // default -- native scorers and the unranked fallback. UhdKernelHeuristic overrides
-        // rank() and traces its own, with the model provenance §12 also asks for. Two of the
-        // three shipped UHDs are `native` kind, so tracing only the model path would leave
-        // most real selections invisible.
+        // RFC 0019 §12 selection trace. UhdKernelHeuristic traces its own model path.
         if(!scored.empty() && ::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))
         {
             std::ostringstream candidates;
@@ -263,19 +202,11 @@ public:
         return ranked;
     }
 
-    /// @brief Exact physical estimates in the context's ranking metric, best first in that
-    ///        metric's direction; empty when this ranker cannot calibrate for it.
+    /// @brief Exact physical estimates in the context's ranking metric, best first; empty when
+    ///        this ranker cannot calibrate for it.
     ///
-    /// RFC 0019 §11.3: a cross-engine score must be an absolute value of a registered metric,
-    /// on a scale that means the same thing everywhere. Only the model trained on exactly
-    /// `context.rankingMetric` may answer -- §4.4 forbids substituting one metric for another,
-    /// and §11.4 gives L2 no default-ranker fallback. Empty by default, so a heuristic that
-    /// has not said otherwise is never compared against another engine by accident.
-    ///
-    /// The only place calibration is decided. It used to share that decision with a
-    /// `scoreIsCalibrated()` flag read off the heuristic's own descriptor, and the two
-    /// disagreed whenever the descriptor answering was not the one the running architecture
-    /// ranks with.
+    /// Only a model trained on exactly `context.rankingMetric` may answer (RFC 0019 §4.4, §11.3).
+    /// Empty by default so a heuristic is never compared across engines by accident.
     virtual std::vector<ScoredKernel> calibratedRanking(const Catalog& /*catalog*/,
                                                         const MatchContext& /*context*/,
                                                         std::string& /*modelId*/) const
@@ -283,25 +214,16 @@ public:
         return {};
     }
 
-    /// @brief The id of the model calibratedRanking() would answer with for @p metric on
-    ///        @p arch, from what is bound alone -- nothing loaded, nothing ranked. Empty when
-    ///        no bound model could answer, which is the default for the same reason
-    ///        calibratedRanking() is empty by default.
-    ///
-    /// A description asks this: it names the model an evaluation would use, and describing
-    /// is how a caller discovers what an engine predicts, so it must cost no ranking.
+    /// @brief Id of the model calibratedRanking() would use for @p metric on @p arch, from bound
+    ///        state alone (no loading or ranking); empty when none could answer.
     virtual std::string calibratedModelId(const std::string& /*metric*/,
                                           const std::string& /*arch*/) const
     {
         return {};
     }
 
-    /// The same order as rankScored(), as whole kernels.
-    ///
-    /// Kept because the catalog is what the state manager holds and re-sorts; §15.2's point is
-    /// that the *result crossing a plugin boundary* is ids and scores, not that a caller
-    /// already holding the catalog may not look at it. Non-virtual, so there is exactly one
-    /// place the order is decided.
+    /// The same order as rankScored(), as whole kernels. Non-virtual so the order is decided in
+    /// one place.
     std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
         const auto scored = rankScored(catalog, context);
@@ -314,9 +236,7 @@ public:
 
         std::vector<KernelDefinition> ordered;
         ordered.reserve(scored.size());
-        // Named member, not a structured binding: a binding must decompose every member, so it
-        // would have to be rewritten each time ScoredKernel gains one -- and this loop wants
-        // only the id.
+        // Named member, not a structured binding, so adding ScoredKernel fields needs no edit.
         for(const auto& candidate : scored)
         {
             if(const auto found = byId.find(candidate.kernelId); found != byId.end())
@@ -334,12 +254,9 @@ public:
 class NativeKernelHeuristic : public IKernelHeuristic
 {
 public:
-    /// @param objective The UHD's `objective`. `min` means the scorer returns a cost, which
-    ///        score() negates so that rankScored's higher-wins order puts the cheapest first.
-    /// @param transform The UHD's `score.transform`, the space the scorer's value is in.
-    /// @param metric The UHD's `score.metric`; empty for a metric-less ranker. With
-    ///        @p transform it says whether the score is physical (score_transform's
-    ///        isPhysicalScore).
+    /// @param objective `min` means the scorer returns a cost, which score() negates.
+    /// @param transform The UHD's `score.transform`.
+    /// @param metric The UHD's `score.metric`; empty for a metric-less ranker.
     /// @throws std::runtime_error if @p scoreSymbol is not registered.
     explicit NativeKernelHeuristic(const std::string& scoreSymbol,
                                    const std::string& describedBy = {},
@@ -349,27 +266,16 @@ public:
         : _scoreFn(ScoreRegistry::resolve(scoreSymbol, describedBy))
         , _sign(objective == "min" ? -1.0 : 1.0)
         , _transform(std::move(transform))
-        // A native cost scorer says "no measurement" with 0 -- negated, a zero cost would be
-        // -0 and outrank every real candidate's negated cost -- so under `min` a cost must be
-        // positive whatever the score's units. Otherwise §8.3's rule decides.
+        // Under `min` a cost must be positive: a native scorer's 0 means "no measurement", and
+        // negated it would outrank every real cost. Otherwise §8.3's rule decides.
         , _positiveRequired(objective == "min"
                             || uhd::score_transform::isPhysicalScore(metric, _transform))
     {
     }
 
-    /// The scorer's value recovered through `score.transform` and oriented so higher wins --
-    /// the form a model-backed heuristic reports too, so a caller undoes one orientation rule
-    /// whichever kind ranked, and never an inverse transform on top of it.
-    ///
-    /// Recovered before anything compares it to zero: a transformed 0 is a real value (under
-    /// `log`, 1 ms), and reporting the raw 0 made it indistinguishable from the 0 §5 step 7
-    /// gives "no measurement". Every supported inverse is increasing, so ranking on the
-    /// recovered value keeps the scorer's order.
-    ///
-    /// When positivity is required (see the constructor) a recovered value that is not finite
-    /// and positive comes back NaN, which rankScored sorts last and reports as 0. Otherwise the
-    /// value passes through, infinities included: a metric-less `max` scorer may rank on any
-    /// real number, zero and negatives included.
+    /// The scorer's value inverse-transformed and oriented so higher wins. Recovered before
+    /// any zero check, since a transformed 0 is a real value. When positivity is required, a
+    /// non-positive or non-finite value becomes NaN (ranked last, reported as 0).
     double score(const MatchContext& context,
                  const BoundTokens& bound,
                  const KernelDefinition& kernel) const override
@@ -399,19 +305,13 @@ private:
 class UnrankedKernelHeuristic : public IKernelHeuristic
 {
 public:
-    /// §12 asks whether the model or a fallback decided. For this one it is always the
-    /// fallback, and saying so is the point: an engine ranking on priority because it ships
-    /// no UHD looks identical in the output to one whose model ranked that way.
+    /// Always the fallback; the trace must distinguish this from a model that ranked by priority.
     std::string traceDecidedBy() const override
     {
         return "declared_order";
     }
 
-    /// Zero: this heuristic ranks by declared order and computes no figure of merit. RFC 0019
-    /// §5 step 7 fixes what "no measurement" reports -- an estimate of 0, losing on merit
-    /// rather than by exception -- and a per-kernel score meaning the same thing says it the
-    /// same way. Ordering is unaffected, since every kernel scores alike and priority then
-    /// descriptor id decide.
+    /// Zero, which RFC 0019 §5 step 7 reports for "no measurement"; ordering is unaffected.
     double score(const MatchContext& /*context*/,
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& /*kernel*/) const override

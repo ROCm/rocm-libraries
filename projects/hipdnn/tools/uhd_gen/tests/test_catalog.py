@@ -1,11 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""An engine that offers one kernel per problem must be told apart from a broken sweep.
+"""Tell a deterministic catalog (one kernel per problem) apart from a broken sweep.
 
-Both produce a report with nothing scored in it, and they want opposite responses: one
-is an engine whose kernel choice is a total function of the problem and wants L1, the
-other is a collection failure and wants the sweep fixed. The corpora here plant each
-case so the distinction can be asserted rather than eyeballed.
+Both score nothing; the first wants L1, the second wants the sweep fixed.
 """
 from __future__ import annotations
 
@@ -45,7 +42,7 @@ _ENVELOPE = {
 
 
 def _corpus(candidates_per_problem, problems: int = 12) -> pd.DataFrame:
-    """One row per candidate. `candidates_per_problem` may be an int or a per-problem list."""
+    """One row per candidate; `candidates_per_problem` is an int or per-problem list."""
     if isinstance(candidates_per_problem, int):
         counts = [candidates_per_problem] * problems
     else:
@@ -89,8 +86,7 @@ def test_a_contested_corpus_is_not_deterministic():
 
 
 def test_an_empty_corpus_concludes_nothing():
-    # Not deterministic: a corpus that failed to load must not be read as a finding
-    # about the engine, or a ranking role is refused on the strength of a missing file.
+    # A corpus that failed to load says nothing about the engine.
     density = candidate_density(pd.DataFrame())
     assert not density.deterministic
     assert density.problems == 0
@@ -98,8 +94,7 @@ def test_an_empty_corpus_concludes_nothing():
 
 
 def test_the_same_graph_on_two_devices_is_two_problems():
-    # Problem identity is `evaluate`'s. One kernel per (graph, device) is deterministic
-    # even though `benchmark` alone would show two candidates per graph.
+    # Deterministic per (graph, device), though `benchmark` alone shows two candidates.
     df = _corpus(1, problems=4)
     other = df.copy()
     other["device"] = "devB"
@@ -132,8 +127,7 @@ def test_require_rankable_refuses_a_deterministic_catalog_and_names_the_other_ro
 
 
 def test_the_refusal_is_a_value_error_so_existing_handlers_still_catch_it():
-    # `generate.py` preserves the collected stage on ValueError. The measurements are
-    # exactly the labels an L1 run needs, so the sweep must not be discarded.
+    # `generate.py` keeps the collected stage on ValueError; L1 still needs that sweep.
     assert issubclass(DeterministicCatalogError, ValueError)
 
 
@@ -142,7 +136,7 @@ def test_require_rankable_passes_a_contested_corpus_through():
     assert density.rankable_problems == 3
 
 
-# ------------------------------------------------------------ the near-deterministic case
+# -------------------------------------------------------- the near-deterministic case
 
 
 def test_a_corpus_that_ranks_almost_nothing_warns_but_does_not_refuse():
@@ -158,7 +152,7 @@ def test_a_corpus_with_real_ranking_density_does_not_warn():
 
 
 def test_a_deterministic_corpus_raises_rather_than_warning():
-    # Otherwise the operator gets a warning about the thing that already stopped the run.
+    # It raises in `require_rankable` instead; a warning too would be redundant.
     assert candidate_density(_corpus(1)).near_deterministic_warning() is None
 
 
@@ -168,7 +162,7 @@ def test_the_warning_threshold_is_adjustable():
     assert density.near_deterministic_warning(threshold=0.7) is not None
 
 
-# ---------------------------------------------------------- what the report says about it
+# ------------------------------------------------------ what the report says about it
 
 
 def test_exclusions_name_the_cause_when_single_candidates_are_the_whole_reason():
@@ -177,8 +171,7 @@ def test_exclusions_name_the_cause_when_single_candidates_are_the_whole_reason()
 
 
 def test_exclusions_do_not_blame_the_catalog_when_the_sweep_also_failed():
-    # Problems whose candidates never ran are a collection failure. Reporting them as a
-    # deterministic catalog would send the operator to train L1 on a broken sweep.
+    # Unmeasured candidates are a collection failure, not a deterministic catalog.
     exclusions = Exclusions(
         problems_single_candidate=17, problems_no_measured_candidate=3
     )
@@ -198,8 +191,7 @@ def test_a_report_that_scored_nothing_for_no_stated_reason_is_not_blamed_on_the_
 
 
 def _oracle_scorer(frame: pd.DataFrame):
-    """Rank by the measurement itself: the best a ranker could do, so nothing scores
-    zero for want of a good model rather than for want of a choice."""
+    """Perfect ranker: scores by the measurement itself."""
     return -pd.to_numeric(frame["robustMeanMs"]).to_numpy(dtype=float)
 
 

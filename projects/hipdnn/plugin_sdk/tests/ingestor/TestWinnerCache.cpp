@@ -220,10 +220,7 @@ WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
     return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
 }
 
-/// RFC 0019 §9.2 requires the cache to be capacity-bounded. This is the guard on the bound
-/// actually being enforced: an unbounded map is the failure this replaces -- a process that
-/// ranks many distinct graphs grew a winner map it could never release, with only a log line
-/// to show for it.
+/// RFC 0019 §9.2: the winner cache is capacity-bounded.
 TEST(TestIngestorWinnerCacheStateManager, TheWinnerCacheHoldsNoMoreEntriesThanItsCapacity)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -241,11 +238,7 @@ TEST(TestIngestorWinnerCacheStateManager, TheWinnerCacheHoldsNoMoreEntriesThanIt
     EXPECT_EQ(manager->winnerCacheSize(), CAPACITY);
 }
 
-/// Which entry goes is the whole of the eviction policy, so it is asserted rather than left
-/// to whatever the container happens to do. A record is evicted by DISUSE: the graph still
-/// being executed keeps its measured order, and the one nothing has asked for in a while
-/// pays for it -- which is what makes the bound cost a re-measure of something idle rather
-/// than of the hot path.
+/// Eviction is by disuse, so the bound costs a re-measure of an idle graph, not the hot one.
 TEST(TestIngestorWinnerCacheStateManager, ALookupSavesARankingFromEvictionAndAnIdleOnePays)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -690,9 +683,8 @@ private:
     std::filesystem::path _path;
 };
 
-/// A device whose arch carries the feature suffix a real gfx942 reports, with the memory
-/// properties a live HIP query fills in. Nonzero on purpose: DeviceKey compares them, so a
-/// codec that drops one can only be caught by a device on which it is not zero.
+/// The suffixed arch a real gfx942 reports, with nonzero memory properties so a codec that
+/// drops one is caught.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
 {
     DeviceProperties properties;
@@ -718,8 +710,7 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
     return WinnerRecord{entryFor(definitionFor(kernel), timeMs)};
 }
 
-/// A UHD's descriptor id as `EngineIdentity` carries it: UUID text, which is already a
-/// plain path component and so reaches the shard path verbatim.
+/// UUID text is already a plain path component, so it reaches the shard path verbatim.
 const std::string UHD_ID = toString(HEURISTIC_ID);
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
@@ -746,18 +737,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordSurvivesIntoAFreshManagerThroug
     EXPECT_EQ(served->front().kernelId, testId(0x11));
 }
 
-/// RFC 0019 §9.2: "the UHD identity has to be in the path, because nothing else survives a
-/// restart ... a restart happily reads entries written by a model that has since been
-/// replaced." A regenerated model keeps its UHD id, so the CONTENT hash is what has to
-/// separate the two -- §9.2 again: "Hash the content, don't trust the id or a version
-/// field."
-///
-/// Written and read through the real shard rather than compared as paths, because the claim
-/// is about what a later process SERVES, not about string shape: a path that differs but is
-/// still readable would pass a path comparison and fail the engine.
-///
-/// Falsifying mutation: drop the build component from winnerCacheShardPath(). The reader
-/// below then serves the ranking the superseded model measured.
+/// RFC 0019 §9.2: a retrained model keeps its UHD id, so the content hash must separate it.
+/// Checked through the real shard, since what matters is what a later process serves.
 TEST(TestIngestorWinnerCacheStateManager, ANewModelDoesNotInheritTheOldModelsPersistedRankings)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -780,20 +761,14 @@ TEST(TestIngestorWinnerCacheStateManager, ANewModelDoesNotInheritTheOldModelsPer
     EXPECT_FALSE(afterRetraining->winnerFor(key).has_value())
         << "a retrained model must not be handed the previous model's measured order";
 
-    // And the original identity still reads its own, so the miss above is invalidation
-    // rather than the record never having been persisted at all.
+    // The original identity still reads its record, so the miss above is invalidation.
     const auto rereader = makeIdentifiedStateManager(trained);
     ASSERT_TRUE(rereader->winnerFor(key).has_value());
     EXPECT_EQ(rereader->winnerFor(key)->front().kernelId, testId(0x21));
 }
 
-/// R6's other half: a model whose artifact had no bytes to digest at load has no content
-/// identity, so nothing can tell its later weights apart and a persisted ranking could
-/// outlive the model that measured it. The disk cache is declined for such an engine --
-/// nothing written, nothing served to a later process -- while in-memory behaviour stays.
-///
-/// Falsifying mutation: drop the contentIdentified checks. The writer then persists under
-/// the "unhashed" directory and the fresh reader below is served that ranking.
+/// With no content identity, later weights are indistinguishable, so the disk cache is
+/// declined; the in-memory cache still works.
 TEST(TestIngestorWinnerCacheStateManager, AnEngineWithoutContentIdentityPersistsNoRankings)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -816,10 +791,7 @@ TEST(TestIngestorWinnerCacheStateManager, AnEngineWithoutContentIdentityPersists
         << "a model with no content identity must not hand a later process its ranking";
 }
 
-/// The other half of the persisted identity: the engine's own descriptor revision. A UED
-/// revision bump can change which kernels a pack admits or what a knob means without the
-/// UHD changing at all, so a measured order from the previous revision is not evidence
-/// about this one.
+/// A UED revision bump can change what a pack admits or a knob means with the UHD unchanged.
 TEST(TestIngestorWinnerCacheStateManager, ANewEngineRevisionDoesNotInheritPersistedRankings)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -842,11 +814,8 @@ TEST(TestIngestorWinnerCacheStateManager, ANewEngineRevisionDoesNotInheritPersis
         << "a bumped engine revision must not read the previous revision's records";
 }
 
-/// An engine that ships no UHD and one that does must not share a directory: they select
-/// through different machinery over the same candidates, so one's measured order is not
-/// evidence about the other's. Asserted on the paths because "no UHD" is the one identity
-/// whose components are defaults, and a defaulted component silently colliding with a real
-/// one is exactly the mistake worth pinning.
+/// "No UHD" leaves every model component defaulted; it must not collide with a real UHD,
+/// whose measured order says nothing about declared-order selection.
 TEST(TestIngestorWinnerCache, AnEngineWithNoUhdGetsItsOwnShardDirectory)
 {
     const ScopedCacheDir cacheDir("no_uhd_identity");
@@ -859,8 +828,7 @@ TEST(TestIngestorWinnerCache, AnEngineWithNoUhdGetsItsOwnShardDirectory)
     ASSERT_FALSE(modelled.empty());
     ASSERT_FALSE(bare.empty());
     EXPECT_NE(modelled, bare);
-    // Both must still be readable trees rather than opaque digests: the arch stays the last
-    // directory either way, which is what the delete-one-arch-by-eye contract needs.
+    // The arch stays the last directory either way, so one arch's cache can be deleted by eye.
     EXPECT_EQ(modelled.parent_path().filename().string(), "gfx942");
     EXPECT_EQ(bare.parent_path().filename().string(), "gfx942");
 }
@@ -1171,11 +1139,8 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCou
         << "the good line after the malformed one must still load";
 }
 
-/// DeviceKey compares the memory properties, so the codec must carry them. A record
-/// persisted for a real device must be served to the key the live device builds -- a
-/// separate DeviceProperties, not the one that was written. Falsifying mutation: drop any
-/// one memory field from encodeWinnerRecordLine()/decodeWinnerRecordLine(); the decoded key
-/// then carries a zero where the live one does not, and the lookup misses.
+/// The codec must carry the memory fields DeviceKey compares: a separately built key for the
+/// same live device must still hit.
 TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLiveDevicesKey)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1195,8 +1160,7 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLive
         << "a persisted record must be found again by the device that measured it";
     EXPECT_EQ(served->front().kernelId, testId(0x41));
 
-    // And the memory fields are part of the identity, not merely tolerated: a board of the
-    // same arch and CU count with different HBM is not served that measurement.
+    // A board of the same arch and CU count with different HBM must miss.
     auto otherBoard = suffixedDeviceProperties();
     otherBoard.totalGlobalMem /= 2;
     EXPECT_FALSE(makeNamedStateManager("test:MemoryIdentity")
@@ -1204,10 +1168,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLive
                      .has_value());
 }
 
-/// a line in the previous format carries no memory fields. Decoding it with zeros
-/// would hand its ranking to any device whose memory properties are unresolved (all
-/// zero) -- a device it was not measured on. It must miss instead. Falsifying mutation:
-/// accept version 1 and default the absent fields, and the zero-memory lookup below hits.
+/// A version-1 line has no memory fields; decoding them as zero would serve it to any device
+/// whose memory properties are unresolved.
 TEST(TestIngestorWinnerCacheStateManager, APreviousFormatLineIsAMissNeverAZeroMemoryDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1246,8 +1208,7 @@ TEST(TestIngestorWinnerCacheStateManager, APreviousFormatLineIsAMissNeverAZeroMe
         << "a previous-format line must miss, not decode its absent fields as zero";
 }
 
-/// within the current format every device field is required. A line missing any one
-/// of them is declined rather than decoded with that field zeroed.
+/// A current-format line missing any device field is declined, never decoded as zero.
 TEST(TestIngestorWinnerCache, ALineMissingAnyDeviceFieldIsDeclined)
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
@@ -1270,11 +1231,8 @@ TEST(TestIngestorWinnerCache, ALineMissingAnyDeviceFieldIsDeclined)
     }
 }
 
-/// last-line-wins must hold whatever the cache's capacity. With capacity 2 and the
-/// shard A_old, B, C, A_new, a line-by-line putIfAbsent() over the reversed file admitted
-/// A_new, then C and B evicted it, and A_old -- now absent -- was admitted in its place.
-/// Eviction may cost a miss; it must never serve a superseded ranking. The newest lines are
-/// the ones kept resident, so here A_new is served.
+/// Shard A_old, B, C, A_new at capacity 2: eviction may cost a miss, but A_old must never be
+/// served over A_new.
 TEST(TestIngestorWinnerCacheStateManager, AnEvictedNewerLineNeverLetsAnOlderDuplicateBack)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

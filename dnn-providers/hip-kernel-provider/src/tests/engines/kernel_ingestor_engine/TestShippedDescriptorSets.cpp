@@ -17,23 +17,12 @@
 #include "TestDescriptorRoot.hpp"
 
 /// @file TestShippedDescriptorSets.cpp
-/// @brief RFC 0019 §12's descriptor-set validation, run over each staged descriptor tree this
-///        build produces: the unit test root, and the production tree whenever this build packs
-///        one.
+/// @brief RFC 0019 §12 descriptor-set validation over each staged descriptor tree (unit, and
+///        production when this build packs one).
 ///
-/// The loader already enforces these rules -- and enforces them by *dropping* the offending set,
-/// which is the right behavior at runtime for third-party data and the wrong place to find out
-/// about our own. A malformed shipped descriptor produces a warning in a log nobody reads and an
-/// engine that silently declines every graph; every functional test still passes, because they
-/// assert on what the surviving engines do. So the check has to run somewhere that fails a build.
-///
-/// It reads the staged trees rather than the source tree: staging is what packaging produces and
-/// what the provider loads at runtime, and a descriptor correct in source but mis-staged is
-/// exactly the failure a source-tree check cannot see.
-///
-/// The production instance exists only where this build wires the `product` pack -- a production
-/// root holding descriptors for an architecture in GPU_TARGETS. Elsewhere it skips, naming why,
-/// rather than passing over a tree that was never staged.
+/// The loader drops invalid sets with only a warning, so this is where a bad shipped
+/// descriptor fails the build. It reads the staged trees, since mis-staging is invisible in
+/// source.
 namespace hipdnn_plugin_sdk::ingestor
 {
 namespace
@@ -41,8 +30,7 @@ namespace
 
 namespace detail
 {
-/// Which MetadataValue alternatives are lists. Spelled as a trait rather than detected from
-/// streamability, which is a C++20 idiom this target does not compile with.
+/// Which MetadataValue alternatives are lists (a trait; this target is not C++20).
 template <typename T>
 struct IsList : std::false_type
 {
@@ -56,7 +44,7 @@ struct IsList<std::vector<T>> : std::true_type
 /// One staged descriptor tree this suite validates.
 struct StagedTree
 {
-    /// The instantiation suffix.
+    /// Instantiation suffix.
     const char* name;
     /// The build target that stages the tree, named in the diagnostics.
     const char* packTarget;
@@ -68,8 +56,7 @@ struct StagedTree
 
 std::filesystem::path unitRoot()
 {
-    // HIPDNN_TEST_DESCRIPTOR_DIR is the unit root this binary stages, holding every unit pack
-    // under it.
+    // The unit root this binary stages, holding every unit pack.
     return {HIPDNN_TEST_DESCRIPTOR_DIR};
 }
 
@@ -78,7 +65,7 @@ constexpr bool PRODUCT_TREE_STAGED = true;
 
 std::filesystem::path productRoot()
 {
-    // The arch-neutral production root, as the provider loads it: every arch shard under it.
+    // The arch-neutral production root, as the provider loads it.
     return hip_kernel_provider::testing::descriptorSetRoot(
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
 }
@@ -91,16 +78,8 @@ std::filesystem::path productRoot()
 }
 #endif
 
-/// A kernel's completed metadata tuple: every schema field, defaults applied, in schema order.
-///
-/// Every field, not just the UED's advertised knobs. The knobs are the subset a caller may set;
-/// the tuple that identifies a kernel is the whole schema. Keying on knobs alone reports the
-/// shipped f32 and f16 kernels as duplicates, when what distinguishes them is `dtype` -- a
-/// schema field the engine does not expose as a knob.
-///
-/// Order comes from the schema rather than from the kernel's own map so two kernels are compared
-/// on the same axes in the same sequence -- map iteration order would make the comparison depend
-/// on field names.
+/// A kernel's completed metadata tuple: every schema field (not just knobs, e.g. `dtype`),
+/// defaults applied, in schema order.
 std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& metadata)
 {
     std::ostringstream tuple;
@@ -115,8 +94,7 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
                     using Held = std::decay_t<decltype(held)>;
                     if constexpr(detail::IsList<Held>::value)
                     {
-                        // A list-valued knob, rendered element-wise so two kernels differing
-                        // only inside the list still produce different tuples.
+                        // Element-wise, so kernels differing inside a list still differ.
                         for(const auto& element : held)
                         {
                             tuple << element << ",";
@@ -131,8 +109,7 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
         }
         else if(field.defaultValue.has_value())
         {
-            // A kernel that omits an optional field takes the default, so that is the value it
-            // is actually resolved by.
+            // An omitted optional field resolves to its default.
             std::visit(
                 [&tuple](const auto& held) {
                     using Held = std::decay_t<decltype(held)>;
@@ -159,8 +136,7 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
     return tuple.str();
 }
 
-/// Parameterized over the staged trees. The sets are read-only once parsed, so each tree is
-/// loaded once and shared by every case that reads it.
+/// Parameterized over the staged trees; each tree is loaded once and shared across cases.
 class TestShippedDescriptorSets : public ::testing::TestWithParam<StagedTree>
 {
 protected:
@@ -198,9 +174,8 @@ protected:
 
 TEST_P(TestShippedDescriptorSets, TheStagedTreeContainsDescriptorsAtAll)
 {
-    // Guards every other case here. An empty tree makes them all vacuously pass, and an empty
-    // tree is a real and recurring state: reconfiguring the build wipes the staged content, and
-    // engines then decline everything with no error anywhere.
+    // Guards every other case: an empty tree (e.g. after a reconfigure wipes staging) makes
+    // them pass vacuously.
     ASSERT_TRUE(std::filesystem::exists(root()))
         << "no staged descriptor tree at " << root() << ". Build " << GetParam().packTarget
         << " first.";
@@ -209,8 +184,7 @@ TEST_P(TestShippedDescriptorSets, TheStagedTreeContainsDescriptorsAtAll)
 
 TEST_P(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
 {
-    // RFC 0019 §4: a UED names its KMD by id. An unresolvable one leaves the schema empty, and
-    // an engine with no schema cannot type-check the knobs it advertises.
+    // RFC 0019 §4: without its KMD schema an engine cannot type-check its knobs.
     for(const auto& set : sets())
     {
         EXPECT_FALSE(set.schema.fields.empty())
@@ -220,9 +194,8 @@ TEST_P(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
 
 TEST_P(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
 {
-    // The knob names in a UED are what a caller queries and what autotune sweeps. A knob with
-    // no schema field has no type and no default, so it reads back as absent -- the query
-    // succeeds and returns nothing, rather than failing.
+    // A knob with no schema field has no type or default, so a query for it silently
+    // returns nothing.
     for(const auto& set : sets())
     {
         std::set<std::string> declared;
@@ -242,9 +215,7 @@ TEST_P(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
 
 TEST_P(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
 {
-    // RFC 0019 §3.1: the engine owns the UHD that ranks it. A dangling reference degrades to
-    // declared order, which is a legal ranking -- so the engine keeps working and simply stops
-    // using the model it shipped. Nothing downstream can tell those two apart.
+    // RFC 0019 §3.1: a dangling reference silently degrades to declared order.
     for(const auto& set : sets())
     {
         if(set.engine.sortKernelCatalog.empty())
@@ -259,8 +230,7 @@ TEST_P(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
 
 TEST_P(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 {
-    // A UHD is either a native symbol or an artifact on disk. Neither being present is a
-    // descriptor that parses, resolves, and scores nothing.
+    // A UHD needs a native symbol or an on-disk artifact.
     for(const auto& set : sets())
     {
         std::vector<const HeuristicDescriptor*> all;
@@ -278,21 +248,18 @@ TEST_P(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 
         for(const auto* heuristic : all)
         {
-            // What "something to score with" means is adapter-specific, because the
-            // descriptor IS the UHD: there is no single `payload` field that every kind
-            // fills in. Checking the wrong one per adapter would pass vacuously.
+            // What counts as scorable is adapter-specific; there is no common payload field.
             switch(heuristic->adapter)
             {
             case UhdAdapter::STATIC_ORDER:
-                // Ranks by declared fields alone -- no symbol, no artifact. The fields are
-                // optional (empty means priority then id), so there is nothing to require.
+                // Declared fields only, all optional; nothing to require.
                 break;
 
             case UhdAdapter::NATIVE:
                 EXPECT_FALSE(heuristic->nativeSymbol.empty())
                     << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name
                     << "' with an empty native symbol";
-                // The symbol is resolved at registration, not on disk.
+                // Resolved at registration, not on disk.
                 break;
 
             case UhdAdapter::TREE_DATA:
@@ -310,7 +277,7 @@ TEST_P(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
                 break;
             }
 
-            // -Wswitch-default. The enum is closed and every member is handled above.
+            // -Wswitch-default; every enum member is handled above.
             default:
                 ADD_FAILURE() << "engine '" << set.engine.name << "' ships heuristic '"
                               << heuristic->name << "' naming an adapter this test does not know";
@@ -322,13 +289,8 @@ TEST_P(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 
 TEST_P(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
 {
-    // The completed metadata tuple is the catalog key -- it is how a plan resolves a kernel
-    // once matchers have chosen the pack. Two kernels answering to the same tuple make the
-    // choice between them an accident of catalog order, and a UHD ranking them cannot express
-    // a preference it has no feature to express.
-    //
-    // Scoped to the pack, which is the collision domain: two packs of one engine are selected
-    // by different matchers, so the same tuple in each is answering a different graph.
+    // The completed tuple is the catalog key, so duplicates make the choice an accident of
+    // catalog order. Scoped per pack: different packs answer different graphs.
     for(const auto& set : sets())
     {
         if(set.schema.fields.empty())

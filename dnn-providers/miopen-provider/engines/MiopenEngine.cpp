@@ -25,12 +25,8 @@
 #include "version.h"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-// The ONLY thing this provider takes from the ingestor: the by-UUID lookup that resolves
-// a declared L1 model (RFC 0019 Open Question 7, RESOLVED). Nothing in miopen-provider is
-// descriptor-backed -- no UED, no kernel packs, no catalog to rank -- and nothing else
-// here may grow a dependency on this header. The loader is header-only, so the cost is a
-// compile-time include and no link-time coupling; when the ingestor is not built the
-// declaration simply resolves to nothing and every engine reports UNAVAILABLE.
+// Used only to resolve declared L1 models by UUID; nothing else in miopen-provider may
+// depend on the ingestor. Header-only, so no link-time coupling.
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <nlohmann/json.hpp>
@@ -96,32 +92,14 @@ void initializeMiopenSettings(
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// What this provider asks MIOpen for, as a revision. Bump it whenever that changes
-/// without the provider's semantic version or MIOpen's own moving -- a different find or
-/// tuning mode, a different solution-selection call, a changed DB policy -- because every
-/// deployed L1 model was measured under the old request and must stop matching.
+/// Revision of what this provider asks MIOpen for (find/tuning mode, selection call, DB
+/// policy). Bump it when that changes, so models measured under the old request stop matching.
 constexpr const char* MIOPEN_SELECTOR_POLICY_REVISION = "untuned-v1";
 
-/// What this build of @p engineName was, for a model that claims to have measured it.
-///
+/// RFC 0019 §4.1 `trained_against.selector_revision` for @p engineName:
 /// `miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`.
-/// Every segment is deliberately versioned, and nothing in it changes merely because the
-/// provider was rebuilt from another commit: a model trained at one commit must keep
-/// loading at the next, or committing the model would invalidate it. The commit stays
-/// provenance only (MIOPEN_PROVIDER_VERSION_STRING, the plugin's reported version).
-///   - The provider's semantic version, from version.json.
-///   - The engine name: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC are different
-///     selectors over different solvers, so a model measured on one says nothing about
-///     the other.
-///   - MIOPEN_SELECTOR_POLICY_REVISION, for a change in what we ask MIOpen.
-///   - The MIOpen library version, which is what actually picks the solution and so
-///     decides this engine's throughput. Queried at run time rather than compiled in,
-///     because the provider links whatever MIOpen the machine installed.
-///
-/// A deployed L1 model records this exact string as RFC 0019 §4.1's
-/// `trained_against.selector_revision`, and the loader refuses one that does not match:
-/// L1 is the score compared across engines, so a stale estimate changes which engine is
-/// selected rather than merely misreporting a number.
+/// Excludes the commit so a model trained at one commit still loads at the next. The
+/// MIOpen version is queried at run time because it is whatever library is installed.
 std::string selectorRevision(const std::string& engineName)
 {
     size_t major = 0;
@@ -134,8 +112,7 @@ std::string selectorRevision(const std::string& engineName)
     }
     else
     {
-        // Not fatal: the revision stays well-formed and simply will not match a model
-        // recorded on a machine that could answer, which is the safe direction.
+        // Not fatal: the revision just won't match any model, which is the safe direction.
         HIPDNN_PLUGIN_LOG_WARN("miopen: cannot read the MIOpen library version; no L1 model "
                                "will match this build");
     }
@@ -143,12 +120,8 @@ std::string selectorRevision(const std::string& engineName)
            + MIOPEN_SELECTOR_POLICY_REVISION + "/miopen-" + library;
 }
 
-/// Every descriptor file this provider reads, parsed once for the process.
-///
-/// MIOpen ships no descriptor tree of its own, so the only roots are the ones an operator
-/// names: HIPDNN_DESCRIPTOR_DIR, then HIPDNN_DESCRIPTOR_RUNTIME_DIR and every
-/// HIPDNN_DESCRIPTOR_PATH entry. With none named the catalog is empty, nothing resolves,
-/// and every engine reports UNAVAILABLE -- absence is not an error (RFC 0019 §11.2).
+/// Descriptors from the operator-named roots only (MIOpen ships none), parsed once per
+/// process. With no roots every engine reports UNAVAILABLE, which is not an error.
 const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 {
     static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog = [] {
@@ -168,16 +141,9 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
     return s_catalog;
 }
 
-/// Resolves the ids this engine's container declared for it. Never throws: an id nothing
-/// deploys, a model whose provenance fails, and no descriptor tree at all are all
-/// "no estimate", never a failure to construct the engine.
-///
-/// Every id is bound under `default`: one model may cover several architectures (its
-/// artifact's `training_arches` says which, checked per query), so the declaration names
-/// a model per metric and never per architecture. The loader files each resolved model
-/// under the metric its own `score.metric` declares; a model deployed under the id
-/// declared for another metric is refused rather than bound, since answering in a metric
-/// its id was never declared for would make the declaration mean nothing.
+/// Resolves the declared ids into @p binding. Never throws: missing or invalid models just
+/// mean no estimate. A model whose `score.metric` differs from the metric its id was
+/// declared for is marked unusable rather than bound.
 void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
                           const std::string& engineName,
                           const std::string& selectorRevision,
@@ -188,10 +154,8 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
     std::map<ingestor::DescriptorId, std::string> declaredMetric;
     for(const auto& [metric, id] : l1ModelIds)
     {
-        // Both checks guard compiled-in literals, so a failure is an authoring bug in
-        // MiopenContainer rather than anything a deployment can cause. Logged and skipped
-        // rather than thrown: a throw here would cost the whole provider over one
-        // unusable model.
+        // These guard compiled-in literals; log and skip so one bad id cannot take down
+        // the whole provider.
         if(hipdnn_data_sdk::utilities::findRankingMetric(metric) == nullptr)
         {
             HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '" << engineName << "' declares L1 model id '"
@@ -266,8 +230,7 @@ MiopenEngine::MiopenEngine(int64_t id,
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     bindDeclaredL1Models(_l1Models, _name, _selectorRevision, _l1ModelIds);
 #else
-    // Without the ingestor there is no UHD runtime to bind a declared model into, so the
-    // engine reports no estimate -- the same outcome as an id nothing deploys.
+    // No UHD runtime to bind into: the engine reports no estimate.
     static_cast<void>(l1ModelIds);
 #endif
 }
@@ -350,13 +313,11 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
     result.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? PredictionKind::CONFIGURATION
                                                                  : PredictionKind::ENGINE;
     result.status = PredictionStatus::UNAVAILABLE;
-    // Outside the try below: an unregistered metric is a bad request (BAD_PARAM), not a
-    // missing answer, and must not be reported as one.
+    // Outside the try: an unregistered metric is BAD_PARAM, not a missing answer.
     result.metric = std::string(hipdnn_plugin_sdk::heuristics::rankingMetric(config).name);
     if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
     {
-        // RFC 0019 §11.2's "A only (opaque)" row: MIOpen runs its own solver, so it has
-        // no exact configuration of ours to name.
+        // MIOpen runs its own solver, so it has no exact configuration to name (§11.2).
         result.reason = "MIOpen selects its own solution and predicts no exact configuration";
         return result;
     }
@@ -367,11 +328,8 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         auto prediction = _l1Models.predict(
             _id, _name, _selectorRevision, result.metric, device.gcnArchName, features, evaluate);
-        // A description names the model an author must publish, deployed or not: the
-        // id this engine declares for the requested metric is what a first model is
-        // promoted under, so collection records it even before anything is installed.
-        // The binding only carries `uhd_id` itself once a model resolved (and then it is
-        // this same id).
+        // A description names the declared id even before a model is deployed, so
+        // collection knows what to promote a first model under.
         if(const auto declared = _l1ModelIds.find(result.metric);
            !evaluate && declared != _l1ModelIds.end() && !prediction.binding_json.empty())
         {
@@ -386,8 +344,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
     }
     catch(const std::exception& error)
     {
-        // An unreadable device or an unbuildable feature row is a missing answer, not a
-        // claim of bad performance: applicability is untouched (§11.2).
+        // A missing answer, not a claim of bad performance; applicability is untouched.
         result.reason = error.what();
         return result;
     }

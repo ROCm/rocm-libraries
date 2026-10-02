@@ -6,31 +6,13 @@ include_guard(GLOBAL)
 # ============================================================================
 # hkp_asm_sdpa_fwd_revision(<out-revision> <engine-dir> [CONFIGURE_DEPENDS])
 # ============================================================================
-# The ASM SDPA forward selector revision: 16 lowercase hex digits naming everything that
-# decides which forward kernel runs and how it is launched. An L1 model for this engine
-# predicts the throughput of that dispatch, and the loader refuses a model whose recorded
-# `selector_revision` is not the one the provider reports, so this value is the expiry
-# rule for every shipped AITER model. It has to name exactly what changes those
-# measurements, and nothing else:
+# The ASM SDPA forward selector revision: 16 hex digits over everything that decides which
+# forward kernel runs and how it is launched. L1 models record it and the loader refuses
+# a mismatch, so it must hash exactly those inputs: a missing input lets a stale model
+# silently pick the wrong engine; an extra one expires models for unrelated changes.
 #
-#   * too wide -- the provider version, or a git hash. `0.2.0 -> 0.2.1` for a fix that
-#     cannot touch this engine expires both shipped models, and the only symptom is
-#     UNAVAILABLE on every engine-selection query.
-#   * too narrow -- a hand-bumped string, or a digest missing an input. It expires
-#     nothing when selection changes, which is the silent direction: a stale L1 estimate
-#     changes which ENGINE runs.
-#
-# Its own function, in its own file, because the engine's tests compute it over fixture
-# trees to prove the two properties no single build can show: a CRLF and an LF checkout
-# agree, and each input below does (or does not) move it.
-#
-# <engine-dir> is the asm_sdpa_engine source directory. CONFIGURE_DEPENDS is for the build
-# that reports the value: the digest is computed at configure time, so it makes every
-# hashed file a configure dependency of the calling directory and every glob below a
-# CONFIGURE_DEPENDS glob. Without that, an edit -- or a kernel added -- after configure
-# leaves the build reporting a revision for sources it no longer compiles. Fixture trees
-# omit it: they are rewritten by each configure, and a glob recorded mid-mutation would
-# never verify and so would reconfigure every build.
+# CONFIGURE_DEPENDS makes every input a configure dependency so an edit or a new kernel
+# reconfigures. Test fixture trees omit it: they are rewritten on each configure.
 function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
     cmake_parse_arguments(PARSE_ARGV 2 _arg "CONFIGURE_DEPENDS" "" "")
     set(_track "")
@@ -38,13 +20,9 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
         set(_track CONFIGURE_DEPENDS)
     endif()
 
-    # The forward kernel inventory and the CSVs that describe it. Same scope as codegen.py
-    # (`<arch>/fmha_v3_fwd/**/*.csv` for EVERY arch directory present, not the configured
-    # arch list), because those CSVs are the config table forward selection searches, and a
-    # .co whose bytes change is a different kernel even under an identical CSV row. Other
-    # files there (SOURCE.md) are provenance notes and select nothing. Globbed over the
-    # whole kernel tree and filtered, so a new arch directory or a new forward directory is
-    # caught by the same CONFIGURE_DEPENDS glob as a new kernel (develop's fp8 .co files).
+    # Forward kernels and CSVs for every arch directory present (same scope as codegen.py),
+    # not just configured arches. Globbed over the whole tree so a new arch or forward
+    # directory is caught by the CONFIGURE_DEPENDS glob.
     file(GLOB_RECURSE _kernel_files ${_track}
         "${_engine_dir}/asm/asm_kernels/*.csv"
         "${_engine_dir}/asm/asm_kernels/*.co")
@@ -56,9 +34,8 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
         endif()
     endforeach()
 
-    # The forward sources, each because it changes which kernel runs or what it is given.
-    # Backward-only sources are absent by design: a backward change cannot move a forward
-    # throughput number, and expiring the models for one is the "too wide" failure.
+    # Forward sources that change which kernel runs or what it is given. Backward-only
+    # sources are excluded: they cannot move a forward throughput number.
     set(_sources
         # Turns the CSVs into the config table the forward builder searches.
         asm/asm_kernels/codegen.py
@@ -82,11 +59,8 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
         plans/SdpaFwdArgsBuilder.hpp
         asm/SdpaFwdKernelArgs.hpp
         asm/SgprPadding.hpp)
-    # Not inputs: asm/AsmKernelPath.hpp (which directory, not which kernel),
-    # plans/SdpaModuleCache.hpp and plans/SdpaKernelUtils.hpp (module load and launch
-    # plumbing shared with backward), pack.py (.kpack archives nothing loads yet), and this
-    # engine's CMakeLists.txt (build wiring; the recipe itself lives in this file, whose
-    # changes alter the value by construction).
+    # Not inputs: AsmKernelPath.hpp, SdpaModuleCache.hpp, SdpaKernelUtils.hpp (load and
+    # launch plumbing), pack.py (nothing loads .kpack yet), and CMakeLists.txt.
     set(_inputs "")
     foreach(_source IN LISTS _sources)
         if(NOT EXISTS "${_engine_dir}/${_source}")
@@ -99,10 +73,8 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
     endforeach()
     list(APPEND _inputs ${_kernels})
 
-    # Sorted, and each entry named by its path under <engine-dir>: GLOB order is
-    # filesystem order, and the same kernel name exists under both MI300/ and MI308/, so
-    # an unsorted list or a bare file name would make two checkouts of identical content
-    # disagree.
+    # Sorted and keyed by relative path: GLOB order is filesystem order, and the same
+    # kernel name exists under both MI300/ and MI308/.
     list(SORT _inputs)
     set(_digest "")
     foreach(_input IN LISTS _inputs)
@@ -111,11 +83,8 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
             # A code object is bytes; git never converts it.
             file(SHA256 "${_input}" _one)
         else()
-            # Text is hashed as git stores it (LF). A Windows checkout (core.autocrlf) has
-            # CRLF where Linux has LF; hashing the raw bytes made the same commit report two
-            # revisions, so a model trained on one platform was refused on the other.
-            # file(READ) already drops the CR on Windows (it reads in text mode) but not on
-            # Linux, which can also hold a CRLF file; the REPLACE makes both read LF.
+            # Hash text as LF so CRLF and LF checkouts of one commit agree. file(READ)
+            # drops CR only on Windows; the REPLACE covers CRLF files on Linux.
             file(READ "${_input}" _text)
             string(REPLACE "\r\n" "\n" _text "${_text}")
             string(SHA256 _one "${_text}")

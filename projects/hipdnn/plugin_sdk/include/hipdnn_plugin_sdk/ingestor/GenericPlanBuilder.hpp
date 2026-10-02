@@ -48,13 +48,8 @@ using KnobFilter = std::map<std::string, int64_t>;
 namespace detail
 {
 
-/// One MetadataValue as the JSON value it already is: an int stays an int, a string
-/// stays a string, an int list stays a list.
-///
-/// Verbatim on purpose. Turning `"float16"` into an ordinal here would bake one encoding
-/// into the training corpus that every later reader would have to guess and undo, and
-/// RFC 0019 §7 puts categorical encoding in the feature extractor, which is the only
-/// place that knows the signature the encoding has to agree with.
+/// One MetadataValue as the JSON value it already is, kept verbatim: categorical
+/// encoding belongs to the feature extractor (RFC 0019 §7).
 inline nlohmann::json metadataValueToJson(const MetadataValue& value)
 {
     return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
@@ -69,8 +64,7 @@ inline void addMetadataFeature(nlohmann::json& features,
     {
         for(size_t i = 0; i < values->size(); ++i)
         {
-            // Direct published scalars win over synthesized indexed references,
-            // independently of unordered BoundTokens traversal order.
+            // emplace: a directly published scalar wins over a synthesized indexed name.
             features.emplace(name + "[" + std::to_string(i) + "]", (*values)[i]);
         }
     }
@@ -229,24 +223,13 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        // Orderability is the FULL catalog's question, answered once, in sortedCatalog():
-        // `catalog.measuredRecord` is the benchmarked record that covered and ordered every
-        // kernel the matchers admitted, and `filtered` is that order with rows removed, so
-        // it is the measured order restricted.
-        //
-        // Asking again here against `filtered` -- which is what this did -- makes the answer
-        // depend on the pin. A record covering the pinned subset but not the full catalog
-        // said "measured" to a pinned request and "heuristic" to an unpinned one over the
-        // same candidates, and the two orders need not agree. RFC 0019 §5 step 8 fixes the
-        // basis for exactly this reason: the decision is "resolved against the canonical
-        // candidate set -- every kernel the matchers admitted for this graph, before any knob
-        // filter narrows it ... Knob filtering then applies to the resulting order."
+        // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
+        // that measured order restricted. Re-asking against `filtered` would let a pin change
+        // the order source (RFC 0019 §5 step 8).
         if(catalog.measuredRecord != nullptr)
         {
-            // Walks the ranked list instead of committing to its front: constructing
-            // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
-            // prepare (GenericPlan::GenericPlan), and a cache hit must not be stricter
-            // than an empty cache.
+            // Walk the ranked list rather than take its front: a GenericPlan can fail to
+            // build, and a cache hit must not be stricter than an empty cache.
             for(size_t rank = 0; rank < filtered.size(); ++rank)
             {
                 std::string failure;
@@ -256,7 +239,7 @@ public:
                         _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
                     // The record is the catalog's own snapshot, so this holds even after the
-                    // bounded winner cache has evicted the copy it was adopted from.
+                    // winner cache evicts its copy.
                     HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                            << _engine.name << "' served kernel "
                                            << toString(filtered[rank].kernelId) << " at rank "
@@ -269,9 +252,8 @@ public:
                 }
                 catch(const HipdnnPluginException& error)
                 {
-                    // A malformed descriptor is the author's mistake, not a kernel that
-                    // happens not to fit this graph: falling past it would hide the fault
-                    // and silently serve a different kernel than the one authored.
+                    // A malformed descriptor is the author's mistake: rethrow rather than
+                    // silently serve a different kernel.
                     if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
                     {
                         throw;
@@ -310,9 +292,8 @@ public:
 
         if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
-            // A record only ever reorders candidates measured together; it never
-            // replaces the heuristic's pick, so a record that does not fully cover
-            // the catalog is ignored rather than partially trusted.
+            // A record only reorders candidates measured together; one that does not cover
+            // the whole catalog is ignored rather than partially trusted.
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: engine '"
                 << _engine.name << "' has a benchmarked record that does not fully cover its "
@@ -424,20 +405,9 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
-        // benchmarkId is the graph half of the winner key and deviceId the device half.
-        // Both are logged, and neither is the whole key: an exporter needs to group rows
-        // by problem, and a problem is (graph, device) exactly as the winner cache keys
-        // it. The device half is constant within one process but NOT across a corpus
-        // merged from several machines, nor across a sweep spanning two GPUs; grouping on
-        // the graph alone there would silently take RFC 0019.13 §11.2's per-problem oracle
-        // across devices and understate every regret figure computed from it.
-        //
-        // Taken from winnerKey.device rather than re-derived from DeviceProperties here:
-        // one notion of "which GPU", so a log line and a cache entry can never disagree
-        // about whether two rows came from the same device.
-        // Hex so both values survive a log grep unambiguously.
-        // `winnerKey` is engaged on this path: the lazy probe above builds it whenever
-        // benchmarking is enabled, and only a benchmarking request reaches here.
+        // The graph and device halves of the winner key, in hex, so an exporter can group
+        // rows per (graph, device) problem exactly as the cache keys it. `winnerKey` is
+        // engaged here: benchmarking always builds it above.
         std::ostringstream benchmarkId;
         benchmarkId << std::hex << winnerKey->graph.hash();
         std::ostringstream deviceId;
@@ -446,12 +416,8 @@ public:
         // A record that exists but did not serve this graph -- either it failed the coverage gate
         // or none of its ranked entries still resolved -- is being superseded, so its write must
         // append rather than adopt.
-        //
-        // `catalog.measuredRecord` is consulted alongside the lookup because the two can
-        // disagree now that the winner cache is bounded: a catalog can carry a measured order
-        // whose record has since been evicted, and reaching here then still means a record was
-        // tried and did not serve. Reading the lookup alone would call that a fresh miss and
-        // adopt the very line that just failed to resolve.
+        // `catalog.measuredRecord` counts too: the bounded winner cache may have evicted the
+        // record that ordered this catalog.
         const auto cause = record.has_value() || catalog.measuredRecord != nullptr
                                ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                : WinnerWriteCause::FRESH_MISS;
@@ -483,10 +449,8 @@ public:
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
 
-            // A non-integer value is advertised as its ordinal, which is what a caller must
-            // pin to select that kernel (RFC 0019 §13.2). Dropping those values instead --
-            // as this did while only INT was addressable -- advertised a knob whose valid set
-            // omitted most of the kernels it selects between.
+            // A non-integer value is advertised as its ordinal, which is what a caller pins
+            // to select that kernel (RFC 0019 §13.2).
             std::vector<int64_t> choices;
             choices.reserve(values.size());
             for(const auto& value : values)
@@ -596,8 +560,7 @@ public:
         page.device_arch = context.deviceProperties.gcnArchName;
         page.total_count = filtered.size();
         page.offset = offset;
-        // The live ranker's own problem half, split at the namespace so device facts keep
-        // their field: a model trained on this page reads at runtime what it was fitted on.
+        // The live ranker's problem features, with `device.*` split into their own field.
         auto problem = problemFeaturesJson(context, catalog.bound);
         nlohmann::json device = nlohmann::json::object();
         for(auto it = problem.begin(); it != problem.end();)
@@ -665,20 +628,12 @@ public:
         return features;
     }
 
-    /// @brief Predicts an executable configuration identified by its exposed knobs, in the
-    ///        ranking metric @p config carries.
+    /// @brief Predicts the configuration plan build would serve, in the ranking metric
+    ///        @p config carries (RFC 0019 §5 step 9).
     ///
-    /// The configuration comes from the order source plan build resolves (RFC 0019 §5 step 9):
-    /// a benchmark record covering the full catalog, else the metric's calibrated ranker.
-    /// Answering from the model while a record decides plan build predicted a configuration
-    /// the engine would not serve, with an estimate where a measurement existed.
-    ///
-    /// The value follows the order source. Under a record it is the measured value in the
-    /// requested metric -- the time, or the throughput derived from it and `graph.flops` --
-    /// and a metric the record cannot supply is answered by the calibrated model's estimate
-    /// for the record's configuration. Otherwise only that metric's own calibrated ranker
-    /// answers (RFC 0019 §11.4): the default ranker may choose kernels for a metric with no
-    /// ranker, but its number is another metric's.
+    /// Under a covering benchmark record the value is measured, or the calibrated model's
+    /// estimate when the record lacks the metric; otherwise only that metric's calibrated
+    /// ranker answers (RFC 0019 §11.4).
     void predictConfiguration(const THandle& handle,
                               const IGraph& graph,
                               const IEngineConfig& config,
@@ -697,20 +652,14 @@ public:
         TSettings executionSettings;
         initializeExecutionSettings(handle, graph, config, executionSettings);
         const auto context = contextFor(handle, graph, metric.name);
-        // The measured catalog sortedCatalog() orders plan build by, read as one snapshot:
-        // its record is the one that ordered it, carried with the catalog, so a winner-cache
-        // eviction cannot leave plan build on the measured order while this falls back to
-        // the model. A catalog no record covers is the model's to answer.
+        // One snapshot: the catalog carries the record that ordered it, so a winner-cache
+        // eviction cannot split plan build and this prediction.
         auto catalog = _stateManager.measuredCatalog(context);
         const auto filtered
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
-        // Both halves of the catalog go in: the full one is the basis the order is decided
-        // on, the filtered one is what the answer may name. Coverage is the full catalog's
-        // question exactly as in sortedCatalog(), and the calibrated ranking is the full
-        // catalog's ranking restricted (KernelIngestorStateManager::calibratedRanking()), so
-        // a pin can neither change the order source nor reorder two candidates. RFC 0019
-        // §9.2 and §5 steps 8 and 9.
+        // The full catalog decides the order source and ranking; `filtered` only limits what
+        // the answer may name, so a pin changes neither (RFC 0019 §9.2, §5 steps 8-9).
         const bool measured = catalog.measuredRecord != nullptr;
         std::vector<ScoredKernel> ranking;
         if(measured)
@@ -746,9 +695,8 @@ public:
             const bool valued
                 = scored.score != 0.0
                   && hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score);
-            // Under a record the order is decided, so a candidate without a value is still the
-            // configuration plan build would serve: it is answered UNAVAILABLE below rather
-            // than passed over for one the engine would not run.
+            // Under a record the order is decided: a candidate without a value is still the one
+            // plan build serves, so it is answered UNAVAILABLE below rather than skipped.
             if(!valued && !measured)
             {
                 continue;
@@ -763,10 +711,7 @@ public:
                                             "Ranker returned an unknown candidate");
             }
             const auto knobs = candidateKnobs(*selected);
-            // The same comparison the replay's knob filter makes (applyKnobFilter): the tuple
-            // holds ordinals for non-integer knobs, so reading the metadata as a raw int64_t
-            // found no match for a string, bool, float or list knob, and every candidate that
-            // carried one was refused as unidentifiable.
+            // Same comparison as applyKnobFilter(): the tuple holds ordinals for non-integer knobs.
             const auto matching = std::count_if(
                 catalog.entries.begin(), catalog.entries.end(), [this, &knobs](const auto& kernel) {
                     return std::all_of(
@@ -781,8 +726,7 @@ public:
             }
             try
             {
-                // Normal selection walks past candidates that cannot prepare. The
-                // prediction must refer to a candidate that can actually be built.
+                // The prediction must name a candidate that can actually be built.
                 const GenericPlan<THandle> prepared(
                     _stateManager.getDispatchDetails(*selected), context, catalog.bound);
                 if(!valued)
@@ -847,7 +791,6 @@ public:
             }
             catch(const std::exception&)
             {
-                // This candidate cannot prepare; the walk moves on to the next one.
                 continue;
             }
         }
@@ -875,13 +818,10 @@ public:
     }
 
 private:
-    /// @p record's order over @p filtered, each kernel carrying its measured value in
-    /// @p metric: the time itself, or for `tflops` the throughput `graph.flops / (ms * 1e9)`
-    /// -- the label uhd_gen trains a tflops model on, so a measurement and an estimate are
-    /// the same quantity (RFC 0019 §5 step 9).
-    /// @param measuresMetric Set false when the record cannot supply @p metric -- a metric it
-    ///        does not time, or a throughput for a graph whose work is unknown -- in which
-    ///        case every value is 0 and only the order is the record's.
+    /// @p record's order over @p filtered, valued in @p metric: the time, or for `tflops`
+    /// `graph.flops / (ms * 1e9)`, the label uhd_gen trains on (RFC 0019 §5 step 9).
+    /// @param measuresMetric Set false when the record cannot supply @p metric; every value
+    ///        is then 0 and only the order is the record's.
     static std::vector<ScoredKernel>
         measuredRanking(const WinnerRecord& record,
                         const std::vector<KernelDefinition>& filtered,
@@ -958,11 +898,8 @@ private:
         for(const auto& name : _engine.knobs)
         {
             const auto it = kernel.metadata.find(name);
-            // The enrolled tuple must ADDRESS this kernel: an enumerated candidate is
-            // replayed by pinning exactly these values, so a field left out of the tuple is a
-            // field the replay does not constrain. Non-integer values enter as their ordinal
-            // (RFC 0019 §13.2); while they were dropped, two kernels differing only in such a
-            // field enrolled the same tuple and enumeration refused both as ambiguous.
+            // The tuple must address this kernel, since replay pins exactly these values.
+            // Non-integer values enter as their ordinal (RFC 0019 §13.2).
             if(it != kernel.metadata.end())
             {
                 if(const auto ordinal = _stateManager.knobOrdinal(name, it->second);
@@ -975,13 +912,9 @@ private:
         return tuple;
     }
 
-    /// The problem half of every collected `sort_kernel_catalog` row, as JSON: exactly the
-    /// scalar name->value set the live ranker binds (detail::catalogProblemFeatures), plus
-    /// each int-list token whole beside its indexed elements.
-    ///
-    /// The `device.*` facts are what a board IS, where the row envelope's `device` says only
-    /// which one it was: a sweep merged from several boards of one arch needs both, since the
-    /// UHD is arch-keyed. Keys are the published names without '$'.
+    /// The problem half of a `sort_kernel_catalog` row as JSON: the scalars the live ranker
+    /// binds (detail::catalogProblemFeatures) plus each int-list token whole. `device.*`
+    /// facts distinguish boards of one arch. Keys drop the leading '$'.
     static nlohmann::json problemFeaturesJson(const MatchContext& context, const BoundTokens& bound)
     {
         auto features = detail::catalogProblemFeatures(context, bound).toJson();
@@ -999,17 +932,8 @@ private:
         return features;
     }
 
-    /// Every feature value that describes one benchmarked (problem, kernel) pair: the
-    /// problem half (problemFeaturesJson, computed once per sweep) and the kernel's own KMD
-    /// metadata under `kernel.`, the names an enumeration page gives the same kernel.
-    ///
-    /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
-    /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
-    /// the opacity its benchmarkId comment exists to protect.
-    ///
-    /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
-    /// present would make the corpus collectable only by a build that already has the
-    /// model the corpus exists to train.
+    /// The features of one benchmarked (problem, kernel) pair: @p problem plus the kernel's
+    /// KMD metadata under `kernel.`. Built for every sweep, whether or not a UHD ships.
     static nlohmann::json candidateFeatures(const nlohmann::json& problem,
                                             const KernelDefinition& kernel)
     {
@@ -1132,10 +1056,7 @@ private:
         filtered.reserve(catalog.size());
         for(const auto& kernel : catalog)
         {
-            // A pin is matched through the engine's ordinal domain, so a string, bool, float
-            // or int_list field selects the kernel carrying the value that index names. The
-            // int64-only comparison this replaces made those fields unpinnable: a filter
-            // naming one matched nothing and the request failed as unsatisfiable.
+            // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
             const bool matchesEverySetKnob
                 = std::all_of(filter.begin(), filter.end(), [this, &kernel](const auto& setting) {
                       return _stateManager.knobMatches(kernel, setting.first, setting.second);

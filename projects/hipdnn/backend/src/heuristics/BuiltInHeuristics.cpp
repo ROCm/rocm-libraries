@@ -34,11 +34,8 @@ void HeuristicPluginManager::registerBuiltIns()
         hipdnn_backend::heuristics::static_ordering::populateFunctionTable(),
         "built-in:SelectionHeuristic::StaticOrdering"));
 
-    // ModeA/ModeB (RFC 0019 prediction ranking) are backend built-ins like the two
-    // above: RFC 0007 §5.3.5/§10.1 make built-in registration the home for
-    // first-party policies. One function table serves both policy IDs —
-    // getAllPolicyIds reports them together and HeuristicPluginManager records
-    // every ID a plugin exposes — so a single registration is enough.
+    // ModeA/ModeB (RFC 0019 prediction policies) share one function table, so one
+    // registration exposes both policy IDs.
     registerPlugin(HeuristicPlugin::createBuiltIn(
         hipdnn_backend::heuristics::prediction::populateFunctionTable(),
         "built-in:SelectionHeuristic::ModeA+ModeB"));

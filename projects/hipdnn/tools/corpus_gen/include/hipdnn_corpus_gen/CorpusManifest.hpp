@@ -22,15 +22,8 @@
 
 /// @file CorpusManifest.hpp
 /// @brief What was generated, where each graph came from, and the key it is measured under.
-///
-/// Two manifests, one content. `manifest.json` is the audit record. `manifest.csv` is the same
-/// rows in the form `uhd_gen evaluate --regime-column` consumes -- keyed on `benchmark`, which
-/// is the identity the collected corpus reports for the same graph, so the two join directly.
-/// Without that column RFC 0019.13 §11.2's per-regime table reports UNAVAILABLE.
-///
-/// The columns are op-general: the parameter columns come from the point itself via
-/// `asQueryColumns` -- already the spelling `uhd_gen`'s feature hash expects -- and the facet
-/// columns from the declaration's `regime_label` axes. Nothing here knows an operation's name.
+/// `manifest.json` is the audit record; `manifest.csv` holds the same rows keyed on `benchmark`
+/// for `uhd_gen evaluate --regime-column` (RFC 0019.13 §11.2).
 namespace hipdnn_corpus_gen
 {
 
@@ -38,12 +31,6 @@ namespace detail
 {
 
 /// A CSV field, quoted only when it has to be.
-///
-/// `origin` is free text ("a pack file and its kernel count, a model name, a draw index") and
-/// `name` is composed from labels, so neither can be assumed comma-free. The `q.*` values
-/// cannot contain a comma -- they are numbers, `true`/`false`, or declared enum identifiers --
-/// but they go through the same function rather than relying on that as an invariant nothing
-/// checks.
 inline std::string asCsvField(const std::string& text)
 {
     if(text.find_first_of(",\"\n\r") == std::string::npos)
@@ -69,28 +56,21 @@ inline std::string asCsvField(const std::string& text)
 /// One graph, as both manifests record it.
 struct ManifestEntry
 {
-    /// The pool membership: the problem, which source supplied it, where inside that source,
-    /// and the regime it was ordered under.
     PoolEntry entry;
 
-    /// The identity the measured corpus will carry for this graph. See @ref graphIdentity;
-    /// this must be the id written into the graph document, not a second opinion about it.
+    /// Must be the id written into the graph document (see @ref graphIdentity).
     std::string benchmark;
 
-    /// The graph document's own name, which is how an L2 collection -- which mints its own
-    /// ids -- joins back to this row.
+    /// The graph document's name; L2 collections mint their own ids and join on this.
     std::string name;
 
     /// Corpus-relative, e.g. `graphs/sdpa_fwd_0001.fb`.
     std::string file;
 
-    /// The graph's tensor footprint, as the byte budget measured it.
+    /// Tensor footprint, as the byte budget measured it.
     int64_t bytes = 0;
 
-    /// Which operation's declaration this problem was drawn from, and that declaration's
-    /// facets. Per entry and not per run, because one corpus may cover several operations:
-    /// their parameters do not agree, and neither do their regime axes, so a single set of
-    /// either would describe one of them and misdescribe the rest.
+    /// Per entry, not per run: one corpus may cover several operations with different axes.
     std::string operation;
     std::vector<RegimeAxis> regimeAxes;
 };
@@ -98,31 +78,24 @@ struct ManifestEntry
 /// Everything the manifest records that is not per-graph.
 struct ManifestContext
 {
-    /// Which generation produced this corpus. Recorded because the C++ sampler applies the
-    /// declared mixture as per-combination quotas where the Python applied it as per-draw
-    /// weights: both honour the shares, and neither reproduces the other's bytes at a seed.
     std::string tool = "corpus_gen";
 
-    /// The operations covered, in the order they were generated. A label for the run; the
-    /// authoritative per-row answer is @ref ManifestEntry::operation.
+    /// In generation order; the per-row authority is @ref ManifestEntry::operation.
     std::vector<std::string> operations;
 
     uint64_t seed = 0;
 
-    /// What was asked for, against which @ref ManifestEntry count is the shortfall. Reported,
-    /// never filled: a corpus of 664 problems from an engine that serves 664 is complete.
+    /// Requested entry count. A shortfall is reported, never padded.
     int64_t requested = 0;
 
     /// Per source, from `PoolAssembly::select`.
     std::map<std::string, int64_t> allocation;
     std::map<std::string, int64_t> duplicatesDropped;
 
-    /// Files the corpus was derived from. Digested here so a rerun that quietly read a
-    /// different pack is visible in a diff of the manifest.
+    /// Input files; digested so a rerun on different inputs shows in a manifest diff.
     std::vector<std::filesystem::path> inputs;
 
-    /// Per-source notes -- what each pool held and what it dropped. Free-form because the
-    /// sources are not alike; see `PoolEntry::origin`.
+    /// Free-form per-source notes: what each pool held and dropped.
     nlohmann::json reports = nlohmann::json::object();
 };
 
@@ -144,11 +117,8 @@ inline std::string digestOf(const std::filesystem::path& path)
 } // namespace detail
 
 /// @brief The `manifest.json` document.
-///
-/// The top-level keys are a contract: `uhd_gen/reproduce/score_predictions.py` and
-/// `compare_engines.py` index `manifest["graphs"]` and read `benchmark`, `name` and `regime`
-/// off each row. Renaming any of them is a silent break, since both scripts fall back to
-/// reporting the graph id.
+/// Key names are a contract with `uhd_gen/reproduce` scripts (`graphs`, `benchmark`, `name`,
+/// `regime`); renaming one breaks them silently.
 inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
                                      const ManifestContext& context)
 {
@@ -166,9 +136,8 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
         record["origin"] = entry.entry.origin;
         record["regime"] = entry.entry.regime;
 
-        // The facets beside the joined label, so a report can group by one of them without
-        // parsing the other. Derived from the point rather than split out of `regime`, whose
-        // separator is also legal inside a declared label.
+        // Facets come from the point, not split from `regime`: its separator may appear in
+        // a label.
         for(const auto& facet : regimeFacets(entry.regimeAxes, entry.entry.point))
         {
             record[facet.first] = facet.second;
@@ -217,12 +186,8 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
 namespace detail
 {
 
-/// Every facet name and every `q.*` name any entry carries, first-seen order preserved.
-///
-/// A union rather than the first entry's columns, because a corpus may cover more than one
-/// operation and theirs do not agree. First-seen rather than sorted so that the common case --
-/// one operation -- still emits its parameters in declaration order, which is the order every
-/// other file this tool writes uses.
+/// Union of facet (or `q.*`) columns across entries, in first-seen order so a
+/// single-operation corpus keeps declaration order.
 inline std::vector<std::string> unionOfColumns(const std::vector<ManifestEntry>& entries,
                                                bool facets)
 {
@@ -274,18 +239,7 @@ inline std::vector<std::string>
 } // namespace detail
 
 /// @brief The `manifest.csv` header and rows, in one ordered pass.
-///
-/// Column order: identity, then what the graph is, then where it came from, then the problem
-/// itself (the `q.*` block), then the file.
-///
-/// Header and rows are generated from the same column list for the same reason
-/// `asQueryColumns` is -- a header that disagrees with its rows transposes two features and
-/// trains a model on the wrong ones. The `q.*` and facet columns are the union across entries,
-/// with a cell left empty where an entry has no such parameter: a row of a two-operation
-/// corpus is not wrong about its own columns just because the other operation has some it
-/// does not.
-/// Takes no @ref ManifestContext: every column it writes is now per-entry, which is the point
-/// of the union above.
+/// Header and rows share one column list; cells are empty where an entry lacks a column.
 inline std::string corpusManifestCsv(const std::vector<ManifestEntry>& entries)
 {
     const auto facetColumns = detail::unionOfColumns(entries, true);
