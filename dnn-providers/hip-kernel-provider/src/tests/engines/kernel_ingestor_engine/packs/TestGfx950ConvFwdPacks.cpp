@@ -75,6 +75,22 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_G16_N2_Hi12_Wi12_C16_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH0_pW0_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH0_pW0_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH2_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH2_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
                  "gfx950_conv_fwd_dtypebf16_G2_N2_Hi13_Wi13_C16_K16_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_G2_N2_Hi13_Wi13_C16_K16_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
@@ -84,10 +100,18 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "gfx950_conv_fwd_dtypebf16_G2_N2_Hi15_Wi15_C16_K16_Y5_X5_sH1_sW1_pH4_pW4_dH2_dW2_"
                  "tile_k64",
                  "gfx950_conv_fwd_dtypebf16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
                  "gfx950_conv_fwd_dtypebf16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
                  "tile_k64",
@@ -95,10 +119,56 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_G4_N2_Hi11_Wi11_C12_K24_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
                  "gfx950_conv_fwd_dtypebf16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_tile_"
                  "k128",
                  "gfx950_conv_fwd_dtypebf16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_tile_"
                  "k64",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw32_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw32_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw3_bwv2",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypebf16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
                  "gfx950_conv_fwd_dtypebf16_N1_Hi15_Wi17_C32_K32_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypebf16_N1_Hi15_Wi17_C32_K32_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
@@ -123,6 +193,22 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_G16_N2_Hi12_Wi12_C16_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH0_pW0_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH0_pW0_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi12_Wi12_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH2_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G24_N2_Hi13_Wi13_C24_K24_Y3_X3_sH2_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
                  "gfx950_conv_fwd_dtypefp16_G2_N2_Hi13_Wi13_C16_K16_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_G2_N2_Hi13_Wi13_C16_K16_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
@@ -132,10 +218,18 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "gfx950_conv_fwd_dtypefp16_G2_N2_Hi15_Wi15_C16_K16_Y5_X5_sH1_sW1_pH4_pW4_dH2_dW2_"
                  "tile_k64",
                  "gfx950_conv_fwd_dtypefp16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_G32_N2_Hi14_Wi14_C32_K32_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
                  "gfx950_conv_fwd_dtypefp16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_G32_N2_Hi17_Wi17_C32_K32_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
                  "tile_k64",
@@ -143,10 +237,56 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_G4_N2_Hi11_Wi11_C12_K24_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
                  "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G5_N2_Hi56_Wi24_C5_K5_Y17_X17_sH1_sW1_pH8_pW8_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_"
+                 "family1_spatial_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
                  "gfx950_conv_fwd_dtypefp16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_tile_"
                  "k128",
                  "gfx950_conv_fwd_dtypefp16_G5_N2_Hi9_Wi9_C5_K5_Y7_X7_sH1_sW1_pH3_pW3_dH1_dW1_tile_"
                  "k64",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw32_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw32_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G64_N2_Hi70_Wi40_C64_K64_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw3_bwv2",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi14_Wi14_C96_K96_Y3_X3_sH1_sW1_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi16_Wi18_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "family1_std_bw4_bwv1",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k128",
+                 "gfx950_conv_fwd_dtypefp16_G96_N2_Hi17_Wi17_C96_K96_Y3_X3_sH2_sW2_pH1_pW1_dH1_dW1_"
+                 "tile_k64",
                  "gfx950_conv_fwd_dtypefp16_N1_Hi15_Wi17_C32_K32_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
                  "tile_k128",
                  "gfx950_conv_fwd_dtypefp16_N1_Hi15_Wi17_C32_K32_Y3_X3_sH1_sW1_pH2_pW2_dH2_dW2_"
@@ -286,8 +426,10 @@ TEST_F(TestGfx950ConvFwdPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950ConvFwdPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 1U);
+    ASSERT_EQ(_set->engine.knobs.size(), 2U);
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_k"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "kernel_family"),
               _set->engine.knobs.end());
 }
 

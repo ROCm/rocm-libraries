@@ -1,7 +1,8 @@
 # Packaged gfx950 forward convolution
 
-`hipkernel:Gfx950ConvFwd` runs rocKE's implicit-GEMM forward convolution through
-the HIP Kernel Provider. It accepts plain 2D cross-correlation with dense
+`hipkernel:Gfx950ConvFwd` runs rocKE's implicit-GEMM forward convolution, and
+for pure depthwise convolution rocKE's direct depthwise kernels, through the
+HIP Kernel Provider. It accepts plain 2D cross-correlation with dense
 channels-last storage, FP16 or BF16 storage, FP32 accumulation, and symmetric
 padding. Grouped convolution, including depthwise and channel-multiplier
 depthwise, is supported: the group count is inferred as X channels divided by
@@ -11,14 +12,31 @@ kernel's flat pointwise path does not select the group's channel slabs. See [the
 dimension/stride mapping and rejection rules, and [kernel mining](mining.md)
 for the ABI and compile-time constraints.
 
-The shipped catalog contains 48 compiled variants for 24 synthetic verification
-requests, each request with `tile_k=64` and `tile_k=128` and otherwise the
-dispatcher's default tuning:
+The engine holds two kernel families, told apart by the integer metadata field
+and engine knob `kernel_family`:
+
+- `0`, implicit GEMM: every accepted graph, with `tile_k` 64 or 128.
+- `1`, direct depthwise: rocKE's `DirectDepthwiseSpec` (`direct_variant`
+  `std`, tuned by `block_w` and `block_waves`) and `DirectDepthwiseSpatialSpec`
+  (`spatial`, tuned by `block_waves`, for fewer than 64 channels). They serve
+  only pure depthwise graphs (`groups == C == K`) with equal strides, symmetric
+  equal padding and no dilation, and only when the last input row and column
+  feed the last output row and column: rocKE's direct kernels compute wrong
+  answers otherwise, so those graphs are left to implicit GEMM. See
+  [the graph contract](graph_contract.md#6-direct-depthwise-family).
+
+The shipped catalog contains 118 compiled variants for 44 synthetic
+verification requests. Every request has an implicit-GEMM variant with
+`tile_k=64` and one with `tile_k=128`, otherwise at the dispatcher's default
+tuning (88 variants); 18 depthwise requests also have one or two direct
+depthwise variants (30 variants: 22 `std`, 8 `spatial`):
 
 | Requests | Source |
 |---:|---|
 | 10 | Synthetic verification shapes, FP16 and BF16: padded 3x3, pointwise 1x1, strided, dilated and non-square. |
-| 14 | Synthetic grouped verification shapes, FP16 and BF16: two grouped 3x3 cases, depthwise 3x3 at stride 1 and 2, odd-channel depthwise 7x7 (default epilogue), a channel-multiplier depthwise 3x3 and a dilated grouped 5x5. |
+| 14 | Synthetic grouped verification shapes, FP16 and BF16: two grouped 3x3 cases, depthwise 3x3 at stride 1 and 2, odd-channel depthwise 7x7 (default epilogue), a channel-multiplier depthwise 3x3 and a dilated grouped 5x5. The three plain depthwise shapes also carry direct variants. |
+| 12 | Synthetic depthwise shapes, FP16 and BF16, each with direct variants: 96 channels at stride 1 (a partly empty channel tile) and at stride 2 on odd and even input heights, 64 channels on a 70x40 input at stride 1 and 2, and a 5-channel 17x17 filter. The 70x40 `block_w=32` variants and the 17x17 spatial variant take rocKE's runtime row loop. |
+| 8 | Synthetic depthwise shapes, FP16 and BF16, that the direct family must decline: 3x3 without padding, 3x3 with padding 2, unequal strides, and dilation 2. Implicit GEMM only. |
 
 Workload shapes are never committed. The shipped catalog exists to prove the
 integration end to end; catalogs for real workloads are generated and packed
@@ -95,16 +113,25 @@ Run `hipdnn_list_engines --plugin-dir
 `hipkernel:Gfx950ConvFwd`. Enumeration alone does not prove dispatch.
 
 The provider's `*Gfx950ConvFwd*` unit tests cover graph refusal, every baked
-constraint, geometry/overflow, output validation, and buffer nonaliasing.
+constraint of both families, geometry/overflow, the direct family's guard and
+launch geometry, ranking, output validation, and buffer nonaliasing.
 Its GPU tests force both `tile_k` values for FP16 and BF16 on every synthetic
 verification shape, grouped and depthwise included, compare with the CPU
-reference, and verify benchmarking and plan recreation. Use their installed
-binaries with `--gtest_filter='*Gfx950ConvFwd*'`.
+reference, and verify benchmarking and plan recreation. For the direct family
+they check, on every direct-capable shape: that an unforced, unbenchmarked plan
+serves the direct default kernel; that every packaged direct variant, not only
+the default or the benchmark winner, matches the CPU reference (each is served
+in turn from a winner record that ranks it first); and that benchmarking
+measures both families and reuses its winner. The guarded depthwise graphs must
+offer only `kernel_family=0` and stay correct through implicit GEMM. Use their
+installed binaries with `--gtest_filter='*Gfx950ConvFwd*'`.
 
 The shared bundles are `quick/Gfx950ConvFwd/Smoke` (the padded 3x3 smoke
-shape and a depthwise 3x3, each in FP16 and BF16) and
+shape and a depthwise 3x3, each in FP16 and BF16),
 `standard/Gfx950ConvFwd/Spatial` (eight spatial cases, twelve grouped and
-depthwise cases). The registered target pins the engine by name:
+depthwise cases) and `standard/Gfx950ConvFwd/Depthwise` (ten depthwise cases
+the direct family serves by default). The registered target pins the engine
+by name:
 
 ```bash
 ctest --test-dir "$CONV_INSTALL/bin/hip_kernel_provider" \
@@ -128,8 +155,24 @@ bundle data into the build tree during configuration, then installs that copy.
 
 ## Selection, cache, and timing
 
-`tile_k` is an integer engine knob with values 64 and 128. Fallback ranking
-prefers 64, matching the dispatcher. With `HIPDNN_FORCE_BENCHMARKING=1`, the
+`tile_k` and `kernel_family` are integer engine knobs. `kernel_family` forces
+a family: `0` implicit GEMM, `1` direct depthwise. Implicit-GEMM kernels offer
+`tile_k` 64 and 128; forcing either selects implicit GEMM. Known quirk: direct
+kernels carry the placeholder `tile_k=0`, and knob choices come from metadata,
+so on a graph the direct family serves `tile_k` also advertises 0 (and reports
+it as the default). Forcing `tile_k=0` therefore selects only direct kernels,
+and combining `kernel_family=0` with `tile_k=0` matches nothing. Use
+`kernel_family` to choose the family; hiding the placeholder would need a
+plugin SDK change. Without benchmarking, fallback ranking puts the
+direct family's default variant first wherever it applies (the spatial kernel
+with `block_waves=1` below 64 channels, otherwise the standard kernel with
+`block_w=4` and `block_waves=1`), then any other direct variant, then
+implicit GEMM preferring `tile_k=64`, matching the dispatcher. This default can
+be slower than implicit GEMM on some shapes; benchmarking measures both
+families. A winner record measured before a graph gained direct candidates no
+longer covers every candidate, so the runtime ignores it: fallback ranking
+applies until the graph is benchmarked again, and a benchmarking run
+re-measures it. With `HIPDNN_FORCE_BENCHMARKING=1`, the
 existing ingestor benchmarks all applicable candidates on first execution and
 persists the measured ranking. A complete cached ranking suppresses a new
 search, including after process restart. Use a fresh `HIPDNN_CACHE_DIR` for
@@ -144,8 +187,12 @@ The integration probe at
 `projects/hipdnn/tools/IngestorGenerator/tools/benchmark_conv_integration.py`
 checks the exact engine, validates each forced variant against PyTorch,
 records the first search separately, and compares steady-state execution with
-direct rocKE using the same spec and compiler. Run its `--help` for artifact
-paths and forced/automatic/reuse modes. Execute reuse in a separate process
+the original rocKE builder's kernel launched on its own, using the same spec
+and compiler. It discovers both families' packaged variants for the graph from
+the installed descriptors and checks each against the adapter;
+`--kernel-family 0|1` forces a family (with `--mode forced`) or restricts the
+measured candidates (with auto/reuse). Run its `--help` for artifact paths and
+forced/automatic/reuse modes. Execute reuse in a separate process
 with the same cache. The fastest result means fastest among the valid variants
 actually packaged and measured; first-search time is excluded from reported
 steady-state timing. Keep raw measurements in private evidence outside Git.
@@ -175,8 +222,13 @@ the source tree, out of commits and out of pull requests. To serve them:
 1. Mine or write the requests into a private file outside the source tree.
 2. Copy `configs/gfx950_conv_fwd.yaml` outside the source tree and replace or
    extend its `shapes` lists with the private requests. Grouped requests go in
-   the `_G{groups}` variants group so names cannot collide.
+   the `_G{groups}` variants group so names cannot collide. Direct depthwise
+   variants go in the `_family1_{direct_variant}` group; keep only arms that
+   `supports_gfx950_conv_fwd` accepts, which applies the direct family's guard.
 3. Run `generate.py --config <private config> --output-dir <private dir>`.
+   Any script that builds direct kernels outside `hkp_pack` must set
+   `ROCKE_BACKEND=python` (`hkp_pack` already pins it): rocKE's C++ lowering
+   slows down sharply as `block_w` grows.
 4. Copy the shipped descriptor root
    (`src/engines/kernel_ingestor_engine/descriptors`) to a private directory and
    replace its `rocKE/gfx950_conv_fwd` bundle with the generated one, so the

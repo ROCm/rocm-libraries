@@ -111,6 +111,26 @@
     {
       "name": "epilogue",
       "type": "string"
+    },
+    {
+      "name": "kernel_family",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "direct_variant",
+      "type": "string",
+      "default_value": "none"
+    },
+    {
+      "name": "block_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_waves",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

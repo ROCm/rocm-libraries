@@ -193,8 +193,20 @@ def load_config(path: Path) -> IngestorConfig:
                 name=raw_field["name"],
                 type=raw_field["type"],
                 default_value=raw_field.get("default_value"),
+                builder_default=raw_field.get("builder_default", False),
             )
         )
+        if not isinstance(kmd_fields[-1].builder_default, bool):
+            raise ConfigError(
+                f"kmd_fields entry '{raw_field['name']}' declares builder_default "
+                f"{kmd_fields[-1].builder_default!r}; it must be true or false."
+            )
+        if kmd_fields[-1].builder_default and kmd_fields[-1].is_mandatory:
+            raise ConfigError(
+                f"kmd_fields entry '{raw_field['name']}' declares builder_default "
+                f"without a default_value. builder_default lets a kernel omit the "
+                f"field, which only a KMD default_value can then decide."
+            )
 
     kmd_field_names = {f.name for f in kmd_fields}
 
@@ -946,7 +958,7 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
     }
 )
-_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
+_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
 _KNOWN_PACK = frozenset(
     {
         "name",

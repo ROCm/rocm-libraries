@@ -6,11 +6,26 @@
 # docs/gfx950_conv_fwd/README.md). Every request carries both tile_k arms (64
 # and 128) so the engine's benchmarked selection has a real choice.
 # Group 1 (groups=1): five verification shapes in FP16/BF16.
-# Group 2 (groups>1, names carry _G{groups}): seven grouped and depthwise
-# verification shapes in FP16/BF16. Grouped pointwise (1x1, stride 1, no
-# padding) is outside the contract and never appears here.
+# Group 2 (groups>1, names carry _G{groups}): seventeen grouped and depthwise
+# verification shapes in FP16/BF16. The last four are depthwise shapes the
+# direct family must decline (pad 0, pad 2, sH != sW, dilation 2), served by
+# implicit GEMM only. Grouped pointwise (1x1, stride 1, no padding) is outside
+# the contract and never appears here.
+# Group 3 (kernel_family=1, names end _family1_std_bw{block_w}_bwv{block_waves}
+# or _family1_spatial_bwv{block_waves}; the spatial kernel derives its block
+# width): rocKE's direct depthwise kernels on nine of the depthwise shapes of
+# group 2, in FP16/BF16. kernel_family=1 forces them. Their implicit-GEMM fields
+# hold placeholders: tile_k is 0, so forcing tile_k=64/128 selects only implicit
+# GEMM (a known quirk: tile_k=0 is advertised on these graphs and also selects
+# only direct kernels; see docs/gfx950_conv_fwd/README.md). The 70x40 3x3 block_w=32 arms
+# and the 56x24 17x17 spatial arm take rocKE's runtime H loop
+# (_DW_UNROLL_THRESH); the other direct arms are fully unrolled.
 # Requests: gfx950_conv_fwd.requests.json; each request's _catalog_tile_k
-# records the arms admitted to this catalog.
+# records the implicit-GEMM arms and _catalog_direct the direct arms admitted
+# to this catalog.
+# The four family fields are builder_default: the adapter's dataclass defaults
+# them to the KMD default_value, so groups 1 and 2 omit them and their
+# descriptors stay as first shipped.
 # Regenerate descriptors with generate.py --config this-file --output-dir DIR.
 
 dialect: packaged
@@ -20,6 +35,7 @@ engine:
   sdk_version: 1.0.0
   knobs:
   - tile_k
+  - kernel_family
   heuristic: native
 kmd_fields:
 - name: N
@@ -77,17 +93,33 @@ kmd_fields:
   type: string
 - name: epilogue
   type: string
+- name: kernel_family
+  type: int
+  default_value: 0
+  builder_default: true
+- name: direct_variant
+  type: string
+  default_value: none
+  builder_default: true
+- name: block_w
+  type: int
+  default_value: 0
+  builder_default: true
+- name: block_waves
+  type: int
+  default_value: 0
+  builder_default: true
 kernel_source_kind: rocke
 workspace_policy: none
 graph_match:
   shape: shared_shape
   discriminator: none
 # Every metadata field is baked into the kernel at compile time: the builder's
-# Gfx950ConvFwdSpec consumes all 27, so the whole geometry and every tuning value
+# Gfx950ConvFwdSpec consumes all 31, so the whole geometry and every tuning value
 # is part of the specialization contract and none of them are matcher-only.
 specialization:
   metadata_fields:
-    [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue]
+    [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, kernel_family, direct_variant, block_w, block_waves]
   matcher_only_fields: []
   bindings:
     N: {field: N}
@@ -117,6 +149,10 @@ specialization:
     wave_size: {field: wave_size}
     pipeline: {field: pipeline}
     epilogue: {field: epilogue}
+    kernel_family: {field: kernel_family}
+    direct_variant: {field: direct_variant}
+    block_w: {field: block_w}
+    block_waves: {field: block_waves}
 
 packs:
 - name: gfx950_conv_fwd
@@ -191,3 +227,75 @@ packs:
     - {N: 2, Hi: 12, Wi: 12, C: 16, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 16, dtype: bf16, knobs: knobs0}
     - {N: 2, Hi: 15, Wi: 15, C: 16, K: 16, Y: 5, X: 5, sH: 1, sW: 1, pH: 4, pW: 4, dH: 2, dW: 2, groups: 2, dtype: fp16, knobs: knobs0}
     - {N: 2, Hi: 15, Wi: 15, C: 16, K: 16, Y: 5, X: 5, sH: 1, sW: 1, pH: 4, pW: 4, dH: 2, dW: 2, groups: 2, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 14, Wi: 14, C: 96, K: 96, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 14, Wi: 14, C: 96, K: 96, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 17, Wi: 17, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 17, Wi: 17, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 16, Wi: 18, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 16, Wi: 18, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 56, Wi: 24, C: 5, K: 5, Y: 17, X: 17, sH: 1, sW: 1, pH: 8, pW: 8, dH: 1, dW: 1, groups: 5, dtype: fp16, epilogue: default, knobs: knobs0}
+    - {N: 2, Hi: 56, Wi: 24, C: 5, K: 5, Y: 17, X: 17, sH: 1, sW: 1, pH: 8, pW: 8, dH: 1, dW: 1, groups: 5, dtype: bf16, epilogue: default, knobs: knobs0}
+    - {N: 2, Hi: 12, Wi: 12, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, groups: 24, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 12, Wi: 12, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 0, pW: 0, dH: 1, dW: 1, groups: 24, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 12, Wi: 12, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 1, dW: 1, groups: 24, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 12, Wi: 12, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 1, dW: 1, groups: 24, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 13, Wi: 13, C: 24, K: 24, Y: 3, X: 3, sH: 2, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 24, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 13, Wi: 13, C: 24, K: 24, Y: 3, X: 3, sH: 2, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 24, dtype: bf16, knobs: knobs0}
+    - {N: 2, Hi: 13, Wi: 13, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 2, dW: 2, groups: 24, dtype: fp16, knobs: knobs0}
+    - {N: 2, Hi: 13, Wi: 13, C: 24, K: 24, Y: 3, X: 3, sH: 1, sW: 1, pH: 2, pW: 2, dH: 2, dW: 2, groups: 24, dtype: bf16, knobs: knobs0}
+  - name: gfx950_conv_fwd_dtype{md_dtype}_G{groups}_N{N}_Hi{Hi}_Wi{Wi}_C{C}_K{K}_Y{Y}_X{X}_sH{sH}_sW{sW}_pH{pH}_pW{pW}_dH{dH}_dW{dW}_family{kernel_family}_{tag}
+    metadata: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, kernel_family, direct_variant, block_w, block_waves]
+    spec_order: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, kernel_family, direct_variant, block_w, block_waves]
+    vocabulary:
+      dtype:
+        fp16: fp16
+        bf16: bf16
+      layout:
+        NHWC: NHWC
+      pipeline:
+        none: none
+      epilogue:
+        none: none
+      direct_variant:
+        std: std
+        spatial: spatial
+    # Direct depthwise placeholders for the implicit-GEMM fields. A spatial arm
+    # carries block_w 0: the kernel derives block_waves * (64 // groups).
+    spec_defaults: {layout: NHWC, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: none, epilogue: none, kernel_family: 1}
+    knob_sets:
+      dw_spatial_std4:
+      - {direct_variant: spatial, block_w: 0, block_waves: 1, tag: 'spatial_bwv{block_waves}'}
+      - {direct_variant: std, block_w: 4, block_waves: 1, tag: 'std_bw{block_w}_bwv{block_waves}'}
+      dw_spatial:
+      - {direct_variant: spatial, block_w: 0, block_waves: 1, tag: 'spatial_bwv{block_waves}'}
+      dw_std4:
+      - {direct_variant: std, block_w: 4, block_waves: 1, tag: 'std_bw{block_w}_bwv{block_waves}'}
+      dw_std4_std3x2:
+      - {direct_variant: std, block_w: 4, block_waves: 1, tag: 'std_bw{block_w}_bwv{block_waves}'}
+      - {direct_variant: std, block_w: 3, block_waves: 2, tag: 'std_bw{block_w}_bwv{block_waves}'}
+      dw_std4_std32:
+      - {direct_variant: std, block_w: 4, block_waves: 1, tag: 'std_bw{block_w}_bwv{block_waves}'}
+      - {direct_variant: std, block_w: 32, block_waves: 1, tag: 'std_bw{block_w}_bwv{block_waves}'}
+    shapes:
+    - {N: 2, Hi: 14, Wi: 14, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 32, dtype: fp16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 14, Wi: 14, C: 32, K: 32, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 32, dtype: bf16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 17, Wi: 17, C: 32, K: 32, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 32, dtype: fp16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 17, Wi: 17, C: 32, K: 32, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 32, dtype: bf16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 9, Wi: 9, C: 5, K: 5, Y: 7, X: 7, sH: 1, sW: 1, pH: 3, pW: 3, dH: 1, dW: 1, groups: 5, dtype: fp16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 9, Wi: 9, C: 5, K: 5, Y: 7, X: 7, sH: 1, sW: 1, pH: 3, pW: 3, dH: 1, dW: 1, groups: 5, dtype: bf16, knobs: dw_spatial_std4}
+    - {N: 2, Hi: 14, Wi: 14, C: 96, K: 96, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: dw_std4_std3x2}
+    - {N: 2, Hi: 14, Wi: 14, C: 96, K: 96, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: dw_std4_std3x2}
+    - {N: 2, Hi: 17, Wi: 17, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: dw_std4}
+    - {N: 2, Hi: 17, Wi: 17, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: dw_std4}
+    - {N: 2, Hi: 16, Wi: 18, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: fp16, knobs: dw_std4}
+    - {N: 2, Hi: 16, Wi: 18, C: 96, K: 96, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 96, dtype: bf16, knobs: dw_std4}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: fp16, knobs: dw_std4_std32}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 1, sW: 1, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: bf16, knobs: dw_std4_std32}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: fp16, knobs: dw_std4_std32}
+    - {N: 2, Hi: 70, Wi: 40, C: 64, K: 64, Y: 3, X: 3, sH: 2, sW: 2, pH: 1, pW: 1, dH: 1, dW: 1, groups: 64, dtype: bf16, knobs: dw_std4_std32}
+    - {N: 2, Hi: 56, Wi: 24, C: 5, K: 5, Y: 17, X: 17, sH: 1, sW: 1, pH: 8, pW: 8, dH: 1, dW: 1, groups: 5, dtype: fp16, knobs: dw_spatial}
+    - {N: 2, Hi: 56, Wi: 24, C: 5, K: 5, Y: 17, X: 17, sH: 1, sW: 1, pH: 8, pW: 8, dH: 1, dW: 1, groups: 5, dtype: bf16, knobs: dw_spatial}

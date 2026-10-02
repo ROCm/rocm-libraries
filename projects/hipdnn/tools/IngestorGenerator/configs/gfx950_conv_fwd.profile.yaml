@@ -5,6 +5,15 @@
 # root the tools find from their own location; python_source paths resolve
 # against provider_root's rocke/library, the base dispatch_parity.py imports
 # modules from.
+#
+# Two kernel families share the engine, selected per kernel by kernel_family.
+# The dispatch/predicate/reference_candidates model below describes the
+# implicit-GEMM family only (groups 1 and 2 of gfx950_conv_fwd.yaml).
+# rocKE has no dispatcher for its direct depthwise kernels, so group 3
+# (kernel_family=1) is hand-authored from
+# builders/common/convolution_forward.py:gfx950_conv_fwd_direct_spec_for_request
+# and dispatch_parity.py does not reproduce it. The supports_gfx950_conv_fwd
+# predicate and the launch_surface entries cover both families.
 
 slug: gfx950_conv_fwd
 bundle: gfx950_conv_fwd
@@ -22,7 +31,7 @@ delegates_to_existing_plan: false
 engine:
   name: hipkernel:Gfx950ConvFwd
   sdk_version: "1.0.0"
-  knobs: [tile_k]
+  knobs: [tile_k, kernel_family]
   heuristic: native
 
 request:
@@ -64,7 +73,8 @@ reference_request:
 metadata_fields: &metadata_fields
   [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups,
    tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n,
-   warp_tile_k, wave_size, pipeline, epilogue]
+   warp_tile_k, wave_size, pipeline, epilogue, kernel_family, direct_variant,
+   block_w, block_waves]
 kmd_fields:
   - {name: N, type: int}
   - {name: Hi, type: int}
@@ -93,9 +103,13 @@ kmd_fields:
   - {name: wave_size, type: int}
   - {name: pipeline, type: string}
   - {name: epilogue, type: string}
+  - {name: kernel_family, type: int, default_value: 0, builder_default: true}
+  - {name: direct_variant, type: string, default_value: none, builder_default: true}
+  - {name: block_w, type: int, default_value: 0, builder_default: true}
+  - {name: block_waves, type: int, default_value: 0, builder_default: true}
 
 # Every metadata field is baked into the kernel at compile time: the builder's
-# Gfx950ConvFwdSpec consumes all 27, so the whole geometry and every tuning
+# Gfx950ConvFwdSpec consumes all 31, so the whole geometry and every tuning
 # value is part of the specialization contract and none are matcher-only.
 # Mirrors the `specialization` block of gfx950_conv_fwd.yaml.
 specialization:
@@ -129,6 +143,10 @@ specialization:
     wave_size: {field: wave_size}
     pipeline: {field: pipeline}
     epilogue: {field: epilogue}
+    kernel_family: {field: kernel_family}
+    direct_variant: {field: direct_variant}
+    block_w: {field: block_w}
+    block_waves: {field: block_waves}
 
 # One exact-shape kernel per catalog entry: no field is read only from kernel
 # arguments, so nothing is reused across runtime shapes. Documentation only.
@@ -140,11 +158,15 @@ graph_match:
 
 # Metadata uses the adapter's lowercase dtype names. Every tuning value is
 # resolved before emission; there are no policy-owned optional fields here.
+# Direct depthwise kernels carry pipeline and epilogue "none" and a
+# direct_variant of std or spatial; implicit GEMM leaves direct_variant at its
+# KMD default "none".
 vocabulary:
   dtype: {fp16: fp16, bf16: bf16}
   layout: {NHWC: NHWC}
-  pipeline: {mem: mem}
-  epilogue: {cshuffle: cshuffle, default: default}
+  pipeline: {mem: mem, none: none}
+  epilogue: {cshuffle: cshuffle, default: default, none: none}
+  direct_variant: {none: none, std: std, spatial: spatial}
 policies: {}
 field_map:
   G: groups
@@ -157,7 +179,8 @@ field_map:
 # Partial tiles are masked. tile_k need not divide Y*X*C.
 divides: {}
 # This models native fallback ordering only. Forced knobs and BenchmarkPlan
-# can select either arm; an unforced host corpus will prefer tile_k=64.
+# can select any arm; an unforced host corpus prefers a direct depthwise kernel
+# (tile_k 0) where one applies, then tile_k=64.
 score: {field: tile_k, prefer: min}
 sweep:
   tile_k:
@@ -210,6 +233,36 @@ launch_surface:
   - name: fallback_selection
     python_source: builders/common/convolution_forward.py:gfx950_conv_fwd_spec_for_request
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:score
-    kmd_fields: [tile_k]
-    guard: Native score prefers the dispatcher's tile_k=64 default; BenchmarkPlan can replace that ranking with measurements.
+    kmd_fields: [tile_k, kernel_family, direct_variant, block_w, block_waves]
+    guard: Native score ranks direct depthwise kernels first, the default direct arm (gfx950_conv_fwd_direct_spec_for_request with no overrides) highest, then the dispatcher's tile_k=64 default; BenchmarkPlan can replace that ranking with measurements across both families.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
+  - name: direct_applicability
+    python_source: builders/common/convolution_forward.py:_direct_error
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:kernelFits
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, groups, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, kernel_family, direct_variant, block_w, block_waves]
+    guard: kernelFits refuses an unknown kernel_family or direct_variant, an implicit-GEMM kernel whose direct fields are not at their defaults, and a direct kernel unless groups == C == K, sH == sW, pH == pW, dH == dW == 1, every implicit-GEMM placeholder is exact (tile/warp fields 0, wave_size 64, pipeline and epilogue none), block_waves is in [1, 16], a std kernel has block_w > 0 and a spatial kernel has block_w 0 and groups < 64.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
+  - name: direct_row_coverage
+    python_source: builders/common/convolution_forward.py:_direct_rows_covered
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directRowsCovered
+    kmd_fields: [Hi, Wi, Y, X, sH, sW, pH, pW]
+    guard: rocKE's direct kernels write output row floor(p/s) only for input rows p < Hi, so a direct kernel is accepted only when floor((Hi-1)/s) == Ho-1 and floor((Wi-1)/s) == Wo-1; otherwise rows are left unwritten or the runtime H loop writes into the next image. Such graphs stay on implicit GEMM.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
+  - name: direct_grid
+    python_source: builders/common/convolution_forward.py:grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directLaunchGeometry
+    kmd_fields: [N, Hi, Wi, X, sW, pW, groups, wave_size, direct_variant, block_w, block_waves]
+    guard: "std: (ceil(Wo/block_w), ceil(groups/(64*block_waves)), N); spatial: (ceil(Wo/(block_waves*(64//groups))), 1, N), mirroring rocke/library/benchmarks/common/benchmark_direct_conv.py; directLaunchGeometry refuses any axis above 65535."
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
+  - name: direct_block
+    python_source: builders/common/convolution_forward.py:block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directLaunchGeometry
+    kmd_fields: [wave_size, block_waves]
+    guard: The block is 64 * block_waves threads with block_waves in [1, 16]; the direct kernels use no LDS and no workspace, so prepare still requests zero dynamic shared memory.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
+  - name: direct_kernargs_and_execution
+    python_source: kernels/common/conv_direct_grouped.py:build_direct_depthwise
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:launch
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, groups, kernel_family, direct_variant]
+    guard: Both direct kernels (build_direct_depthwise and build_direct_depthwise_spatial) take the implicit-GEMM ABI unchanged (A, B, D, A_bytes, B_bytes, D_bytes) with the same byte counts, so launch is shared; the GPU tests force kernel_family=1 on every direct catalog shape, including both runtime H-loop paths with N=2.
+    test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
