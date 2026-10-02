@@ -1,0 +1,6 @@
+{% extends "common/base.h.jinja2" %}
+{% block params_type -%}partition_config_params{% endblock -%}
+{% block config_base_type -%}partition_config_params_base<key_type>{%- endblock -%}
+{% block config_constructor -%}
+partition_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}

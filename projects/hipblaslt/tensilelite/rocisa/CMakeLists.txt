@@ -160,7 +160,9 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        if("gfx1250" IN_LIST GPU_TARGETS)
+        # Both steppings need the bindings, and they are separate entries in
+        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
+        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
             set(STINKYTOFU_BUILD_PYTHON ON)
         else()
             set(STINKYTOFU_BUILD_PYTHON OFF)
@@ -172,7 +174,7 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS)
+            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
                 set(STINKYTOFU_BUILD_PYTHON ON)
             else()
                 set(STINKYTOFU_BUILD_PYTHON OFF)
@@ -356,6 +358,9 @@ block()
 
     if(NOT ROCISA_STANDALONE)
         set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
+        # TheRock computes install RPATHs relative to this target location.
+        set_property(TARGET _rocisa PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_rocisa_install_dir}")
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
             DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
