@@ -458,7 +458,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
     };
 
     template <typename DeviceArch>
-    __device__ static constexpr auto GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(DeviceArch)
+    __host__ __device__ static constexpr auto
+    GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1(DeviceArch)
     {
         if constexpr(DirectLoad)
         {
@@ -490,7 +491,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
     }
 
     template <typename DeviceArch>
-    __device__ static constexpr auto GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1(DeviceArch)
+    __host__ __device__ static constexpr auto
+    GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1(DeviceArch)
     {
         if constexpr(DirectLoad)
         {
