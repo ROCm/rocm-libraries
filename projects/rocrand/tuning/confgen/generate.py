@@ -121,7 +121,7 @@ def main():
         existing_dir = pathlib.Path(args.existing)
         if not existing_dir.exists():
             log.error(f"Could not find directory: {existing_dir}")
-            quit()
+            quit(1)
 
     # Merge newly generated configs to existing configs
     if existing_dir:
