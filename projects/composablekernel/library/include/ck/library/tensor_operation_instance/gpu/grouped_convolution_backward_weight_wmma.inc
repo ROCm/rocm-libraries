@@ -47,7 +47,7 @@ void add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
-#ifdef CK_USE_GFX1250
+#ifdef CK_HAS_GFX1250_INSTANCES
 void add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
                                                            NHWGC,
@@ -113,7 +113,7 @@ void add_device_grouped_conv3d_bwd_weight_wmma_ndhwgc_gkzyxc_ndhwgk_bf16_instanc
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
-#ifdef CK_USE_GFX1250
+#ifdef CK_HAS_GFX1250_INSTANCES
 void add_device_grouped_conv3d_bwd_weight_wmma_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<3,
                                                            NDHWGC,

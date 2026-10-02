@@ -76,7 +76,7 @@ void add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc
                                                                 PassThrough,
                                                                 PassThrough,
                                                                 AddClamp>>>& instances);
-#ifdef CK_USE_GFX1250
+#ifdef CK_HAS_GFX1250_INSTANCES
 void add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
                                                                 NHWGC,
@@ -172,7 +172,7 @@ void add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwg
                                                                 PassThrough,
                                                                 PassThrough,
                                                                 AddClamp>>>& instances);
-#ifdef CK_USE_GFX1250
+#ifdef CK_HAS_GFX1250_INSTANCES
 void add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
     std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<3,
                                                                 NDHWGC,
