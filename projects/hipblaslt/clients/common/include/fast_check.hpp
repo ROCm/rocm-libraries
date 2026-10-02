@@ -54,7 +54,9 @@ struct FastCheckMatrix
     int64_t     stride = 0; // distance between batches, in elements
 };
 
-// D = alpha * diag(scale_alpha_vec) * op(A) * op(B) + beta * C + bias * 1^T, per batch.
+// D = scale_d * (alpha * diag(scale_alpha_vec .* scale_a) * op(A) * op(B) * diag(scale_b)
+//                + beta * scale_c * C + bias * 1^T), per batch. scale_a is one value or one per
+// row of D, and scale_b one value or one per column. Every scale must be an integer.
 struct FastCheckProblem
 {
     int64_t M           = 0;
@@ -81,6 +83,14 @@ struct FastCheckProblem
     const void* bias        = nullptr; // length M per batch, or nullptr
     hipDataType bias_type   = HIP_R_32F;
     int64_t     bias_stride = 0; // distance between per-batch bias vectors, in elements
+
+    const void* scale_a        = nullptr; // one value, or length M when scale_a_vector
+    bool        scale_a_vector = false;
+    const void* scale_b        = nullptr; // one value, or length N when scale_b_vector
+    bool        scale_b_vector = false;
+    hipDataType scale_ab_type  = HIP_R_32F;
+    double      scale_c        = 1;
+    double      scale_d        = 1;
 
     uint64_t seed = 0; // selects the random probe vectors
 
@@ -115,8 +125,11 @@ struct FastCheckExpected
     double          max_result  = 0; // bounds |element of D| before rounding to D's type
     std::vector<uint64_t>              row_probe; // r, length N
     std::vector<uint64_t>              col_probe; // t, length M
-    std::vector<int64_t>               scale; // scaleAlpha_vector, or ones; length M
-    std::vector<std::vector<int64_t>>  bias; // per batch, length M
+    std::vector<int64_t>               scale; // scaleAlpha_vector .* scale_a, or ones; length M
+    std::vector<int64_t>               col_scale; // scale_b, or ones; length N
+    int64_t                            alpha = 0; // alpha * scale_d
+    int64_t                            beta  = 0; // beta * scale_c * scale_d
+    std::vector<std::vector<int64_t>>  bias; // per batch, length M, times scale_d
     std::vector<std::vector<uint64_t>> row_sums; // per batch, expected D * r
     std::vector<std::vector<uint64_t>> col_sums; // per batch, expected t^T * D
 };
@@ -141,6 +154,48 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  problem,
 
 // The probe vector entry for the given seed and index, in [1, kFastCheckModulus).
 uint64_t fast_check_probe(uint64_t seed, uint64_t index);
+
+// Reads element i of a host buffer of the given type as a double.
+double fast_check_load(const void* data, hipDataType type, size_t i);
+
+// Activations fast_check checks exactly. GELU and SiLU have no exact integer form.
+enum class FastCheckActivation
+{
+    none,
+    relu, // max(x, 0)
+    clamp, // max(arg1, min(x, arg2))
+};
+
+// With an activation, D is not linear in the inputs, so it is checked through E, the
+// pre-activation result the kernel also writes: E is verified like D (with scale_e in place of
+// scale_d), and then every element of D must equal scale_d * act(E / scale_e), rounded to D's
+// type. Copies the M x N x batch regions of D and E to the host. Sets *amax, when given, to the
+// largest |act(E / scale_e)|, the value amaxD must hold. E must hold its values exactly.
+FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
+                                             const FastCheckMatrix& e,
+                                             int64_t                batch_count,
+                                             double                 scale_d,
+                                             double                 scale_e,
+                                             FastCheckActivation    act,
+                                             double                 arg1,
+                                             double                 arg2,
+                                             hipStream_t            stream,
+                                             double*                amax);
+
+// The largest |element| of a verified device D divided by scale_d, the value amaxD must hold
+// without an activation. Copies D's M x N x batch region to the host.
+double fast_check_amax_device(const FastCheckMatrix& d,
+                              int64_t                batch_count,
+                              double                 scale_d,
+                              hipStream_t            stream);
+
+// Checks the bias gradient a GEMM writes for one batch, exactly from the inputs: source 'a'
+// (BGRADA) sums each row of op(A) over K, and 'b' (BGRADB) each column of op(B). bias holds the
+// kernel's output on the host, in bias_type.
+FastCheckResult fast_check_bias_gradient(const FastCheckProblem& problem,
+                                         char                    source,
+                                         const void*             bias,
+                                         hipDataType             bias_type);
 
 // Pass/fail for each solution and iteration of a test, so the end of the test can say which
 // solutions failed and on which iterations. Each defect class lives in a few of the hundreds of

@@ -1107,20 +1107,31 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         return "fast_check does not support timing runs";
     if(batchMode != HIPBLASLT_BATCH_MODE_STRIDED || arg.grouped_gemm > 0)
         return "fast_check supports single strided-batched GEMMs only";
-    if(arg.activation_type != hipblaslt_activation_type::none || arg.gradient || arg.use_e
-       || arg.amaxD)
-        return "fast_check does not support activation, gradient, E output or amaxD";
-    if(arg.scaleA != hipblaslt_scaling_format::none || arg.scaleB != hipblaslt_scaling_format::none
-       || arg.scaleC || arg.scaleD || arg.scaleE)
-        return "fast_check does not support scaleA, scaleB, scaleC, scaleD or scaleE";
+    if(arg.gradient
+       && (arg.activation_type != hipblaslt_activation_type::none || arg.use_e || !arg.bias_vector
+           || arg.bias_source == hipblaslt_bias_source::d))
+        return "fast_check supports a gradient epilogue only as a bias gradient from A or B "
+               "(BGRADA, BGRADB), with no activation and no E input";
+    if(arg.gradient && arg.batch_count > 1)
+        return "fast_check checks a bias gradient for a single batch only";
+    if(!arg.gradient && arg.activation_type != hipblaslt_activation_type::none
+       && arg.activation_type != hipblaslt_activation_type::relu
+       && arg.activation_type != hipblaslt_activation_type::clamp)
+        return "fast_check checks only the relu and clamp activations, which keep integers "
+               "exact; GELU, SiLU and sigmoid do not";
+    if(!arg.gradient && arg.activation_type != hipblaslt_activation_type::none && !arg.use_e)
+        return "fast_check checks an activation through E, the pre-activation output, so it "
+               "requires use_e";
+    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+        return "fast_check does not support MX block scales";
     if(do_swizzle)
         return "fast_check does not support swizzled A or B";
-    // fast_check models the bias as one value per row of D, which is what bias_source a and d
-    // allocate. bias_source b allocates one value per column.
-    if(arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
+    // Without a gradient, fast_check models the bias as one value per row of D, which is what
+    // bias_source a and d allocate. bias_source b allocates one value per column.
+    if(!arg.gradient && arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
         return "fast_check supports a bias with one value per row of D (bias_source a or d), not "
                "bias_source b";
-    if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < arg.M[0])
+    if(!arg.gradient && arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < arg.M[0])
         return "fast_check requires bias_stride to be at least M";
     for(hipDataType t : {TiA, TiB, To, Tc})
     {
@@ -3577,6 +3588,17 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(!arg.gradient && arg.bias_vector)
             {
                 CHECK_HIP_ERROR(synchronize(dBias[i], hBias[i], block_count));
+                // A kernel that reads a bias entry past M, in the gap before the next batch's
+                // vector, reads poison and produces a wrong D.
+                if(arg.fast_check && arg.bias_stride > M[i])
+                {
+                    fast_check_poison_padding_device(
+                        {dBias[i].buf(), Tbias, M[i], 1, arg.bias_stride, arg.bias_stride},
+                        num_batches[i],
+                        size_bias[i],
+                        stream);
+                    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+                }
             }
 
             if(arg.scaleAlpha_vector)
@@ -5724,15 +5746,45 @@ void testing_matmul_with_bias(const Arguments& arg,
                 fp.scale_alpha_vec      = hScaleAlphaVec[i].buf();
                 fp.scale_alpha_vec_type = Talpha;
             }
-            if(arg.bias_vector)
+            if(arg.bias_vector && !arg.gradient)
             {
                 fp.bias        = hBias[i].buf();
                 fp.bias_type   = Tbias;
                 fp.bias_stride = arg.bias_stride > 0 ? arg.bias_stride : 0;
             }
+            if(arg.scaleA == hipblaslt_scaling_format::Scalar
+               || arg.scaleA == hipblaslt_scaling_format::Vector)
+            {
+                fp.scale_a        = hScaleA[i].buf();
+                fp.scale_a_vector = arg.scaleA == hipblaslt_scaling_format::Vector;
+            }
+            if(arg.scaleB == hipblaslt_scaling_format::Scalar
+               || arg.scaleB == hipblaslt_scaling_format::Vector)
+            {
+                fp.scale_b        = hScaleB[i].buf();
+                fp.scale_b_vector = arg.scaleB == hipblaslt_scaling_format::Vector;
+            }
+            fp.scale_ab_type = Talpha;
+            if(arg.scaleC)
+                fp.scale_c = fast_check_load(hScaleC[i].buf(), Talpha, 0);
+            if(arg.scaleD)
+                fp.scale_d = fast_check_load(hScaleD[i].buf(), Talpha, 0);
             fp.seed = fast_check_seed(arg);
             return fp;
         };
+        // E is the pre-activation result times scaleE: the same check, with scaleE for scaleD.
+        const bool fcCheckE = arg.fast_check && arg.use_e && !arg.gradient;
+        const auto fcActivation
+            = arg.activation_type == hipblaslt_activation_type::relu    ? FastCheckActivation::relu
+              : arg.activation_type == hipblaslt_activation_type::clamp ? FastCheckActivation::clamp
+                                                                        : FastCheckActivation::none;
+        auto fcProblemE = [&](int i) {
+            FastCheckProblem fp
+                = fcProblem(i, {dE[i].buf(), Taux, M[i], N[i], lde[i], stride_e[i]});
+            fp.scale_d = arg.scaleE ? fast_check_load(hScaleE[i].buf(), Talpha, 0) : 1;
+            return fp;
+        };
+        std::vector<FastCheckExpected> fcExpectedE(fcCheckE ? gemm_count : 0);
         // The expected sums depend only on the inputs. Computing them before any launch also
         // refuses a configuration whose results the compute type cannot hold exactly.
         if(arg.fast_check)
@@ -5740,12 +5792,17 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 fcExpected[i] = fast_check_expected(
                     fcProblem(i, {(*dDp)[i].buf(), To, M[i], N[i], ldd[i], stride_d[i]}));
-                if(!fcExpected[i].status.passed)
+                if(fcCheckE && fcExpected[i].status.passed)
+                    fcExpectedE[i] = fast_check_expected(fcProblemE(i));
+                const FastCheckResult& status = fcCheckE && fcExpected[i].status.passed
+                                                    ? fcExpectedE[i].status
+                                                    : fcExpected[i].status;
+                if(!status.passed)
                 {
 #ifdef GOOGLE_TEST
-                    FAIL() << fcExpected[i].status.message;
+                    FAIL() << status.message;
 #else
-                    hipblaslt_cerr << fcExpected[i].status.message << std::endl;
+                    hipblaslt_cerr << status.message << std::endl;
                     return;
 #endif
                 }
@@ -5771,6 +5828,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(
                         fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
             }
+            if(fcCheckE)
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(
+                        fast_check_fill_sentinel_device(dE[i].buf(), Taux, size_E[i], stream));
             // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
             // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
             // too early, for example). Zero rather than poison: kernels may rely on their flags
@@ -6012,8 +6073,72 @@ void testing_matmul_with_bias(const Arguments& arg,
                     FastCheckResult scan = fast_check_scan_padding_device(
                         d_dev, num_batches[i], size_D[i], arg.c_equal_d, stream);
 
-                    FastCheckProblem fp  = fcProblem(i, d_dev);
-                    FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
+                    FastCheckProblem fp = fcProblem(i, d_dev);
+                    // With an activation D is not linear in the inputs; it is checked through E.
+                    FastCheckResult res = fcActivation == FastCheckActivation::none
+                                              ? fast_check_result_device(fp, fcExpected[i], stream)
+                                              : FastCheckResult{};
+                    if(fcCheckE)
+                    {
+                        FastCheckProblem fpE   = fcProblemE(i);
+                        FastCheckResult  scanE = fast_check_scan_padding_device(
+                            fpE.D, num_batches[i], size_E[i], false, stream);
+                        FastCheckResult resE
+                            = fast_check_result_device(fpE, fcExpectedE[i], stream);
+                        if(!scanE.passed || !resE.passed)
+                            reportFailure("fast_check E", scanE.message + resE.message);
+                        else if(fcActivation != FastCheckActivation::none)
+                        {
+                            res = fast_check_activation_device(d_dev,
+                                                               fpE.D,
+                                                               num_batches[i],
+                                                               fp.scale_d,
+                                                               fpE.scale_d,
+                                                               fcActivation,
+                                                               arg.activation_arg1,
+                                                               arg.activation_arg2,
+                                                               stream,
+                                                               nullptr);
+                        }
+                    }
+                    if(arg.amaxD && scan.passed && res.passed)
+                    {
+                        double want = 0;
+                        if(fcActivation != FastCheckActivation::none)
+                            fast_check_activation_device(d_dev,
+                                                         fcProblemE(i).D,
+                                                         num_batches[i],
+                                                         fp.scale_d,
+                                                         fcProblemE(i).scale_d,
+                                                         fcActivation,
+                                                         arg.activation_arg1,
+                                                         arg.activation_arg2,
+                                                         stream,
+                                                         &want);
+                        else
+                            want
+                                = fast_check_amax_device(d_dev, num_batches[i], fp.scale_d, stream);
+                        double got = 0;
+                        CHECK_HIP_ERROR(
+                            synchronize(hAmaxD[i], dAmaxD[i], 0, 0, 0, 0, 1, false, stream));
+                        got = fast_check_load(hAmaxD[i].buf(), Talpha, 0);
+                        if(!(got == want))
+                            reportFailure("fast_check amaxD",
+                                          "amaxD holds " + std::to_string(got)
+                                              + ", the verified D gives " + std::to_string(want)
+                                              + "\n");
+                    }
+                    if(arg.gradient && arg.bias_vector)
+                    {
+                        std::vector<char> hb(size_bias[i] * realDataTypeSize(Tbias));
+                        CHECK_HIP_ERROR(
+                            hipMemcpy(hb.data(), dBias[i].buf(), hb.size(), hipMemcpyDeviceToHost));
+                        const char source = arg.bias_source == hipblaslt_bias_source::a ? 'a' : 'b';
+                        FastCheckResult grad
+                            = fast_check_bias_gradient(fp, source, hb.data(), Tbias);
+                        if(!grad.passed)
+                            reportFailure("fast_check bias gradient", grad.message);
+                    }
                     if(!scan.passed || !res.passed)
                     {
                         std::vector<FastCheckBuffer> buffers
