@@ -148,7 +148,9 @@ def train_model(
         # RFC 0019 §8.3: a zero or negative measurement is no measurement, and the runtime
         # refuses a score that recovers to one. A label the model could only learn to
         # reproduce as an unusable score is an error in the corpus, not a data point.
-        raise ValueError(f"target {target_col!r} must contain finite, strictly positive values")
+        raise ValueError(
+            f"target {target_col!r} must contain finite, strictly positive values"
+        )
     y = score_transform.forward(target)
 
     if params is None:
@@ -191,8 +193,6 @@ def train_model(
     model = lgb.train(params, train_data, num_boost_round=best_iter)
     logger.info("Trained model with %d trees", model.num_trees())
     return model
-
-
 
 
 def predict(model: lgb.Booster, X: np.ndarray) -> np.ndarray:

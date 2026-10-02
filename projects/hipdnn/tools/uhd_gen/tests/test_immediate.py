@@ -494,8 +494,11 @@ def test_time_l1_training_declares_the_metric_its_label_and_direction(
     )
     assert uhd["objective"] == "min"
     assert uhd["score"] == {"metric": "time", "calibrated": True, "transform": "log"}
-    assert (manifest["target"], manifest["score_metric"], manifest["timing_statistic"]) == (
-        "avgTimeMs", "time", "avgTimeMs")
+    assert (
+        manifest["target"],
+        manifest["score_metric"],
+        manifest["timing_statistic"],
+    ) == ("avgTimeMs", "time", "avgTimeMs")
 
 
 def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifact(

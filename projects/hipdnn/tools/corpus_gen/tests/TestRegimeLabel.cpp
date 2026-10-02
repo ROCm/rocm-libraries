@@ -305,9 +305,8 @@ TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "prefill_short_gqa", error);
     ASSERT_TRUE(focus.has_value()) << error;
-    const ProblemOracle evenBatchIsHeld = [](const ProblemPoint& point) {
-        return std::get<int64_t>(point.at("batch")) % 2 == 0;
-    };
+    const ProblemOracle evenBatchIsHeld
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("batch")) % 2 == 0; };
 
     const auto found = exploreRegime(
         metadata, *focus, focusRequest(), 20, SERVES_EVERYTHING, evenBatchIsHeld, {});
@@ -328,9 +327,8 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
-    const ProblemOracle shortOnly = [](const ProblemPoint& point) {
-        return std::get<int64_t>(point.at("seqlen_k")) <= 1024;
-    };
+    const ProblemOracle shortOnly
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("seqlen_k")) <= 1024; };
 
     const auto found = exploreRegime(metadata, *focus, focusRequest(), 10, shortOnly, {}, {});
 

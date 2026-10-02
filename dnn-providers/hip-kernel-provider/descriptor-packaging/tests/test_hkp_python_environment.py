@@ -487,18 +487,21 @@ def test_staged_files_survive_a_repack_and_follow_their_source(build_environment
     env.build()
     packed = env.build_dir / "first" / "imports.json"
     staged = env.build_dir / "first" / "gfx942" / "model.bin"
+    # The pack edge's output: the build compares an input's mtime against this, and it is
+    # written last, so the clock must pass it before an edit can count as newer.
+    stamp = env.build_dir / "first" / ".hkp-packed.stamp"
     assert staged.read_text(encoding="utf-8") == "model-one"
 
     # An edit to the authored root alone repacks, and the repack wipes the tree.
     before = packed.stat().st_mtime_ns
-    env.advance_file_clock(packed, staged)
+    env.advance_file_clock(packed, staged, stamp)
     authored.write_text("two", encoding="utf-8")
     env.build()
     assert packed.stat().st_mtime_ns != before
     assert staged.read_text(encoding="utf-8") == "model-one"
 
     # An edit to the staged source alone reaches the tree.
-    env.advance_file_clock(packed, staged)
+    env.advance_file_clock(packed, staged, stamp)
     env.loose.write_text("model-two", encoding="utf-8")
     env.build()
     assert staged.read_text(encoding="utf-8") == "model-two"

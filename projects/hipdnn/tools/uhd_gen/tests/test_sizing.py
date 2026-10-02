@@ -17,8 +17,14 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 from uhd_gen.provenance import snapshot_provenance
-from uhd_gen.sizing import (allocate, ceiling_from_repeats, fit_curve, miss_at, size_for,
-                            stratified_test_set)
+from uhd_gen.sizing import (
+    allocate,
+    ceiling_from_repeats,
+    fit_curve,
+    miss_at,
+    size_for,
+    stratified_test_set,
+)
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -29,18 +35,21 @@ GRAPHS = 150
 # The pure pieces.
 # ------------------------------------------------------------------------------------------
 
+
 def test_the_fit_recovers_a_planted_power_law():
     floor, a, b = 0.12, 3.0, 0.45
-    points = [(n, floor + a * n ** -b) for n in (50, 100, 200, 400, 800, 1600)]
+    points = [(n, floor + a * n**-b) for n in (50, 100, 200, 400, 800, 1600)]
     fit = fit_curve(points, floor)
     assert fit["floor_source"] == "measured"
-    assert fit["a"] == pytest.approx(a, rel=1e-6) and fit["b"] == pytest.approx(b, rel=1e-6)
-    assert size_for(fit, 1 - (floor + a * 3200 ** -b)) == pytest.approx(3200, rel=1e-6)
+    assert fit["a"] == pytest.approx(a, rel=1e-6) and fit["b"] == pytest.approx(
+        b, rel=1e-6
+    )
+    assert size_for(fit, 1 - (floor + a * 3200**-b)) == pytest.approx(3200, rel=1e-6)
 
 
 def test_an_unknown_ceiling_is_estimated_and_says_so():
     floor, a, b = 0.2, 2.0, 0.5
-    points = [(n, floor + a * n ** -b) for n in (50, 100, 200, 400, 800, 1600)]
+    points = [(n, floor + a * n**-b) for n in (50, 100, 200, 400, 800, 1600)]
     fit = fit_curve(points, None)
     assert fit["floor_source"] == "estimated"
     assert fit["floor"] == pytest.approx(floor, abs=0.02)
@@ -63,16 +72,28 @@ def test_the_ceiling_scores_repeats_against_the_label_never_the_label_itself():
     other_gpu = {"benchmark": "g", "arch": "gfx", "tflops": 130.0}
     key = ("g", "gfx", "None", "None")
     labels = {key: ((2, "gpu0"), label)}
-    measurements = [((0, "gpu0"), same_gpu_again), ((1, "gpu1"), other_gpu), ((2, "gpu0"), label)]
+    measurements = [
+        ((0, "gpu0"), same_gpu_again),
+        ((1, "gpu1"), other_gpu),
+        ((2, "gpu0"), label),
+    ]
     ceiling = ceiling_from_repeats(labels, measurements, "tflops", 0.10, {"g"})
     assert ceiling["repeats"] == 2 and ceiling["repeat_within"] == 0.5
     # 104 vs 100 is two errors of ~2.8%; 130 vs 100, two of ~21%: one of each within 10%.
     assert ceiling["within"] == 0.5
-    wide = ceiling_from_repeats(labels, [((1, "gpu1"), dict(other_gpu, tflops=113.0))], "tflops",
-                                0.10, {"g"})
-    assert (wide["repeat_within"], wide["within"]) == (0.0, 1.0), \
-        "13% apart is two measurements ~9% off each: a perfect model is within 10%"
-    assert ceiling_from_repeats(labels, [((2, "gpu0"), label)], "tflops", 0.1, {"g"})["within"] is None
+    wide = ceiling_from_repeats(
+        labels, [((1, "gpu1"), dict(other_gpu, tflops=113.0))], "tflops", 0.10, {"g"}
+    )
+    assert (wide["repeat_within"], wide["within"]) == (
+        0.0,
+        1.0,
+    ), "13% apart is two measurements ~9% off each: a perfect model is within 10%"
+    assert (
+        ceiling_from_repeats(labels, [((2, "gpu0"), label)], "tflops", 0.1, {"g"})[
+            "within"
+        ]
+        is None
+    )
 
 
 def test_every_regime_reaches_the_floor_before_the_rest_follows_the_misses():
@@ -84,20 +105,32 @@ def test_every_regime_reaches_the_floor_before_the_rest_follows_the_misses():
     }
     quotas = allocate(300, regimes, floor=30)
     assert sum(quotas.values()) == 300
-    assert quotas["unmeasured"] == 30, "a regime nothing has tested gets its floor and no more"
+    assert (
+        quotas["unmeasured"] == 30
+    ), "a regime nothing has tested gets its floor and no more"
     assert quotas["thin"] >= 26
     # Per test shape, `weak` misses twice as often as `common`: it gets more per test shape.
     assert quotas["weak"] / 20 > quotas["common"] / 100
 
 
 def test_floors_alone_may_exceed_what_was_asked():
-    quotas = allocate(10, {"a": {"train": 0, "test": 0, "misses": 0},
-                           "b": {"train": 5, "test": 1, "misses": 1}}, floor=30)
+    quotas = allocate(
+        10,
+        {
+            "a": {"train": 0, "test": 0, "misses": 0},
+            "b": {"train": 5, "test": 1, "misses": 1},
+        },
+        floor=30,
+    )
     assert quotas == {"a": 30, "b": 25}
 
 
 def test_the_test_set_is_stratified_and_reproducible():
-    shapes = {"big": [f"b{i}" for i in range(100)], "small": ["s0", "s1", "s2"], "one": ["o0"]}
+    shapes = {
+        "big": [f"b{i}" for i in range(100)],
+        "small": ["s0", "s1", "s2"],
+        "one": ["o0"],
+    }
     chosen = stratified_test_set(shapes, 0.2, seed=4)
     assert chosen == stratified_test_set(shapes, 0.2, seed=4)
     assert sum(s.startswith("b") for s in chosen) == 20
@@ -108,6 +141,7 @@ def test_the_test_set_is_stratified_and_reproducible():
 # ------------------------------------------------------------------------------------------
 # The run.
 # ------------------------------------------------------------------------------------------
+
 
 def _noise(device: str, graph: str) -> float:
     """Up to +/-8% per (device, shape), a few shapes much worse: a ceiling to measure."""
@@ -122,9 +156,15 @@ def store(tmp_path, monkeypatch):
     pytest.importorskip("flatbuffers")
     tree = tmp_path / "descriptors"
     tree.mkdir()
-    (tree / "engine.ued.json").write_text(json.dumps(
-        {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}), encoding="utf-8")
-    (tree / "metadata.kmd.json").write_text(json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8")
+    (tree / "engine.ued.json").write_text(
+        json.dumps(
+            {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}
+        ),
+        encoding="utf-8",
+    )
+    (tree / "metadata.kmd.json").write_text(
+        json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8"
+    )
     provenance = snapshot_provenance(tree)
     graphs = tmp_path / "graphs"
     graphs.mkdir()
@@ -133,38 +173,85 @@ def store(tmp_path, monkeypatch):
         writer.writerow(["benchmark", "name", "regime", "phase", "source", "op"])
         for index in range(GRAPHS):
             (graphs / f"{index}.json").write_text(
-                json.dumps({"id": f"graph-{index}", "size": index}), encoding="utf-8")
+                json.dumps({"id": f"graph-{index}", "size": index}), encoding="utf-8"
+            )
             phase = "decode" if index % 3 == 0 else "append"
-            writer.writerow([f"graph-{index}", f"g{index}", phase, phase, "sweep", "toy_op"])
+            writer.writerow(
+                [f"graph-{index}", f"g{index}", phase, phase, "sweep", "toy_op"]
+            )
     engine = {"device": "board-a"}
 
     def bench(command, environment, log_dir, ordinal, commands):
         commands.append({"argv": command})
         metric = command[command.index("--ranking-metric") + 1]
-        graph = json.loads(Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8"))
-        average = (1.0 + math.sqrt(graph["size"])) * _noise(engine["device"], graph["id"])
-        return {"engine_id": 7, "engine_name": "provider:engine7", "graph_id": graph["id"],
-                "device_id": engine["device"], "arch": "gfx942", "metric": metric,
-                "binding": {"engine": "provider:engine7", "role": "predict_engine", "arch": "gfx942",
-                            "metric": metric, "selector_revision": "provider-1",
-                            "trained_against": {**provenance, "selector_revision": "provider-1"}},
-                "features": {"graph.flops": 2e9 * (graph["size"] + 1), "device.cu_count": 120},
-                "avgTimeMs": average, "robustMeanMs": average * 0.9, "stddevMs": 0.01, "iters": 30,
-                "is_valid": True, "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
+        graph = json.loads(
+            Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8")
+        )
+        average = (1.0 + math.sqrt(graph["size"])) * _noise(
+            engine["device"], graph["id"]
+        )
+        return {
+            "engine_id": 7,
+            "engine_name": "provider:engine7",
+            "graph_id": graph["id"],
+            "device_id": engine["device"],
+            "arch": "gfx942",
+            "metric": metric,
+            "binding": {
+                "engine": "provider:engine7",
+                "role": "predict_engine",
+                "arch": "gfx942",
+                "metric": metric,
+                "selector_revision": "provider-1",
+                "trained_against": {**provenance, "selector_revision": "provider-1"},
+            },
+            "features": {
+                "graph.flops": 2e9 * (graph["size"] + 1),
+                "device.cu_count": 120,
+            },
+            "avgTimeMs": average,
+            "robustMeanMs": average * 0.9,
+            "stddevMs": 0.01,
+            "iters": 30,
+            "is_valid": True,
+            "selection_mode": "immediate",
+            "timing_statistic": "robustMeanMs",
+        }
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
     monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
 
     def collect(name, device, collected_at):
         from uhd_gen.__main__ import main
+
         engine["device"] = device
         output = tmp_path / name
-        assert main(["generate", "--collect-only", "--graphs", str(graphs), "--descriptor-tree",
-                     str(tree), "--engine-id", "7", "--role", "predict_engine",
-                     "--output-dir", str(output)]) == 0
-        manifest = json.loads((output / "collection_manifest.json").read_text(encoding="utf-8"))
+        assert (
+            main(
+                [
+                    "generate",
+                    "--collect-only",
+                    "--graphs",
+                    str(graphs),
+                    "--descriptor-tree",
+                    str(tree),
+                    "--engine-id",
+                    "7",
+                    "--role",
+                    "predict_engine",
+                    "--output-dir",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+        manifest = json.loads(
+            (output / "collection_manifest.json").read_text(encoding="utf-8")
+        )
         manifest["collected_at"] = collected_at
-        (output / "collection_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (output / "collection_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
         return output
 
     first = collect("col_a", "board-a", "2026-09-28T10:00:00+00:00")
@@ -174,17 +261,49 @@ def store(tmp_path, monkeypatch):
 
 def _size(store, evaluator, name, *extra):
     from uhd_gen.__main__ import main
+
     output = store["root"] / name
-    code = main(["size", "--collection", *map(str, store["collections"]),
-                 "--test-set", str(store["root"] / "test_set.json"),
-                 "--descriptor-tree", str(store["tree"]), "--engine-id", "7", "--arch", "gfx942",
-                 "--features", "graph.flops", "--num-boost-round", "30", "--early-stopping", "5",
-                 "--eval-fraction", "0.1", "--sizes", "15", "30", "60", "120", "--draws", "2",
-                 "--feature-evaluator", evaluator, "--output-dir", str(output), *extra])
+    code = main(
+        [
+            "size",
+            "--collection",
+            *map(str, store["collections"]),
+            "--test-set",
+            str(store["root"] / "test_set.json"),
+            "--descriptor-tree",
+            str(store["tree"]),
+            "--engine-id",
+            "7",
+            "--arch",
+            "gfx942",
+            "--features",
+            "graph.flops",
+            "--num-boost-round",
+            "30",
+            "--early-stopping",
+            "5",
+            "--eval-fraction",
+            "0.1",
+            "--sizes",
+            "15",
+            "30",
+            "60",
+            "120",
+            "--draws",
+            "2",
+            "--feature-evaluator",
+            evaluator,
+            "--output-dir",
+            str(output),
+            *extra,
+        ]
+    )
     return code, output
 
 
-def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(store, evaluator, monkeypatch):
+def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(
+    store, evaluator, monkeypatch
+):
     import uhd_gen.sizing as sizing
 
     trained_on = []
@@ -195,7 +314,9 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(store, evaluator,
         return real(template, merged, metric, rows, destination)
 
     monkeypatch.setattr(sizing, "_write_subset", spy)
-    code, output = _size(store, evaluator, "round1", "--create-test-set", "--target", "0.6")
+    code, output = _size(
+        store, evaluator, "round1", "--create-test-set", "--target", "0.6"
+    )
     assert code == 0
     test_set = json.loads((store["root"] / "test_set.json").read_text(encoding="utf-8"))
     pinned = set(test_set["shapes"])
@@ -207,13 +328,16 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(store, evaluator,
     report = json.loads((output / "sizing_report.json").read_text(encoding="utf-8"))
     assert report["schema"] == "uhd_gen.sizing/1"
     assert report["training_pool"] == 120 and len(report["curve"]) == 7
-    assert report["ceiling"]["repeats"] == 30, "each test shape measured again on the other GPU"
+    assert (
+        report["ceiling"]["repeats"] == 30
+    ), "each test shape measured again on the other GPU"
     assert report["ceiling"]["repeat_within"] < report["ceiling"]["within"] < 1
     within = {}
     for point in report["curve"]:
         within.setdefault(point["shapes"], []).append(point["within"])
-    assert sum(within[120]) / len(within[120]) > sum(within[15]) / len(within[15]), \
-        "more shapes, better model: a fixture that does not show this sizes nothing"
+    assert sum(within[120]) / len(within[120]) > sum(within[15]) / len(
+        within[15]
+    ), "more shapes, better model: a fixture that does not show this sizes nothing"
     assert report["fit"] is not None
     assert set(report["per_regime"]) == {"decode", "append"}
     quotas = json.loads((output / "regime_quotas.json").read_text(encoding="utf-8"))
@@ -221,20 +345,36 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(store, evaluator,
     assert sum(quotas["toy_op"].values()) >= report["recommendation"]["new_shapes"]
 
     # The second round reuses the pin, and checks the first round's prediction.
-    code, second = _size(store, evaluator, "round2", "--create-test-set",
-                         "--previous", str(output / "sizing_report.json"))
+    code, second = _size(
+        store,
+        evaluator,
+        "round2",
+        "--create-test-set",
+        "--previous",
+        str(output / "sizing_report.json"),
+    )
     assert code == 0
-    assert json.loads((store["root"] / "test_set.json").read_text(encoding="utf-8")) == test_set
-    checked = json.loads((second / "sizing_report.json").read_text(encoding="utf-8"))["previous"]
+    assert (
+        json.loads((store["root"] / "test_set.json").read_text(encoding="utf-8"))
+        == test_set
+    )
+    checked = json.loads((second / "sizing_report.json").read_text(encoding="utf-8"))[
+        "previous"
+    ]
     assert checked["comparable"] is True
     assert checked["observed_within"] is not None
 
 
-def test_a_target_past_the_measured_ceiling_asks_for_measurement_not_shapes(store, evaluator):
-    code, output = _size(store, evaluator, "past", "--create-test-set", "--target", "0.99")
+def test_a_target_past_the_measured_ceiling_asks_for_measurement_not_shapes(
+    store, evaluator
+):
+    code, output = _size(
+        store, evaluator, "past", "--create-test-set", "--target", "0.99"
+    )
     assert code == 0
-    recommendation = json.loads((output / "sizing_report.json").read_text(encoding="utf-8"))[
-        "recommendation"]
+    recommendation = json.loads(
+        (output / "sizing_report.json").read_text(encoding="utf-8")
+    )["recommendation"]
     assert recommendation["reachable"] is False
     assert "ceiling" in recommendation["reason"]
     assert recommendation["basis"] == "next_doubling"

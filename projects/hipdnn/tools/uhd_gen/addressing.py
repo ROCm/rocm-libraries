@@ -140,7 +140,8 @@ def merge_manifests(manifests) -> dict:
                     raise ValueError(
                         f"knob {name!r} ordinal {pinned} addressed {known!r} in one collection and "
                         f"{observed!r} in another (collection {index}); the engine numbered them "
-                        "differently, so they cannot train one model")
+                        "differently, so they cannot train one model"
+                    )
                 entry[pinned] = observed
     return as_manifest(table)
 

@@ -478,13 +478,14 @@ TEST(TestPointwiseAddBinding, OmitsDtypeAndBytesForAnUnsetDtype)
 /// the stronger assertion is absent, so its absence is not read as an oversight.
 TEST(TestPointwiseAddBinding, AMixedPrecisionGraphIsRefusedSoPerOperandWidthCannotBeObservedHere)
 {
-    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,
-                                                   data_objects::DataType::FLOAT,
-                                                   {1, 1, 1, 1},
-                                                   std::nullopt,
-                                                   /*binary=*/true,
-                                                   /*explicitStrides=*/std::nullopt,
-                                                   /*inputBDataType=*/data_objects::DataType::HALF));
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                            data_objects::DataType::FLOAT,
+                            {1, 1, 1, 1},
+                            std::nullopt,
+                            /*binary=*/true,
+                            /*explicitStrides=*/std::nullopt,
+                            /*inputBDataType=*/data_objects::DataType::HALF));
 
     EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context()).has_value());
 }

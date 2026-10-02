@@ -42,6 +42,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/engine_api_version.h>
@@ -4516,4 +4517,230 @@ TEST(TestEnginePluginResourceManager, MismatchedEngineNameIsDroppedAtLoad)
 
     EXPECT_TRUE(resourceManager.getEngineInfos().empty());
     EXPECT_FALSE(resourceManager.findEngineIdByName(K_MISMATCHED_NAME).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The optional enumeration and prediction entry points, against real binaries.
+// The codegen fixture exports both and answers as CodegenFixturePlugin.hpp
+// describes; the lying engine-name fixture exports neither.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Returns the message of the HipdnnException `call` throws, after checking its status.
+template <typename Call>
+std::string thrownMessage(Call&& call, hipdnnStatus_t expectedStatus)
+{
+    try
+    {
+        std::forward<Call>(call)();
+    }
+    catch(const HipdnnException& error)
+    {
+        EXPECT_EQ(error.getStatus(), expectedStatus) << error.what();
+        return error.what();
+    }
+    ADD_FAILURE() << "Expected a HipdnnException";
+    return {};
+}
+
+class TestEnginePluginOptionalCapabilities : public ::testing::Test
+{
+protected:
+    void load(const std::filesystem::path& path)
+    {
+        ASSERT_TRUE(std::filesystem::exists(path))
+            << "Test precondition: plugin missing at " << path;
+        _manager = std::make_shared<EnginePluginManager>();
+        _manager->loadPlugins({path}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+        ASSERT_EQ(_manager->getPlugins().size(), 1U);
+        _plugin = _manager->getPlugins().front();
+        _handle = _plugin->createHandle();
+        ASSERT_NE(_handle, nullptr);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            _plugin->destroyHandle(_handle);
+        }
+    }
+
+    hipdnnPluginConstData_t config(int64_t engineId)
+    {
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+        config.engine_id = engineId;
+        _config.Clear();
+        _config.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(_config, &config));
+        return {_config.GetBufferPointer(), _config.GetSize()};
+    }
+
+    hipdnnPluginConstData_t graph() const
+    {
+        return {_graph.GetBufferPointer(), _graph.GetSize()};
+    }
+
+    std::shared_ptr<EnginePluginManager> _manager;
+    std::shared_ptr<EnginePlugin> _plugin;
+    hipdnnEnginePluginHandle_t _handle = nullptr;
+    flatbuffers::FlatBufferBuilder _config;
+    flatbuffers::FlatBufferBuilder _graph = createValidGraph();
+};
+
+} // namespace
+
+TEST_F(TestEnginePluginOptionalCapabilities, PredictionAnswerIsReturnedAndReleasedLikeEngineDetails)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t prediction{nullptr, 0};
+    ASSERT_TRUE(_plugin->getPrediction(
+        _handle, &engineConfig, &opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, false, &prediction));
+    ASSERT_NE(prediction.ptr, nullptr);
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(prediction.ptr), prediction.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<fb::EnginePrediction>());
+    const auto* answer = fb::GetEnginePrediction(prediction.ptr);
+    EXPECT_EQ(answer->engine_id(), codegen_fixture::K_FIXTURE_ENGINE_ID);
+    EXPECT_EQ(answer->kind(), fb::PredictionKind::ENGINE);
+    EXPECT_EQ(answer->status(), fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(answer->metric()->string_view(), "tflops");
+
+    EXPECT_NO_THROW(_plugin->destroyEngineDetails(_handle, &prediction));
+}
+
+// NOT_APPLICABLE is how a plugin declines: no prediction, no error, and no stale output
+// left for the caller to free.
+TEST_F(TestEnginePluginOptionalCapabilities, DeclinedPredictionIsAbsentNotAnError)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    int sentinel = 0;
+    hipdnnPluginConstData_t prediction{&sentinel, 1};
+    EXPECT_FALSE(_plugin->getPrediction(_handle,
+                                        &engineConfig,
+                                        &opGraph,
+                                        HIPDNN_ENGINE_PREDICTION_CONFIGURATION,
+                                        true,
+                                        &prediction));
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
+}
+
+// Any other failure is a plugin error, and carries the plugin's own explanation.
+TEST_F(TestEnginePluginOptionalCapabilities, FailedPredictionIsAPluginErrorWithThePluginMessage)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    constexpr int64_t UNKNOWN_ENGINE_ID = 0x7777;
+    const auto engineConfig = config(UNKNOWN_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t prediction{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] {
+            std::ignore = _plugin->getPrediction(_handle,
+                                                 &engineConfig,
+                                                 &opGraph,
+                                                 HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                                 true,
+                                                 &prediction);
+        },
+        HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr("Engine prediction failed"));
+    EXPECT_THAT(message, HasSubstr("Engine with ID " + std::to_string(UNKNOWN_ENGINE_ID)));
+}
+
+// An engine that declines enumeration is unsupported, not an empty catalog.
+TEST_F(TestEnginePluginOptionalCapabilities, DeclinedEnumerationIsNotSupported)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 10, &page); },
+        HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_THAT(message, HasSubstr("Engine does not support matched-catalog enumeration"));
+    EXPECT_EQ(page.ptr, nullptr);
+}
+
+TEST_F(TestEnginePluginOptionalCapabilities, FailedEnumerationIsAPluginErrorWithThePluginMessage)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 0, &page); },
+        HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr("Candidate enumeration failed"));
+    EXPECT_THAT(message, HasSubstr("Candidate page limit must be in [1, 10000]"));
+}
+
+// Both entry points are optional exports; a plugin without them is never called.
+TEST_F(TestEnginePluginOptionalCapabilities, PluginWithoutTheExportsReportsNoCapability)
+{
+    load(LYING_ENGINE_NAME_PLUGIN_PATH);
+    const auto engineConfig = config(K_LYING_NULL_NAME_ENGINE_ID);
+    const auto opGraph = graph();
+
+    int sentinel = 0;
+    hipdnnPluginConstData_t prediction{&sentinel, 1};
+    EXPECT_FALSE(_plugin->getPrediction(
+        _handle, &engineConfig, &opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, true, &prediction));
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 10, &page); },
+        HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_THAT(message, HasSubstr("does not export"));
+}
+
+// The same three answers, as the resource manager publishes them: a plugin's answer is
+// passed on, a decline is reported as absent, and a plugin failure becomes INVALID.
+TEST(TestEnginePluginResourceManager, CodegenFixturePredictionsThroughResourceManager)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({CODEGEN_FIXTURE_DIR}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+    ASSERT_EQ(pluginManager->getPlugins().size(), 1);
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    fb::EngineConfigT request;
+    request.engine_id = codegen_fixture::K_FIXTURE_ENGINE_ID;
+    flatbuffers::FlatBufferBuilder configBytes;
+    configBytes.Finish(fb::EngineConfig::Pack(configBytes, &request));
+    const hipdnnPluginConstData_t engineConfig{configBytes.GetBufferPointer(),
+                                               configBytes.GetSize()};
+    const auto graphBytes = createValidGraph();
+    const hipdnnPluginConstData_t opGraph{graphBytes.GetBufferPointer(), graphBytes.GetSize()};
+
+    const auto engine = resourceManager.getEnginePrediction(
+        engineConfig, opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(engine.status, fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(engine.reason, "Engine does not provide predictions");
+    EXPECT_EQ(engine.metric, "tflops");
+
+    const auto configuration = resourceManager.getEnginePrediction(
+        engineConfig, opGraph, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_NE(configuration.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_NE(configuration.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(configuration.reason, "Engine does not expose this prediction capability");
+
+    const std::array<uint8_t, 8> notAGraph{};
+    const auto failed = resourceManager.getEnginePrediction(
+        engineConfig, {notAGraph.data(), notAGraph.size()}, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(failed.status, fb::PredictionStatus::INVALID);
+    EXPECT_THAT(failed.reason, HasSubstr("Engine prediction failed"));
+    EXPECT_THAT(failed.reason, HasSubstr("valid graph"));
 }

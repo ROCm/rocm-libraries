@@ -95,43 +95,96 @@ def test_the_manifest_form_survives_json_and_says_which_knobs_are_indices():
 
 def test_shards_of_one_numbering_merge_into_its_union():
     """Each shard of a catalog collection observes only what its own graphs enumerated."""
-    first = addressing.as_manifest(addressing.observe([
-        candidate({"dtype": 0, "batch": 1}, {"dtype": "BF16", "batch": 1})]))
-    second = addressing.as_manifest(addressing.observe([
-        candidate({"dtype": 1, "batch": 128}, {"dtype": "FP16", "batch": 128}),
-        candidate({"dtype": 0, "batch": 4}, {"dtype": "BF16", "batch": 4})]))
+    first = addressing.as_manifest(
+        addressing.observe(
+            [candidate({"dtype": 0, "batch": 1}, {"dtype": "BF16", "batch": 1})]
+        )
+    )
+    second = addressing.as_manifest(
+        addressing.observe(
+            [
+                candidate({"dtype": 1, "batch": 128}, {"dtype": "FP16", "batch": 128}),
+                candidate({"dtype": 0, "batch": 4}, {"dtype": "BF16", "batch": 4}),
+            ]
+        )
+    )
     merged = addressing.merge_manifests([first, second])
-    assert merged["dtype"] == {"ordinal": True, "values": [{"pin": 0, "value": "BF16"},
-                                                           {"pin": 1, "value": "FP16"}]}
+    assert merged["dtype"] == {
+        "ordinal": True,
+        "values": [{"pin": 0, "value": "BF16"}, {"pin": 1, "value": "FP16"}],
+    }
     assert merged["batch"]["ordinal"] is False
     assert [v["pin"] for v in merged["batch"]["values"]] == [1, 4, 128]
 
 
 def test_shards_that_read_one_pin_differently_are_refused():
-    first = addressing.as_manifest(addressing.observe([candidate({"dtype": 0}, {"dtype": "BF16"})]))
-    second = addressing.as_manifest(addressing.observe([candidate({"dtype": 0}, {"dtype": "FP16"})]))
+    first = addressing.as_manifest(
+        addressing.observe([candidate({"dtype": 0}, {"dtype": "BF16"})])
+    )
+    second = addressing.as_manifest(
+        addressing.observe([candidate({"dtype": 0}, {"dtype": "FP16"})])
+    )
     with pytest.raises(ValueError, match="numbered them differently"):
         addressing.merge_manifests([first, second])
 
 
-def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_saw(tmp_path):
-    from uhd_gen.generate import COLLECTION_MANIFEST, COLLECTION_SCHEMA, load_collections
+def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_saw(
+    tmp_path,
+):
+    pytest.importorskip("pandas")  # uhd_gen.generate reads collections into frames
+    from uhd_gen.generate import (
+        COLLECTION_MANIFEST,
+        COLLECTION_SCHEMA,
+        load_collections,
+    )
 
     def collection(name, at, table):
         directory = tmp_path / name
         directory.mkdir()
         (directory / "corpus.json").write_text("[]")
-        (directory / COLLECTION_MANIFEST).write_text(json.dumps({
-            "schema": COLLECTION_SCHEMA, "collected_at": at, "role": "sort_kernel_catalog",
-            "engine_name": "e", "engine_id": "1", "selector_revision": None,
-            "trained_against": {"ued": {"id": "u"}}, "collection_knobs": ["dtype"],
-            "knob_encodings": table, "shipping_knobs": ["dtype"], "sources": [None],
-            "published": [], "kernel_fields": ["kernel.dtype"], "graphs": [], "commands": [], "devices": [], "row_counts": {}}))
+        (directory / COLLECTION_MANIFEST).write_text(
+            json.dumps(
+                {
+                    "schema": COLLECTION_SCHEMA,
+                    "collected_at": at,
+                    "role": "sort_kernel_catalog",
+                    "engine_name": "e",
+                    "engine_id": "1",
+                    "selector_revision": None,
+                    "trained_against": {"ued": {"id": "u"}},
+                    "collection_knobs": ["dtype"],
+                    "knob_encodings": table,
+                    "shipping_knobs": ["dtype"],
+                    "sources": [None],
+                    "published": [],
+                    "kernel_fields": ["kernel.dtype"],
+                    "graphs": [],
+                    "commands": [],
+                    "devices": [],
+                    "row_counts": {},
+                }
+            )
+        )
         return directory
 
-    shards = [collection("s0", "2026-10-01T00:00:00", addressing.as_manifest(addressing.observe(
-                  [candidate({"dtype": 0}, {"dtype": "BF16"})]))),
-              collection("s1", "2026-10-01T00:00:01", addressing.as_manifest(addressing.observe(
-                  [candidate({"dtype": 1}, {"dtype": "FP16"})])))]
+    shards = [
+        collection(
+            "s0",
+            "2026-10-01T00:00:00",
+            addressing.as_manifest(
+                addressing.observe([candidate({"dtype": 0}, {"dtype": "BF16"})])
+            ),
+        ),
+        collection(
+            "s1",
+            "2026-10-01T00:00:01",
+            addressing.as_manifest(
+                addressing.observe([candidate({"dtype": 1}, {"dtype": "FP16"})])
+            ),
+        ),
+    ]
     merged = load_collections(shards, role="sort_kernel_catalog", sources=[None])
-    assert [v["value"] for v in merged["knob_encodings"]["dtype"]["values"]] == ["BF16", "FP16"]
+    assert [v["value"] for v in merged["knob_encodings"]["dtype"]["values"]] == [
+        "BF16",
+        "FP16",
+    ]

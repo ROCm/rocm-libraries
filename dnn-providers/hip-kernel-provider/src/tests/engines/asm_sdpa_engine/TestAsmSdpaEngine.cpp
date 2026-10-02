@@ -25,6 +25,7 @@
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "version.h"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
+#include "version.h"
 
 namespace asm_sdpa_engine
 {

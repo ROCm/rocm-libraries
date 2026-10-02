@@ -576,7 +576,8 @@ int runGenerator(const std::vector<std::string>& args)
         const auto& quotas = requested.second;
         const bool named = !operation.empty();
         const bool selectedHere
-            = std::any_of(selected.operations.begin(), selected.operations.end(),
+            = std::any_of(selected.operations.begin(),
+                          selected.operations.end(),
                           [&](const auto& entry) { return entry.second.operation == operation; });
         if(named && !selectedHere)
         {
@@ -990,6 +991,7 @@ int runGenerator(const std::vector<std::string>& args)
             askedEngines.end(), options.alsoEngineIds.begin(), options.alsoEngineIds.end());
         const auto everyEngine = [&](int64_t maxBytes) {
             std::vector<hipdnn_corpus_gen::ProblemOracle> each;
+            each.reserve(askedEngines.size());
             for(const auto id : askedEngines)
             {
                 each.push_back(hipdnn_corpus_gen::makeCorpusOracle(handle,
@@ -1255,21 +1257,22 @@ int runGenerator(const std::vector<std::string>& args)
                     // rediscover it, so a short quota there is the engine's limit.
                     continue;
                 }
-                auto found = hipdnn_corpus_gen::exploreRegime(metadata,
-                                                              focusFor.at(result.operation).at(regime),
-                                                              options.exploration,
-                                                              asked - have,
-                                                              admits,
-                                                              alreadyHave,
-                                                              anchors);
+                auto found
+                    = hipdnn_corpus_gen::exploreRegime(metadata,
+                                                       focusFor.at(result.operation).at(regime),
+                                                       options.exploration,
+                                                       asked - have,
+                                                       admits,
+                                                       alreadyHave,
+                                                       anchors);
                 size_t draw = 0;
                 for(const auto& point : found.problems)
                 {
                     hipdnn_corpus_gen::PoolEntry entry;
-                    entry.point  = point;
+                    entry.point = point;
                     entry.source = "sweep";
-                    entry.origin = result.operation + " focus " + regime + " draw "
-                                   + std::to_string(draw++);
+                    entry.origin
+                        = result.operation + " focus " + regime + " draw " + std::to_string(draw++);
                     entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
                     if(admit(entry, true))
                     {
@@ -1277,17 +1280,22 @@ int runGenerator(const std::vector<std::string>& args)
                         pools["sweep"].push_back(std::move(entry));
                     }
                 }
+                const char* stop = "";
+                if(found.saturated)
+                {
+                    stop = ", saturated";
+                }
+                else if(found.searchCapped)
+                {
+                    stop = ", budget limit";
+                }
                 std::cerr << "  focus " << regime << ": " << have << " pooled, " << asked - have
-                          << " wanted, " << found.problems.size() << " found ("
-                          << found.inRegime << " of " << found.proposed
-                          << " proposals in the regime)"
-                          << (found.saturated ? ", saturated"
-                                              : (found.searchCapped ? ", budget limit" : ""))
+                          << " wanted, " << found.problems.size() << " found (" << found.inRegime
+                          << " of " << found.proposed << " proposals in the regime)" << stop
                           << "\n";
                 focused.emplace(regime, std::move(found));
             }
         }
-
 
         // Spread a cut over every categorical combination as well as the regime, so a count
         // below the pools' size takes a proportional share of each dtype, layout and mode.
@@ -1332,8 +1340,8 @@ int runGenerator(const std::vector<std::string>& args)
 
         std::map<std::string, int64_t> allocation;
         std::map<std::string, hipdnn_corpus_gen::RegimeQuotaOutcome> quotaOutcome;
-        const auto& owed = quotas != quotasFor.end() ? quotas->second
-                                                     : std::map<std::string, int64_t>{};
+        const auto& owed
+            = quotas != quotasFor.end() ? quotas->second : std::map<std::string, int64_t>{};
         // With quotas, "everything the pools hold" would bury them: 0 means the quotas alone.
         // So the cut is asked for nothing beyond them -- a quota short of its regime stays short
         // rather than being padded from another -- while what was requested is their sum.

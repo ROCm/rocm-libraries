@@ -190,7 +190,7 @@ public:
         matmul.c_tensor_uid = 3;
         auto node = std::make_unique<NodeT>();
         node->compute_data_type = DataType::FLOAT;
-        node->attributes.Set(std::move(matmul));
+        node->attributes.Set(matmul);
         graph.nodes.push_back(std::move(node));
         _buffer.Finish(Graph::Pack(_buffer, &graph));
         _graph = std::make_unique<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper>(

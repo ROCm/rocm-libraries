@@ -20,7 +20,12 @@ from .correctness import (
 from .features import evaluate_feature_maps, signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
-from .ranking_metrics import RANKING_METRICS, RankingMetric, is_valid_metric_value, ranking_metric
+from .ranking_metrics import (
+    RANKING_METRICS,
+    RankingMetric,
+    is_valid_metric_value,
+    ranking_metric,
+)
 from .score_transform import INVERTIBLE as INVERTIBLE_TRANSFORMS
 
 ROLE = "predict_engine"
@@ -448,9 +453,14 @@ def validate_model(descriptor: dict) -> RankingMetric:
     # a capability limit of this tool, reported where the scoring happens. An omitted or
     # empty transform is the runtime's identity (`SUPPORTED_TRANSFORMS` lists "", and
     # `applyInverse` returns the raw score for it), so it is admitted as exactly that.
-    if score.get("calibrated") is not True or score.get("transform", "") not in ("", *INVERTIBLE_TRANSFORMS):
-        raise ValueError("L1 prediction requires a calibrated score, and uhd_gen can only "
-                         f"score identity (or omitted), {', '.join(INVERTIBLE_TRANSFORMS)} transforms")
+    if score.get("calibrated") is not True or score.get("transform", "") not in (
+        "",
+        *INVERTIBLE_TRANSFORMS,
+    ):
+        raise ValueError(
+            "L1 prediction requires a calibrated score, and uhd_gen can only "
+            f"score identity (or omitted), {', '.join(INVERTIBLE_TRANSFORMS)} transforms"
+        )
     validate_provenance(descriptor.get("trained_against"))
     validate_signature(descriptor.get("features_signature", []))
     return metric
@@ -675,7 +685,10 @@ def evaluate_immediate(
         # (-1, 0): a handful of rows near the bottom of the range (4 in 495, run 67929709).
         # Those models still ship, so the rows are scored as the declines the runtime makes
         # of them rather than failing the artifact.
-        impossible = np.array([not is_valid_metric_value(name, float(value)) for value in values], dtype=bool)
+        impossible = np.array(
+            [not is_valid_metric_value(name, float(value)) for value in values],
+            dtype=bool,
+        )
         values[impossible] = np.nan
         declined[engine] = int(impossible.sum())
         predicted.loc[selected.index] = values

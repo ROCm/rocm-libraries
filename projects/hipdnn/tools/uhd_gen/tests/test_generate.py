@@ -17,6 +17,17 @@ from uhd_gen.generate import (
 from uhd_gen.provenance import snapshot_provenance
 
 
+def _cli():
+    """uhd_gen's CLI entry point. It imports the trainer and the FlatBuffer converter, so
+    a run through it needs lightgbm and flatbuffers; without them the test is skipped,
+    as every other converter-backed suite is."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    return main
+
+
 def _page():
     return {
         "engine_id": 7,
@@ -519,9 +530,7 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(
     """`--metric tflops time`: each metric's labels are measured under that metric (the
     engine's kernel choice follows it), each trains and evaluates its own UHD, and both
     land in the arch's role list rather than the second replacing the first."""
-    pytest.importorskip("lightgbm")
-    pytest.importorskip("flatbuffers")
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
     requested = _immediate_bench(monkeypatch, snapshot_provenance(tree))
@@ -577,8 +586,7 @@ def test_an_opaque_time_model_over_a_corpus_without_flops_skips_one_bad_graph(
     """T6 + 0.2: L1 `time` needs no work count (a conv-bwd corpus publishes none), one
     crashing graph is recorded and skipped rather than ending the run, and an engine with
     no UED trains and installs under the id its provider declares for the metric."""
-    pytest.importorskip("lightgbm")
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     tree = tmp_path / "descriptors"
     tree.mkdir()
@@ -639,7 +647,7 @@ def test_graph_failures_over_the_budget_fail_the_run_with_the_list(
     _immediate_bench(
         monkeypatch, snapshot_provenance(tree), broken={"graph-3", "graph-4"}
     )
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     assert (
         main(
@@ -672,7 +680,7 @@ def test_an_opaque_engine_is_never_trained_under_an_undeclared_id(
     monkeypatch, tmp_path, evaluator, caplog, requested, declared, message
 ):
     """Refused after the first graph, not after the whole corpus has been measured."""
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     tree = tmp_path / "descriptors"
     tree.mkdir()
@@ -707,7 +715,7 @@ def test_l1_generation_never_trains_on_picks_checked_wrong(
     """§13.2 at the L1 entrance: every immediate pick came back wrong, so there is no label
     at all -- refused, with each row's verdict and reason kept in the preserved corpus.
     Import used to erase the verdict and this run trained and evaluated on 13 rows."""
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
     _immediate_bench(
@@ -745,7 +753,7 @@ def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
     replacement or additive root ahead of the tree being generated against supplies its
     own selector, and the labels describe a tree this run never installs into. Both roles
     run with exactly one root: the given tree (L1) or its collection copy (L2)."""
-    from uhd_gen.__main__ import main
+    main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
     kmd = tree / "metadata.kmd.json"

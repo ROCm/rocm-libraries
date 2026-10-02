@@ -62,9 +62,8 @@ namespace detail
 /// Which declared label each axis would have to take for the joined @p label, or nullopt when
 /// no assignment of the axes' labels spells it. Tried rather than split on `_`, because a
 /// declared label may itself contain one.
-inline std::optional<std::vector<std::string>> splitRegimeLabel(const std::vector<RegimeAxis>& axes,
-                                                                const std::string& label,
-                                                                size_t axis = 0)
+inline std::optional<std::vector<std::string>>
+    splitRegimeLabel(const std::vector<RegimeAxis>& axes, const std::string& label, size_t axis = 0)
 {
     if(axis == axes.size())
     {
@@ -123,7 +122,8 @@ inline bool isNumeric(const OperationMetadata& metadata, const std::string& name
 {
     const auto* parameter = metadata.find(name);
     return parameter != nullptr
-           && (parameter->type == ParameterType::INT64 || parameter->type == ParameterType::FLOAT64);
+           && (parameter->type == ParameterType::INT64
+               || parameter->type == ParameterType::FLOAT64);
 }
 
 /// The equalities @p when asserts, folded into @p focus. Only `==` and a conjunction of them
@@ -170,7 +170,8 @@ inline void foldEqualities(const OperationMetadata& metadata,
         // takes heads' value". A tie that would close a cycle, or re-tie something already fixed,
         // is dropped; the label check still holds the point to both.
         std::string source = right;
-        for(auto hop = focus.ties.find(source); hop != focus.ties.end(); hop = focus.ties.find(source))
+        for(auto hop = focus.ties.find(source); hop != focus.ties.end();
+            hop = focus.ties.find(source))
         {
             source = hop->second;
         }
@@ -414,6 +415,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     std::vector<Lane> lanes(served.size());
 
     std::vector<std::string> names;
+    names.reserve(window.size());
     for(const auto& dimension : window)
     {
         names.push_back(dimension.name);

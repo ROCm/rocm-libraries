@@ -251,6 +251,7 @@ TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
     // the rare one, which is the lopsided corpus a quota exists to correct. Owed six, it gets
     // six, and the rest of the count is cut from what is left, as before.
     std::vector<PoolEntry> pool;
+    pool.reserve(100);
     for(int64_t index = 0; index < 100; ++index)
     {
         pool.push_back(entryAt("sweep", index, index < 90 ? "common" : "rare"));
@@ -273,6 +274,7 @@ TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
     // The quotas are what the caller measured it needs; a count set with them in mind must not
     // quietly undo them.
     std::vector<PoolEntry> pool;
+    pool.reserve(40);
     for(int64_t index = 0; index < 40; ++index)
     {
         pool.push_back(entryAt("sweep", index, index % 2 == 0 ? "a" : "b"));
@@ -280,8 +282,8 @@ TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
 
     std::map<std::string, int64_t> allocation;
     std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected = select(
-        {{"sweep", pool}}, 5, defaultShares(), allocation, {{"a", 8}, {"b", 7}}, outcome);
+    const auto selected
+        = select({{"sweep", pool}}, 5, defaultShares(), allocation, {{"a", 8}, {"b", 7}}, outcome);
 
     const std::map<std::string, int64_t> expected{{"a", 8}, {"b", 7}};
     EXPECT_EQ(regimeCounts(selected), expected);
@@ -293,12 +295,13 @@ TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
     // engine serves, and filling it with something else would hide it.
     std::map<std::string, int64_t> allocation;
     std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected = select({{"sweep", {entryAt("sweep", 1, "rare"), entryAt("sweep", 2, "x")}}},
-                                 0,
-                                 defaultShares(),
-                                 allocation,
-                                 {{"rare", 5}},
-                                 outcome);
+    const auto selected
+        = select({{"sweep", {entryAt("sweep", 1, "rare"), entryAt("sweep", 2, "x")}}},
+                 0,
+                 defaultShares(),
+                 allocation,
+                 {{"rare", 5}},
+                 outcome);
 
     EXPECT_EQ(outcome.at("rare").taken, 1);
     ASSERT_EQ(selected.size(), 1u);

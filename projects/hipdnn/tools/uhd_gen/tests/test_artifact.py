@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 flatbuffers = pytest.importorskip("flatbuffers")
+pytest.importorskip("lightgbm")  # the shipping converter builds every artifact here
 pytest.importorskip("numpy")
 pytest.importorskip("pandas")
 

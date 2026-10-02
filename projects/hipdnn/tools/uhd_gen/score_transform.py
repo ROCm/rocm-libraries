@@ -49,7 +49,9 @@ def inverse(raw: np.ndarray, transform: str) -> np.ndarray:
     be a finite value that outranks a real score.
     """
     if transform not in INVERTIBLE and transform != "":
-        raise ValueError(f"uhd_gen can only score {', '.join(INVERTIBLE)} transforms, not {transform!r}")
+        raise ValueError(
+            f"uhd_gen can only score {', '.join(INVERTIBLE)} transforms, not {transform!r}"
+        )
     values = np.asarray(raw, dtype=np.float64)
     if transform == "log1p":
         recovered = np.expm1(values)

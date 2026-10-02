@@ -1572,8 +1572,15 @@ def _booster_scorer(
     booster = lgb.Booster(model_file=str(model_file))
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        values = booster.predict(build_feature_matrix(
-            frame, features, categorical_encoding, signature=signature, feature_evaluator=feature_evaluator))
+        values = booster.predict(
+            build_feature_matrix(
+                frame,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+            )
+        )
         return invert_score(values, score_transform)
 
     return score

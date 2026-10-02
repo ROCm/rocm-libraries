@@ -1,0 +1,4 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::merge_config<{{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}

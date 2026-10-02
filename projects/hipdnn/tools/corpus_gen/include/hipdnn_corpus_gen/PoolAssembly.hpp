@@ -331,8 +331,8 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
         const auto found = pools.find(source);
         // Every pool is spread before it is cut, not only the model pool: a pack or a search
         // arrives in its own order, and taking a prefix of that keeps whatever came first.
-        ordered[source] = detail::spread(
-            found == pools.end() ? std::vector<PoolEntry>{} : found->second);
+        ordered[source]
+            = detail::spread(found == pools.end() ? std::vector<PoolEntry>{} : found->second);
     }
 
     std::map<std::string, std::vector<bool>> chosen;
