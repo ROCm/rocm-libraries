@@ -369,14 +369,8 @@ The component selection must include the provider. The `hipdnn-providers` preset
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
 `hip-kernel-provider`, `hipdnn-dev-all` and `miopen-hipdnn-dev-all`.
 
-On Linux `ENABLE_CLANG_TIDY` defaults ON in hipDNN and every provider, and runs
-clang-tidy on each C++ compile of the targets that call `clang_tidy_check()`. For local
-iteration you may configure with `-DENABLE_CLANG_TIDY=OFF` (configure then warns that CI
-requires passing clang-tidy checks); before a PR, run the `hipdnn-tidy` skill over the
-changed files. Build time depends heavily on the node: a full tidy-on
-`hip-kernel-provider` superbuild took 11 min on an 88-core MI355X node, while a
-tidy-off build on an MI300A node was still under one third done after 25 min. Record
-the build wall time with the build log.
+Clang-tidy defaults and how to turn it off for local iteration are in
+`projects/hipdnn/docs/Building.md` and the `ENABLE_CLANG_TIDY` row of `hipdnn-superbuild`.
 
 **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is unconditional.** The provider's top-level
 `CMakeLists.txt` raises `FATAL_ERROR` whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON and
