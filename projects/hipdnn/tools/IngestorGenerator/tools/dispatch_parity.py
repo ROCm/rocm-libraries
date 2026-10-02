@@ -18,6 +18,36 @@ about what a shape is, so it aborts (``ParityError``, ``FAIL`` on stderr, exit
 2). A decline -- the eligibility predicate returning false with a reason -- is
 a per-shape outcome, counted and printed by ``--report-gaps``.
 
+**Two profile dialects for the ``dispatch`` block.** The original names a
+function that takes the request and returns the builder's spec. A dispatcher
+that selects by *pinning* instead needs four more keys::
+
+    dispatch:
+      module: dispatch.attention
+      function: dispatch_attention
+      pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_grid}
+      result_attr: spec           # DispatchResult -> the tuned spec
+      spec_attr: kernel_spec      # tuned spec -> the builder's spec
+      refusal_exception: rocke.dispatch.core.PinRefused
+
+``pin`` is merged into every request and outranks the shape, because the pin is
+what makes the emitted catalog one kernel family. ``result_attr``/``spec_attr``
+walk the dispatcher's return value down to the object the builder compiles; a
+``None`` on the way is fatal and says so, since a route-only candidate resolves
+to a routing plan rather than a buildable spec. ``refusal_exception`` names the
+class the dispatcher raises for a pin it will not serve -- that is a per-shape
+decline like any other, while an import error, a missing attribute or a failed
+request construction stays fatal.
+
+**Reproducing a shipped catalog** additionally needs its naming, since the
+packer derives each kpack ``toc_key`` and ``symbol`` from the kernel name::
+
+    kernel_name_template: >-
+      attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_c{causal}.gfx950
+
+Absent, names are derived from the spec's own fields -- stable for a new
+catalog, but not the names an existing one already ships.
+
 This tool does not sweep. ``--report-knobs`` partitions the spec fields into
 those that vary across dispatch decisions and those the library ships (see
 ``knob_partition``).
@@ -26,6 +56,7 @@ those that vary across dispatch decisions and those the library ships (see
 from __future__ import annotations
 
 import argparse
+import collections
 import copy
 import dataclasses
 import inspect
@@ -39,6 +70,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import launch_surface  # noqa: E402
+
+
+#: Why the knob cross-product dropped combinations, from the last
+#: ``build_config`` call, for the summary to print. Reporting only -- nothing
+#: reads it to make a decision, and it is reset per call so a second
+#: invocation in one process cannot inherit the first one's counts.
+_LAST_DROPPED: dict[str, int] = {}
 
 
 class ParityError(RuntimeError):
@@ -169,6 +207,46 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
     return [decl[k] for k in keys]
 
 
+def _import_dotted(path: str, scope: str):
+    """Import `a.b.C` written as one string, for a profile key naming a class."""
+    module, _, symbol = path.rpartition(".")
+    if not module or not symbol:
+        raise ParityError(
+            f"the profile's '{scope}' must be a dotted path to a class, like "
+            f"'rocke.dispatch.core.PinRefused'; got {path!r}."
+        )
+    attribute = _import(module, symbol)
+    if not isinstance(attribute, type) or not issubclass(attribute, BaseException):
+        raise ParityError(f"'{path}' is not an exception class.")
+    return attribute
+
+
+def _project(obj, attrs: list[tuple[str, str]]):
+    """Walk named attributes off the dispatcher's result.
+
+    A missing attribute is operational: the profile and the dispatcher disagree
+    about the shape of the result. So is a ``None``, and that one is worth
+    naming -- a route-only candidate resolves to a spec whose ``kernel_spec``
+    is ``None``, a routing plan rather than something a builder can compile,
+    and silently writing that into the catalog would emit kernels with no spec.
+    """
+    for name, key in attrs:
+        if not hasattr(obj, name):
+            raise ParityError(
+                f"the profile's dispatch.{key} names '{name}', which "
+                f"{type(obj).__name__} does not have. Available: "
+                f"{sorted(a for a in dir(obj) if not a.startswith('_'))}."
+            )
+        obj = getattr(obj, name)
+        if obj is None:
+            raise ParityError(
+                f"dispatch.{key} '{name}' is None. The pin resolved to a "
+                f"routing decision, not a buildable spec -- pin a candidate "
+                f"that carries one (a route-only candidate never does)."
+            )
+    return obj
+
+
 def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     """Ask the dispatcher for every shape; API errors are operational failures."""
     dispatch = profile.get("dispatch") or {}
@@ -185,22 +263,60 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
     arch = profile.get("arch")
     defaults = dict(request_decl.get("defaults") or {})
 
+    # The selector fields that name one candidate. Authoritative over a shape:
+    # a shape quietly switching `algorithm` would mix two kernel families into
+    # one catalog, which the loader reads as one engine's inventory.
+    pin = dict(dispatch.get("pin") or {})
+    # Walked off the dispatcher's return value. Absent: the function already
+    # returns the builder's spec, which is the older profile dialect.
+    projection = [
+        (dispatch[key], key)
+        for key in ("result_attr", "spec_attr")
+        if dispatch.get(key)
+    ]
+    # A pin the dispatcher refuses is a SHAPE-level outcome, not a tool
+    # failure: the catalog simply does not serve that shape, which is what
+    # --report-gaps counts. Operational errors stay fatal.
+    refusal = (
+        _import_dotted(dispatch["refusal_exception"], "dispatch.refusal_exception")
+        if dispatch.get("refusal_exception")
+        else None
+    )
+
     out: list[Resolution] = []
     for shape in shapes:
         # Keys prefixed `_` are carried provenance, not request fields: they
         # travel with a shape so results can be split by origin, but the
         # request class would reject the key.
-        fields = {
-            **defaults,
-            **{k: v for k, v in shape.items() if not k.startswith("_")},
-        }
+        shape_fields = {k: v for k, v in shape.items() if not k.startswith("_")}
+        conflicting = sorted(
+            k for k, v in pin.items() if k in shape_fields and shape_fields[k] != v
+        )
+        if conflicting:
+            raise ParityError(
+                f"shape {shape!r} sets {conflicting}, which dispatch.pin also "
+                f"sets. The pin decides which kernel family this catalog is; a "
+                f"shape overriding it would emit another family's kernels under "
+                f"this engine. Remove it from the shape or from the pin."
+            )
+        fields = {**defaults, **shape_fields, **pin}
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
             request = request_cls(**fields)
-            spec = factory(request)
         except Exception as exc:
             raise ParityError(f"request/spec construction failed: {exc}") from exc
+        try:
+            spec = factory(request)
+        except Exception as exc:
+            if refusal is not None and isinstance(exc, refusal):
+                out.append(
+                    Resolution(shape, reason=str(exc), kind="declined")
+                )
+                continue
+            raise ParityError(f"request/spec construction failed: {exc}") from exc
+        if projection:
+            spec = _project(spec, projection)
         if predicate is not None:
             supported, why = _predicate_result(
                 predicate, spec, **({"arch": arch} if arch else {})
@@ -253,6 +369,38 @@ def _kernel_name(slug: str, spec, index: int) -> str:
         parts.append(f"{_abbrev(name)}{value}")
     parts.append(f"v{index}")
     return "_".join(str(p) for p in parts)
+
+
+def _templated_name(template: str, spec: dict, metadata: dict) -> str:
+    """``kernel_name_template`` rendered against one variant's own fields.
+
+    The auto-name above is derived from whatever fields the spec happens to
+    carry, which makes it stable for a NEW catalog and useless for reproducing
+    an existing one: a kernel name is not cosmetic, since the packer derives the
+    kpack ``toc_key`` and ``symbol`` from it. A profile regenerating a shipped
+    catalog therefore states the catalog's own naming instead.
+
+    Spec fields win over metadata on a name collision, because the spec is what
+    the binary is built from; a bool renders 1/0 so `c{causal}` matches the
+    shipped spelling rather than `cTrue`.
+    """
+    fields = {
+        **metadata,
+        **{k: (int(v) if isinstance(v, bool) else v) for k, v in spec.items()},
+    }
+    try:
+        return template.format(**fields)
+    except KeyError as exc:
+        raise ParityError(
+            f"kernel_name_template references {exc}, which neither the resolved "
+            f"spec nor the metadata provides. Available: "
+            f"{sorted(fields)}."
+        ) from exc
+    except (IndexError, ValueError) as exc:
+        raise ParityError(
+            f"kernel_name_template {template!r} is not a valid format string: "
+            f"{exc}. Field references are named, like '{{block_m}}'."
+        ) from exc
 
 
 def _abbrev(field: str) -> str:
@@ -322,6 +470,9 @@ def build_config(
     slug = profile["slug"]
     metadata_fields = list(profile.get("metadata_fields") or [])
     vocabulary = dict(profile.get("vocabulary") or {})
+    # Absent: the derived auto-name. Present: this catalog's own naming, which
+    # is what a profile regenerating a SHIPPED catalog needs (see _templated_name).
+    name_template = profile.get("kernel_name_template")
     resolvers = _policy_resolvers(profile)
     # Resolved before any kernel is built, so a knob with no declared readout
     # is refused while the message can still name it.
@@ -371,6 +522,23 @@ def build_config(
                 f"kernel and the sweep would measure nothing. Either the name is "
                 f"wrong, or the field is not a build-time knob of this kernel."
             )
+    # The eligibility predicate again, this time per KNOB COMBINATION. The
+    # per-shape pass in resolve_shapes ran on the dispatcher's resolved spec,
+    # which carries one tile; a cross-product invents combinations the
+    # dispatcher never resolved to and nothing has judged. Emitting those
+    # unchecked ships catalog entries that cannot be lowered -- a tile can
+    # satisfy every divisibility rule and still exceed the LDS budget -- and
+    # the failure surfaces at comgr, per variant, deep inside a build.
+    predicate_decl = profile.get("predicate") or {}
+    knob_predicate = (
+        _import(*_required(predicate_decl, "predicate", "module", "function"))
+        if (predicate_decl and knobs)
+        else None
+    )
+    arch = profile.get("arch")
+    dropped: dict[str, int] = collections.Counter()
+    _LAST_DROPPED.clear()
+
     kernels = []
     for index, resolution in enumerate(resolutions):
         if resolution.spec is None:
@@ -412,6 +580,14 @@ def build_config(
         axis_names = sorted(knobs)
         for combo in itertools.product(*[knobs[k] for k in axis_names]):
             pinned = dict(zip(axis_names, combo))
+            if knob_predicate is not None:
+                candidate = dataclasses.replace(resolution.spec, **pinned)
+                ok, why = _predicate_result(
+                    knob_predicate, candidate, **({"arch": arch} if arch else {})
+                )
+                if not ok:
+                    dropped[why] += 1
+                    continue
             variant_metadata = dict(metadata)
             variant_spec = dict(spec)
             for knob, value in pinned.items():
@@ -423,9 +599,12 @@ def build_config(
                 # from the shared spec, so a `knob in variant_spec` guard would
                 # skip exactly the knobs worth sweeping.
                 variant_spec[knob] = value
-            name = _kernel_name(slug, resolution.spec, index)
-            if pinned:
-                name += "." + "_".join(f"{k}{pinned[k]}" for k in axis_names)
+            if name_template:
+                name = _templated_name(name_template, variant_spec, variant_metadata)
+            else:
+                name = _kernel_name(slug, resolution.spec, index)
+                if pinned:
+                    name += "." + "_".join(f"{k}{pinned[k]}" for k in axis_names)
             kernels.append(
                 {
                     "name": name,
@@ -438,6 +617,8 @@ def build_config(
                     "metadata": variant_metadata,
                 }
             )
+    # Publish the predicate-refused counts so the summary can print them.
+    _LAST_DROPPED.update(dropped)
     # `dialect: packaged` is stated rather than guessed: a rocKE builder can
     # only be authored packaged, and the loader rejects any other pairing.
     return {
@@ -579,11 +760,22 @@ def main(argv=None) -> int:
         count = len(config["packs"][0]["kernels"])
         if knobs:
             arms = math.prod(len(v) for v in knobs.values())
+            crossed = len(served) * arms
             print(
                 f"\n  wrote {args.out}: {count} kernels "
-                f"= {len(served)} servable shapes x {arms} surviving knob "
+                f"= {len(served)} servable shapes x {arms} knob "
                 f"combination(s) ({', '.join(sorted(knobs))})"
+                + (f", less {crossed - count} the predicate refused" if crossed != count else "")
             )
+            # Not a footnote: a cross-product invents combinations the dispatcher
+            # never resolved to, and the refused ones are exactly those that
+            # would have failed at comgr. Printing the reasons is how a reviewer
+            # tells "legal tiles this kernel does not want" from "the knob list
+            # is wrong".
+            for reason, n in sorted(
+                _LAST_DROPPED.items(), key=lambda kv: -kv[1]
+            )[:5]:
+                print(f"    refused x{n}: {reason}")
             # The cap the runbook states, enforced where the number is known:
             # past the low thousands the pack time, the archive and the catalog
             # all stop being reasonable.

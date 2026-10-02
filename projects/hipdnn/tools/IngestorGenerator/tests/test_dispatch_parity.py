@@ -75,6 +75,48 @@ def supports(spec, arch=None):
     if spec.seqlen_q == 777:
         return False, "seqlen_q 777 is not a supported prefill length"
     return True, ""
+
+
+class Refused(ValueError):
+    """What a pinning dispatcher raises for a pin it will not serve."""
+
+
+@dataclasses.dataclass
+class TunedSpec:
+    """The dispatcher's own wrapper. `kernel_spec` is what a builder compiles."""
+
+    kernel_spec: object
+
+
+@dataclasses.dataclass
+class DispatchResult:
+    spec: object
+
+
+@dataclasses.dataclass
+class PinnedRequest:
+    seqlen_q: int
+    head_size: int = 128
+    arch: str = "gfx950"
+    algorithm: str = "auto"
+    spec_id: str = "auto"
+
+
+def resolve_pinned(request):
+    """Selects by pin, refuses one shape, and routes another to a plan-only spec.
+
+    `seqlen_q` 777 is refused (a per-shape decline) and 888 resolves to a spec
+    carrying no `kernel_spec`, standing in for a route-only candidate.
+    """
+    if request.algorithm != "stub_grid" or request.spec_id != "stub_grid_default":
+        raise Refused(
+            f"no registered candidate has spec_id {request.spec_id!r}"
+        )
+    if request.seqlen_q == 777:
+        raise Refused("seqlen_q 777: pin does not admit this shape")
+    if request.seqlen_q == 888:
+        return DispatchResult(spec=TunedSpec(kernel_spec=None))
+    return DispatchResult(spec=TunedSpec(kernel_spec=resolve(request)))
 '''
 
 
@@ -116,6 +158,55 @@ def parity(tmp_path, monkeypatch):
         ]
 
     return argv
+
+
+@pytest.fixture
+def pinned_parity(tmp_path, monkeypatch):
+    """The pinning dialect: `pin` + `result_attr`/`spec_attr` + `refusal_exception`.
+
+    Returns `(argv, profile_path)` so a test can also mutate the profile, which is
+    how the pin-versus-shape conflict and the route-only spec are reached.
+    """
+    library = tmp_path / "provider" / "rocke" / "library"
+    library.mkdir(parents=True)
+    (tmp_path / "provider" / "rocke" / "platform" / "python").mkdir(parents=True)
+    (library / "stub_provider.py").write_text(_STUB_PROVIDER)
+    monkeypatch.delitem(sys.modules, "stub_provider", raising=False)
+
+    profile = {
+        "slug": "stub_attention",
+        "source": "kernels/stub.py",
+        "builder": "build_stub",
+        "engine": {"name": "stub:Engine"},
+        "kmd_fields": [{"name": "seqlen_q", "type": "int", "default_value": 256}],
+        "provider_root": str(tmp_path / "provider"),
+        "arch": "gfx950",
+        "metadata_fields": ["seqlen_q"],
+        "specialization": {
+            "metadata_fields": ["seqlen_q"],
+            "matcher_only_fields": [],
+            "bindings": {"seqlen_q": {"field": "seqlen_q"}},
+        },
+        "dispatch": {
+            "module": "stub_provider",
+            "function": "resolve_pinned",
+            "pin": {"algorithm": "stub_grid", "spec_id": "stub_grid_default"},
+            "result_attr": "spec",
+            "spec_attr": "kernel_spec",
+            "refusal_exception": "stub_provider.Refused",
+        },
+        "request": {"module": "stub_provider", "class": "PinnedRequest"},
+        "predicate": {"module": "stub_provider", "function": "supports"},
+    }
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(profile))
+
+    def argv(shapes: list, *extra: str) -> list:
+        shapes_path = tmp_path / "shapes.json"
+        shapes_path.write_text(json.dumps(shapes))
+        return ["--profile", str(profile_path), "--shapes", str(shapes_path), *extra]
+
+    return argv, profile_path
 
 
 _SERVED_AND_DECLINED = [{"seqlen_q": 256}, {"seqlen_q": 2048}, {"seqlen_q": 777}]
@@ -359,35 +450,51 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
 
 
 class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
-    """The request defaults decide which kernel the dispatcher resolves, and this
-    catalog contains one arm of that choice only."""
+    """The pin decides which kernel the dispatcher resolves, and this catalog
+    contains one arm of that choice only.
 
-    def test_dense_persistent_is_the_string_off_not_a_yaml_boolean(self):
-        defaults = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"][
-            "defaults"
-        ]
-        assert "dense_persistent" in defaults, (
-            "the profile leaves dense_persistent unset, so AttentionRequest defaults "
-            "it to 'auto' and the dispatcher resolves the persistent arm once "
-            "work >= dense_num_persistent -- a kernel this catalog does not ship"
+    Persistence used to be a request field (``dense_persistent``). Since the dense
+    arms became algorithms it is the pin, so these assert the pin -- but the
+    obligation is unchanged: resolve the non-persistent, eight-argument arm, which
+    is the only contract this engine's expectedSignature check accepts.
+    """
+
+    def test_the_pin_names_the_non_persistent_arm(self):
+        dispatch = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["dispatch"]
+        pin = dispatch.get("pin") or {}
+        assert pin.get("algorithm") == "attention_dense_grid", (
+            f"the profile pins algorithm {pin.get('algorithm')!r}. Unpinned, "
+            "dispatch_attention returns the unified routing path -- another kernel "
+            "family on the paged ABI -- and the persistent algorithm is a "
+            "five-argument kernel this catalog does not ship"
         )
-        value = defaults["dense_persistent"]
-        assert isinstance(value, str), (
-            f"dense_persistent parsed as {type(value).__name__} ({value!r}): the key "
-            "was written unquoted and PyYAML read `off` as a boolean. The dispatcher "
-            "calls .strip().lower() on it, so the tool aborts rather than pinning "
-            "the non-persistent arm"
+        assert pin.get("spec_id") == "gfx950_dense_grid", pin
+        assert "dense_persistent" not in (
+            dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"].get(
+                "defaults"
+            )
+            or {}
+        ), (
+            "the profile still sets dense_persistent, which AttentionRequest no "
+            "longer accepts: every shape would abort at request construction"
         )
-        assert value == "off", value
+
+    def test_the_projection_reaches_the_builders_spec(self):
+        """Without both hops the emitted `spec` is the dispatcher's wrapper, which
+        hkp_pack cannot hydrate into the builder's dataclass."""
+        dispatch = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["dispatch"]
+        assert dispatch.get("result_attr") == "spec", dispatch
+        assert dispatch.get("spec_attr") == "kernel_spec", dispatch
 
     @staticmethod
     def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
         """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
-        request class the shipped profile binds, on its own ``request.defaults``.
+        request class the shipped profile binds, on its own ``request.defaults``
+        and ``dispatch.pin``, projected down the profile's own attribute chain.
 
-        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, so the
-        unpinned ``auto`` arm resolves persistent and, at D=128 causal bf16, wide DMA
-        with it: the one shape where the pin is the whole difference.
+        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, which is
+        where the persistent arm becomes reachable: the one shape where the pin is
+        the whole difference.
         """
         import importlib
 
@@ -417,9 +524,16 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             "hdim_v": 128,
             "dtype": "bf16",
             "mask_type": 1,
+            **(dispatch.get("pin") or {}),
             **overrides,
         }
-        return factory(request_cls(**fields))
+        result = factory(request_cls(**fields))
+        # The profile's own projection, so a chain that stops reaching the
+        # builder's spec fails here rather than in a later assertion.
+        for key in ("result_attr", "spec_attr"):
+            if dispatch.get(key):
+                result = getattr(result, dispatch[key])
+        return result
 
     def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
         """Checking the YAML value is only half of it: this is what the dispatcher does
@@ -433,10 +547,103 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         )
         assert spec.wide_lds_dma is False, spec
 
-    def test_the_unpinned_control_does_resolve_the_persistent_arm(self, monkeypatch):
-        """A control: without the pin this shape IS persistent, so the case above
-        exercises the pin rather than a shape that is never persistent."""
+    def test_the_persistent_arm_is_reachable_at_this_shape(self, monkeypatch):
+        """A control: the persistent arm IS resolvable here, so the case above
+        exercises the pin rather than a shape no persistent kernel serves."""
         spec = self._resolve_with_the_real_dispatcher(
-            monkeypatch, dense_persistent="auto"
+            monkeypatch,
+            algorithm="attention_dense_persist",
+            spec_id="gfx950_dense_persist",
         )
         assert spec.persistent is True, spec
+
+
+class TestThePinningDialect:
+    """A dispatcher that selects by pin rather than by deriving from the request.
+
+    The split that matters: a refused pin is a per-shape DECLINE, because the
+    catalog simply does not serve that shape. Everything else about reaching the
+    dispatcher -- a bad profile, a result the profile cannot walk, a pin a shape
+    contradicts -- stays operational, because each makes every remaining count
+    untrustworthy in the same way a construction failure does.
+    """
+
+    def test_the_pin_reaches_the_dispatcher(self, pinned_parity, capsys):
+        """The control for every other case here: without the pin merged into the
+        request, the stub refuses every shape and the servable count is 0."""
+        argv, _ = pinned_parity
+        assert dispatch_parity.main(argv([{"seqlen_q": 256}, {"seqlen_q": 2048}])) == 0
+        out = capsys.readouterr().out
+        assert "servable          2" in out, out
+
+    def test_the_projection_walks_down_to_the_builders_spec(
+        self, pinned_parity, tmp_path, capsys
+    ):
+        """`result_attr`/`spec_attr` must yield the object the builder compiles, not
+        the dispatcher's wrapper -- an unwalked result would emit a `spec` of
+        `{"kernel_spec": ...}` and pack-time hydration would fail on it."""
+        argv, _ = pinned_parity
+        out_path = tmp_path / "emitted.yaml"
+        assert dispatch_parity.main(argv([{"seqlen_q": 2048}], "--out", str(out_path))) == 0
+        emitted = out_path.read_text()
+        assert "kernel_spec" not in emitted, emitted
+        # block_n 64 is the field the stub dispatcher DERIVES at seqlen_q >= 1024,
+        # so finding it proves the walk reached the resolved spec.
+        assert "block_n" in emitted and "64" in emitted, emitted
+
+    def test_a_refused_pin_is_a_decline_not_an_abort(self, pinned_parity, capsys):
+        """The semantic crux. A stale or inapplicable pin is what `--report-gaps`
+        exists to count; aborting on it would make one unserved shape hide the
+        coverage of every other."""
+        argv, _ = pinned_parity
+        shapes = [{"seqlen_q": 256}, {"seqlen_q": 777}]
+        assert dispatch_parity.main(argv(shapes, "--report-gaps")) == 0
+        out = capsys.readouterr().out
+        assert "servable          1" in out, out
+        assert "declined          1" in out, out
+        assert "pin does not admit this shape" in out, (
+            "the decline reason the dispatcher gave is missing, so --report-gaps "
+            "cannot say WHY the catalog does not serve the shape"
+        )
+
+    def test_an_unrelated_exception_still_aborts(self, pinned_parity, capsys):
+        """`refusal_exception` must narrow to the named class. Catching every
+        exception would turn a genuinely broken dispatcher into a quiet gap
+        report claiming the library serves nothing."""
+        argv, profile_path = pinned_parity
+        profile = json.loads(profile_path.read_text())
+        profile["dispatch"]["function"] = "resolve_but_raise"
+        profile_path.write_text(json.dumps(profile))
+        assert dispatch_parity.main(argv([{"seqlen_q": 256}])) == 2
+        assert "dispatcher exploded" in capsys.readouterr().err
+
+    def test_a_routing_only_result_is_fatal_and_says_so(self, pinned_parity, capsys):
+        """A route-only candidate resolves to a plan whose `kernel_spec` is None.
+        Writing that into the catalog would emit a kernel with no spec, so it
+        aborts and names the cause rather than declining the shape."""
+        argv, _ = pinned_parity
+        assert dispatch_parity.main(argv([{"seqlen_q": 888}])) == 2
+        err = capsys.readouterr().err
+        assert "kernel_spec" in err and "routing" in err, err
+
+    def test_a_shape_contradicting_the_pin_is_fatal(self, pinned_parity, capsys):
+        """A shape overriding `algorithm` would mix two kernel families into one
+        engine's inventory, which the loader reads as that engine's whole
+        catalog. Silent precedence either way is worse than refusing."""
+        argv, _ = pinned_parity
+        shapes = [{"seqlen_q": 256, "algorithm": "something_else"}]
+        assert dispatch_parity.main(argv(shapes)) == 2
+        err = capsys.readouterr().err
+        assert "algorithm" in err, err
+
+    def test_a_refusal_exception_naming_a_non_exception_is_fatal(
+        self, pinned_parity, capsys
+    ):
+        """Silently ignoring it would make every refused pin abort instead, which
+        reads as a broken dispatcher rather than a mistyped profile key."""
+        argv, profile_path = pinned_parity
+        profile = json.loads(profile_path.read_text())
+        profile["dispatch"]["refusal_exception"] = "stub_provider.Spec"
+        profile_path.write_text(json.dumps(profile))
+        assert dispatch_parity.main(argv([{"seqlen_q": 256}])) == 2
+        assert "not an exception class" in capsys.readouterr().err
