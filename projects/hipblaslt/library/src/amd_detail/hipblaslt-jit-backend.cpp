@@ -209,8 +209,8 @@ namespace hipblaslt_jit
         std::string kernelOf(const DeviceTarget& target, int32_t index)
         {
             Status why;
-            auto   solution
-                = JitLibrary::process().solutionByIndex(target.device, *target.hardware, index, why);
+            auto   solution = JitLibrary::process().solutionByIndex(
+                target.device, *target.hardware, index, why);
             return solution ? solution->kernelName : std::string();
         }
 
@@ -305,8 +305,8 @@ namespace hipblaslt_jit
                     exclude.push_back(std::move(kernel));
             excluding.stop();
             debug::Phase generatePhase("jit_generate");
-            auto         outcome
-                = jit.generate(request, target, count - fill.indices.size(), workspaceLimit, exclude);
+            auto         outcome = jit.generate(
+                request, target, count - fill.indices.size(), workspaceLimit, exclude);
             generatePhase.stop();
             if(debug::categories())
                 generating.lastDebugId = debug::lastGeneration();
