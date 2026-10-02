@@ -153,13 +153,26 @@ TEST(SynchronizerValidatorReporting, UnknownSolutionIsChecked)
 }
 
 // amaxD is the third consumer: the dispatcher appends the buffer as AmaxSync
-// whenever outputAmaxD is set, independent of streamK and globalAccumulation.
+// whenever outputAmaxD is set, independent of tile-processing strategy and globalAccumulation.
 TEST(SynchronizerValidatorReporting, AmaxDSolutionIsChecked)
 {
     TestableSynchronizerValidator    validator(enabledArgs());
     TensileLite::ContractionSolution solution;
     setSolution(solution, TileProcessingStrategy::None, 0);
     solution.problemType.outputAmaxD = true;
+
+    validator.preSolution(&solution);
+    EXPECT_TRUE(validator.mayUseSynchronizer());
+}
+
+// Custom StreamK kernels read and reset the buffer through AddressSynchronizer
+// although they set no tile-processing strategy.
+TEST(SynchronizerValidatorReporting, CustomStreamKSolutionIsChecked)
+{
+    TestableSynchronizerValidator    validator(enabledArgs());
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, TileProcessingStrategy::None, 0);
+    solution.customKernel.workspaceType = TensileLite::CustomWorkspaceType::StreamK;
 
     validator.preSolution(&solution);
     EXPECT_TRUE(validator.mayUseSynchronizer());

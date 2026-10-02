@@ -58,9 +58,10 @@ namespace TensileLite
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_failedInSolution = false;
-            // Covers the three possible uses of the pointer: Flags in
+            // Covers the four possible uses of the pointer: Flags in
             // singleCallArgs for StreamK, the dstD/Synchronizer block for
-            // MBSK, and AmaxSync for amaxD.
+            // MBSK, AmaxSync for amaxD, and the Flags/Synchronizer args of
+            // custom StreamK kernels.
             // Parallel Stream-K reduction passes Flags=nullptr, but excluding it
             // requires the problem- and hardware-dependent reduction decision.
             // We conservatively scan its buffer too; it normally remains zero.
@@ -72,10 +73,14 @@ namespace TensileLite
                 return;
             }
 
-            auto const& sm      = solution->sizeMapping;
-            bool const  streamK = sm.requiresPartialReduction();
-            bool const mbsk    = sm.globalAccumulation == 3;
-            m_mayUseSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
+            auto const& sm               = solution->sizeMapping;
+            auto const  customType       = solution->customKernel.workspaceType;
+            bool const  partialReduction = sm.requiresPartialReduction();
+            bool const  customStreamK    = customType == CustomWorkspaceType::StreamK
+                                        || customType == CustomWorkspaceType::StreamKWithReduction;
+            bool const mbsk = sm.globalAccumulation == 3;
+            m_mayUseSynchronizer = partialReduction || customStreamK || mbsk
+                                   || solution->problemType.outputAmaxD;
         }
 
         void SynchronizerValidator::postSolution()

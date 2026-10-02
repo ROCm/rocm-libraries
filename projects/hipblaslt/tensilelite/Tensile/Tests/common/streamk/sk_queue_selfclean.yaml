@@ -34,7 +34,7 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  - # SGEMM NT - dynamic work queue, both SK4 and the SK5 dynamic sub-path
+  - # SGEMM NT - dynamic work queue, StreamK with DynamicWorkQueue, and Hybrid's DynamicWorkQueue sub-path
     - # ProblemType
       OperationType: GEMM
       DataType: s
