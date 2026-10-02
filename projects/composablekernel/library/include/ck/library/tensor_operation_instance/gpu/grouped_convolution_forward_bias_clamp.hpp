@@ -10,7 +10,6 @@
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
-#include "ck/host_utility/device_prop.hpp"
 #include "ck/library/tensor_operation_instance/device_operation_instance_factory.hpp"
 
 #ifdef CK_USE_XDL
@@ -297,11 +296,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_instances(
                     op_ptrs);
 #ifdef CK_HAS_GFX1250_INSTANCES
-                if(ck::is_gfx125_supported())
-                {
-                    add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
+                add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_gfx1250_instances(
                         op_ptrs);
-                }
 #endif
                 add_device_grouped_conv2d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_nhwgc_gkyxc_nhwgk_bf16_generic_instances(
                     op_ptrs);
@@ -349,11 +345,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_instances(
                     op_ptrs);
 #ifdef CK_HAS_GFX1250_INSTANCES
-                if(ck::is_gfx125_supported())
-                {
-                    add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
+                add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_gfx1250_instances(
                         op_ptrs);
-                }
 #endif
                 add_device_grouped_conv3d_fwd_bias_clamp_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_ndhwgk_bf16_generic_instances(
                     op_ptrs);

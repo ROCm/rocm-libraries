@@ -3,6 +3,7 @@
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_wmma_cshufflev3_large_tensor_instance.hpp"
+#include "ck/host_utility/device_prop.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -22,6 +23,11 @@ void add_device_grouped_conv3d_fwd_wmma_cshufflev3_large_tensor_ndhwgc_gkzyxc_nd
                                                                 PassThrough,
                                                                 PassThrough>>>& instances)
 {
+    // These instances exist only for gfx1250; register nothing on any other device.
+    if(!ck::is_gfx125_supported())
+    {
+        return;
+    }
     add_device_operation_instances(
         instances,
         device_grouped_conv_fwd_wmma_large_tensor_bf16_gfx1250_instances<3,
