@@ -98,6 +98,15 @@ def test_new_pipelines_reject_other_architectures_and_tiles(pipeline):
     assert validate_kernel_config(replace(cfg, gfx_arch='gfx1250:xnack-')).is_valid
 
 
+@pytest.mark.parametrize('pipeline', PIPELINES)
+def test_ctypes_validation_applies_codegen_pad_rules(pipeline):
+    sweep = [c.to_ctypes_config() for c in configs() if c.pipeline == pipeline]
+    assert all(validate_kernel_config(c).is_valid for c in sweep)
+    # comp_async needs every pad; the others reject pad_n/pad_k on gfx1250.
+    bad = dict.fromkeys(('pad_m', 'pad_n', 'pad_k'), pipeline != 'comp_async')
+    assert not validate_kernel_config(replace(sweep[0], **bad)).is_valid
+
+
 def test_tdm_v2_requires_four_waves():
     cfg = next(c for c in configs() if c.pipeline == 'comp_tdm_v2').to_ctypes_config()
     assert not validate_kernel_config(replace(cfg, wave_n=2)).is_valid

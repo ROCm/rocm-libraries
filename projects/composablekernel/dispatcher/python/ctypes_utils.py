@@ -278,9 +278,12 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             layout=config.layout, operator=OperatorType.GEMM_PRESHUFFLE,
         ))
         errors.extend(result.errors)
-        # ArchFilter has no persistent flag; the shared rules cover it.
+        # ArchFilter gets no pads or persistent flag; the shared rules cover them.
         from codegen_common import preshuffle_pipeline_reject_reason
-        reason = preshuffle_pipeline_reject_reason(pipeline, persistent=getattr(config, "persistent", False))
+        reason = preshuffle_pipeline_reject_reason(
+            pipeline, arch, pad_m=config.pad_m, pad_n=config.pad_n, pad_k=config.pad_k,
+            persistent=getattr(config, "persistent", False),
+        )
         if reason:
             errors.append(reason)
         # Preshuffle requires larger minimum tiles for efficiency
