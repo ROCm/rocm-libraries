@@ -187,7 +187,6 @@ Checks: >
   modernize-use-transparent-functors,
   modernize-use-uncaught-exceptions,
   performance-avoid-endl,
-  performance-faster-string-find,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
   performance-inefficient-algorithm,
