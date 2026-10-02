@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-debug.hpp"
-#include "hipblaslt-jit-process.hpp"
+#include "jit_test_child.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -123,8 +123,7 @@ namespace
 
     struct Child
     {
-        hipblaslt_jit::process::Result result;
-        std::string                    log;
+        std::string log;
     };
 
     fs::path self;
@@ -132,17 +131,15 @@ namespace
 
     Child child(const std::string& scenario, const std::string& name, Environment overlay)
     {
-        hipblaslt_jit::process::Request request;
-        request.argv        = {self.string(), "--child", scenario, root.string()};
-        request.environment = {{"HIPBLASLT_JIT", "1"},
-                               {"HIPBLASLT_JIT_DEBUG", "all"},
-                               {"HIPBLASLT_JIT_DEBUG_FILE", ""}};
-        request.environment.insert(request.environment.end(), overlay.begin(), overlay.end());
-        request.workingDirectory = root;
-        request.logPath          = root / (name + ".log");
-        auto result              = hipblaslt_jit::process::run(request);
-        require(result.succeeded(), name + ": child failed: " + read(request.logPath));
-        return {result, read(request.logPath)};
+        Environment environment{{"HIPBLASLT_JIT", "1"},
+                                {"HIPBLASLT_JIT_DEBUG", "all"},
+                                {"HIPBLASLT_JIT_DEBUG_FILE", ""}};
+        environment.insert(environment.end(), overlay.begin(), overlay.end());
+        const auto log = root / (name + ".log");
+        require(hipblaslt_jit_test::runChild(
+                    {self.string(), "--child", scenario, root.string()}, environment, root, log),
+                name + ": child failed: " + read(log));
+        return {read(log)};
     }
 
     // Scenarios run in a child process, whose categories the environment sets.

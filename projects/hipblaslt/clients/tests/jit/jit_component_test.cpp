@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-prediction.hpp"
-#include "hipblaslt-jit-process.hpp"
+#include "jit_test_child.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -693,18 +693,17 @@ namespace
     {
         const auto tmp = parent / "debug-tmp";
         fs::create_directory(tmp);
-        hj::process::Request request;
-        request.argv             = {self.string(), "--debug-child"};
-        request.environment      = {{"HIPBLASLT_JIT", "1"},
-                                    {"HIPBLASLT_JIT_DEBUG", "all"},
-                                    {"HIPBLASLT_JIT_DEBUG_FILE", ""},
-                                    {"TMPDIR", tmp.string()}};
-        request.workingDirectory = parent;
-        request.logPath          = parent / "debug-child.log";
-        const auto     result    = hj::process::run(request);
-        std::ifstream  in(request.logPath);
+        const auto log = parent / "debug-child.log";
+        const bool ran = hipblaslt_jit_test::runChild({self.string(), "--debug-child"},
+                                                      {{"HIPBLASLT_JIT", "1"},
+                                                       {"HIPBLASLT_JIT_DEBUG", "all"},
+                                                       {"HIPBLASLT_JIT_DEBUG_FILE", ""},
+                                                       {"TMPDIR", tmp.string()}},
+                                                      parent,
+                                                      log);
+        std::ifstream     in(log);
         const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-        require(result.succeeded(), "The debug child failed: " + text);
+        require(ran, "The debug child failed: " + text);
 
         std::map<std::string, std::vector<std::string>> scenarios;
         std::string                                     scenario;
