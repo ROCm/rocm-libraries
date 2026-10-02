@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -281,6 +281,11 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
               std::sort(ret.begin(), ret.end());
               return ret;
           };
+
+    // avoid UB (TODO: remove once ruled out by design)
+    if(strideA.size() < lengthA.size() || strideB.size() < lengthB.size()
+       || lengthB.size() < lengthA.size())
+        return false;
 
     std::vector<iodim> iodimA = make_sorted_iodim_vec(lengthA, strideA);
     std::vector<iodim> iodimB = make_sorted_iodim_vec(lengthB, strideB);
