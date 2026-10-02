@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
+import math
 import os
 import random
 import re
@@ -93,8 +94,9 @@ _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 
 
-# Mirrors dispatch.grouped_convolution._FWD_MERGE_{DEGREES,MAX,MIN_CTAS} and the
-# body of fwd_group_merge_for_geometry -- this file is a standalone sweep driver
+# Mirrors dispatch.grouped_convolution._FWD_MERGE_DEGREES, the eight fitted
+# _FWD_MERGE_* constants and the body of fwd_group_merge_for_geometry /
+# _fwd_merge_cost -- this file is a standalone sweep driver
 # that deliberately does not import the dispatcher (see _MAX_GRID_DIM_Z above),
 # and that separation matters more here than anywhere else in the file: the sweep
 # is the ground truth the dispatch policy is *tuned against*, so importing the
@@ -102,34 +104,83 @@ _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 #
 # The copy is kept honest by test_fwd_merge_window.py, which imports both and
 # asserts they agree over the whole (groups, M, tile) grid the sweep can reach.
-_FWD_MERGE_DEGREES_MIRROR = (64, 32, 16, 8, 4, 2)
-_FWD_MERGE_MAX_MIRROR = 32
-_FWD_MERGE_MIN_CTAS_MIRROR = 512
+_FWD_MERGE_DEGREES_MIRROR = (1, 2, 4, 8, 16, 32, 64)
+_FWD_MERGE_CONSTS_MIRROR = (
+    0.014175,  # b_aload_issue
+    0.00030657,  # w_memory
+    0.4249,  # r_reuse
+    1.9548e6,  # d_cta_fixed
+    558.42,  # cupar
+    130.64,  # c_footprint
+    2.7279,  # a_util
+    1.6812,  # q_brake
+)
+_FWD_MERGE_LINE_BYTES_MIRROR = 128
+_FWD_MERGE_VEC_BYTES_MIRROR = 16
 
 
-def _fwd_merge_pick(groups: int, m: int, tile_m: int, tile_n: int) -> int:
-    """Local mirror of the dispatch-side merge-degree policy. See note above."""
-    caps = [tile_n, _FWD_MERGE_MAX_MIRROR]
-    if m > 0:
-        m_tiles = -(-m // max(int(tile_m), 1))
-        caps.append(max(1, (m_tiles * groups) // _FWD_MERGE_MIN_CTAS_MIRROR))
-    cap = min(caps)
+def _fwd_merge_pick(
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
+    tile_k: int = 64,
+) -> int:
+    """Local mirror of the dispatch-side merge-degree policy. See note above.
+
+    An eight-constant cost model evaluated at every admissible degree; the
+    argmin wins and ties go to the smaller degree. The mechanisms and the fit
+    are documented on ``dispatch.grouped_convolution._fwd_merge_cost`` -- this
+    copy exists only so the sweep driver does not import the dispatcher, and is
+    pinned to it by test_fwd_merge_window.py.
+    """
+    B, W, r, D, P, F, A, q = _FWD_MERGE_CONSTS_MIRROR
+    if y * x <= 1:
+        return 1
+    m = max(int(m), 1)
+    stride = max(int(stride), 1)
+    tile_m = max(int(tile_m), 1)
+    best, best_cost = 1, None
     for gm in _FWD_MERGE_DEGREES_MIRROR:
-        if gm <= cap and groups % gm == 0:
-            return gm
-    return 1
+        if gm > tile_n or groups % gm != 0:
+            continue
+        ctas = -(-m // tile_m) * (groups // gm)
+        kpad = tile_k * -(-(y * x * gm) // tile_k)
+        vw = min(gm, _FWD_MERGE_VEC_BYTES_MIRROR // esize)
+        u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES_MIRROR)
+        footprint = tile_m * y * x * gm * esize
+        reuse = (1.0 + (x - 1) / stride) ** r
+        compute = kpad * (1.0 + B / vw)
+        memory = kpad * tile_m * esize * W / max(u**A * reuse, 1e-30)
+        per_cta = (compute + memory) * (1.0 + footprint / F) ** q + D
+        cost = math.ceil(ctas / P) * per_cta
+        if best_cost is None or cost < best_cost * (1.0 - 1e-9):
+            best, best_cost = gm, cost
+    return best
 
 
 def _group_merge_window(
-    groups: int, m: int, tile_m: int, tile_n: int, radius: int
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    radius: int,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
 ) -> tuple:
     """Merge degrees worth sweeping for one tile geometry.
 
     The full degree axis is a free cross-product: six degrees multiply the whole
     tile/warp/pipeline/epilogue grid, and on a depthwise fwd shape that is what
     takes the sweep from ~8.9k combos to ~34.5k. But the degree is not a free
-    variable at *dispatch* time -- the policy chooses it analytically from
-    (groups, M, tile) -- so the sweep only has to confirm that pick and its
+    variable at *dispatch* time -- the policy chooses it analytically from the
+    request geometry -- so the sweep only has to confirm that pick and its
     immediate neighbours, not rediscover the whole curve.
 
     So: centre a window of ``2 * radius + 1`` degrees on what dispatch would pick
@@ -154,11 +205,12 @@ def _group_merge_window(
     ]
     if not admissible:
         return ()
-    pick = _fwd_merge_pick(groups, m, tile_m, tile_n)
+    pick = _fwd_merge_pick(groups, m, tile_m, tile_n, y, x, stride, esize)
     if pick <= 1:
-        # No degree survives the policy's caps (occupancy, typically). The gate
-        # still admits some, and the sweep is where a wrong cap should show up,
-        # so fall back to the smallest admissible degrees rather than nothing.
+        # The cost model prefers unmerged (or Y*X == 1, where merging buys
+        # nothing). The gate still admits some degrees, and the sweep is where a
+        # wrong pick should show up, so fall back to the smallest admissible
+        # degrees rather than nothing.
         idx = len(admissible) - 1
     else:
         idx = admissible.index(pick) if pick in admissible else len(admissible) - 1
@@ -2326,7 +2378,15 @@ def _run_sweep(
                 _all_degrees
                 if _full_degrees
                 else _group_merge_window(
-                    p.groups, p.M, _tm, _tn, args.group_merge_window
+                    p.groups,
+                    p.M,
+                    _tm,
+                    _tn,
+                    args.group_merge_window,
+                    p.Y,
+                    p.X,
+                    p.sW,
+                    2 if dtype in ("fp16", "bf16") else 4,
                 )
             )
             for _tm in _tile_mn

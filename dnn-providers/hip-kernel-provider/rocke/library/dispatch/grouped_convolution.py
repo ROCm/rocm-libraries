@@ -141,6 +141,7 @@ hard-coded defaults if the model is absent or predicts an invalid config.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Tuple
 
@@ -892,73 +893,214 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
 # gfx950 depthwise forward candidate with merged groups
 # ---------------------------------------------------------------------------
 
-# Degrees the emitter's gate accepts, descending. The policy below walks this
-# list, so the order *is* the preference.
-_FWD_MERGE_DEGREES = (64, 32, 16, 8, 4, 2)
+# Degrees the emitter's gate accepts, ascending. The policy below evaluates a
+# cost at each and takes the argmin, and ties resolve to the first entry, so the
+# order *is* the tie-break: prefer the smaller degree.
+_FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
 
-# Measured ceiling on the degree itself, set from the 35-case depthwise corpus
-# sweep. A few large-batch stride-2 shapes do peak at 64, but only narrowly, and
-# no cheap request-side signal separates them from the many shapes that peak at
-# 16 or 32 and give up a large part of their gain when pushed to 64. Scored over
-# the whole corpus, capping here realises materially more of the achievable gain
-# than allowing 64 does, and its worst case is much less bad. 64 stays available
-# in the emitter and the sweep -- this is the default policy, not the gate.
-_FWD_MERGE_MAX = 32
+# Fitted constants of the merge-degree cost model (see _fwd_merge_cost for the
+# mechanism each one weighs). Reviewers reasonably ask where eight magic numbers
+# came from, so, briefly:
+#
+# WHERE THEY COME FROM. The functional form is hand-derived from the four things
+# that move when Gm changes -- K padding, A-load vector width, cache-line
+# utilisation, and the CTA's A working set. Only the *weights* are fitted: a
+# random search over a measured corpus of several hundred depthwise shapes, each
+# swept across every admissible degree at the tile this file pins. The target is
+# the geometric mean of the realised fraction -- what share of a shape's own
+# measured best the single modelled pick keeps -- so every quantity in the fit is
+# a ratio inside one shape.
+#
+# WHY A SEARCH AND NOT A SOLVE. The model's output is an argmin over seven
+# degrees, so the objective is piecewise constant in these constants: nudging one
+# changes nothing at all until it flips some shape's winner. There is no gradient
+# to descend, anywhere. Brute force is the method, not a shortcut.
+#
+# WHY EIGHT. Each term was admitted by cross-validation against a *nested* model
+# that pins the constant at the value making its term vanish, so a win is
+# attributable to the term added rather than to a reparametrisation. All eight
+# earn their place; the A-load vector term is the largest single contributor and
+# removing it is clearly visible out of sample.
+#
+# WHY TWO OF THEM LOOK NEGLIGIBLE. B_ALOAD_ISSUE and W_MEMORY are ~1e-2 and
+# ~3e-4, which reads as inert until you notice they are weighed against
+# D_CTA_FIXED at ~2e6. The cost has no physical unit -- only ratios between
+# degrees are ever compared -- so the scale is arbitrary and absolute magnitude
+# says nothing about influence. Do not "simplify" a small-looking constant away;
+# check it with a nested fit instead.
+#
+# SCOPE. gfx950, fp16/bf16, forward, at the tile this file pins. Re-fit before
+# pointing this at another arch, element size, or tile. The corpus, the fitting
+# driver and the scoring harness are in
+# ``platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model/``;
+# ``score_shipped.py`` there re-derives every pick from this very function and
+# fails if it has drifted from the reference model it was fitted as.
 
-# CTA floor the occupancy cap aims at: two per CU on a 256-CU gfx950 part.
-# Hardcoding the CU count keeps this function pure -- a device query here would
-# make dispatch non-deterministic and unusable for cross-compile. The candidate
-# is gfx950-scoped anyway, and `attention/gfx942.py:49` sets the precedent of
-# spelling 256 as "the gfx950 CU count" in dispatch policy.
-_FWD_MERGE_MIN_CTAS = 512
+# Cost of issuing the A load, relative to one K step of MFMA: charged per step
+# and divided by the achieved vector width, so narrow loads cost more issue.
+_FWD_MERGE_B_ALOAD_ISSUE = 0.014175
+# Weight of the DRAM bucket against the compute bucket -- how many cost units one
+# byte of A traffic is worth.
+_FWD_MERGE_W_MEMORY = 0.00030657
+# How much of the available W-direction halo reuse the cache actually delivers.
+# 0 would be none, 1 perfect; fitted below 1/2, i.e. real but partial.
+_FWD_MERGE_R_REUSE = 0.4249
+# Per-CTA overhead that no degree can avoid (launch, prologue, epilogue). Large
+# relative to the degree-dependent terms, which is exactly why halving the CTA
+# count is such a strong pull toward merging.
+_FWD_MERGE_D_CTA_FIXED = 1.9548e6
+# Effective CTAs resident machine-wide. Divides the CTA count into waves, so it
+# is what makes "this shape has too little parallelism left to merge further"
+# expressible at all.
+_FWD_MERGE_CUPAR = 558.42
+# Footprint scale of the brake, in elements: the CTA A working set at which the
+# penalty has doubled before exponentiation. The only term that argues against
+# merging.
+_FWD_MERGE_C_FOOTPRINT = 130.64
+# Exponent on cache-line utilisation. Above 1, so a half-used line costs rather
+# more than twice a full one -- partial lines also burn request slots, not just
+# bandwidth.
+_FWD_MERGE_A_UTIL = 2.7279
+# Exponent on the brake. Above 1, so the working-set penalty is superlinear and
+# can eventually overturn the halved CTA count; at 1 it never does.
+_FWD_MERGE_Q_BRAKE = 1.6812
+
+# Machine constants the model is written against, not fitted: a 128-byte cache
+# line and a 16-byte (dwordx4) widest load.
+_FWD_MERGE_LINE_BYTES = 128
+_FWD_MERGE_VEC_BYTES = 16
 
 
 def _pick_group_merge(req: ConvGroupedRequest, tile_m: int, tile_n: int) -> int:
-    """Largest merge degree worth paying for on this request, or 1.
+    """Merge degree worth paying for on this request, or 1.
 
-    Three caps, all binding:
-
-    * **Divisibility / tile.** ``groups % Gm == 0`` (a workgroup must not own a
-      partial group) and ``Gm <= tile_n`` (the GEMM-N extent under merge *is*
-      ``Gm``). Both are re-checked by the emitter gate; picking outside them
-      here would just make ``support()`` return False for no reason.
-    * **Occupancy.** Merging shrinks ``grid.z`` by exactly ``Gm``. Where M is
-      large that is free, but on a depthwise shape M can be a single tile
-      (``N=1``, ``7x7``), and then ``grid.z`` *is* the parallelism -- merging
-      hands the machine back to itself empty. So require the post-merge launch
-      to keep ``_FWD_MERGE_MIN_CTAS`` blocks.
-    * **Degree ceiling** ``_FWD_MERGE_MAX``.
-
-    The occupancy cap is not a refinement; it is why this function is not a
-    constant. Swept over the 35-case depthwise corpus, *no* flat degree works:
-    the degree that is best on a large-batch shape regresses the ``N=1`` shapes
-    below unmerged outright, because merging spends ``grid.z`` to buy GEMM-N
-    width and those shapes have no ``grid.z`` to spare. The rule below tracks
-    each shape's own swept optimum closely and never picks a regressing degree.
-
-    An earlier revision capped at ``dwordx4 / itemsize = 8`` on the theory that
-    the win was load width. The sweep refutes that: the A-load vector saturates
-    at 8 by ``Gm = 8`` (every higher degree still reports ``vec=8/1/8``) and yet
-    16 and 32 keep gaining. The win past saturation is MFMA N-lane utilisation
-    plus the ``grid.z`` shrink cutting redundant A re-reads -- which is also why
-    it inverts the moment CTAs become scarce.
-
-    Per-degree curves for all 35 cases, and the scoring that fixes
-    ``_FWD_MERGE_MAX``, are in
-    ``platform/python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md``.
+    Unwraps the request and defers to :func:`fwd_group_merge_for_geometry`,
+    which is where the policy actually lives.
     """
     groups = int(req.G)
+    y, x, stride = int(req.Y), int(req.X), int(req.stride_w)
     try:
         m = int(_problem(req).M)
     except Exception:
         # A degenerate shape is _request_errors' business, not this function's;
-        # fall back to the caps that need no geometry.
+        # m <= 0 lets the model fall back to the geometry-free admissibility set.
         m = 0
-    return fwd_group_merge_for_geometry(groups, m, tile_m, tile_n)
+    # support() already rejects everything but fp16/bf16 (see _request_errors),
+    # so the element size is 2 by construction. Passed rather than assumed so
+    # the model stays re-fittable against a wider dtype corpus.
+    return fwd_group_merge_for_geometry(
+        groups, m, tile_m, tile_n, y=y, x=x, stride=stride, esize=2
+    )
 
 
-def fwd_group_merge_for_geometry(groups: int, m: int, tile_m: int, tile_n: int) -> int:
+def _fwd_merge_admissible(groups: int, tile_n: int, y: int, x: int) -> tuple:
+    """Degrees the emitter's gate will actually build for this geometry.
+
+    Mirrors ``fwd_group_merge_available``: a power of two that divides ``groups``
+    (a workgroup must not own a partial group) and fits the N tile (the GEMM-N
+    extent under merge *is* ``Gm``). Pointwise is excluded by the gate outright,
+    so there is nothing to choose and the caller gets ``(1,)``.
+    """
+    if y * x <= 1:
+        return (1,)
+    return tuple(
+        gm for gm in _FWD_MERGE_DEGREES if gm <= tile_n and groups % gm == 0
+    )
+
+
+def _fwd_merge_cost(
+    gm: int,
+    *,
+    groups: int,
+    m: int,
+    y: int,
+    x: int,
+    stride: int,
+    tile_m: int,
+    tile_k: int,
+    esize: int,
+) -> float:
+    """Modelled time for one degree, in arbitrary units -- only ratios are used.
+
+    ``Gm`` consecutive conv groups fold into one GEMM with ``Gm`` on GemmN *and*
+    GemmK, so ``M`` is untouched and the launch becomes
+
+        CTAs(Gm) = ceil(M/tile_m) * G/Gm          -- halves per doubling
+        Kpad(Gm) = tile_k * ceil(Y*X*Gm/tile_k)   -- grows ~linearly
+
+    Four things move with the degree, three of them in its favour:
+
+    ``pad``  K-padding waste, already folded into ``Kpad``. At ``Y*X = 9`` the
+        per-group K extent is 9 of a 64-wide tile, so ``Gm = 1`` wastes 7.1x and
+        by ``Gm = 8`` it is 1.1x. At ``Y*X = 961`` there is nothing to recover,
+        which is the first reason huge filters never want to merge.
+    ``vw``   A-load vector width, ``min(Gm, 16/esize)``. k's innermost field is
+        the channel, so merging makes ``Gm`` channels contiguous in NHWC.
+        Saturates at dwordx4 -- but the gain does *not* stop there, which is why
+        an earlier revision capping at ``dwordx4/itemsize = 8`` was wrong.
+    ``u``    A-load cache-line utilisation, ``min(1, Gm*esize/128)``. This is
+        what keeps 8 -> 16 -> 32 paying on large shapes after ``vw`` saturates.
+    ``fp``   The brake: the CTA's A working set is ``tile_m * Y*X*Gm`` elements,
+        linear in the degree *and* in the filter area.
+
+    Occupancy is the obvious candidate for that brake and it is the wrong one.
+    Shapes with tens of thousands of CTAs, where the machine cannot run dry,
+    still turn over at 8..16, and they turn over sooner the larger ``Y*X`` is --
+    across the corpus whether the top degree still pays is a clean monotone
+    function of ``Y*X`` alone, essentially independent of how many CTAs the
+    shape has. So the penalty multiplies the *whole* per-CTA cost rather than
+    the DRAM bucket only: an oversized K working set costs issue slots and
+    occupancy, not just traffic. Charged against traffic alone it never has the
+    leverage to overturn a halved CTA count, and the model merges to 64 almost
+    everywhere.
+
+    Occupancy is still in here, as ``ceil(CTAs/CUPAR)``, and still does the work
+    it was doing before: an ``N = 1``, ``7x7`` shape has M in a single tile, so
+    ``grid.z`` *is* its parallelism and merging hands the machine back to itself
+    empty.
+    """
+    ctas = -(-m // tile_m) * (groups // gm)
+    kpad = tile_k * -(-(y * x * gm) // tile_k)
+
+    vw = min(gm, _FWD_MERGE_VEC_BYTES // esize)
+    u = min(1.0, gm * esize / _FWD_MERGE_LINE_BYTES)
+    footprint = tile_m * y * x * gm * esize
+    # Available W-direction reuse: adjacent output columns read input columns
+    # `stride` apart, so X-1 of the X taps land on data a neighbour already
+    # pulled at stride 1, and about half that at stride 2.
+    reuse = (1.0 + (x - 1) / stride) ** _FWD_MERGE_R_REUSE
+
+    compute = kpad * (1.0 + _FWD_MERGE_B_ALOAD_ISSUE / vw)
+    memory = (
+        kpad
+        * tile_m
+        * esize
+        * _FWD_MERGE_W_MEMORY
+        / max(u**_FWD_MERGE_A_UTIL * reuse, 1e-30)
+    )
+
+    brake = (1.0 + footprint / _FWD_MERGE_C_FOOTPRINT) ** _FWD_MERGE_Q_BRAKE
+    per_cta = (compute + memory) * brake + _FWD_MERGE_D_CTA_FIXED
+    return math.ceil(ctas / _FWD_MERGE_CUPAR) * per_cta
+
+
+def fwd_group_merge_for_geometry(
+    groups: int,
+    m: int,
+    tile_m: int,
+    tile_n: int,
+    *,
+    y: int,
+    x: int,
+    stride: int,
+    esize: int = 2,
+    tile_k: int = _GFX950_TILE_K,
+) -> int:
     """:func:`_pick_group_merge` with the request unwrapped to plain integers.
+
+    Evaluate :func:`_fwd_merge_cost` at every admissible degree and return the
+    argmin; ties go to the smaller degree, which is the safer side on shapes the
+    model cannot see (odd ``Ho*Wo`` tails, say).
 
     Split out so the sweep benchmark can centre its merge-degree window on the
     *same* policy dispatch will apply, without constructing a
@@ -967,17 +1109,37 @@ def fwd_group_merge_for_geometry(groups: int, m: int, tile_m: int, tile_n: int) 
     around this pick, so a second copy drifting from this one would silently
     sweep a window that no longer brackets what ships.
 
-    ``m <= 0`` means "geometry unknown" and drops the occupancy cap only.
+    ``m <= 0`` means "geometry unknown": every cost then shares the same CTA
+    count, which leaves the degree-dependent part of the model intact, so the
+    pick degrades rather than failing.
+
+    This replaced a three-cap rule (tile fit, a flat ``Gm <= 32`` ceiling, and an
+    occupancy floor) that was fitted by hand to a corpus of a few dozen shapes.
+    Held out from the fit, the model keeps a materially larger share of each
+    shape's own measured best than that rule did, and leaves materially fewer
+    shapes far short of it. The measured comparison, the per-shape curves and the
+    reasoning behind the functional form are in
+    ``platform/python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md``;
+    the corpus, the fitting driver and the scoring harness are beside it in
+    ``platform/python/rocke/examples/gfx950/conv_fwd/merge_degree_model/``.
     """
-    caps = [tile_n, _FWD_MERGE_MAX]
-    if m > 0:
-        m_tiles = -(-m // max(int(tile_m), 1))
-        caps.append(max(1, (m_tiles * groups) // _FWD_MERGE_MIN_CTAS))
-    cap = min(caps)
-    for gm in _FWD_MERGE_DEGREES:
-        if gm <= cap and groups % gm == 0:
-            return gm
-    return 1
+    cands = _fwd_merge_admissible(groups, tile_n, y, x)
+    best, best_cost = 1, None
+    for gm in cands:
+        c = _fwd_merge_cost(
+            gm,
+            groups=groups,
+            m=max(int(m), 1),
+            y=y,
+            x=x,
+            stride=max(int(stride), 1),
+            tile_m=max(int(tile_m), 1),
+            tile_k=tile_k,
+            esize=esize,
+        )
+        if best_cost is None or c < best_cost * (1.0 - 1e-9):
+            best, best_cost = gm, c
+    return best
 
 
 def _make_gfx950_fwd_dw_merged_candidate() -> KernelCandidate:

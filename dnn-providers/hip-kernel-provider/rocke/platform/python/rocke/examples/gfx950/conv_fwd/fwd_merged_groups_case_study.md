@@ -24,6 +24,7 @@ approved access-controlled record.
 - [Finding 2: the best degree is shape-dependent, and a flat cap is harmful](#finding-2-the-best-degree-is-shape-dependent-and-a-flat-cap-is-harmful)
 - [Finding 3: the diagonal belongs on the B load](#finding-3-the-diagonal-belongs-on-the-b-load)
 - [Finding 4: the sweep can be pruned without losing the optimum](#finding-4-the-sweep-can-be-pruned-without-losing-the-optimum)
+- [Finding 5: the degree model is tile-local, and the fixed tile costs more than the degree wins](#finding-5-the-degree-model-is-tile-local-and-the-fixed-tile-costs-more-than-the-degree-wins)
 - [Correctness gate](#correctness-gate)
 - [Results](#results)
 - [Caveats](#caveats)
@@ -168,43 +169,85 @@ shrink stops buying re-read savings and starts starving the machine.
 
 `_pick_group_merge` in
 [`grouped_convolution.py`](../../../../../../library/dispatch/grouped_convolution.py)
-therefore applies three independently binding caps rather than a constant:
+therefore evaluates a **closed-form cost for every admissible degree and takes
+the argmin**. Two conditions decide what is admissible at all — they are hard
+constraints on what the kernel can build, not preferences:
 
 - **`tile_n`** — `Gm` must fit the GEMM-N tile, or the block-N offset can exceed
   `Gm`.
-- **Degree ceiling** (`_FWD_MERGE_MAX = 32`) — 64 remains reachable from the
-  sweep harness, but dispatch will not select it. See below for why.
-- **Occupancy** — `ceil(M / tile_m) * groups / _FWD_MERGE_MIN_CTAS`, targeting
-  two CTAs per CU on a 256-CU `gfx950` part. This is the cap that stops the
-  function from being a constant, and it is the one that saves the `N=1`
-  rows. The CU count is hardcoded deliberately: a device query inside dispatch
-  would make selection non-deterministic and unusable for cross-compile.
+- **Divisibility** — `groups % Gm == 0`. Over the 35 measured configurations, 34
+  admit `Gm >= 16` and 31 admit up to 64; the single exclusion is `G = 3`, for
+  which no power-of-two degree divides.
 
-Divisibility (`groups % Gm == 0`) is a hard admissibility condition, not a cap.
-Over the 35 measured configurations, 34 admit `Gm >= 16` and 31 admit up to 64;
-the single exclusion is `G = 3`, for which no power-of-two degree divides.
+Over what survives, four mechanisms move with `Gm`, and only the last of them
+argues against merging:
 
-### Why the ceiling is 32 and not 64
+- **`pad`** — K-padding waste. `K_gemm = Y*X*Gm` is rounded up to `tile_k`, so at
+  `Y*X = 9` a single group fills 9 of a 64-wide tile and wastes 7.1x; by `Gm = 8`
+  that is down to 1.1x. At `Y*X = 961` there is nothing left to recover, which is
+  the first reason very large filters never want to merge.
+- **`vw`** — A-load vector width, `min(Gm, 16/esize)`. `k`'s innermost field is
+  the channel, so merging makes `Gm` channels contiguous in NHWC. Saturates at
+  `dwordx4`.
+- **`u`** — A-load cache-line utilisation, `min(1, Gm*esize/128)`. This keeps
+  improving past the vector-width knee, which is why large shapes still gain
+  going 8 → 16 → 32.
+- **`fp`** — the brake. A CTA's A working set is `tile_m * Y*X*Gm` elements,
+  linear in the degree *and* in the filter area; the model charges
+  `(1 + fp/C)**q` against the whole per-CTA cost.
 
-Three of the 35 configurations do peak at `Gm = 64` — all large-batch, all
-stride-2. Raising the ceiling to capture them was measured rather than argued:
-the shipped `_pick_group_merge` was run against every configuration's measured
-optimum at both ceilings, scoring each pick by the fraction of that shape's own
-achievable gain it realises.
+Occupancy is the obvious candidate for the brake and it turns out not to be the
+right one. Shapes with tens of thousands of CTAs, where the part cannot run dry,
+still turn over at 8..16, and they turn over sooner the larger `Y*X` is — the
+measured 64-vs-32 ratio is a monotone function of `Y*X` alone, crossing 1.0 near
+`Y*X = 7`. Charging the penalty against the whole per-CTA cost rather than only
+the DRAM bucket is worth 1.6 points of cross-validated geomean. Occupancy
+survives as a secondary `ceil(CTAs / _FWD_MERGE_CUPAR)` term, which is what still
+saves the `N = 1` rows. `_FWD_MERGE_CUPAR` is a fitted constant rather than a
+device query: a query inside dispatch would make selection non-deterministic and
+unusable for cross-compile.
 
-| ceiling | picks the measured optimum | geomean fraction of achievable gain | worst case |
+Eight constants are fitted (scale is free, so the MFMA coefficient is pinned at
+1). They are not independently interpretable — `B` and `W` are ratios against a
+large `D` — but each earns its place under repeated 5-fold cross-validation:
+dropping the vector-width term costs 6 points of geomean, dropping the memory
+bucket another 1.3.
+
+### Why there is no degree ceiling
+
+An earlier revision capped dispatch at `Gm = 32`, on the reading that 64 wins on
+too few shapes to be worth the shapes it breaks, and that **dispatch has no cheap
+request-side signal that separates the winners from the losers**. That second
+claim is what a **428-configuration measured corpus** — real depthwise stages
+from published models plus generated grid points, all swept at the fixed 64x64
+dispatch tile — refutes. `(groups, M, Y, X, stride, esize, tile)` is exactly such
+a signal; the cost model above reads it.
+
+Scored against every shape's own measured optimum (fraction of that optimum
+realised; held-out split of 128 shapes the constants were never fitted on):
+
+| policy | TEST (128) geomean | exact picks | shapes below 0.95 |
 | --- | --- | --- | --- |
-| `32` | 19 / 35 | 0.970 | 0.82 |
-| `64` | 13 / 35 | 0.907 | 0.66 |
+| cost model | 0.9692 | 56 | 23 |
+| three-cap rule | 0.9232 | 37 | 43 |
 
-Raising the ceiling makes the policy **worse on both axes**. The three shapes it
-rescues gain 3–17% each; the six it breaks lose 23–34% each, because at the
-shipped 64x64 dispatch tile the occupancy cap does not bind early enough to
-protect shapes whose true optimum is 16 or 32. The ceiling is therefore a
-deliberate trade, not an observation that nothing prefers 64: dispatch has no
-cheap request-side signal that separates the three winners from the six losers,
-so it declines the bet. A shape that genuinely wants 64 can still be reached
-through the sweep harness.
+Over all 428 configurations: 0.9777 / 214 exact / 53 below 0.95, against 0.9322 /
+137 / 139. Re-imposing a hard `Gm <= 32` cap *on top of* the model does not help
+(TEST 0.9682, ALL 0.9743), so `_FWD_MERGE_MAX` was removed rather than retained —
+the model declines 64 on the shapes that should decline it, without needing to be
+told.
+
+Two residuals are known and pinned with explicit floors in
+`test_known_residuals_stay_bounded` rather than left to a geomean: a `G = 576`
+5x5 shape whose curve is flat from 2 to 8 and then jumps at 16 (the model takes
+the flat region, realising 0.591), and a large stride-2 3x3 shape where the
+CTA-count term keeps paying to 64 while the brake turns over at 32 (0.894). A
+refit that fixes either shows up as a bound that wants tightening; a refit that
+makes either worse fails the test instead of quietly moving a geomean.
+
+The 35-configuration case-study corpus this document is built on is a subset of
+that 428; the measured-ratio tables above are the held-out evidence, and the
+constants in dispatch are the ones fitted on the complementary 300-shape split.
 
 ## Finding 3: the diagonal belongs on the B load
 
@@ -285,8 +328,9 @@ degrees present.
 Scoring the window on the corpus it was tuned against would be circular, so the
 window was scored on **12 synthesised held-out depthwise shapes** that appear
 nowhere in the corpus, chosen to populate each of the three regimes the policy
-can land in — ceiling-bound (`_FWD_MERGE_MAX`), divisor-bound (group counts with
-poor 2-adic valuation), and occupancy-bound (small `M`). Each was swept across
+can land in — brake-bound (large `tile_m * Y*X * Gm` working set), divisor-bound
+(group counts with poor 2-adic valuation), and occupancy-bound (small `M`, where
+the `ceil(CTAs / CUPAR)` term dominates). Each was swept across
 the **full** degree axis and the **full** unmerged leg, and both the full and the
 pruned answer were then computed offline from those same measured rows, so no
 kernel is timed twice and the comparison isolates the pruning.
@@ -345,10 +389,120 @@ hand-copied `_fwd_merge_pick`, and the mirror is what makes that copy safe:
 `fwd_group_merge_for_geometry` was extracted from `_pick_group_merge` as a pure
 refactor (no emission change), and
 [`library/tests/test_fwd_merge_window.py`](../../../../../../library/tests/test_fwd_merge_window.py)
-asserts the two agree across 10,725 `(groups, M, tile_m, tile_n)` points plus the
-three shared constants. A change to `_FWD_MERGE_MAX` / `_FWD_MERGE_MIN_CTAS` /
-`_FWD_MERGE_DEGREES` that is not mirrored fails there, rather than silently
+asserts the two agree across 96,525 `(groups, M, tile_m, tile_n, Y, X, stride)`
+points, plus `_FWD_MERGE_DEGREES`, the two byte constants and the eight fitted
+constants compared as an **ordered tuple**. The drift now guarded against is no
+longer only a changed constant: a reordered `_FWD_MERGE_CONSTS` tuple, or a term
+dropped from one body and not the other, fails there too — rather than silently
 producing a sweep that brackets the wrong degree.
+
+The same file also pins three structural properties that survive a refit — the
+pick is admissible, it is non-increasing in filter size, and pointwise never
+merges — so a refit is free to move individual picks but not to change the shape
+of the policy without saying so.
+
+## Finding 5: the degree model is tile-local, and the fixed tile costs more than the degree wins
+
+Findings 2–4 were all measured at one tile, `64x64x64 / w2x2 / a32x32x16` — the
+tile dispatch hard-codes. That is not a depthwise decision: the block in
+[`library/dispatch/grouped_convolution.py`](../../../../../../library/dispatch/grouped_convolution.py)
+that defines it is labelled *"Hard-coded tile parameters (to be replaced by
+sweep-derived tuning tables)"* and is shared by **every** implicit-GEMM
+convolution candidate on gfx950. The merged candidate's `_tile()` returns the
+same seven globals as the plain one; there is no tile selection anywhere in the
+depthwise path. So the single-tile corpus was an artefact of the harness, not a
+statement that the tile was right.
+
+Two independent reasons to doubt it. Composable Kernel's merged-groups instance
+list — `device_grouped_conv_fwd_xdl_merged_groups_instance.hpp`, the direct
+analogue of this feature — ships six distinct tiles, every one of them with
+`NPerBlock <= 64` and `KPerBlock` of 16 or 32, never 64. And CK's general
+grouped-conv-forward set contains **no `64x64x64` instance at all**; exactly one
+of its instances uses `KPerBlock = 64`.
+
+So the whole corpus was re-measured at **eight** tiles: the shipped one as a
+control, six copied from the CK instance lists above, and `256x32x64` — the tile
+family the earlier 35-shape tile-swept study found winning. 18,105 configurations,
+every one verified PASS, one CSV per tile.
+
+### The degree model does not transfer cleanly
+
+Geomean of (degree the model picks ÷ best degree **at that same tile**), so each
+column is scored against its own optimum and the tile is not being judged here:
+
+| tile | fitted at | geomean | exact picks | below 0.95 |
+|---|---|---|---|---|
+| `64x64x64` (control) | yes | 0.9718 | 198 | 59 |
+| `64x16x32` | no | 0.9690 | 223 | 60 |
+| `64x64x32` | no | 0.9695 | 207 | 62 |
+| `256x32x64` | no | 0.9524 | 192 | 89 |
+| `128x64x32` | no | 0.9428 | 163 | 99 |
+| `128x32x32` | no | 0.9351 | 165 | 110 |
+| `64x16x16` | no | 0.9226 | 169 | 97 |
+| `32x64x32` | no | 0.8808 | 130 | 159 |
+
+The split is along `tile_m`, exactly where the fit was known to be
+unidentified. The three tiles that keep `tile_m = 64` hold within 0.003 of the
+control; every tile that moves `tile_m` loses between 0.02 and 0.09. This is the
+confounding called out in Caveats made visible: `tile_m` enters the cost in three
+places — the CTA count, the memory bucket's bytes-per-tile, and the brake's
+working-set footprint — and with `tile_m` constant across every training point
+only the products `64*W` and the ratio `64/C` were ever identified.
+
+Refitting on the pooled eight-tile corpus confirms the diagnosis. Held-out TEST
+(shapes split whole, so no curve straddles the split), geomean per tile:
+
+| | shipped | pooled refit | per-tile refit |
+|---|---|---|---|
+| mean over the 8 tiles | 0.9312 | 0.9439 | 0.9622 |
+| at the control tile | 0.9681 | 0.9591 | 0.9610 |
+
+The pooled refit recovers most of the loss on the `tile_m != 64` tiles
+(`32x64x32` +0.034, `128x32x32` +0.039, `128x64x32` +0.031) and gives back about
+0.010 at the three `tile_m = 64` tiles — one parameter set being stretched across
+a mechanism it cannot express. The per-tile column is an upper bound for this
+functional form, and it is *not* tight: the residual +0.018 is concentrated at
+`32x64x32` (+0.062), the one tile with `tile_m < tile_n`. The form is missing a
+`tile_m` term, not merely mis-constanted. That per-tile column also has eight
+times fewer constraints per fit, so some of its margin is overfitting and it
+should be read as a loose ceiling.
+
+**This does not change what ships.** Dispatch emits exactly one tile, the model
+is accurate at that tile, and the mirror test pins them together. The finding is
+a precondition: the moment tile selection widens, these constants must be refit
+against a corpus that varies `tile_m`, or the degree policy silently degrades on
+every newly reachable tile.
+
+### `64x64x64` is not the right tile
+
+Separately from the degree, best-achievable-at-tile ÷ best-achievable-at-control,
+per shape (each side free to choose its own best degree):
+
+| tile | geomean vs control | shapes it beats control on |
+|---|---|---|
+| `128x32x32` | 1.079 | 263 / 396 |
+| `128x64x32` | 1.047 | 258 / 396 |
+| `256x32x64` | 1.011 | 228 / 396 |
+| `64x16x32` | 1.005 | 210 / 396 |
+| `64x64x32` | 0.975 | 159 / 396 |
+| `64x16x16` | 0.920 | 187 / 396 |
+| `32x64x32` | 0.673 | 66 / 396 |
+
+The shipped tile is the best of the eight on **40 of 396 shapes** — behind
+`64x16x32` (92) and `128x32x32` (91). Per-shape headroom reaches 2.87x. Note
+that the best single tile and the best per-shape tile are far apart: no one tile
+exceeds 1.08x geomean, while picking per shape is worth considerably more, which
+is the usual argument for a tuning table rather than a better constant.
+
+The mechanism is not the degree. On `N1_H80W80_G64_Y3X3_s2`, the 2.64x
+control-to-`128x32x32` gap survives with merging worth only 1.02x at the control
+tile and 1.04x at `128x32x32`: `M = 1600`, so halving the M-tile count from 25 to
+13 is the whole effect. Merging and tiling are close to orthogonal levers here,
+which is why the degree model stays usable at a tile it was not fitted at even
+when that tile is much faster.
+
+This is the "widening dispatch's tile selection" item in Caveats, now with a
+number on it: it is worth more than merged groups was.
 
 ## Correctness gate
 
@@ -475,7 +629,13 @@ untouched. That is the designed fallback, not a failure to improve.
   depthwise optimum measured here is `256x32x64 / w2x2 / a16x16x32`. The merged
   candidate inherits that fixed tile, so the dispatch path will realise less
   than the sweep shows. Widening dispatch's tile selection is pre-existing work,
-  out of scope for this change, and the single largest remaining lever.
+  out of scope for this change, and the single largest remaining lever —
+  Finding 5 measures it across eight tiles and puts the shipped tile first on
+  only 40 of 396 shapes.
+- **Finding 5's eight tiles are not a tuning table.** They are a transfer test
+  for the degree model and a sanity check on the shipped tile, swept at one
+  warp split per tile (the one the CK instance being copied uses). A real tile
+  policy would have to sweep the warp and atom axes too, which this did not.
 - **This compares rocke against rocke.** The MIOpen column is a reference point
   for whether the remaining gap is closed, not a like-for-like comparison: it is
   a different implementation with its own tuning database, and it selects its
@@ -584,8 +744,9 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py
 | `Gm` on GemmN and GemmK (rather than wgrad/CK's M and N) | **Keep** | Leaves `M` untouched, keeps the C store dense and unmasked, and needs no transposed A window |
 | Diagonal mask on the B load | **Keep** | Off-diagonal elements become hardware zeros with no memory traffic; this is what lets the store stay wide |
 | `vector_size_b = 1` under merge | **Keep** | The B tile is `1/Gm` dense by construction; for depthwise, weights are negligible against activations |
-| Shape-dependent `_pick_group_merge` with an occupancy cap | **Keep** | The winning degree spreads across five values over 35 shapes, and every flat choice regresses some shape below unmerged; the cap is the reason the function is not a constant |
-| `_FWD_MERGE_MAX = 32` ceiling in dispatch | **Keep** | Scored against every shape's measured optimum, a ceiling of 64 realises less of the achievable gain and has a worse floor. Three shapes do prefer 64; dispatch cannot identify them cheaply, so 64 stays reachable only from the sweep harness |
+| Shape-dependent `_pick_group_merge` rather than a constant | **Keep** | The winning degree spreads across five values over 35 shapes, and every flat choice regresses some shape below unmerged |
+| Closed-form cost model (8 fitted constants) in place of the three-cap rule | **Keep** | On a 128-shape held-out split of a 428-configuration measured corpus it realises 0.9692 of each shape's own optimum against 0.9232 for the cap rule, and leaves 23 shapes more than 5% short against 43 |
+| No `_FWD_MERGE_MAX` ceiling | **Keep** | A hard `Gm <= 32` cap on top of the model does not help (0.9682 TEST / 0.9743 ALL, against 0.9692 / 0.9777 without it). The model declines 64 where 64 should be declined, so the ceiling only costs the shapes that want it |
 | `group_merge` default of 1 | **Keep** | Additive by construction: parity config 17 is the unmerged depthwise control and byte-compares identical, so the knob is provably inert where it is not asked for |
 | Merge + `async_dma` | **Defer** | `AsyncTileLoader`'s predicate is chunk-granular and cannot express a per-element diagonal |
 | Merge + pointwise (`Y == X == 1`) | **Defer** | The flat fast path builds `valid` from scratch with no slot for the diagonal. Highest-value follow-up: this is where merging should pay most |
