@@ -654,6 +654,7 @@ Arguments:
   - fast_check_inject: c_int32
   - requires_streamk: c_int8
   - integer_exact_pattern: c_char*16
+  - allow_no_solution: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -769,6 +770,7 @@ Defaults:
   fast_check_inject: -1
   requires_streamk: 0
   integer_exact_pattern: ''
+  allow_no_solution: 0
   timing: 0
   iters: 10
   cold_iters: 2
