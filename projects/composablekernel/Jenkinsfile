@@ -635,6 +635,24 @@ pipeline {
                         }
                     }
                 }
+                stage("Run CK_TILE_FMHA Tests on gfx1250")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CK_TILE_FMHA_TESTS.toBoolean() }
+                    }
+                    agent none
+                    steps{
+                        script {
+                            loadCk()
+                            ck.runOnHealthyNode(rocmnode("gfx90a")) {
+                                deleteDir()
+                                ck.buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: ck.build_and_run_fmha("gfx1250"))
+                                cleanWs()
+                            }
+                        }
+                    }
+                }
             }
         }
 

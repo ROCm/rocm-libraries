@@ -730,6 +730,10 @@ def build_and_run_fmha(String arch){
                 ninja -j128 tile_example_fmha_fwd tile_example_fmha_bwd && \
                 cd ../ &&
                 example/ck_tile/01_fmha/script/run_full_test.sh "CI_${params.COMPILER_VERSION}" "${env.BRANCH_NAME}" "${NODE_NAME}" "${arch}" """
+    if(setup_args.contains("gfx1250")){
+        cmd = """export HSA_MODEL_LIB=/libhsakmtmodel.so \
+                 export HSA_MODEL_TOPOLOGY=/topology/mi450 \ """ + cmd
+    }
     return cmd
 }
 
