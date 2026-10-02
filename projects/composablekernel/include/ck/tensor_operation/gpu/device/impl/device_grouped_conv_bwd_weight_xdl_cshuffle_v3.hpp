@@ -1452,9 +1452,27 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
     {
         constexpr index_t ldsBufferCount =
             BlkGemmPipelineVer == BlockGemmPipelineVersion::v4 ? 2 : 1;
-        if(GridwiseGemm64::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount > get_lds_size())
+        if(get_warp_size() == 64)
         {
-            return false;
+            if constexpr(NXdlPerWave64 > 0)
+            {
+                if(GridwiseGemm64::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount >
+                   get_lds_size())
+                {
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            if constexpr(NXdlPerWave32 > 0)
+            {
+                if(GridwiseGemm64::GetSharedMemoryNumberOfByteOnHost() * ldsBufferCount >
+                   get_lds_size())
+                {
+                    return false;
+                }
+            }
         }
 
         // Memory access runtime error on gfx1250 (inconsistent across runs)
