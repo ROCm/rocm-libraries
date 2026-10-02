@@ -229,7 +229,7 @@ def _request_errors(req: OperatorRequest) -> list[str]:
             errors.append(f"{field} must be positive")
     if req.hdim_q != req.hdim_v:
         errors.append("only hdim_q == hdim_v is supported")
-    if int(req.nhead_q) % int(req.nhead_k):
+    if int(req.nhead_k) > 0 and int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
     try:
         _parse_attention_mask_type(req.mask_type)
@@ -254,6 +254,8 @@ def _check_dense_factory_request(req: AttentionRequest) -> None:
     errors = _request_errors(req)
     if bool(req.use_fp8):
         errors.append("attention_dense has no fp8 path (use_fp8=True)")
+    elif bool(req.fp8_fnuz):
+        errors.append("attention_dense has no fp8 path (fp8_fnuz=True)")
     if errors:
         raise ValueError("; ".join(errors))
 

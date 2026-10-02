@@ -32,8 +32,9 @@ from dispatch.attention import (
     registered_attention_combos,
 )
 
-# gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
-# which is gfx950's and would hand back an untuned spec for a gfx942 request.
+# gfx942's own spec factory. The package-level ``dense_spec_for_request`` routes
+# here by ``req.arch``; importing it from the arch module pins these tests to the
+# gfx942 factory and its arch guard without going through that routing.
 from dispatch.attention.gfx942 import _dense_spec, dense_spec_for_request
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from kernels.gfx942.attention_dense import (
@@ -417,8 +418,16 @@ class TestGfx942DirectFactoryHonoursRequest(unittest.TestCase):
         self.assertIn("sinks", why)
 
     def test_fp8_request_raises(self):
-        with self.assertRaisesRegex(ValueError, "fp8"):
-            dense_spec_for_request(_req(use_fp8=True))
+        # fp8_fnuz without use_fp8 is an invalid FP8 request elsewhere
+        # (validate_explicit_fp8_encoding), so it must not pass as plain dense.
+        for kw in (dict(use_fp8=True), dict(fp8_fnuz=True)):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "fp8"):
+                    dense_spec_for_request(_req(**kw))
+
+    def test_zero_kv_heads_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, "nhead_k must be positive"):
+            dense_spec_for_request(_req(nhead_k=0))
 
     def test_mismatched_value_head_size_raises(self):
         with self.assertRaisesRegex(ValueError, "hdim_q == hdim_v"):

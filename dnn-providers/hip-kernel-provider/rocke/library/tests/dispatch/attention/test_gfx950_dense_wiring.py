@@ -495,19 +495,19 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("swa128", kname)
         self.assertIn("persist", kname)
 
-    def test_sliding_window_with_ragged_shape_rejected_at_dispatch(self):
-        """Ragged and sliding_window rejected early in _dense_spec.
+    def test_sliding_window_with_partial_tile_rejected_at_dispatch(self):
+        """A partial-tile length with sliding_window is rejected early in _dense_spec.
 
         The requirement says 'explicit decision rather than letting the spec
         validator raise at dispatch time.' This test verifies _dense_spec()
         itself catches the constraint and raises a clear error.
         """
-        # Create a ragged-shaped request: seqlen_q=seqlen_k, not a multiple
-        # of the default block_m=256 / block_n=64 geometry.
+        # Self-attention length that is not a multiple of the default
+        # block_m=256 / block_n=64 geometry, combined with a sliding window.
         req = _gfx950_dense_req(
             seqlen_q=500,
             seqlen_k=500,
-            sliding_window=128,  # Conflict: ragged + window
+            sliding_window=128,
         )
 
         # _dense_spec should reject this at dispatch time with a clear error
@@ -1035,8 +1035,14 @@ class TestDenseFactoryRejectsUncarriedFields(unittest.TestCase):
     make the factory raise instead of building a plain bf16/fp16 spec."""
 
     def test_fp8_request_raises(self):
-        with self.assertRaisesRegex(ValueError, "fp8"):
-            dense_spec_for_request(_gfx950_dense_req(use_fp8=True))
+        for kw in (dict(use_fp8=True), dict(fp8_fnuz=True)):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "fp8"):
+                    dense_spec_for_request(_gfx950_dense_req(**kw))
+
+    def test_zero_kv_heads_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, "nhead_k must be positive"):
+            dense_spec_for_request(_gfx950_dense_req(nhead_k=0))
 
     def test_mismatched_value_head_size_raises(self):
         with self.assertRaisesRegex(ValueError, "hdim_q == hdim_v"):
