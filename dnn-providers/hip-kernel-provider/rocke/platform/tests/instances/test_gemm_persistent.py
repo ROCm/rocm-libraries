@@ -15,6 +15,8 @@ import re
 import unittest
 from dataclasses import replace
 
+import pytest
+
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.instances.common.gemm_universal import (
     DataSpec,
@@ -56,6 +58,26 @@ def _spec(**trait_overrides) -> UniversalGemmSpec:
     )
 
 
+def test_persistent_ctas_survives_backend_serialization():
+    from rocke.core.backend import universal_gemm_spec_to_dict
+
+    spec = _spec(persistent=True, persistent_ctas=7)
+    serialized = universal_gemm_spec_to_dict(spec)
+    assert serialized["persistent"] is True
+    assert serialized["persistent_ctas"] == 7
+
+
+def test_persistent_public_backend_parity():
+    pytest.importorskip("rocke_engine")
+    from rocke.core.backend import lower_universal_gemm
+
+    # Exercise the public converter and binding, not hand-built native specs.
+    result = lower_universal_gemm(
+        _spec(persistent=True, persistent_ctas=7), arch=ARCH, backend="both"
+    )
+    assert result.backend == "both"
+
+
 class TestPersistentValidity(unittest.TestCase):
     def test_persistent_needs_a_cta_count(self):
         ok, why = is_valid_spec(_spec(persistent=True), arch=ARCH)
@@ -63,9 +85,7 @@ class TestPersistentValidity(unittest.TestCase):
         self.assertIn("persistent_ctas", why)
 
     def test_persistent_with_cta_count_is_valid(self):
-        ok, why = is_valid_spec(
-            _spec(persistent=True, persistent_ctas=CTAS), arch=ARCH
-        )
+        ok, why = is_valid_spec(_spec(persistent=True, persistent_ctas=CTAS), arch=ARCH)
         self.assertTrue(ok, why)
 
     def test_rejected_combinations(self):
@@ -123,9 +143,7 @@ class TestPersistentEmission(unittest.TestCase):
         # takes no extra argument and needs no host-side counter workspace.
         pattern = re.compile(r"define amdgpu_kernel void @\S+\((.*?)\) #", re.DOTALL)
         plain = pattern.search(self._ll()).group(1)
-        pers = pattern.search(
-            self._ll(persistent=True, persistent_ctas=CTAS)
-        ).group(1)
+        pers = pattern.search(self._ll(persistent=True, persistent_ctas=CTAS)).group(1)
         self.assertEqual(
             [p.split()[-1] for p in plain.split(",")],
             [p.split()[-1] for p in pers.split(",")],
@@ -145,7 +163,9 @@ class TestPersistentEmission(unittest.TestCase):
         # zero vector on every trip of the outer tile loop, not carry the
         # previous tile's partial sums.
         ll = self._ll(persistent=True, persistent_ctas=CTAS)
-        zero = re.search(r"(%cz\d+) = select i1 true, <\d+ x float> zeroinitializer", ll)
+        zero = re.search(
+            r"(%cz\d+) = select i1 true, <\d+ x float> zeroinitializer", ll
+        )
         self.assertIsNotNone(zero, "no zero accumulator emitted")
         accs = re.findall(r"%acc_m\d+_n\d+ = phi <\d+ x float> \[ (%cz\d+), ", ll)
         self.assertTrue(accs, "no accumulator phis found")
@@ -165,9 +185,7 @@ class TestPersistentEmission(unittest.TestCase):
         )
 
     def test_chiplet_swizzle_composes(self):
-        ll = self._ll(
-            persistent=True, persistent_ctas=CTAS, chiplet_swizzle=True
-        )
+        ll = self._ll(persistent=True, persistent_ctas=CTAS, chiplet_swizzle=True)
         # The XCD remap keys off the loop induction variable, so blockIdx.y --
         # which the non-persistent swizzle flattens in -- must be gone.
         self.assertNotIn("workgroup.id.y()", ll.split("declare", 1)[-1])
