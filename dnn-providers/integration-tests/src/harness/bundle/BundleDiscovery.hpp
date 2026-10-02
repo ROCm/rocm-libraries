@@ -127,6 +127,12 @@ inline bool canListDirectory(const std::filesystem::path& directory)
 // before reaching the root again. Two links to the same directory from different
 // branches are not a cycle; both are walked, as a copied tree would be.
 //
+// Only a directory symlink is resolved. A plain subdirectory resolves to the level
+// it is listed in plus its own name. No outer level lies at or below that innermost
+// level (the root trivially, a link by the check, a plain directory by this same
+// argument), so none lies at or below the subdirectory and it cannot lead back. A
+// tree with no links therefore costs one canonical() call, for the root.
+//
 // A directory the walk may not list is skipped with a warning, so one unreadable
 // folder under a linked tree does not end discovery.
 template <typename Visit>
@@ -143,19 +149,27 @@ void forEachBundleTreeEntry(const std::filesystem::path& root, Visit&& visit)
         ancestry.resize(static_cast<size_t>(it.depth()) + 1);
         if(it->is_directory())
         {
-            auto directory = canonicalDirectory(it->path());
-            const bool leadsBack
-                = std::any_of(ancestry.begin(), ancestry.end(), [&](const fs::path& level) {
-                      return isDescendantOf(level, directory);
-                  });
-            if(leadsBack)
+            fs::path directory;
+            if(it->is_symlink())
             {
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "Not following bundle directory that contains one already being walked "
-                    "(cycle): "
-                    << it->path() << " -> " << directory);
-                it.disable_recursion_pending();
-                continue;
+                directory = canonicalDirectory(it->path());
+                const bool leadsBack
+                    = std::any_of(ancestry.begin(), ancestry.end(), [&](const fs::path& level) {
+                          return isDescendantOf(level, directory);
+                      });
+                if(leadsBack)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN(
+                        "Not following bundle directory that contains one already being walked "
+                        "(cycle): "
+                        << it->path() << " -> " << directory);
+                    it.disable_recursion_pending();
+                    continue;
+                }
+            }
+            else
+            {
+                directory = ancestry.back() / it->path().filename();
             }
             if(!canListDirectory(it->path()))
             {
