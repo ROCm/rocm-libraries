@@ -35,6 +35,7 @@ __all__ = [
     "write_parquet",
     "expand_descriptors",
     "resolve_duplicates",
+    "publish_frame",
 ]
 
 #: Collection bookkeeping, dropped once shards are merged (§8.3). `is_valid`/`skip_reason`
@@ -355,6 +356,34 @@ def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.drop(columns=[c for c in COLLECTION_ONLY if c in frame.columns])
 
 
+def publish_frame(
+    csvs: Iterable[pathlib.Path],
+    *,
+    expand_descriptor: Iterable[str] = (),
+    scope_by: str | None = None,
+    resolve_duplicates_by: str | None = None,
+    best_column: str = "avgTimeMs",
+) -> pd.DataFrame:
+    """Collected CSVs -> the validated dataset, as `python -m uhd_gen.dataset` publishes it.
+
+    Resolve first: it settles duplicates validation would reject. Expand last, so the checks
+    see the producer's columns rather than derived ones.
+    """
+    frame = load_csvs(csvs)
+    if resolve_duplicates_by is not None:
+        if resolve_duplicates_by not in frame.columns:
+            raise ValidationError(
+                f"--resolve-duplicates needs {resolve_duplicates_by!r} to order "
+                "occasions by, and this corpus does not carry it"
+            )
+        frame = resolve_duplicates(frame, resolve_duplicates_by, best_column)
+    dataset = build_dataset(frame)
+    expand_descriptor = list(expand_descriptor)
+    if expand_descriptor:
+        dataset = expand_descriptors(dataset, expand_descriptor, scope_by)
+    return dataset
+
+
 def write_parquet(frame: pd.DataFrame, destination: pathlib.Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(destination, index=False)
@@ -405,20 +434,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Resolve first: it settles duplicates validation would reject. Expand last, so the checks
-    # see the producer's columns rather than derived ones.
     try:
-        frame = load_csvs(args.csv)
-        if args.resolve_duplicates is not None:
-            if args.resolve_duplicates not in frame.columns:
-                raise ValidationError(
-                    f"--resolve-duplicates needs {args.resolve_duplicates!r} to order "
-                    "occasions by, and this corpus does not carry it"
-                )
-            frame = resolve_duplicates(frame, args.resolve_duplicates, args.best_column)
-        dataset = build_dataset(frame)
-        if args.expand_descriptor:
-            dataset = expand_descriptors(dataset, args.expand_descriptor, args.scope_by)
+        dataset = publish_frame(
+            args.csv,
+            expand_descriptor=args.expand_descriptor,
+            scope_by=args.scope_by,
+            resolve_duplicates_by=args.resolve_duplicates,
+            best_column=args.best_column,
+        )
     except ValidationError as error:
         print(f"uhd_gen.dataset: {error}", file=sys.stderr)
         return 1

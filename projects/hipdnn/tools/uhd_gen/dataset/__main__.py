@@ -13,4 +13,14 @@ import sys
 from .publish import main
 
 if __name__ == "__main__":
+    # `add` converts a source into a stored dataset and `export` reads rows back out
+    # (store.py); anything else publishes.
+    if sys.argv[1:2] == ["add"]:
+        from .store import main as add_main
+
+        sys.exit(add_main(sys.argv[2:]))
+    if sys.argv[1:2] == ["export"]:
+        from .store import export_main
+
+        sys.exit(export_main(sys.argv[2:]))
     sys.exit(main())

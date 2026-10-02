@@ -122,20 +122,30 @@ def test_shards_that_read_one_pin_differently_are_refused():
         addressing.merge_manifests([first, second])
 
 
-def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_saw(
+def test_a_dataset_trains_shards_whose_tables_differ_only_by_what_they_saw(
     tmp_path,
 ):
-    pytest.importorskip("pandas")  # uhd_gen.generate reads collections into frames
-    from uhd_gen.generate import (
-        COLLECTION_MANIFEST,
-        COLLECTION_SCHEMA,
-        load_collections,
-    )
+    pytest.importorskip("pandas")  # uhd_gen.generate reads datasets into frames
+    pytest.importorskip("pyarrow")
+    from uhd_gen.dataset import store
+    from uhd_gen.generate import COLLECTION_MANIFEST, COLLECTION_SCHEMA, load_dataset
 
     def collection(name, at, table):
         directory = tmp_path / name
         directory.mkdir()
-        (directory / "corpus.json").write_text("[]")
+        (directory / "corpus.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "benchmark": f"g-{name}",
+                        "device": "d",
+                        "arch": "gfx942",
+                        "kernel": "k",
+                        "knob_settings": "{}",
+                    }
+                ]
+            )
+        )
         (directory / COLLECTION_MANIFEST).write_text(
             json.dumps(
                 {
@@ -177,7 +187,10 @@ def test_load_collections_trains_shards_whose_tables_differ_only_by_what_they_sa
             ),
         ),
     ]
-    merged = load_collections(shards, role="sort_kernel_catalog", sources=[None])
+    dataset = tmp_path / "dataset"
+    for shard in shards:
+        store.add(dataset, *store.from_collection(shard))
+    merged = load_dataset(dataset, role="sort_kernel_catalog", sources=[None])
     assert [v["value"] for v in merged["knob_encodings"]["dtype"]["values"]] == [
         "BF16",
         "FP16",

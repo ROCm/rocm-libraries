@@ -962,9 +962,18 @@ python -m uhd_gen generate --collect-only --graphs corpus/sdpa_fwd/graphs \
 # Or across N GPUs: --shard K/N measures every N-th graph, one collection per shard.
 python -m uhd_gen generate --collect-only --shard 0/4 --graphs corpus/sdpa_fwd/graphs ... --output-dir col_1_s0
 
-# Train on any number of collections.
-python -m uhd_gen generate --collection col_1 col_2 col_3 --descriptor-tree tree ... --output-dir model
+# Convert collections into a stored dataset (Parquet; appends, and skips a collection already
+# added), then train on it.
+python -m uhd_gen.dataset add --into store/sdpa_fwd --collection col_1 col_2 col_3
+python -m uhd_gen generate --dataset store/sdpa_fwd --descriptor-tree tree ... --output-dir model
 ```
+
+A dataset is `dataset.parquet` plus `dataset_manifest.json`, one entry per contribution
+(collection, one-shot `generate` folder via `--generation`, or §8.3 CSVs via `--csv` with the
+binding stated). Every contribution must share one engine binding. `generate --contribution
+ID...` trains on a subset; `python -m uhd_gen.dataset export` writes contributions' rows back
+out as JSON. A dataset of §8.3 CSVs alone trains as `train` would (`--target`, `--objective`,
+`--group-by-feature`, `--no-promote`).
 
 Training takes **one measurement of each configuration on each shape**: the newest session's
 (a session is one collection on one device). The same shape measured on two GPUs of an arch is
@@ -981,7 +990,7 @@ features.
 ### `size`: how many more shapes, and from which regimes
 
 ```bash
-python -m uhd_gen size --collection col_1 col_2 col_3 \
+python -m uhd_gen size --dataset store/sdpa_fwd \
     --test-set store/test_set.json --create-test-set --target 0.70 --tolerance 0.10 \
     --descriptor-tree tree --engine-id 4714091817493728420 --arch gfx950 --uhd-id <id> \
     --output-dir sizing_1
@@ -989,7 +998,7 @@ python -m uhd_gen size --collection col_1 col_2 col_3 \
 
 1. **A pinned test set.** It is stratified by regime and created once. It is reused every
    round, so rounds are comparable, and never replaced.
-2. **A learning curve.** `generate --collection` trains on nested subsets of the other shapes
+2. **A learning curve.** `generate --dataset` trains on nested subsets of the other shapes
    (`--draws` random subsets per size), and `evaluate` scores each model on the test set.
 3. **A measured ceiling.** A repeat measurement (another collection or GPU) disagrees with the
    label by two measurement errors, where a perfect model faces only one. The ceiling is how
