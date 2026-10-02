@@ -266,9 +266,10 @@ std::optional<conv::LaunchGeometry> implicitGemmLaunch(const MatchedProblem& mat
     {
         return std::nullopt;
     }
-    if(!metadataEquals(kernel, "epilogue", std::string("cshuffle"))
-       && !((p.k / p.groups) % 2 != 0
-            && metadataEquals(kernel, "epilogue", std::string("default"))))
+    // The default epilogue stores scalars, so it is valid only when K/groups is odd.
+    const bool defaultEpilogueAllowed
+        = (p.k / p.groups) % 2 != 0 && metadataEquals(kernel, "epilogue", std::string("default"));
+    if(!metadataEquals(kernel, "epilogue", std::string("cshuffle")) && !defaultEpilogueAllowed)
     {
         return std::nullopt;
     }
