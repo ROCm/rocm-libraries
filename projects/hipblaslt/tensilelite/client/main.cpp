@@ -34,6 +34,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
@@ -54,9 +55,6 @@
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
 
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
 #endif
@@ -828,7 +826,20 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("Failed to load solution library");
     }
 
+    auto filename = args["library-file"].as<std::string>();
+
+    size_t      directoryPos     = filename.rfind('/');
+    std::string libraryDirectory = filename;
+    if(directoryPos != std::string::npos)
+        libraryDirectory.resize(directoryPos + 1);
+    else
+        libraryDirectory = '.';
+
     TensileLite::hip::SolutionAdapter adapter;
+    // A failed primary code-object load may ask the adapter to reload its
+    // helper HSACOs. Record that context before the first load can enter the
+    // recovery path; actual helper loading remains below.
+    adapter.setLazyLoadingContext(hardware->archName(), libraryDirectory);
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().start();
 #endif
@@ -859,15 +870,6 @@ int main(int argc, const char* argv[])
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().stop();
 #endif
-
-    auto filename = args["library-file"].as<std::string>();
-
-    size_t      directoryPos     = filename.rfind('/');
-    std::string libraryDirectory = filename;
-    if(directoryPos != std::string::npos)
-        libraryDirectory.resize(directoryPos + 1);
-    else
-        libraryDirectory = '.';
 
     {
         ScopedTimer timer("lazy_loading_init");

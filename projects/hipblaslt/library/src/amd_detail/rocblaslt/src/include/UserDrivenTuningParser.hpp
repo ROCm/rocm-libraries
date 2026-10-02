@@ -33,6 +33,8 @@
 #include <shared_mutex>
 
 #include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -53,8 +55,26 @@ public:
     // assignment operator
     OverrideSingleton& operator=(const OverrideSingleton&) = delete;
 
+    /**
+     * Re-read HIPBLASLT_TUNING_OVERRIDE_FILE after the singleton exists.
+     *
+     * Tests only: they set and clear the variable within one process, and the
+     * singleton otherwise reads it once, at its first use.
+     */
+    void reloadForTest()
+    {
+        file_path.clear();
+        env_mode = false;
+        load();
+    }
+
 private:
     OverrideSingleton()
+    {
+        load();
+    }
+
+    void load()
     {
         char* Env = getenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
         if(Env)
@@ -69,21 +89,27 @@ private:
 
 namespace TensileLite
 {
-
-    enum class HeaderFields
+    /**
+     * What a tuning file row resolves to.
+     *
+     * A solution index is only a position in one build's kernel library, so on
+     * its own it cannot tell whether it still names the kernel that was tuned.
+     * The name recorded beside it is what lets replay check that: kernel_name
+     * in files hipblaslt-bench writes, solution_name in some older files, and
+     * neither in the oldest, which are trusted only when they were written by
+     * the running build.
+     */
+    struct TunedEntry
     {
-        transA = 0,
-        transB,
-        batch_count,
-        m,
-        n,
-        k,
-        a_type,
-        b_type,
-        c_type,
-        compute_type,
-        solution_index,
-        count
+        int32_t                    solutionIndex = -1;
+        std::optional<std::string> kernelName;
+        std::optional<std::string> solutionName;
+
+        bool sameIdentity(const TunedEntry& other) const
+        {
+            return solutionIndex == other.solutionIndex && kernelName == other.kernelName
+                   && solutionName == other.solutionName;
+        }
     };
 
     class ProblemOverride
@@ -156,8 +182,6 @@ namespace TensileLite
         size_t           m_batchSize;
     };
 
-    std::pair<ProblemOverride, int> problemFromEntries(const std::vector<std::string>& entries);
-
     void getContractionProblemsFromFile(const std::string& path);
 
     template <>
@@ -216,23 +240,60 @@ namespace TensileLite
             return size;
         }
 
-        auto find(const ProblemOverride& prob_key)
+        /**
+         * Copy out every entry recorded for a key, in file order. Copies, so
+         * no caller walks the multimap outside the lock.
+         */
+        std::vector<TunedEntry> find(const ProblemOverride& prob_key)
         {
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      iter = m_override.equal_range(prob_key);
-            return iter;
+
+            std::vector<TunedEntry> found;
+            auto                    range = m_override.equal_range(prob_key);
+            for(auto it = range.first; it != range.second; ++it)
+                found.push_back(it->second);
+            return found;
         }
 
-        void add(const std::pair<ProblemOverride, int>& problemSolution)
+        /**
+         * Insert unless this key already records the same entry, so a file that
+         * repeats a row does not stack duplicates. The identity is the index and
+         * the recorded names together: two rows can share an index while naming
+         * different kernels, and only one of them can still be valid.
+         */
+        void addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.insert(problemSolution);
+
+            auto range = m_override.equal_range(key);
+            for(auto it = range.first; it != range.second; ++it)
+                if(it->second.sameIdentity(entry))
+                    return;
+            m_override.emplace(key, entry);
         }
 
-        void erase(std::multimap<ProblemOverride, int>::iterator& sol_idx)
+        /**
+         * Whether a path has already been read. Tracked per path rather than
+         * inferred from the map, so a file that yields no usable rows is still
+         * read only once.
+         */
+        bool isLoaded(const std::string& path)
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+            return m_loaded.count(path) != 0;
+        }
+
+        void markLoaded(const std::string& path)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.erase(sol_idx);
+            m_loaded.insert(path);
+        }
+
+        void resetForTest()
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            m_override.clear();
+            m_loaded.clear();
         }
 
         std::mutex& getLock()
@@ -241,9 +302,10 @@ namespace TensileLite
         }
 
     private:
-        std::multimap<ProblemOverride, int> m_override;
-        std::mutex                          m_guard;
-        std::shared_timed_mutex             m_mutex;
+        std::multimap<ProblemOverride, TunedEntry> m_override;
+        std::set<std::string>                      m_loaded;
+        std::mutex                                 m_guard;
+        std::shared_timed_mutex                    m_mutex;
     };
 } // namespace Tensile
 

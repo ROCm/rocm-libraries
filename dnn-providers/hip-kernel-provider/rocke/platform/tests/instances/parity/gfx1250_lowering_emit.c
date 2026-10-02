@@ -170,6 +170,16 @@ static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
     wmma_scaled(b, true, "bf8e5m2");
 }
 
+static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "fp4e2m1");
+}
+
+static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "fp4e2m1");
+}
+
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
  * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
@@ -397,6 +407,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_bf8_bf8, "gfx1250"},
     {build_wmma_scale, "gfx1250"},
     {build_wmma_scale16, "gfx1250"},
+    {build_wmma_scale_fp4, "gfx1250"},
+    {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
