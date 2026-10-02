@@ -1,7 +1,8 @@
 # Validate the JIT implementation
 
-The JIT tests check the Jit stages, the comgr code-object builder and the source
-bundle reader. The JIT headers are not installed. The tests include them from
+The JIT tests check the Jit stages, the comgr code-object builder, the source
+bundle reader and, through the mock backend, the internal entry points that run
+JIT solutions with the GEMM APIs. The JIT headers are not installed. The tests include them from
 `library/src/amd_detail`. They build the gfx950 source bundles committed in
 [`data`](data/README.md), so they need neither Python nor a generator.
 
@@ -12,7 +13,7 @@ From the repository root, with `project_build` set as in the
 
 ```bash
 cmake -S projects/hipblaslt -B "$project_build" \
-  -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_BUILD_TESTING=ON \
+  -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON -DHIPBLASLT_BUILD_TESTING=ON \
   -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF -DGPU_TARGETS=gfx950
 cmake --build "$project_build" --parallel
 ctest --test-dir "$project_build/clients/tests/jit" -L jit-cpu --output-on-failure
@@ -22,14 +23,19 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
 load and launch code on device 0, which must be a gfx950. Each test writes under
 `clients/tests/jit/scratch` in the build directory, which CTest empties before
-the tests run. The CTest tests are:
+the tests run.
+
+`HIPBLASLT_JIT_TESTING=ON` links the mock backend that
+`hipblaslt-jit-mock-backend-test` replays bundles through. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
-  `jit-bundle-freshness`.
-- `jit-gpu`: `jit-code-object-gpu`.
+  `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
+  `jit-source-bundle` and `jit-disabled`.
+- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
+  build for gfx950 also `jit-mock-backend`.
 
-A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness`, because
-the committed library entries are MsgPack.
+A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` or
+`jit-mock-backend`, because the committed library entries are MsgPack.
 
 ## What each test checks
 
@@ -40,11 +46,22 @@ the committed library entries are MsgPack.
 | `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, concurrent builds, and the status and log of each kind of failed build, without a GPU; with `--bundle`, the same for the committed split-K bundle |
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |
 | `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
+| `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, rejected mock options, and bundle lifetime |
+| `jit-disabled` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 
-## Jit component test
+The `GemmPointerCheck` tests in `hipblaslt-test` check that `Gemm::setProblem`
+rejects a null A or B when alpha is nonzero, also with K=0, in builds with and
+without JIT.
 
+## Mock backend and Jit component tests
+
+`hipblaslt-jit-mock-backend-test` takes one argument, a source bundle
+directory; CTest passes `data/gfx950/splitk`. It creates the mock backend with
+`jit::mock::createBackend` from `hipblaslt-jit-mock.hpp`, so generation runs no
+generator, and checks an FP16 problem with M=256, N=128, K=512, the record
+fault and rejected mock options.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
-uses as the scratch parent; it needs no GPU. It is built only with
+uses as the scratch parent; it needs no GPU. Both are built only with
 `HIPBLASLT_ENABLE_JIT=ON`.
 
 ## Code-object tests

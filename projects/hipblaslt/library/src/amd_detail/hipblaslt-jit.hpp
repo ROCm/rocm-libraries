@@ -13,7 +13,8 @@ namespace hipblaslt_jit
     class Jit;
 }
 
-// Not installed.
+// Not installed. The entry points stay exported because the JIT test binaries
+// link against the shared library.
 namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
@@ -65,4 +66,41 @@ namespace hipblaslt_ext::experimental::jit
         std::string backend;
         std::string message;
     };
+
+    // Compile synchronously on the current HIP device (which must equal device).
+    // Call before stream capture. Unsupported operation/backend pairs return
+    // NOT_SUPPORTED. The solution lives in this process only.
+    HIPBLASLT_EXPORT hipblasStatus_t getJitAlgo(int            device,
+                                                const Request& request,
+                                                const Backend& backend,
+                                                size_t         maxWorkspaceBytes,
+                                                Solution&      solution,
+                                                Diagnostics&   diagnostics);
+
+    // Build the implemented GEMM request from existing hipBLASLt descriptors.
+    // Other operations can add factories without changing getJitAlgo or Backend.
+    HIPBLASLT_EXPORT hipblasStatus_t makeGemmRequest(hipblasLtHandle_t       handle,
+                                                     hipblasLtMatmulDesc_t   desc,
+                                                     const void*             alpha,
+                                                     const void*             A,
+                                                     hipblasLtMatrixLayout_t layoutA,
+                                                     const void*             B,
+                                                     hipblasLtMatrixLayout_t layoutB,
+                                                     const void*             beta,
+                                                     const void*             C,
+                                                     hipblasLtMatrixLayout_t layoutC,
+                                                     void*                   D,
+                                                     hipblasLtMatrixLayout_t layoutD,
+                                                     Request&                request,
+                                                     Diagnostics&            diagnostics);
+
+    // Adapt a GEMM solution to hipblasLtMatmul / hipblaslt_ext::Gemm. Other
+    // operation kinds return NOT_SUPPORTED. The resulting algorithm retains its
+    // modules until process exit; copies work only on their original device in
+    // this process. Never persist algorithm bytes or use them as prebuilt indices.
+    // Execution preserves existing handle, workspace and stream requirements;
+    // sharing a backend or solution does not relax those concurrency requirements.
+    HIPBLASLT_EXPORT hipblasStatus_t getGemmAlgo(const Solution&                   solution,
+                                                 hipblasLtMatmulHeuristicResult_t& result,
+                                                 Diagnostics&                      diagnostics);
 }

@@ -12,16 +12,23 @@ target_sources(hipblaslt
 )
 
 if(HIPBLASLT_ENABLE_JIT)
+    find_package(ZLIB REQUIRED)
     find_package(amd_comgr CONFIG REQUIRED)
-    target_link_libraries(hipblaslt PRIVATE amd_comgr)
+    target_link_libraries(hipblaslt PRIVATE ZLIB::ZLIB amd_comgr)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-loader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp")
+    if(HIPBLASLT_JIT_TESTING)
+        target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp")
+    endif()
 endif()
 
-if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
+if(HIPBLASLT_BUILD_TESTING)
     add_subdirectory("${PROJECT_SOURCE_DIR}/clients/tests/jit"
                      "${PROJECT_BINARY_DIR}/clients/tests/jit")
 endif()

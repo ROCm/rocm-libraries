@@ -64,6 +64,8 @@ namespace hipblaslt_jit
         int             wavefrontSize = 0;
         int             cuCount       = 0;
         std::shared_ptr<TensileLite::Hardware> hardware;
+
+        static Status make(int device, DeviceTarget& target);
     };
 
     // A header a HIP unit includes by name.
@@ -235,5 +237,19 @@ namespace hipblaslt_jit
 
     private:
         Components m_components;
+    };
+}
+
+namespace hipblaslt_ext::experimental::jit::detail
+{
+    struct CompiledSolution
+    {
+        hipblaslt_jit::DeviceTarget               target;
+        std::shared_ptr<const OperationRequest>   request;
+        std::shared_ptr<const hipblaslt_jit::Jit> jit;
+        std::shared_ptr<const KernelBundle>       bundle;
+        uint64_t                                  process        = 0;
+        size_t                                    workspaceLimit = 0;
+        size_t                                    workspaceBytes = 0;
     };
 }

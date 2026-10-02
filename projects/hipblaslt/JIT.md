@@ -21,11 +21,52 @@ hipBLASLt runs a GEMM with a kernel from its pre-tuned library, so a problem
 that the library serves poorly, or not at all, has no better kernel available.
 JIT generation produces kernels for a problem when they are needed. The `Jit`
 component defines the stages of that generation and the order in which they
-run. Its interfaces and a comgr code-object builder are implemented; no
-backend, loader or store is implemented yet, and nothing in hipBLASLt calls
-`Jit`.
+run. Its interfaces, a comgr code-object builder and a TensileLite solution
+loader are implemented. Internal entry points let the JIT test binaries
+generate a GEMM solution through a backend and run it with `hipblasLtMatmul`
+or `hipblaslt_ext::Gemm`. The only backend is a test mock that replays
+pre-generated source bundles. No generator backend or solution store is
+implemented yet, and no public API reaches JIT.
 
 ## Current behavior
+
+### Entry points
+
+The internal entry points, in `library/src/amd_detail/hipblaslt-jit.hpp`,
+generate through `Jit`, keep generated algorithms in one process-local
+registry, and return an algorithm for the existing C and C++ GEMM execution
+APIs:
+
+- A backend factory, such as `jit::mock::createBackend`, returns a `Backend`
+  handle that owns a `Jit` configured with that backend.
+- `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars.
+- `jit::getJitAlgo` compiles on the selected device and returns an owned
+  `Solution`.
+- `jit::getGemmAlgo` adapts the solution to the algorithm that
+  `hipblasLtMatmul` and `Gemm` accept.
+
+The header is internal, as are `hipblaslt-jit-mock.hpp` and
+`hipblaslt-jit-gemm-internal.hpp`: they are not installed and
+`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports three
+functions and one type from them with `HIPBLASLT_EXPORT` for the JIT test
+binaries, which link against the shared library: `jit::makeGemmRequest`,
+`jit::getJitAlgo`, `jit::getGemmAlgo` and the `jit::detail::GemmRequest`
+request type. A build with `HIPBLASLT_JIT_TESTING=ON` also exports
+`jit::mock::createBackend`. No installed header declares them, and they are
+not a supported API.
+
+The backend's configuration belongs to the options of its factory. The
+application owns its buffers and workspace. The request owns descriptor values
+and host scalars; it does not take ownership of device pointers. Compilation
+and support checks finish before graphics processing unit (GPU) work is
+submitted; call the entry points before stream capture. GEMM is the
+implemented operation.
+
+Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
+scalar values. The generic `Solution` and private `CompiledSolution` retain
+the `Jit`, device target, request, workspace and bundle lifetime around the
+existing GEMM support and execution machinery. A matmul algorithm is an
+adaptation token, not a general owning executable object.
 
 ### Components
 
@@ -60,13 +101,30 @@ can generate from several threads at once.
 are for compiled-in implementations and do not establish a stable external
 plugin application binary interface (ABI).
 
+The implementations are:
+
+- Code-object builder: `makeComgrBuilder()`; see
+  [building generated sources](#building-generated-sources).
+- Loader: `makeTensileLoader()`, in `hipblaslt-jit-loader.cpp`, parses the
+  entry, checks support and workspace with TensileLite's predicates, and loads
+  the code object into a process-local `TensileBundle`.
+- Mock backend: `hipblaslt-jit-mock-backend.cpp` replays a list of source
+  bundles without a generator. A generation returns, in list order, up to the
+  requested count of bundles whose predicates accept the device and problem,
+  skipping excluded kernels; the comgr builder still builds them. Its faults
+  fail generation and leave a log in the scratch directory, replace the main
+  kernel assembly with an invalid instruction so the build fails, append the
+  request to a file and fail, or abort the process. Tests reach it through
+  `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`. Only builds with
+  `HIPBLASLT_JIT_TESTING=ON` compile it; it is not a production backend.
+
 ### Build
 
-`HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles none of
-the JIT sources. The enabled build requires the host library, ROCm and ROCm's
-`amd_comgr` CMake package, which only a JIT build links. comgr compiles helper
-sources against the host's C and C++ standard library headers, so those must
-be installed where JIT runs. From the repository root:
+`HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
+exports no JIT entry points. The enabled build requires the host library, ROCm
+and ROCm's `amd_comgr` CMake package, which only a JIT build links. comgr
+compiles helper sources against the host's C and C++ standard library headers,
+so those must be installed where JIT runs. From the repository root:
 
 ```bash
 project_root="$PWD"
@@ -78,9 +136,37 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
 cmake --build "$project_build" --parallel
 ```
 
-The `jit` CMake preset enables this feature for a new configuration. The
+The `jit` CMake preset enables this feature for a new configuration.
+`HIPBLASLT_JIT_TESTING`, off by default, also compiles the mock backend into
+the library and adds the tests that use it. The
 [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
 validation commands.
+
+### Algorithm lifetime and failures
+
+The returned heuristic result contains the required workspace size. Supply that
+workspace and follow the same handle, stream and workspace sharing rules as
+`hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. All helper
+entrypoints are resolved before submission. Stream-K uses the handle's
+stream-specific synchronization region; MultipleBufferSingleKernel and
+output-amax use its shared synchronization storage. Registry synchronization
+protects algorithm lookup; it does not protect application buffers or make
+simultaneous calls on one `Gemm` object safe.
+
+Copies of an algorithm remain usable on its generating device within the same
+process, and its modules are retained until process exit. Reuse within one
+program invocation needs no recompilation. The opaque algorithm bytes that
+`getJitAlgo` and `getGemmAlgo` return are not a library index:
+`hipblaslt_ext::getIndexFromAlgo` returns -1 for them, and a different program
+invocation cannot use them. Save the bundle manifests for reproduction.
+
+An empty GEMM output (M=0 or N=0) returns `HIPBLAS_STATUS_NOT_SUPPORTED` from
+the request factory without compilation. K=0 can use a solution that
+implements beta*C. The backend owns its datatype, instruction and scale-layout
+restrictions. The library propagates support failures, including a mismatch
+between the supplied physical MX scale layout and the compiled solution. Jit
+never benchmarks generated solutions. A failed build names the retained
+`comgr.log` in its message.
 
 ### Building generated sources
 

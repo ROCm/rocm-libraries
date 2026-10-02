@@ -69,6 +69,7 @@ option(HIPBLASLT_ENABLE_JIT "Build experimental just-in-time (JIT) GEMM solution
 if(HIPBLASLT_ENABLE_JIT AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_JIT requires the host library")
 endif()
+option(HIPBLASLT_JIT_TESTING "Link the JIT mock and test backends that the JIT tests use." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
 

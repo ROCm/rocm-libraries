@@ -12,6 +12,7 @@ set(hipblaslt_jit_scratch "${CMAKE_CURRENT_BINARY_DIR}/scratch")
 # Committed bundles; data/README.md lists them and how to regenerate them.
 set(hipblaslt_jit_data "${CMAKE_CURRENT_SOURCE_DIR}/data")
 set(hipblaslt_jit_splitk "${hipblaslt_jit_data}/gfx950/splitk")
+string(REGEX MATCH "(^|;)gfx950(:[^;]*)?(;|$)" hipblaslt_jit_gfx950 "${GPU_TARGETS}")
 
 # Each test writes to its own directory in an emptied scratch directory.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/reset-scratch.cmake"
@@ -42,6 +43,14 @@ hipblaslt_jit_test(jit-source-bundle jit-cpu
     $<TARGET_FILE:hipblaslt-jit-source-bundle-test> "${hipblaslt_jit_scratch}/source-bundle")
 hipblaslt_jit_stage(hipblaslt-jit-source-bundle-test)
 
+if(NOT HIPBLASLT_ENABLE_JIT)
+    add_executable(hipblaslt-jit-disabled-test disabled_api_test.cpp)
+    target_link_libraries(hipblaslt-jit-disabled-test PRIVATE roc::hipblaslt hip::host)
+    hipblaslt_jit_stage(hipblaslt-jit-disabled-test)
+    hipblaslt_jit_test(jit-disabled jit-cpu $<TARGET_FILE:hipblaslt-jit-disabled-test>)
+    return()
+endif()
+
 # Compiles the Jit stages directly; runs without a GPU.
 add_executable(hipblaslt-jit-component-test
     jit_component_test.cpp
@@ -66,6 +75,20 @@ hipblaslt_jit_test(jit-code-object-gpu jit-gpu
     $<TARGET_FILE:hipblaslt-jit-code-object-test>
     --gpu --out "${hipblaslt_jit_scratch}/code-object-gpu" --bundle "${hipblaslt_jit_splitk}")
 hipblaslt_jit_stage(hipblaslt-jit-component-test hipblaslt-jit-code-object-test)
+
+if(HIPBLASLT_JIT_TESTING)
+    add_executable(hipblaslt-jit-mock-backend-test mock_backend_test.cpp)
+    target_include_directories(hipblaslt-jit-mock-backend-test PRIVATE
+        "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/include")
+    target_link_libraries(hipblaslt-jit-mock-backend-test PRIVATE roc::hipblaslt hip::device)
+    hipblaslt_jit_stage(hipblaslt-jit-mock-backend-test)
+
+    # The committed bundles hold gfx950 code and MsgPack library entries.
+    if(hipblaslt_jit_gfx950 AND NOT HIPBLASLT_ENABLE_YAML)
+        hipblaslt_jit_test(jit-mock-backend jit-gpu
+            $<TARGET_FILE:hipblaslt-jit-mock-backend-test> "${hipblaslt_jit_splitk}")
+    endif()
+endif()
 
 # Fails when the committed bundles no longer match the layout versions in
 # GlobalParameters.py, the builder's code-object version or the host library.
