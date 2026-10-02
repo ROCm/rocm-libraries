@@ -3849,11 +3849,37 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         ),
     }
 
+    # The runtime K stride feeds three K/V load paths; each (head_size, dtype)
+    # pins one, keyed to the (rows per async-load instruction, cfvst) it must take:
+    # D128 bf16 the one-row _async_load, D64 the two-row _async_load, D128 fp16
+    # the cfvst V loads.
+    _LOAD_PATHS = {
+        (128, "bf16"): (1, False),
+        (128, "fp16"): (1, True),
+        (64, "bf16"): (2, False),
+    }
+
     @staticmethod
     def _spec(**kw):
         from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 
         return Gfx942AttentionDenseSpec(**kw)
+
+    def _load_path_bases(self, **kw):
+        """Yield ``(head_size, dtype)`` and a base spec per K/V load path, after
+        checking the spec really takes that path."""
+        from kernels.gfx942.attention_dense import _rows_per_instr
+
+        for (d, dtype), path in self._LOAD_PATHS.items():
+            base = self._spec(
+                **{**self._BASE_KWARGS, "head_size": d, "dtype": dtype}, **kw
+            )
+            self.assertEqual(
+                (_rows_per_instr(d), base.resolved_use_cfvst()),
+                path,
+                f"test setup error: D{d} {dtype} no longer takes its load path",
+            )
+            yield (d, dtype), base
 
     @staticmethod
     def _flavors():
@@ -4097,72 +4123,21 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     def test_head_configs_share_one_key_ir_and_name(self):
         from dataclasses import replace
 
-        base = self._spec(**self._BASE_KWARGS)
-        self._assert_one_artifact(
-            [
-                replace(base, num_query_heads=hq, num_kv_heads=hkv)
-                for hq, hkv in self._HEADS
-            ]
-        )
-
-    def test_heads_and_shape_varied_together_share_one_artifact(self):
-        from dataclasses import replace
-
-        base = self._spec(**self._BASE_KWARGS)
-        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
-        self._assert_one_artifact(
-            [
-                replace(
-                    base,
-                    batch=bt,
-                    seqlen_q=sq,
-                    seqlen_kv=sk,
-                    num_query_heads=hq,
-                    num_kv_heads=hkv,
-                )
-                for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
-            ]
-        )
-
-    def test_sliding_window_heads_and_shape_share_one_artifact(self):
-        """Non-persistent sliding-window takes runtime heads and shape too."""
-        from dataclasses import replace
-
-        base = self._spec(**self._BASE_KWARGS, sliding_window=128)
-        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
-        self._assert_one_artifact(
-            [
-                replace(
-                    base,
-                    batch=bt,
-                    seqlen_q=sq,
-                    seqlen_kv=sk,
-                    num_query_heads=hq,
-                    num_kv_heads=hkv,
-                )
-                for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
-            ]
-        )
-
-    def test_persistent_heads_and_shape_share_one_artifact(self):
-        """The persistent grid takes runtime heads and shape too: per pinned decode
-        order (and with a sliding window), every head config -- alone and varied
-        together with the shape -- shares one key, IR per flavor, and name."""
-        from dataclasses import replace
-
-        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
-        for variant, kw in self._PERSIST_VARIANTS.items():
-            base = self._spec(**self._BASE_KWARGS, **kw)
-            self.assertTrue(base.runtime_shape)
-            self.assertEqual(base.runtime_param_fields, self._RUNTIME_FIELDS)
-            with self.subTest(variant=variant, axis="heads"):
+        for path, base in self._load_path_bases():
+            with self.subTest(path=path):
                 self._assert_one_artifact(
                     [
                         replace(base, num_query_heads=hq, num_kv_heads=hkv)
                         for hq, hkv in self._HEADS
                     ]
                 )
-            with self.subTest(variant=variant, axis="heads+shape"):
+
+    def test_heads_and_shape_varied_together_share_one_artifact(self):
+        from dataclasses import replace
+
+        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
+        for path, base in self._load_path_bases():
+            with self.subTest(path=path):
                 self._assert_one_artifact(
                     [
                         replace(
@@ -4176,6 +4151,61 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
                         for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
                     ]
                 )
+
+    def test_sliding_window_heads_and_shape_share_one_artifact(self):
+        """Non-persistent sliding-window takes runtime heads and shape too."""
+        from dataclasses import replace
+
+        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
+        for path, base in self._load_path_bases(sliding_window=128):
+            with self.subTest(path=path):
+                self._assert_one_artifact(
+                    [
+                        replace(
+                            base,
+                            batch=bt,
+                            seqlen_q=sq,
+                            seqlen_kv=sk,
+                            num_query_heads=hq,
+                            num_kv_heads=hkv,
+                        )
+                        for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
+                    ]
+                )
+
+    def test_persistent_heads_and_shape_share_one_artifact(self):
+        """The persistent grid takes runtime heads and shape too: per pinned decode
+        order (and with a sliding window), on every K/V load path, every head
+        config -- alone and varied together with the shape -- shares one key, IR
+        per flavor, and name."""
+        from dataclasses import replace
+
+        shapes = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192), (2, 1024, 1024))
+        for variant, kw in self._PERSIST_VARIANTS.items():
+            for path, base in self._load_path_bases(**kw):
+                self.assertTrue(base.runtime_shape)
+                self.assertEqual(base.runtime_param_fields, self._RUNTIME_FIELDS)
+                with self.subTest(variant=variant, path=path, axis="heads"):
+                    self._assert_one_artifact(
+                        [
+                            replace(base, num_query_heads=hq, num_kv_heads=hkv)
+                            for hq, hkv in self._HEADS
+                        ]
+                    )
+                with self.subTest(variant=variant, path=path, axis="heads+shape"):
+                    self._assert_one_artifact(
+                        [
+                            replace(
+                                base,
+                                batch=bt,
+                                seqlen_q=sq,
+                                seqlen_kv=sk,
+                                num_query_heads=hq,
+                                num_kv_heads=hkv,
+                            )
+                            for (bt, sq, sk), (hq, hkv) in zip(shapes, self._HEADS)
+                        ]
+                    )
 
     def _gfx950_ir(self, spec, flavor):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
