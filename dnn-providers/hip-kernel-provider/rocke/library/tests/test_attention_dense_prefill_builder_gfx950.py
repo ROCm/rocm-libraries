@@ -63,10 +63,24 @@ def test_cli_shapes_build(builder):
         assert spec.block_n == shape["block_n"]
 
 
-def test_a_block_n_the_tile_does_not_fix_is_refused(builder):
-    shape = _shape(builder)
-    with pytest.raises(ValueError, match="fix block_n"):
-        builder.make_spec_from_shape({**shape, "block_n": 2 * shape["block_n"]})
+def test_the_tile_is_a_knob(builder):
+    for kw in ({}, {"persistent": True}):
+        shape = _shape(builder, **kw)
+        for block_m, block_n in ((128, 64), (256, 128), (256, 32)):
+            spec = builder.make_spec_from_shape(
+                {**shape, "block_m": block_m, "block_n": block_n}
+            )
+            assert (spec.block_m, spec.block_n) == (block_m, block_n)
+
+
+def test_wide_lds_dma_needs_the_persistent_body_and_block_n_64(builder):
+    shape = _shape(builder, wide_lds_dma=True)
+    with pytest.raises(ValueError, match="persistent"):
+        builder.make_spec_from_shape(shape)
+    with pytest.raises(ValueError):
+        builder.make_spec_from_shape({**shape, "persistent": True, "block_n": 128})
+    spec = builder.make_spec_from_shape({**shape, "persistent": True, "block_m": 128})
+    assert spec.wide_lds_dma and spec.block_m == 128
 
 
 def test_an_unset_wide_lds_dma_takes_the_shipped_choice(builder):
@@ -75,3 +89,4 @@ def test_an_unset_wide_lds_dma_takes_the_shipped_choice(builder):
     assert builder.make_spec_from_shape(shape).wide_lds_dma
     assert not builder.make_spec_from_shape({**shape, "use_sinks": True}).wide_lds_dma
     assert not builder.make_spec_from_shape({**shape, "persistent": False}).wide_lds_dma
+    assert not builder.make_spec_from_shape({**shape, "block_n": 128}).wide_lds_dma

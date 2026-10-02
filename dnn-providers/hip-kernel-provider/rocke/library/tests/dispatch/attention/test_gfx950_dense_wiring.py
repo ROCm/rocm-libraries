@@ -3,11 +3,12 @@
 """Unit tests for gfx950 dense prefill dispatch wiring.
 
 Covers:
-  - Selection: a dense variant is reached only by pinning ``algorithm`` +
-    ``spec_id``; ``tuning_id`` names one configuration of it
-    (``auto``: the variant's default spec) and replays through dispatch
-  - Knobs (waves_per_eu, persist_decode, ...) are candidate knobs, not request
-    fields, and the kernel validates them
+  - Selection: a dense candidate is reached only by pinning ``algorithm``
+    (grid or persistent body) + ``spec_id``; ``tuning_id`` names one
+    configuration of it (``auto``: the candidate's default spec) and replays
+    through dispatch
+  - Knobs (tile, waves_per_eu, persist_decode, ...) are candidate knobs, not
+    request fields, and the kernel validates them
   - Sliding-window pass-through from AttentionRequest to the dense spec
   - Kernel name includes swa<W> token for sliding window
   - Ragged and sliding_window mutual exclusion constraint
@@ -22,6 +23,8 @@ from dataclasses import replace
 from itertools import islice
 
 from dispatch.attention import (
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
     AttentionMaskType,
     AttentionRequest,
     AttentionTuningSpec,
@@ -43,10 +46,13 @@ from kernels.gfx950.attention_dense import (
 )
 from rocke.dispatch.core import opt_in_probe
 
-_GRID = "gfx950_dense_grid_default"
-_PERSIST = "gfx950_dense_persist_default"
-_WIDE = "gfx950_dense_persist_widedma_default"
-_WIDE_NAME = "attention_gfx950_dense_persist_widedma_default"
+_GRID = "gfx950_dense_grid"
+_PERSIST = "gfx950_dense_persist"
+_WIDE = "gfx950_dense_persist_widedma"
+_GRID_NAME = f"attention_{_GRID}"
+_PERSIST_NAME = f"attention_{_PERSIST}"
+_WIDE_NAME = f"attention_{_WIDE}"
+_DENSE_ALGORITHMS = (DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM)
 
 
 def _gfx950_dense_req(**kw) -> AttentionRequest:
@@ -68,18 +74,18 @@ def _gfx950_dense_req(**kw) -> AttentionRequest:
 
 
 def _spec(req: AttentionRequest, spec_id: str = _GRID, **knobs):
-    """The kernel spec of dense variant ``spec_id`` for ``req``, ``knobs`` applied."""
+    """The kernel spec of dense candidate ``spec_id`` for ``req``, ``knobs`` applied."""
     if knobs:
         return tuning_spec_with_knobs(req, spec_id, knobs).kernel_spec
     return attention_tuning_spec(req, spec_id).kernel_spec
 
 
 def _admitting(req: AttentionRequest) -> set[str]:
-    """Dense variants that admit ``req`` when pinned (what a sweep probes)."""
+    """gfx950 dense candidates that admit ``req`` when pinned (what a sweep probes)."""
     return {
         c.name
         for c in attention_candidates()
-        if c.algorithm == "attention_dense" and c.admits(opt_in_probe(req, c))[0]
+        if c.algorithm in _DENSE_ALGORITHMS and c.admits(opt_in_probe(req, c))[0]
     }
 
 
@@ -97,13 +103,18 @@ _LLAMA_8K = dict(
 
 class TestDenseSelection(unittest.TestCase):
     def test_pinned_spec_id_selects_the_concrete_gfx950_spec(self):
-        result = dispatch_attention(
-            _gfx950_dense_req(algorithm="attention_dense", spec_id=_GRID)
-        )
-        self.assertEqual(result.candidate.name, "attention_gfx950_dense_grid_default")
-        self.assertIsInstance(result.spec, AttentionTuningSpec)
-        self.assertEqual(result.spec.path, "dense")
-        self.assertIsInstance(result.spec.kernel_spec, Gfx950AttentionDenseSpec)
+        for algorithm, spec_id, name in (
+            (DENSE_GRID_ALGORITHM, _GRID, _GRID_NAME),
+            (DENSE_PERSIST_ALGORITHM, _PERSIST, _PERSIST_NAME),
+        ):
+            with self.subTest(spec_id=spec_id):
+                result = dispatch_attention(
+                    _gfx950_dense_req(algorithm=algorithm, spec_id=spec_id)
+                )
+                self.assertEqual(result.candidate.name, name)
+                self.assertIsInstance(result.spec, AttentionTuningSpec)
+                self.assertEqual(result.spec.path, "dense")
+                self.assertIsInstance(result.spec.kernel_spec, Gfx950AttentionDenseSpec)
 
     def test_gfx942_spec_id_selects_the_concrete_gfx942_spec(self):
         spec = _spec(_gfx950_dense_req(arch="gfx942"), "gfx942_dense")
@@ -115,11 +126,26 @@ class TestDenseSelection(unittest.TestCase):
             "attention_unified_2d",
         )
         for kw in (
-            dict(algorithm="attention_dense"),
+            dict(algorithm=DENSE_GRID_ALGORITHM),
+            dict(algorithm=DENSE_PERSIST_ALGORITHM),
             dict(spec_id=_GRID),
         ):
             with self.subTest(**kw), self.assertRaises(ValueError):
                 dispatch_attention(_gfx950_dense_req(**kw))
+
+    def test_spec_id_under_the_other_body_is_refused(self):
+        """The algorithm names the body: the gfx942 ``attention_dense`` name
+        and a spec_id of the other gfx950 body select nothing."""
+        for algorithm, spec_id in (
+            ("attention_dense", _GRID),
+            (DENSE_GRID_ALGORITHM, _PERSIST),
+            (DENSE_PERSIST_ALGORITHM, _GRID),
+        ):
+            with self.subTest(algorithm=algorithm, spec_id=spec_id):
+                with self.assertRaises(ValueError):
+                    dispatch_attention(
+                        _gfx950_dense_req(algorithm=algorithm, spec_id=spec_id)
+                    )
 
     def test_pinned_spec_id_on_the_wrong_arch_is_refused(self):
         with self.assertRaises(ValueError):
@@ -141,7 +167,7 @@ class TestDenseSelection(unittest.TestCase):
                     attention_tuning_spec(req, _WIDE, spec.tuning_id), spec
                 )
         with self.assertRaises(ValueError):
-            attention_tuning_spec(req, _WIDE, "grid_default_wpe2@0000")
+            attention_tuning_spec(req, _WIDE, "grid_wpe2@0000")
 
 
 class TestDenseWavesPerEuWiring(unittest.TestCase):
@@ -171,7 +197,7 @@ class TestDenseWavesPerEuWiring(unittest.TestCase):
             for _candidate, spec in islice(
                 iter_registered_attention_combos(
                     req,
-                    candidate_prefix="attention_gfx950_dense_grid_default",
+                    candidate_prefix=_GRID_NAME,
                     sweep_level=level,
                 ),
                 64,
@@ -200,7 +226,8 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         req = _gfx950_dense_req(**_LLAMA_8K)
         pinned = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "gqa_pair"})
         self.assertEqual(pinned, attention_tuning_spec(req, _WIDE))
-        self.assertEqual(pinned.knobs, ())
+        # Wide DMA records its problem-dependent default tile.
+        self.assertEqual(pinned.knobs, (("block_m", 256),))
         self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair")
         self.assertIn("gqapair", pinned.kernel_name())
 
@@ -238,7 +265,9 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(pinned.kernel_spec.resolved_persist_decode, "gqa_pair_2phase")
         # A decode auto does not pick is kept, and gets its own id.
         other = tuning_spec_with_knobs(req, _WIDE, {"persist_decode": "hkv_major"})
-        self.assertEqual(dict(other.knobs), {"persist_decode": "hkv_major"})
+        self.assertEqual(
+            dict(other.knobs), {"block_m": 256, "persist_decode": "hkv_major"}
+        )
         self.assertNotEqual(other.tuning_id, pinned.tuning_id)
 
     def test_exact_shape_with_sinks_keeps_gqa_pair(self):
@@ -282,7 +311,7 @@ class TestDenseBottomRightWiring(unittest.TestCase):
         base.update(kw)
         return _gfx950_dense_req(**base)
 
-    def test_grid_variant_runs_aligned_and_ragged_moving_masks(self):
+    def test_grid_algorithm_runs_aligned_and_ragged_moving_masks(self):
         shapes = (
             ("aligned", 8192, 12288, False),
             ("ragged", 8180, 12270, True),
@@ -300,7 +329,7 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     self.assertNotIn("persist", spec.kernel_name())
                     self.assertNotIn("wdma", spec.kernel_name())
 
-    def test_persistent_variants_refuse_moving_bottom_right(self):
+    def test_persistent_candidates_refuse_moving_bottom_right(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
             for spec_id in (_PERSIST, _WIDE):
                 with self.subTest(mask_type=mask_type, spec_id=spec_id):
@@ -462,24 +491,24 @@ class TestDenseCapabilitySlidingWindow(unittest.TestCase):
     def test_causal_in_supports_features(self):
         self.assertIn("causal", self._wide().capability.supports_features)
 
-    def test_every_d128_variant_admits_sinks(self):
-        """Admission is the kernel's: wide DMA runs sinks, so its variant admits."""
+    def test_every_d128_candidate_admits_sinks(self):
+        """Admission is the kernel's: wide DMA runs sinks, so its candidate admits."""
         names = _admitting(
             _gfx950_dense_req(
                 use_sinks=True, hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8
             )
         )
         self.assertIn(_WIDE_NAME, names)
-        self.assertIn("attention_gfx950_dense_persist_default", names)
+        self.assertIn(_PERSIST_NAME, names)
 
-    def test_every_d128_variant_admits_sliding_window(self):
+    def test_every_d128_candidate_admits_sliding_window(self):
         names = _admitting(
             _gfx950_dense_req(
                 sliding_window=256, hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8
             )
         )
         self.assertIn(_WIDE_NAME, names)
-        self.assertIn("attention_gfx950_dense_persist_default", names)
+        self.assertIn(_PERSIST_NAME, names)
 
 
 class TestSWASinkComposition(unittest.TestCase):
@@ -778,49 +807,84 @@ class TestSinksValidation(unittest.TestCase):
         self.assertEqual(str(cm.exception), "sinks must be a CUDA tensor")
 
 
-class TestGfx950DenseVariants(unittest.TestCase):
-    """One registered candidate per frozen (tile x persist x wide-DMA) combo."""
+class TestGfx950DenseCandidates(unittest.TestCase):
+    """Two algorithms (grid and persistent body); wide DMA is a persistent
+    candidate; the tile is a knob of each."""
 
-    def test_six_dense_candidates_are_registered(self):
-        from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
+    def test_three_dense_candidates_are_registered(self):
+        by_name = {c.name: c for c in attention_candidates()}
+        expected = {
+            _GRID_NAME: DENSE_GRID_ALGORITHM,
+            _PERSIST_NAME: DENSE_PERSIST_ALGORITHM,
+            _WIDE_NAME: DENSE_PERSIST_ALGORITHM,
+        }
+        gfx950_dense = {
+            n for n, c in by_name.items() if c.algorithm in _DENSE_ALGORITHMS
+        }
+        self.assertEqual(gfx950_dense, set(expected))
+        for name, algorithm in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(by_name[name].algorithm, algorithm)
 
-        names = [c.name for c in attention_candidates()]
-        expected = [v.candidate_name for v in GFX950_DENSE_VARIANTS]
-        self.assertEqual(len(expected), 6)
-        for variant in GFX950_DENSE_VARIANTS:
-            with self.subTest(variant=variant.variant_id):
-                self.assertIn(variant.candidate_name, names)
-                self.assertEqual(variant.candidate_name, f"attention_{variant.spec_id}")
-
-    def test_d128_admits_all_six_dense_variants(self):
-        from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
-
+    def test_d128_admits_all_three_dense_candidates(self):
         req = _gfx950_dense_req(
             hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=2048, seqlen_k=2048
         )
-        self.assertEqual(
-            _admitting(req), {v.candidate_name for v in GFX950_DENSE_VARIANTS}
-        )
+        self.assertEqual(_admitting(req), {_GRID_NAME, _PERSIST_NAME, _WIDE_NAME})
 
-    def test_d64_refuses_wide_dma_variants(self):
-        names = _admitting(_gfx950_dense_req())
-        self.assertIn("attention_gfx950_dense_grid_default", names)
-        self.assertNotIn(_WIDE_NAME, names)
-        self.assertNotIn("attention_gfx950_dense_persist_widedma_bm128", names)
+    def test_d64_refuses_wide_dma(self):
+        self.assertEqual(_admitting(_gfx950_dense_req()), {_GRID_NAME, _PERSIST_NAME})
 
-    def test_spec_id_selects_the_tile(self):
+    def test_tile_is_a_knob(self):
         req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
-        spec = _spec(req, "gfx950_dense_persist_widedma_bm128")
-        self.assertEqual(spec.block_m, 128)
+        self.assertEqual(_spec(req, _WIDE).block_m, 256)
+        spec = _spec(req, _WIDE, block_m=128)
+        self.assertEqual((spec.block_m, spec.block_n), (128, 64))
         self.assertTrue(spec.persistent)
         self.assertTrue(spec.wide_lds_dma)
-        self.assertEqual(_spec(req, _WIDE).block_m, 256)
+        for spec_id in (_GRID, _PERSIST):
+            with self.subTest(spec_id=spec_id):
+                spec = _spec(req, spec_id, block_n=128)
+                self.assertEqual((spec.block_m, spec.block_n), (256, 128))
+        with self.assertRaises(ValueError):
+            _spec(req, _WIDE, block_n=128)
+
+    def test_tile_knob_recomputes_ragged(self):
+        req = _gfx950_dense_req(
+            hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8, seqlen_q=384, seqlen_k=384
+        )
+        self.assertTrue(_spec(req, _GRID).ragged)
+        self.assertFalse(_spec(req, _GRID, block_m=128).ragged)
+
+    def test_wide_dma_starts_at_a_non_ragged_tile(self):
+        """Wide DMA has no ragged path: where 256x64 is ragged its default is
+        the 128x64 tile, and the same knob setting keeps one tuning_id across
+        problems."""
+        d128 = dict(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        short = _gfx950_dense_req(**d128, seqlen_q=384, seqlen_k=384)
+        spec = attention_tuning_spec(short, _WIDE)
+        self.assertEqual(spec.kernel_spec.block_m, 128)
+        self.assertFalse(spec.kernel_spec.ragged)
+        long = tuning_spec_with_knobs(
+            _gfx950_dense_req(**d128), _WIDE, {"block_m": 128}
+        )
+        self.assertEqual(spec.tuning_id, long.tuning_id)
+
+    def test_sweep_covers_both_block_m_tiles(self):
+        req = _gfx950_dense_req(hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+        tiles = {
+            (spec.kernel_spec.block_m, spec.kernel_spec.block_n)
+            for _c, spec in iter_registered_attention_combos(
+                req, candidate_prefix=_GRID_NAME, sweep_level="production"
+            )
+        }
+        self.assertLessEqual({(256, 64), (128, 64)}, tiles)
 
     def test_llama3_8b_s8192_needs_an_explicit_pin(self):
         req = _gfx950_dense_req(**_LLAMA_8K)
         self.assertEqual(dispatch_attention(req).candidate.name, "attention_unified_2d")
         pinned = dispatch_attention(
-            replace(req, algorithm="attention_dense", spec_id=_WIDE)
+            replace(req, algorithm=DENSE_PERSIST_ALGORITHM, spec_id=_WIDE)
         )
         self.assertEqual(pinned.candidate.name, _WIDE_NAME)
         spec = pinned.spec.kernel_spec
@@ -844,7 +908,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
             c.name for c, _spec in registered_attention_combos(req, tuning_sample=2)
         }
         self.assertIn(_WIDE_NAME, names)
-        self.assertIn("attention_gfx950_dense_grid_bm128", names)
+        self.assertIn(_GRID_NAME, names)
         self.assertNotIn("attention_unified_2d", names)
 
     def test_d256_combos_exclude_dense_and_routing_labels(self):
@@ -863,7 +927,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
         names = {c.name for c, _spec in combos}
         self.assertNotIn("attention_gfx950_d256", names)
         self.assertFalse(
-            any(c.algorithm == "attention_dense" for c, _spec in combos),
+            any(c.algorithm in _DENSE_ALGORITHMS for c, _spec in combos),
             names,
         )
 

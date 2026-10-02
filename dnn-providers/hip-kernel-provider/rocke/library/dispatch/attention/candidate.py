@@ -3,14 +3,14 @@
 """Attention's tuned candidates, built on :func:`rocke.dispatch.tuning.make_tuned_candidate`.
 
 :func:`make_tuning_candidate` builds one per unified geometry variant and
-:func:`make_dense_candidate` one per dense variant. Each supplies its space,
+:func:`make_dense_candidate` one per dense candidate. Each supplies its space,
 the per-request base the space builds from, and attention's signature, grid,
 and Torch binding; admission, pin resolution and sweeping are shared.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import supports_native_unified_attention
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
@@ -31,7 +31,12 @@ from .common import (
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
 
+# The dense selectors. gfx942 has one candidate whose space covers both bodies;
+# on gfx950 the grid and persistent bodies serve different features, so each
+# is its own algorithm (wide DMA is a second candidate of the persistent one).
 DENSE_ALGORITHM = "attention_dense"
+DENSE_GRID_ALGORITHM = "attention_dense_grid"
+DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
 
 
 def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
@@ -105,13 +110,19 @@ def make_dense_candidate(
     base_spec: Callable[[AttentionRequest], object],
     supports: DenseSupports,
     features: frozenset,
+    algorithm: str = DENSE_ALGORITHM,
     recorded: frozenset = frozenset(),
+    derived: Optional[
+        Callable[[object, Mapping[str, object]], Mapping[str, object]]
+    ] = None,
 ) -> KernelCandidate:
-    """One dense variant. ``base_spec(req)`` is its default kernel spec (raise
+    """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
     kernel's own validator; ``features`` is the capability's feature set;
-    ``recorded`` names the fields ``base_spec`` resolves per problem (see
-    :meth:`rocke.dispatch.tuning.KnobSpace.recorded`)."""
+    ``algorithm`` the selector a pin names it by; ``recorded`` names the
+    fields ``base_spec`` resolves per problem (see
+    :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
+    problem fields that depend on the knobs (see :class:`.DenseSpace`)."""
 
     def bind_torch(request, spec, tensors, **kwargs):
         from .bindings import bind_dense_attention_torch
@@ -121,7 +132,7 @@ def make_dense_candidate(
     return make_tuned_candidate(
         name=name,
         family=FAMILY,
-        algorithm=DENSE_ALGORITHM,
+        algorithm=algorithm,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=3,
@@ -136,6 +147,7 @@ def make_dense_candidate(
             candidate_name=name,
             supports=supports,
             recorded_fields=frozenset(recorded),
+            derived=derived,
         ),
         base=base_spec,
         request_errors=_request_errors,

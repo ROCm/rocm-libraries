@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
-from typing import Callable, Mapping, Optional, Tuple
+from itertools import product
+from typing import Callable, Iterable, Mapping, Optional, Tuple
+
+from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
 from .axes import DENSE_PROBLEM_FIELDS, KnobAxis, axis_knob_names, tuning_axes
 from .common import AttentionTuningSpec
@@ -63,11 +66,18 @@ class _DenseTuningArch:
     kernel). ``policy_knobs`` are ``None`` fields resolved by a
     ``resolved_<name>()`` policy; an explicit value equal to the policy is a
     duplicate. ``inert`` names the remaining knob-on-knob dependencies.
+    ``num_persistent_over_tiles`` resolves the symbolic CTA counts for every
+    ``block_m`` the tile axis offers, not only the base's, because a count
+    such as ``gqa_pair`` is exact for one tile. ``production_crossed`` axes
+    get a full one-knob-at-a-time production pass at each of their values
+    instead of being one more single knob.
     """
 
     scope: Mapping[str, Callable[[object], bool]]
     policy_knobs: Tuple[str, ...]
     inert: Callable[[object], Mapping[str, str]]
+    num_persistent_over_tiles: bool = False
+    production_crossed: Tuple[str, ...] = ()
 
 
 _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
@@ -92,6 +102,9 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "pv_loop_order",
         ),
         inert=_gfx950_dense_inert_knobs,
+        num_persistent_over_tiles=True,
+        # The query tile changes what every other knob does.
+        production_crossed=("block_m",),
     ),
     "gfx942": _DenseTuningArch(
         # persistent is itself an axis here, so the persistent-only knobs stay
@@ -126,14 +139,17 @@ def _dense_field_defaults(spec_type: type) -> Mapping[str, object]:
     return {f.name: f.default for f in _dataclass_fields(spec_type)}
 
 
-def resolve_dense_num_persistent(spec, policy: str) -> int:
-    """Persistent-CTA count for one symbolic ``num_persistent`` policy.
+def resolve_dense_num_persistent(
+    spec, policy: str, block_m: Optional[int] = None
+) -> int:
+    """Persistent-CTA count for one symbolic ``num_persistent`` policy, at
+    ``block_m`` (the spec's by default).
 
     ``half`` / ``0.75x`` / ... / ``2x`` scale the base count; ``gqa_pair`` /
     ``gqa_pair_2phase`` are the exact counts those decodes require; ``work`` is
     one CTA per (query block, head, batch) work item.
     """
-    nqb = -(-int(spec.seqlen_q) // int(spec.block_m))
+    nqb = -(-int(spec.seqlen_q) // int(block_m or spec.block_m))
     pairs = nqb * int(spec.num_kv_heads) * int(spec.batch)
     base = int(spec.num_persistent)
     counts = {
@@ -158,19 +174,31 @@ def resolve_dense_num_persistent(spec, policy: str) -> int:
 @lru_cache(maxsize=256)
 def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
     """The declared dense axes that apply to ``base``, with concrete values."""
-    scopes = _dense_arch(arch).scope
+    rules = _dense_arch(arch)
+    declared = tuning_axes(arch, "dense")
+    block_ms = [int(base.block_m)]
+    if rules.num_persistent_over_tiles:
+        block_ms += [
+            int(value)
+            for axis in declared
+            if axis.name == "block_m"
+            for choice in axis.choices
+            for _name, value in choice
+            if int(value) != int(base.block_m)
+        ]
     axes = []
-    for axis in tuning_axes(arch, "dense"):
-        scope = scopes.get(axis.name)
+    for axis in declared:
+        scope = rules.scope.get(axis.name)
         if scope is not None and not scope(base):
             continue
         if axis.name == "num_persistent":
             counts: list[int] = []
-            for choice in axis.choices:
-                for _name, policy in choice:
-                    n = resolve_dense_num_persistent(base, policy)
-                    if n > 0 and n != int(base.num_persistent) and n not in counts:
-                        counts.append(n)
+            for block_m in block_ms:
+                for choice in axis.choices:
+                    for _name, policy in choice:
+                        n = resolve_dense_num_persistent(base, policy, block_m)
+                        if n > 0 and n != int(base.num_persistent) and n not in counts:
+                            counts.append(n)
             axis = KnobAxis(
                 axis.name, ((),) + tuple((("num_persistent", n),) for n in counts)
             )
@@ -233,7 +261,7 @@ def _dense_redundant_knob(spec, arch: str) -> Optional[str]:
 @lru_cache(maxsize=256)
 def _dense_defaults(base, recorded: frozenset) -> Tuple[Tuple[str, object], ...]:
     """The default spec's values that are neither problem fields nor resolved
-    per problem: variant geometry, the base constants (the CU-count default,
+    per problem: the candidate's body, the base constants (the CU-count default,
     the shipped WPE, the layout pads) and every dataclass default."""
     return tuple(
         (f.name, getattr(base, f.name))
@@ -244,17 +272,36 @@ def _dense_defaults(base, recorded: frozenset) -> Tuple[Tuple[str, object], ...]
 
 @dataclass(frozen=True)
 class DenseSpace(WavesPerEuSpace):
-    """One dense variant's space. ``base`` is its default kernel spec for the
+    """One dense candidate's space. ``base`` is its default kernel spec for the
     request; ``supports`` is the kernel's own validator."""
 
     supports: DenseSupports = None
     recorded_fields: frozenset = frozenset()
+    # Problem fields that also depend on knobs, recomputed on every build:
+    # ``derived(base, knobs) -> {field: value}`` (gfx950: ``ragged`` follows
+    # the swept tile).
+    derived: Optional[
+        Callable[[object, Mapping[str, object]], Mapping[str, object]]
+    ] = None
 
     def recorded(self, base):
         return self.recorded_fields
 
     def axes(self, base):
         return _dense_axes_for(base, self.arch)
+
+    def production(self, base, axes, is_valid) -> Iterable[dict]:
+        crossed_names = _dense_arch(self.arch).production_crossed
+        crossed = [a for a in axes if a.name in crossed_names]
+        rest = tuple(a for a in axes if a.name not in crossed_names)
+        for choices in product(*(a.choices for a in crossed)):
+            point = {k: v for choice in choices for k, v in choice}
+            if point and not is_valid(point):
+                continue
+            for knobs in one_knob_at_a_time(
+                rest, lambda k, point=point: is_valid({**point, **k})
+            ):
+                yield {**point, **knobs}
 
     def known_knobs(self, base):
         return axis_knob_names(tuning_axes(self.arch, "dense"))
@@ -263,7 +310,8 @@ class DenseSpace(WavesPerEuSpace):
         return dict(_dense_defaults(base, self.recorded_fields))
 
     def build(self, base, knobs):
-        return replace(base, **knobs)
+        extra = self.derived(base, knobs) if self.derived is not None else {}
+        return replace(base, **knobs, **extra)
 
     def inert(self, base, kernel):
         inert = dict(_dense_redundant_knobs(kernel, self.arch))

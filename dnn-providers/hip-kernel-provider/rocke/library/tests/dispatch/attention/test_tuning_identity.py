@@ -22,7 +22,7 @@ from dispatch.attention import (
 from rocke.dispatch.core import PinRefused, spec_identity
 
 _UNIFIED = "gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
-_DENSE = "gfx950_dense_persist_default"
+_DENSE = "gfx950_dense_persist"
 _GFX942_DENSE = "gfx942_dense"
 
 
@@ -121,7 +121,7 @@ class TestCanonicalKnobs(unittest.TestCase):
 
     def test_inert_dense_knobs_are_dropped(self):
         req = _req()
-        grid = "gfx950_dense_grid_default"
+        grid = "gfx950_dense_grid"
         # The grid body never reads the persistent-only knobs.
         self.assertEqual(
             tuning_spec_with_knobs(
@@ -140,7 +140,9 @@ class TestCanonicalKnobs(unittest.TestCase):
         req = _req()
         for spec_id, knobs, reason in (
             (_DENSE, {"seqlen_q": 64}, "not tunable"),
-            (_DENSE, {"block_m": 128}, "not tunable"),
+            (_DENSE, {"persistent": False}, "not tunable"),
+            (_DENSE, {"wide_lds_dma": True}, "not tunable"),
+            (_DENSE, {"block_m": 192}, "block_m"),
             (_DENSE, {"lds_num_buffers": 3}, "not tunable"),
             (_UNIFIED, {"not_a_knob": True}, "not tunable"),
         ):
@@ -202,7 +204,7 @@ class TestProblemIndependentIdentity(unittest.TestCase):
 
     def test_samplers_dedupe_by_tuning_id(self):
         for prefix in (
-            "attention_gfx950_dense_persist_default",
+            "attention_gfx950_dense_persist",
             "attention_" + _UNIFIED,
         ):
             with self.subTest(prefix=prefix):
@@ -287,7 +289,7 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
             "unknown id": (
                 replace(
                     _pin(_DENSE, stored),
-                    tuning_id="persist_default_wpe2@" + "0" * 16,
+                    tuning_id="persist_wpe2@" + "0" * 16,
                     tuning_knobs=(),
                 ),
                 "unknown tuning_id",

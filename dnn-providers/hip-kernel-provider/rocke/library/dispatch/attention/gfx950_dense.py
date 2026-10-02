@@ -5,22 +5,30 @@
 
 Unified-kernel candidates for gfx950 live in :mod:`.gfx950_unified`.
 
-Each candidate is one frozen (tile x persist x wide-DMA) variant, identified
-the same way as a unified tuning geometry: ``spec_id`` names the variant and
-``tuning_id`` names one configuration from its knob space (``auto``
-is the variant's default spec). The candidates are opt-in: only an explicit
-``spec_id`` selects one. Admission is the kernel's own
-``supports_attention_dense``; dispatch adds no stricter gate.
+The grid and persistent bodies are separate algorithms because they serve
+different requests: only the grid body runs a moving bottom-right causal
+diagonal. Wide DMA is a variant of the persistent algorithm (it requires the
+persistent body). Each candidate is identified the same way as a unified
+tuning geometry: ``spec_id`` names it and ``tuning_id`` names one
+configuration from its knob space -- the tile (``block_m`` / ``block_n``)
+included -- with ``auto`` being the candidate's default spec. The candidates
+are opt-in: only an explicit ``algorithm`` + ``spec_id`` selects one.
+Admission is the kernel's own ``supports_attention_dense``; dispatch adds no
+stricter gate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Mapping, Tuple
 
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
-from .candidate import make_dense_candidate
+from .candidate import (
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
+    make_dense_candidate,
+)
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -28,20 +36,24 @@ from .common import (
 )
 
 _DENSE_LAYOUT = "default"
+_DENSE_TILE = "default"
 # Base-spec values the knob space starts from (and sweeps away from): the
 # gfx950 CU count and the shipped occupancy hint.
 _DEFAULT_NUM_PERSISTENT = 256
 _DEFAULT_WAVES_PER_EU = 2
+_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
 
 
 @dataclass(frozen=True)
 class Gfx950DenseVariant:
-    """One registered gfx950 dense geometry: tile x persist x wide DMA."""
+    """One registered gfx950 dense candidate: a body (algorithm), and wide DMA
+    for the persistent one."""
 
     variant_id: str
-    tile: str
+    algorithm: str
     persistent: bool
     wide_lds_dma: bool
+    features: frozenset
 
     @property
     def candidate_name(self) -> str:
@@ -52,14 +64,28 @@ class Gfx950DenseVariant:
         return f"gfx950_dense_{self.variant_id}"
 
 
-# Frozen catalog. Wide DMA is persist-only.
 GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
-    Gfx950DenseVariant("grid_default", "default", False, False),
-    Gfx950DenseVariant("persist_default", "default", True, False),
-    Gfx950DenseVariant("persist_widedma_default", "default", True, True),
-    Gfx950DenseVariant("grid_bm128", "bm128", False, False),
-    Gfx950DenseVariant("persist_bm128", "bm128", True, False),
-    Gfx950DenseVariant("persist_widedma_bm128", "bm128", True, True),
+    Gfx950DenseVariant(
+        "grid",
+        DENSE_GRID_ALGORITHM,
+        persistent=False,
+        wide_lds_dma=False,
+        features=_FEATURES | {"causal_bottom_right"},
+    ),
+    Gfx950DenseVariant(
+        "persist",
+        DENSE_PERSIST_ALGORITHM,
+        persistent=True,
+        wide_lds_dma=False,
+        features=_FEATURES,
+    ),
+    Gfx950DenseVariant(
+        "persist_widedma",
+        DENSE_PERSIST_ALGORITHM,
+        persistent=True,
+        wide_lds_dma=True,
+        features=_FEATURES,
+    ),
 )
 GFX950_DENSE_VARIANT_BY_NAME = {v.candidate_name: v for v in GFX950_DENSE_VARIANTS}
 GFX950_DENSE_VARIANT_BY_SPEC_ID = {v.spec_id: v for v in GFX950_DENSE_VARIANTS}
@@ -78,12 +104,29 @@ def _ragged_self_attention(
     )
 
 
+def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
+    """``ragged`` for the tile the knobs choose: non-tile-multiple
+    self-attention lengths take the on-chip ragged path."""
+    block_m = int(knobs.get("block_m", base.block_m))
+    block_n = int(knobs.get("block_n", base.block_n))
+    ragged = _ragged_self_attention(
+        int(base.seqlen_q),
+        int(base.seqlen_kv),
+        block_m,
+        block_n,
+        moving_bottom_right=bool(base.causal_bottom_right),
+    )
+    return {"ragged": ragged}
+
+
 def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     """The variant's default ``Gfx950AttentionDenseSpec`` for ``req``.
 
-    Tile, persist, and wide DMA come from the frozen variant; every other
-    tuning field is at its shipped default and is varied by the knob space.
-    Non-tile-multiple self-attention lengths use the on-chip ragged path.
+    Persist and wide DMA come from the variant; the tile and every other
+    tuning field start at the shipped default and are varied by the knob space.
+    Wide DMA cannot take the ragged path, so where the default tile would be
+    ragged it starts at the first registered tile that is not (its ``block_m``
+    is then resolved per problem and recorded).
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx950.attention_dense import (
@@ -96,7 +139,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
         )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
-    geometry = DENSE_TILE_GEOMETRIES[variant.tile]
+    geometry = DENSE_TILE_GEOMETRIES[_DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
@@ -109,6 +152,17 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     ragged = _ragged_self_attention(
         sq, sk, bm, bn, moving_bottom_right=moving_bottom_right
     )
+    if ragged and variant.wide_lds_dma:
+        for tile in DENSE_TILE_GEOMETRIES.values():
+            if not _ragged_self_attention(
+                sq,
+                sk,
+                int(tile["block_m"]),
+                int(tile["block_n"]),
+                moving_bottom_right=moving_bottom_right,
+            ):
+                bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
+                break
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -142,19 +196,19 @@ def _supports(spec, *, arch):
 def _make_gfx950_attention_dense_candidate(
     variant: Gfx950DenseVariant,
 ) -> KernelCandidate:
-    """One gfx950 dense variant. Opt-in: selected only by its ``spec_id``."""
+    """One gfx950 dense variant. Opt-in: selected only by its ``algorithm`` and
+    ``spec_id``."""
     return make_dense_candidate(
         arch="gfx950",
         name=variant.candidate_name,
         spec_id=variant.spec_id,
         variant_id=variant.variant_id,
+        algorithm=variant.algorithm,
         base_spec=lambda req: _base_spec(req, variant),
         supports=_supports,
-        # Only frozen grid variants implement a moving bottom-right diagonal.
-        features=frozenset(
-            {"causal", "sliding_window", "sinks"}
-            | ({"causal_bottom_right"} if not variant.persistent else set())
-        ),
+        features=variant.features,
+        recorded=frozenset({"block_m"}) if variant.wide_lds_dma else frozenset(),
+        derived=_derived,
     )
 
 

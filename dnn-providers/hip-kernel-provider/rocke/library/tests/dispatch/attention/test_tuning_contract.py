@@ -38,16 +38,13 @@ def _check(test, prefixes, requests, **kwargs):
 
 
 class TestAttentionTuningContract(unittest.TestCase):
-    def test_gfx950_dense_variants(self):
+    def test_gfx950_dense_candidates(self):
         _check(
             self,
             [
-                "attention_gfx950_dense_grid_default",
-                "attention_gfx950_dense_persist_default",
-                "attention_gfx950_dense_persist_widedma_default",
-                "attention_gfx950_dense_grid_bm128",
-                "attention_gfx950_dense_persist_bm128",
-                "attention_gfx950_dense_persist_widedma_bm128",
+                "attention_gfx950_dense_grid",
+                "attention_gfx950_dense_persist",
+                "attention_gfx950_dense_persist_widedma",
             ],
             [_req()],
             other_requests=[_req(batch=2, seqlen_q=4096, seqlen_k=4096)],

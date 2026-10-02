@@ -123,7 +123,7 @@ class TestReviewFollowups(unittest.TestCase):
             au.gfx942_4warp_launch_grid(_problem(pinned)),
         )
 
-    def test_pinned_gfx950_dense_spec_is_its_variant_default(self):
+    def test_pinned_gfx950_dense_spec_is_its_candidate_default(self):
         req = _req(
             arch="gfx950",
             nhead_q=16,
@@ -133,8 +133,8 @@ class TestReviewFollowups(unittest.TestCase):
             hdim_q=64,
             hdim_v=64,
         )
-        spec = attention_tuning_spec(req, "gfx950_dense_grid_bm128").kernel_spec
-        self.assertEqual(spec.block_m, 128)
+        spec = attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
+        self.assertEqual((spec.block_m, spec.block_n), (256, 64))
         self.assertFalse(spec.persistent)
 
     def test_gfx942_dense_binding_rejects_paged_block_tables(self):

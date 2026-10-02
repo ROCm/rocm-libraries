@@ -166,7 +166,7 @@ class TestRegistrySplit(unittest.TestCase):
 
     def test_dense_select_spec_returns_an_attention_tuning_spec(self):
         candidate = ATTENTION_EXECUTION_REGISTRY.get(
-            "attention_gfx950_dense_persist_widedma_default"
+            "attention_gfx950_dense_persist_widedma"
         )
         req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)

@@ -10,6 +10,9 @@ from dataclasses import replace
 from itertools import islice
 
 from dispatch.attention import (
+    DENSE_ALGORITHM,
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
     AttentionRequest,
     attention_candidates,
     attention_execution_candidates,
@@ -511,6 +514,9 @@ def _dense_request(**kw):
     return AttentionRequest(**base)
 
 
+_DENSE_ALGORITHMS = (DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM)
+
+
 def _dense_combos(req, level="production", limit=0, **kw):
     """Registered dense ``(candidate, spec)`` pairs for ``req.arch``, through the
     same entry point the combo-sweep bench uses."""
@@ -522,7 +528,7 @@ def _dense_combos(req, level="production", limit=0, **kw):
             sweep_level=level,
             **kw,
         )
-        if candidate.algorithm == "attention_dense"
+        if candidate.algorithm in _DENSE_ALGORITHMS
     )
     return tuple(islice(combos, limit) if limit else combos)
 
@@ -623,7 +629,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
     def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
         req = _dense_request()
         grouped = _by_candidate(_dense_combos(req))
-        self.assertEqual(len(grouped), 6, sorted(grouped))
+        self.assertEqual(len(grouped), 3, sorted(grouped))
         for name, (candidate, specs) in grouped.items():
             with self.subTest(candidate=name):
                 probe = replace(
@@ -638,6 +644,22 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
                     ok, why = supports_attention_dense(spec.kernel_spec, arch="gfx950")
                     self.assertTrue(ok, (spec.kernel_name(), why))
 
+    def test_production_gives_each_query_tile_its_own_pass(self):
+        """``block_m`` is crossed with the other knobs, so the 128-row tile
+        gets the same one-knob-at-a-time coverage as the default tile."""
+        grouped = _by_candidate(_dense_combos(_dense_request()))
+        for name, (_c, specs) in grouped.items():
+            with self.subTest(candidate=name):
+                by_tile = {}
+                for spec in specs:
+                    if spec.kernel_spec.block_n == 64:
+                        by_tile.setdefault(spec.kernel_spec.block_m, set()).update(
+                            set(dict(spec.knobs)) - {"block_m"}
+                        )
+                self.assertEqual(set(by_tile), {128, 256})
+                self.assertTrue(by_tile[256])
+                self.assertEqual(by_tile[128], by_tile[256])
+
     def test_causal_only_knobs_are_not_offered_without_causal(self):
         changed = set()
         req = _dense_request(mask_type=0)
@@ -650,7 +672,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
 
     def test_num_persistent_policies_reach_every_persistent_decode(self):
         grouped = _by_candidate(_dense_combos(_dense_request()))
-        _candidate, specs = grouped["attention_gfx950_dense_persist_default"]
+        _candidate, specs = grouped["attention_gfx950_dense_persist"]
         kernels = [spec.kernel_spec for spec in specs]
         self.assertEqual(
             {k.resolved_persist_decode for k in kernels},
@@ -665,7 +687,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
     def test_redundant_settings_are_pruned(self):
         """A setting that compiles to the default is dropped by
         canonicalization, so it can never mint a second id."""
-        req, spec_id = _dense_request(), "gfx950_dense_grid_default"
+        req, spec_id = _dense_request(), "gfx950_dense_grid"
         default = attention_tuning_spec(req, spec_id)
         base = default.kernel_spec
 
@@ -678,6 +700,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
             dict(iglp_mode=base.resolved_iglp_mode()),
             dict(interleave=True),  # the grid body never reads it
             dict(persist_decode="hkv_major"),
+            dict(block_m=base.block_m, block_n=base.block_n),
         )
         for knobs in restated:
             with self.subTest(**knobs):
@@ -730,11 +753,11 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
 
     def test_tuning_ids_replay_through_dispatch(self):
         """A dense config is served by pinning ``spec_id`` + tuning id, like a
-        unified tuning geometry; ``auto`` is the variant's default spec."""
+        unified tuning geometry; ``auto`` is the candidate's default spec."""
         req = _dense_request()
-        spec_id = "gfx950_dense_persist_widedma_bm128"
+        spec_id = "gfx950_dense_persist_widedma"
         grouped = _by_candidate(_dense_combos(req))
-        _c, specs = grouped["attention_gfx950_dense_persist_widedma_bm128"]
+        _c, specs = grouped["attention_gfx950_dense_persist_widedma"]
         self.assertEqual(attention_tuning_spec(req, spec_id), specs[0])
         for spec in specs[:: max(1, len(specs) // 8)]:
             with self.subTest(tuning_id=spec.tuning_id):
@@ -743,9 +766,11 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
                 )
         wpe = {s.kernel_spec.waves_per_eu for s in specs}
         self.assertGreater(len(wpe), 1)  # WPE is a knob, not a request field
+        tiles = {s.kernel_spec.block_m for s in specs}
+        self.assertEqual(tiles, {128, 256})  # so is the tile
 
-    def test_unpinned_requests_never_select_a_dense_variant(self):
-        for algorithm in ("auto", "attention_dense"):
+    def test_unpinned_requests_never_select_a_dense_candidate(self):
+        for algorithm in ("auto", DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM):
             with self.subTest(algorithm=algorithm):
                 req = _dense_request(algorithm=algorithm)
                 if algorithm == "auto":
@@ -774,7 +799,7 @@ def gfx942_dense_spec(req):
 
 class TestGfx942DenseTuningSpace(unittest.TestCase):
     """The gfx942 dense kernel's knobs on the same machinery. gfx942 registers
-    one dense candidate, so its geometry is swept rather than fixed by a variant."""
+    one dense candidate, so persistence is a knob there alongside the tile."""
 
     def test_every_dense_spec_field_is_classified(self):
         _assert_dense_fields_classified(self, "gfx942", Gfx942AttentionDenseSpec)
