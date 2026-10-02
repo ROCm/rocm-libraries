@@ -21,7 +21,7 @@ import math
 import sys
 from pathlib import Path
 
-from Tensile import SingleSolution as SS
+from . import SingleSolution as SS
 
 
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
@@ -81,7 +81,7 @@ def _modeledParameters(request, candidate):
     """Translate model outputs into Tensile units without changing their meaning."""
     if request.get("modeled_contract") is None:
         return {}
-    from Tensile.Common.DataType import DataType
+    from .Common.DataType import DataType
 
     modeled = candidate["modeled"]
     mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
@@ -131,7 +131,7 @@ def _modeledTransportRejection(request, candidate):
 def _modeledRejection(solution, request, candidate):
     if request.get("modeled_contract") is None:
         return None
-    from Tensile.Common import state
+    from .Common import state
 
     expected = {name: value for name, value in candidate["parameters"].items()
                 if name in ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB")}
@@ -319,7 +319,7 @@ def _configuration(request, candidate):
     problemType = _problemType(request)
     final = [{"ProblemSizes": [{"Exact": exact}]}]
     if problemType.get("UseBias"):
-        from Tensile.SolutionStructs.Problem import ProblemType
+        from .SolutionStructs.Problem import ProblemType
 
         # BenchmarkProcess validates its argument lists even though this path
         # only derives a solution. Use the normal problem type's bias whitelist.
@@ -370,9 +370,9 @@ def _select(request, configPath, derive, ranking=None):
     A ``ranking`` from _Ranking continues after the candidate it last accepted,
     and after its first acceptance returns None once no candidate is left.
     """
-    from Tensile.Common import state
-    from Tensile.Common.GlobalParameters import defaultSolution
-    from Tensile.SolutionStructs.Validators.ProblemSizes import problemSizeRejection
+    from .Common import state
+    from .Common.GlobalParameters import defaultSolution
+    from .SolutionStructs.Validators.ProblemSizes import problemSizeRejection
     import yaml
 
     ranking = _Ranking() if ranking is None else ranking

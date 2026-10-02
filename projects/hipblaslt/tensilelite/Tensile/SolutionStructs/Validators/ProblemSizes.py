@@ -9,7 +9,7 @@ module evaluates the subset available without device buffers or runtime state.
 The host runtime must still evaluate the complete predicate tree before launch.
 """
 
-from Tensile.Contractions import ProblemPredicate, ProblemType
+from ...Contractions import ProblemPredicate, ProblemType
 
 
 def problemSizeRejection(solution, sizes, strides, tensorSizes=None):

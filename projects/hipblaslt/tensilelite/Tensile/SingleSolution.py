@@ -27,7 +27,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from Tensile import __version__
+from . import __version__
 
 
 class SingleSolutionError(RuntimeError):
@@ -107,7 +107,7 @@ def _parameterDict(value, location):
 
 def _singleConfig(config, source):
     """Bound Groups before BenchmarkProcess can eagerly expand them."""
-    from Tensile.BenchmarkStructs import _groupedParameterValueOptions
+    from .BenchmarkStructs import _groupedParameterValueOptions
 
     if not isinstance(config, dict):
         raise SingleSolutionConfigError(f"{source}: expected a YAML mapping")
@@ -185,7 +185,7 @@ def _singleConfig(config, source):
 
 
 def _target(architecture, globalsConfig):
-    from Tensile.Common.Architectures import (
+    from .Common.Architectures import (
         architectureMap,
         baseArchName,
         compilerTargetOf,
@@ -251,8 +251,8 @@ def _helperDescriptions(helpers):
 def _deriveSingleSolution(config, source, architecture, toolchain, debug, isaInfoMap,
                           *, strictErrors=False):
     """Shared singleton derivation; no source emission, compilation, or benchmark."""
-    from Tensile.BenchmarkStructs import BenchmarkProcess, constructLazyForkPermutations
-    from Tensile.BenchmarkProblems import _generate_single_solution
+    from .BenchmarkStructs import BenchmarkProcess, constructLazyForkPermutations
+    from .BenchmarkProblems import _generate_single_solution
 
     problem, group, _ = _singleConfig(config, source)
     try:
@@ -295,26 +295,26 @@ def _build(
     sourceOnly=False,
     _selection=None,
 ):
-    from Tensile import LibraryIO
-    from Tensile.Common import getVerbosity, setVerbosity, state
-    from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-    from Tensile.Common.GlobalParameters import (
+    from . import LibraryIO
+    from .Common import getVerbosity, setVerbosity, state
+    from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+    from .Common.GlobalParameters import (
         assignGlobalParameters,
         globalParameters,
         restoreDefaultGlobalParameters,
     )
-    from Tensile.Common.Types import makeDebugConfig
-    from Tensile.Common.ValidParameters import validParameters
-    from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionLibrary import MasterSolutionLibrary
-    from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
-    from Tensile.TensileCreateLibrary.Run import writeSolutionsAndKernels
-    from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
-    from Tensile.Toolchain.Component import Assembler
-    from Tensile.Toolchain.Source import makeSourceToolchain
-    from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
-    from Tensile.resources import copy_static_headers
+    from .Common.Types import makeDebugConfig
+    from .Common.ValidParameters import validParameters
+    from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
+    from .KernelWriterAssembly import KernelWriterAssembly
+    from .SolutionLibrary import MasterSolutionLibrary
+    from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+    from .TensileCreateLibrary.Run import writeSolutionsAndKernels
+    from .Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
+    from .Toolchain.Component import Assembler
+    from .Toolchain.Source import makeSourceToolchain
+    from .Toolchain.Validators import ToolchainDefaults, validateToolchain
+    from .resources import copy_static_headers
 
     config = LibraryIO.read(str(configPath)) if _selection is None else _selection[0]
     _, _, globalsConfig = _singleConfig(config, configPath)
