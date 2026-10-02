@@ -652,7 +652,13 @@ defaultBenchmarkCommonParameters = [
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
     {"HalfPLR": [0]},
-    {"TDMIterateMode": [0]}
+    {"TDMIterateMode": [0]},
+    # StinkyTofu scheduling knobs. Sentinels keep the backend heuristic so
+    # existing kernels do not change until a YAML fork sets a concrete value.
+    {"ClusterBarrierRule3SignalLeadCycles": [-1]},
+    {"DsReadThrottleLatency": [-1]},
+    {"DsReadPerWmma": [-1]},
+    {"DsReadDrainLatency": [0]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

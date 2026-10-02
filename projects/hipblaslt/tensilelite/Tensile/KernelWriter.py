@@ -70,7 +70,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
-  SW_INSTRUCTION_PREFETCH_AUTO
+  SW_INSTRUCTION_PREFETCH_AUTO, stinkySchedulingKnobUnset
 from .SolutionStructs.Naming import getKernelNameMin
 from .Toolchain.Component import Assembler
 
@@ -7187,6 +7187,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                # SchedulingKnobHeuristics logs an optimistic ds-read
                                # throttle from it; DsReadThrottleLatency is unchanged.
                                "UnrollLoopCopies": int(self.states.unrollLoopCopies),
+                               # YAML-tunable StinkyTofu scheduling knobs. Sentinels
+                               # leave SchedulingKnobHeuristics / dynamic drain in place.
+                               "ClusterBarrierRule3SignalLeadCycles": int(kernel.get(
+                                   "ClusterBarrierRule3SignalLeadCycles",
+                                   stinkySchedulingKnobUnset["ClusterBarrierRule3SignalLeadCycles"])),
+                               "DsReadThrottleLatency": int(kernel.get(
+                                   "DsReadThrottleLatency",
+                                   stinkySchedulingKnobUnset["DsReadThrottleLatency"])),
+                               "DsReadPerWmma": int(kernel.get(
+                                   "DsReadPerWmma",
+                                   stinkySchedulingKnobUnset["DsReadPerWmma"])),
+                               "DsReadDrainLatency": int(kernel.get(
+                                   "DsReadDrainLatency",
+                                   stinkySchedulingKnobUnset["DsReadDrainLatency"])),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
                                "EnableSwInstructionPrefetchAbs": swpAbsEnable,
