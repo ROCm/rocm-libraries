@@ -331,6 +331,20 @@ function(create_device_library)
          ${_codegen_sources}
          "${_codegen_dir}/Tensile/bin/TensileLogic")
 
+    # ninja only compares mtimes of inputs that still exist, so a *removed* file
+    # leaves the stamp clean (nothing is newer), as does a file added with an
+    # older mtime. CONFIGURE_DEPENDS keeps the list accurate but ninja never acts
+    # on membership alone. Depend on a sorted manifest of the list as well: it is
+    # rewritten only when the set changes, and that rewrite dirties the stamp.
+    # No list(SORT) needed: file(GLOB_RECURSE) orders results lexicographically,
+    # so the manifest is byte-stable for an unchanged set.
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
+    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
+    # file(CONFIGURE) rewrites only when the content differs. file(WRITE) would
+    # bump the mtime on every reconfigure and force a needless full rebuild.
+    file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
+    list(APPEND _codegen_dependencies "${_manifest}")
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
