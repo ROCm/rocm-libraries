@@ -450,15 +450,16 @@ ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
     LARFT_GRAM_SUM adds the chunks in a fixed order (so that the result is deterministic) into F. **/
 template <int BS, int NPT, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(BS) larft_gram_partial(const I rows,
-                                                                const I k,
-                                                                U VA,
-                                                                const rocblas_stride shiftV,
-                                                                const I ldv,
-                                                                const rocblas_stride strideV,
-                                                                T* P,
-                                                                const rocblas_stride strideP)
+                                                               const I k,
+                                                               U VA,
+                                                               const rocblas_stride shiftV,
+                                                               const I ldv,
+                                                               const rocblas_stride strideV,
+                                                               T* P,
+                                                               const rocblas_stride strideP)
 {
     constexpr int LDSE = 2048; // entries of the tile in shared memory (32 KB for complex double)
+    static_assert(LDSE >= LARFT_SPLITK_MAXK, "a row of V2 must fit in the tile");
     __shared__ T tile[LDSE];
 
     const I b = hipBlockIdx_y;
@@ -550,7 +551,8 @@ ROCSOLVER_KERNEL void larft_gram_sum(const I k,
 }
 
 /** LARFT_SPLITK returns whether larft computes V2^H V2 with larft_gram_partial (forward,
-    column-wise, k <= 128, at least LARFT_SPLITK_MIN rows in V2), and the number of chunks. **/
+    column-wise, k <= LARFT_SPLITK_MAXK, at least LARFT_SPLITK_MIN rows in V2), and the number
+    of chunks. **/
 template <typename I>
 inline bool larft_splitk(const rocblas_direct direct,
                          const rocblas_storev storev,
@@ -559,7 +561,7 @@ inline bool larft_splitk(const rocblas_direct direct,
                          I* nchunks = nullptr)
 {
     const bool use = direct == rocblas_forward_direction && storev == rocblas_column_wise
-        && k <= 128 && n - k >= I(LARFT_SPLITK_MIN);
+        && k <= I(LARFT_SPLITK_MAXK) && n - k >= I(LARFT_SPLITK_MIN);
     if(nchunks)
         *nchunks = use ? (n - k - 1) / I(LARFT_SPLITK_ROWS) + 1 : 0;
     return use;
@@ -586,12 +588,15 @@ void rocsolver_larft_getMemorySize(const I n,
     *size_scalars = sizeof(T) * 3;
 
     // size of re-usable workspace (and of the partial products of larft_gram_partial, in the
-    // forward column-wise case with many rows; the size grows with n and k)
+    // forward column-wise case with many rows). Callers may size the workspace once and then
+    // call larft with fewer rows or columns, so cover any call with at most n rows and k
+    // columns: at most LARFT_SPLITK_MAXK columns and n - 1 rows in V2.
     *size_work = sizeof(T) * k * batch_count;
-    if(k <= 128 && n - k >= I(LARFT_SPLITK_MIN))
+    if(n - 1 >= I(LARFT_SPLITK_MIN))
     {
-        const size_t nchunks = (n - k - 1) / I(LARFT_SPLITK_ROWS) + 1;
-        *size_work = std::max(*size_work, sizeof(T) * nchunks * k * k * batch_count);
+        const size_t ks = std::min(k, I(LARFT_SPLITK_MAXK));
+        const size_t nchunks = (n - 2) / I(LARFT_SPLITK_ROWS) + 1;
+        *size_work = std::max(*size_work, sizeof(T) * nchunks * ks * ks * batch_count);
     }
 
     // size of array of pointers to workspace
@@ -696,9 +701,14 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
             constexpr int GNPT = 16;
             const I npg = (k * (k - 1) / 2 - 1) / (GBS * GNPT) + 1;
             ROCSOLVER_LAUNCH_KERNEL((larft_gram_partial<GBS, GNPT, T>),
-                                    dim3(nchunks, batch_count, npg), dim3(GBS), 0, stream, u2_n, k,
-                                    V, shiftV + idx2D(u1_n, 0, ldv), ldv, strideV, work, strideP);
-            ROCSOLVER_LAUNCH_KERNEL((larft_gram_sum<T>), dim3((k * k - 1) / 256 + 1, batch_count),
+                                    dim3(static_cast<uint32_t>(nchunks),
+                                         static_cast<uint32_t>(batch_count),
+                                         static_cast<uint32_t>(npg)),
+                                    dim3(GBS), 0, stream, u2_n, k, V, shiftV + idx2D(u1_n, 0, ldv),
+                                    ldv, strideV, work, strideP);
+            ROCSOLVER_LAUNCH_KERNEL((larft_gram_sum<T>),
+                                    dim3(static_cast<uint32_t>((k * k - 1) / 256 + 1),
+                                         static_cast<uint32_t>(batch_count)),
                                     dim3(256), 0, stream, k, nchunks, (const T*)work, strideP, F,
                                     ldf, strideF);
         }

@@ -78,7 +78,7 @@ ROCSOLVER_KERNEL void orgqr_panel_w(const I jb,
     // W(r, c) = sum_{l = r..c} T(r, l) conj(V1(c, l)), V1(c, c) = 1
     T w = 0;
     for(I l = r; l <= c; l++)
-        w += Tb[r + l * ldt] * (l == c ? T(1) : orgqr_conj(V[c + l * lda]));
+        w += Tb[r + l * ldt] * (l == c ? T(1) : orgqr_conj(V[idx2D(c, l, lda)]));
     W[b * strideW + r + c * jb] = w;
 }
 
@@ -102,7 +102,7 @@ ROCSOLVER_KERNEL void orgqr_panel_top(const I jb,
     // Q1(r, c) = delta(r, c) - sum_{l = 0..min(r, c)} V1(r, l) W(l, c), V1(r, r) = 1
     T q = (r == c) ? T(1) : T(0);
     for(I l = 0; l <= std::min(r, c); l++)
-        q -= (l == r ? T(1) : V[r + l * lda]) * Wb[l + c * jb];
+        q -= (l == r ? T(1) : V[idx2D(r, l, lda)]) * Wb[l + c * jb];
     Q1[b * strideW + r + c * jb] = q;
 }
 
@@ -124,7 +124,8 @@ ROCSOLVER_KERNEL void orgqr_panel_store(const I mj,
     if(r >= mj || c >= jb)
         return;
     T* V = load_ptr_batch<T>(A, b, shiftV, strideA);
-    V[r + c * lda] = (r < jb) ? Q1[b * strideW + r + c * jb] : -P[b * strideW + (r - jb) + c * ldp];
+    V[idx2D(r, c, lda)]
+        = (r < jb) ? Q1[b * strideW + r + c * jb] : -P[b * strideW + idx2D(r - jb, c, ldp)];
 }
 
 /** ORGQR_PANEL_WORK_SIZE: entries of the workspace of the columns of a block (per matrix): W and
@@ -133,6 +134,17 @@ template <typename I>
 inline size_t orgqr_panel_work_size(const I m, const I jb)
 {
     return size_t(2) * jb * jb + size_t(m) * jb;
+}
+
+/** ORGQR_PANEL_PTRS: in the batched case, the product V2 W reads V2 through the array of pointers
+    A, and W and V2 W through arrays of pointers built in the workspace (2 * batch_count pointers,
+    more than larf needs in workArr). They follow the blocks of all the matrices. **/
+template <typename T>
+inline T** orgqr_panel_ptrs(T* work, const size_t panel_entries)
+{
+    const size_t a = alignof(T*);
+    const size_t bytes = ((panel_entries * sizeof(T) + a - 1) / a) * a;
+    return reinterpret_cast<T**>(reinterpret_cast<char*>(work) + bytes);
 }
 
 // (the blocked algorithm starts with a block of xxGQx_BLOCKSIZE columns that must end within the
@@ -188,6 +200,8 @@ void rocsolver_orgqr_ungqr_getMemorySize(const rocblas_int m,
 
         // the columns of each block (see orgqr_panel_w)
         temp = sizeof(T) * orgqr_panel_work_size(m, jb) * batch_count;
+        if(BATCHED)
+            temp += sizeof(T*) * (2 * batch_count + 1); // (see orgqr_panel_ptrs)
         *size_Abyx_tmptr = *size_Abyx_tmptr >= temp ? *size_Abyx_tmptr : temp;
 
         // size of temporary array for triangular factor
@@ -304,8 +318,10 @@ rocblas_status rocsolver_orgqr_ungqr_template(rocblas_handle handle,
                 const T one = T(1);
                 const T zero = T(0);
                 rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, mj - jb, jb,
-                               jb, &one, A, shiftA + idx2D(j + jb, j, lda), lda, strideA, Wb, 0,
-                               jb, strideQ, &zero, P, 0, m, strideQ, batch_count, workArr);
+                               jb, &one, A, shiftA + idx2D(j + jb, j, lda), lda, strideA, Wb, 0, jb,
+                               strideQ, &zero, P, 0, m, strideQ, batch_count,
+                               BATCHED ? orgqr_panel_ptrs(Abyx_tmptr, strideQ * batch_count)
+                                       : workArr);
             }
             ROCSOLVER_LAUNCH_KERNEL((orgqr_panel_store<T, I>),
                                     dim3((mj - 1) / BS2 + 1, bx, batch_count), dim3(BS2, BS2), 0,
