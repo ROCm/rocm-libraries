@@ -131,10 +131,11 @@ struct FailedLoad
 
 // A bundle that failed to load for an ordinary reason (malformed graph JSON, an
 // absent sweep metadata block with no golden data to validate, a bad sweep
-// case, ...). Malformed metadata is not one of these: it is a FailedLoad. No test is registered for it — only the diagnostic message to
+// case, ...). No test is registered for it — only the diagnostic message to
 // log. Kept distinct from FailedLoad so only the failures that would otherwise
 // shrink the suite behind our backs turn it red; every other load failure keeps
-// the original log-and-skip behavior.
+// the original log-and-skip behavior. Malformed metadata is never a SkippedLoad:
+// it throws BundleMetadataError and becomes a FailedLoad.
 struct SkippedLoad
 {
     std::string message;
@@ -329,19 +330,25 @@ inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
 inline std::optional<std::vector<LoadedBundle>>
     loadDiscoveredBundles(const DiscoveredBundleSet& discovered, bool countFound, bool countClaims)
 {
-    // Load all bundles eagerly, once, at registration time. A bundle that
-    // fails to load because of the runtime-pass-by-value invariant (see
-    // RuntimePassByValueInvariantError in IntegrationTestBundle.hpp) gets a
-    // synthetic failing test registered in its place — see
-    // detail::registerSyntheticBundleTest() — instead of just an ERROR log, so
-    // that specific contradiction turns the suite red rather than quietly
-    // shrinking it. The same applies to golden blobs whose metadata is missing or
-    // unparseable (LoadError::UNVALIDATABLE_GOLDEN_DATA): pulling the data must never
-    // delete a test. Every other load failure (malformed JSON, invalid graph, a bad
-    // sweep case, a wrong-size blob) keeps the original behavior: logged and
-    // skipped, no test registered. A bundle
-    // whose .bin blobs are absent loads with tensors == nullopt; its test
-    // registers normally and the harness SKIPs it at run time.
+    // Load all bundles eagerly, once, at registration time; classifyBundle()
+    // decides each outcome. Three failures get a synthetic failing test
+    // registered in place of the bundle (see detail::registerSyntheticBundleTest())
+    // instead of just an ERROR log, so they turn the suite red rather than
+    // quietly shrinking it:
+    //   - the runtime-pass-by-value invariant (RuntimePassByValueInvariantError
+    //     in IntegrationTestBundle.hpp);
+    //   - malformed metadata (BundleMetadataError: not an object, a bad
+    //     format_version or enforcement_level, a non-numeric inputs key, or a
+    //     .meta.json that is unreadable or not valid JSON). Red even for
+    //     graph-only bundles: a metadata typo must never delete a test;
+    //   - golden blobs with no metadata at all
+    //     (LoadError::UNVALIDATABLE_GOLDEN_DATA): pulling the data must never
+    //     delete a test.
+    // Every other load failure (malformed graph JSON, invalid graph, a bad sweep
+    // case, a wrong-size blob) keeps the original behavior: logged and skipped,
+    // no test registered. A bundle whose .bin blobs are absent loads with
+    // tensors == nullopt; its test registers normally and the harness SKIPs it
+    // at run time.
     std::vector<LoadedBundle> bundles;
     bundles.reserve(discovered.bundles.size());
 
