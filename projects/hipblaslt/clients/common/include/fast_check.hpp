@@ -102,9 +102,17 @@ bool fast_check_supported_type(hipDataType type, std::string* why = nullptr);
 // The parts of the check that depend only on the inputs: probe vectors and the expected probe
 // sums of D. Compute once and pass to fast_check_result for every solution run on the same
 // inputs. problem.D supplies only its type here; its data is not read.
+//
+// It also bounds, from the actual inputs, the largest magnitude the GPU's accumulator can hold
+// at any point: max_partial bounds any partial sum over any subset of K, the form split-K,
+// Stream-K and every summation order take, and max_result bounds every finished element of D
+// before rounding to D's type. When either reaches the range the compute type holds exactly,
+// the result depends on summation order and status fails before any kernel runs.
 struct FastCheckExpected
 {
-    FastCheckResult                    status; // fails on unsupported or non-integer inputs
+    FastCheckResult status; // fails on unsupported, non-integer or inexact inputs
+    double          max_partial = 0; // bounds |partial sum|, scaled by alpha and scale or not
+    double          max_result  = 0; // bounds |element of D| before rounding to D's type
     std::vector<uint64_t>              row_probe; // r, length N
     std::vector<uint64_t>              col_probe; // t, length M
     std::vector<int64_t>               scale; // scaleAlpha_vector, or ones; length M

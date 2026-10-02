@@ -3636,6 +3636,153 @@ Tests:
   unit_check: 0
   fast_check: 1
 
+###############################################################################
+# fast_check exactness at large K (AIHPBLAS-5016).
+#
+# integer_exact results stay exact only while every partial sum and every result
+# fits what the accumulator holds exactly (2^24 for f32). Before any kernel runs,
+# fast_check bounds both from the actual inputs, over any subset of K, the form
+# split-K and Stream-K partials take, and refuses a configuration that reaches
+# that limit. D's own type is the tighter limit at large K (bf16 holds integers
+# exactly only up to 256), and fast_check models the rounding into D, but each
+# result outside D's exact range costs a K-length dot product on the host. Two
+# patterns keep results small at any K:
+#   ternary:  A, B and C in {-1, 0, 1}.
+#   sparse_k: A is zero except at 16 K indices spread over K, plus the last, so
+#             every |result| is at most 140 while the kernel still reads all of K.
+###############################################################################
+
+# Both patterns checked against the host reference, which also uses them.
+# Runtime on gfx90a: 32 cases, about 3 s.
+- name: matmul_fast_check_patterns_match_unit_check
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: [ ternary, sparse_k ]
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# K = 28672 and 32768 with 16-bit outputs, every transpose. Under ternary a
+# typical |result| grows like the square root of K, about 250 here: inside f16's
+# exact range (2048) but not bf16's (256), where most results would round and
+# each would cost a host dot product. bf16 uses sparse_k only.
+# Runtime on gfx90a: 24 cases (f16 and bf16), about 11 s.
+- name: matmul_fast_check_large_k_f16
+  category: nightly
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+    - { M: 2053, N: 1027, K: 28672 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: [ ternary, sparse_k ]
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_large_k_bf16
+  category: nightly
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+    - { M: 2053, N: 1027, K: 28672 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# int8 accumulates in int32, so the standard pattern stays exact at large K with
+# an int32 output. An int8 output saturates at 127, and fast_check recomputes
+# each saturated element on the host, so the int8 output uses sparse_k.
+# Runtime on gfx90a: 8 cases, about 3 s.
+- name: matmul_fast_check_large_k_int8
+  category: nightly
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_large_k_int8_dst_int8
+  category: nightly
+  function:
+    matmul: *i8_precision_dst_i8
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# fp8 inputs at large K, with f32, bf16 and fp8 outputs. FNUZ fp8 on gfx942,
+# OCP fp8 on gfx950.
+- name: matmul_fast_check_large_k_fp8_fnuz
+  category: nightly
+  function:
+    matmul:
+      - *f8_fnuz_precision_dst_fp32
+      - *f8_fnuz_precision_dst_bf16
+      - *f8_fnuz_precision_dst_f8_fnuz
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_large_k_fp8
+  category: nightly
+  function:
+    matmul:
+      - *f8_precision_dst_fp32
+      - *f8_precision_dst_bf16
+      - *f8_precision_dst_f8
+  matrix_size:
+    - { M: 1031, N: 519, K: 32768 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
 - name: matmul_96_complex
   category: pre_checkin
   function:

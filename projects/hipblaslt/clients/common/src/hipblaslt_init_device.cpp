@@ -29,9 +29,10 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <array>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <array>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -72,6 +73,39 @@ void set_ulp_positive_init_state(bool enable)
 bool ulp_positive_init()
 {
     return ulp_positive_init_state();
+}
+
+namespace
+{
+    struct IntegerExactPatternState
+    {
+        IntegerExactPattern pattern    = IntegerExactPattern::standard;
+        size_t              K          = 0;
+        bool                a_k_is_row = false;
+    };
+    IntegerExactPatternState& integer_exact_pattern_state()
+    {
+        static IntegerExactPatternState state;
+        return state;
+    }
+}
+
+bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern)
+{
+    if(!name || !*name || !strcmp(name, "standard"))
+        pattern = IntegerExactPattern::standard;
+    else if(!strcmp(name, "ternary"))
+        pattern = IntegerExactPattern::ternary;
+    else if(!strcmp(name, "sparse_k"))
+        pattern = IntegerExactPattern::sparse_k;
+    else
+        return false;
+    return true;
+}
+
+void set_integer_exact_pattern_state(IntegerExactPattern pattern, size_t K, bool a_k_is_row)
+{
+    integer_exact_pattern_state() = {pattern, K, a_k_is_row};
 }
 
 template <typename T, typename F>
@@ -187,6 +221,13 @@ template <>
 __host__ __device__ int8_t small_int_positive<int8_t>(size_t idx)
 {
     return static_cast<int8_t>(pseudo_random_device(idx) % 3);
+}
+
+/*! \brief  generate a random number in range [-1, 0, 1] for the ternary integer_exact pattern */
+template <typename T>
+__host__ __device__ T small_int_ternary(size_t idx)
+{
+    return T(float(int(pseudo_random_device(idx) % 3) - 1));
 }
 
 #if defined(HIPBLASLT_USE_FP4)
@@ -986,8 +1027,46 @@ void hipblaslt_init_device(ABC_dims                 abc,
             });
             break;
         case hipblaslt_initialization::integer_exact:
-            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]
-            if(abc == ABC_dims::A || abc == ABC_dims::C)
+        {
+            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]. The ternary and sparse_k
+            // patterns are described with IntegerExactPattern in hipblaslt_init.hpp.
+            const IntegerExactPatternState pat = integer_exact_pattern_state();
+            if(pat.pattern == IntegerExactPattern::ternary)
+            {
+                // B's PRNG offset keeps its values independent of A's.
+                const size_t offset = abc == ABC_dims::B ? 1000003 : 0;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           stride,
+                           batch_count,
+                           [offset] __host__ __device__(size_t idx) -> T {
+                               return small_int_ternary<T>(idx + offset);
+                           });
+            }
+            else if(abc == ABC_dims::A && pat.pattern == IntegerExactPattern::sparse_k)
+            {
+                size_t       effective_stride = stride ? std::max(stride, lda * N) : lda * N;
+                const size_t K                = pat.K;
+                const bool   k_is_row         = pat.a_k_is_row;
+                fill_batch(
+                    A,
+                    M,
+                    N,
+                    lda,
+                    effective_stride,
+                    batch_count,
+                    [effective_stride, lda, K, k_is_row] __host__ __device__(size_t idx) -> T {
+                        auto in_batch = idx % effective_stride;
+                        auto j        = in_batch / lda;
+                        auto i        = in_batch - j * lda;
+                        return integer_exact_sparse_k_kept(k_is_row ? i : j, K)
+                                   ? small_int_positive<T>(idx)
+                                   : T(0);
+                    });
+            }
+            else if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
                 fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return small_int_positive<T>(idx);
@@ -1012,6 +1091,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
             }
             break;
+        }
         case hipblaslt_initialization::fp16_accumulator_probe:
             if constexpr(std::is_same_v<T, hipblasLtHalf>)
             {
