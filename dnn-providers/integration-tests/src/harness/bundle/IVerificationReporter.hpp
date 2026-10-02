@@ -149,7 +149,7 @@ public:
     void recordVerifier(const std::string& bundlePath, Verifier verifier) override
     {
         verifierTally().add(verifier);
-        std::cout << "[ VERIFIER ] " << toString(verifier) << ": " << bundlePath << std::endl;
+        std::cout << "[ VERIFIER ] " << toString(verifier) << ": " << bundlePath << '\n';
     }
 };
 
