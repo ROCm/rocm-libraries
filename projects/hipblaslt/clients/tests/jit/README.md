@@ -48,7 +48,8 @@ generated bundles, and a `summary.json`. A failed case makes the driver return
 a failing status.
 
 The default run tests the disabled configuration last. It reconfigures the same
-build directory with `HIPBLASLT_ENABLE_JIT=OFF`, rebuilds the disabled consumer,
+build directory with `HIPBLASLT_ENABLE_JIT=OFF` and
+`HIPBLASLT_JIT_ENABLE_HIPKITTENS=OFF`, rebuilds the disabled consumer,
 the heuristic test and the benchmark, and checks that the extension API links
 and that `HIPBLASLT_JIT` is ignored with one warning. Restore `ON` and rebuild
 before continuing enabled development. To run a focused enabled check without
@@ -109,6 +110,10 @@ to replay, publish or rebuild it.
 | `heuristic-debug-file` | `HIPBLASLT_JIT_DEBUG_FILE` with `%i` writes one owner-only file per process and nothing to stderr; two processes sharing one file leave every line intact; a file that cannot be opened prints one warning and the lines go to stderr |
 | `heuristic-debug-killed-child` | In modes 2 and 1, a generator killed with SIGKILL once it starts kernel source generation: the relayed events up to that point, `child.exit` with signal 9, a failed `generation.end`, one `generate failed` report, nothing published, the scratch directory kept with the generator's event file, and in mode 1 the pre-tuned results |
 | `bench` | `HIPBLASLT_JIT=2` through the benchmark's ordinary heuristic query: genuine Origami ranking and first-valid selection, unchanged numerical checks, compilation outside timing, publication and reuse, and one error report when ranking or validation cannot produce a recipe |
+| `hipkittens-backend` | The [HipKittens backend](../../../JIT.md#hipkittens-backend) without running a kernel: header discovery through the default location, `Options::headers` and `HIPBLASLT_JIT_HIPKITTENS_PATH`, and one "not available" failure for an empty directory, a missing, edited or linked-out file, and another commit's manifest; one solution for its domain and `NotSupported` for each excluded transpose, type, scalar, batch, size, stride, epilogue and a tensor over 4 GiB; `TargetMismatch` for gfx942; the entry loaded by the Tensile loader with the stride predicates; and the comgr-built kernel's 36-byte arguments, 160,000-byte LDS, 242 VGPRs and no spills |
+| `hipkittens-gemm` | On gfx950, `getJitAlgo` through `hipblasLtMatmul` and `Gemm` for seven shapes from 256×256×128 to 8192³, compared with a CPU reference, with canaries around D and repeated runs identical; the shapes the kernel computes wrongly rejected before launch; base offsets of 2 and 16 bytes; and `getLibraryAlgos` publishing an index that a second process runs with JIT off |
+| `hipkittens-bench` | A published HipKittens index run by `hipblaslt-bench --algo_method index --verify` through `hipblasLtMatmul` with JIT off |
+| `hipkittens-install` | `cmake --install --component runtime` installs the headers, their manifest and the license; a HipKittens index published and run against the installed library finds the installed headers, and after the installation is moved it runs again with the same index |
 | `disabled-api` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library; the disabled benchmark and heuristic test print one warning that `HIPBLASLT_JIT` is ignored, and the heuristic results match a run without it |
 
 The C/C++ routes use `hipblasLtMatmul` and `hipblaslt_ext::Gemm`. They are distinct
@@ -232,6 +237,32 @@ runs the `jit-gemm-gfx1250` route. The driver passes
 `jit_gemm_request_gfx1250.json` from `tensilelite/Tensile/Tests/unit/test_data`:
 the request hipBLASLt writes for its default FP16 problem, with the Origami
 ranking of the six best gfx950 candidates retargeted to gfx1250.
+
+## HipKittens backend tests
+
+`hipblaslt-jit-hipkittens-test` exists only in a build configured with
+`-DHIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` and gfx950 among `GPU_TARGETS`; the
+`jit` preset sets the option. The driver's `hipkittens-*` cases print SKIP
+when the binary is absent or the device is not gfx950. The binary takes a mode:
+
+| Mode | Runs |
+| --- | --- |
+| `host <fresh-scratch>` | The `hipkittens-backend` checks; needs a device but runs no kernel |
+| `gpu` | The `hipkittens-gemm` checks on gfx950; requires `HIPBLASLT_JIT_LIBRARY_PATH` |
+| `library` | Prints the headers it uses, publishes one solution, runs it, and prints `INDEX <n>`; requires `HIPBLASLT_JIT_LIBRARY_PATH` |
+
+`test_hipkittens_bench.py <test> <hipblaslt-bench> <fresh-output>` runs the
+`hipkittens-bench` case, and
+`test_hipkittens_install.py <build> <test> <fresh-output>` the
+`hipkittens-install` case:
+
+```bash
+cmake --build "$project_build" --parallel 8 --target hipblaslt-jit-hipkittens-test hipblaslt-bench
+"$project_python" .github/scripts/test_hipblaslt_jit.py \
+  --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/hipkittens" \
+  --case hipkittens-backend --case hipkittens-gemm --case hipkittens-bench \
+  --case hipkittens-install
+```
 
 ## Algorithm error-status tests
 

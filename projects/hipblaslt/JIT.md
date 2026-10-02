@@ -66,6 +66,9 @@ binaries, which link against the shared library: `jit::makeGemmRequest`,
 `jit::getJitAlgo`, `jit::getGemmAlgo`, `jit::getLibraryAlgos`,
 `jit::tensilelite::createBackend`, `jit::tensilelite::getGemmAlgo`,
 `jit::mock::createBackend`, and the `jit::detail::GemmRequest` request type.
+Builds with the [HipKittens backend](#hipkittens-backend) also export
+`jit::hipkittens::createBackend` and `jit::hipkittens::detail::resources` from
+the internal `hipblaslt-jit-hipkittens.hpp`.
 No installed header declares them, and they are not a supported API.
 
 For these entry points, Python, compiler, recipe and output paths belong to the
@@ -104,6 +107,7 @@ adaptation token, not a general owning executable object.
 | Heuristic integration | `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`. `hipblaslt-jit-tensilelite.cpp` configures one Jit per process from the built-in tool paths, with the JIT solution library as its store, and `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates what it lacks. `hipblaslt-jit-report.cpp` prints failures. `rocblaslt_auxiliary.cpp` calls them from both heuristic queries, and `tensile_host.cpp` from `hipblasLtMatmul` without an algorithm. See [heuristic integration](#heuristic-integration). |
 | Benchmark | `hipblaslt-bench` has no JIT option. With `HIPBLASLT_JIT=2`, its ordinary heuristic query returns generated solutions, so selection and compilation finish before correctness checks and execution timing. See the [benchmark guide](clients/bench/README.jit.md). |
 | Mock backend | `hipblaslt-jit-mock-backend.cpp` replays one source bundle that `Tensile.SingleSolution` or `Tensile.JitGemm` wrote, without Python or a subprocess, for problems and devices that the replayed solution's predicates accept; the comgr builder still builds it. Its faults fail generation, replace the main kernel assembly with an invalid instruction so the build fails, or abort the process. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`; it is not a production backend. |
+| HipKittens backend | `hipblaslt-jit-hipkittens.cpp`, built only with `HIPBLASLT_JIT_ENABLE_HIPKITTENS`. It returns the HIP source of a HipKittens kernel, with the HipKittens headers and its library entry, for problems in its domain; the comgr builder compiles it and the Tensile loader loads it. Tests reach it through `jit::hipkittens::createBackend`; heuristic queries do not use it. See [HipKittens backend](#hipkittens-backend). |
 
 The host runs the Python generator as a child process: POSIX spawning on Linux
 and `CreateProcessW` on Windows. With `--source-only`, `Tensile.SingleSolution`
@@ -227,6 +231,79 @@ copies. Generated bundles do not depend on a prebuilt hipBLASLt device library.
 The `jit` CMake preset enables this feature for a new configuration. The
 [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
 validation commands.
+
+### HipKittens backend
+
+`HIPBLASLT_JIT_ENABLE_HIPKITTENS` (default `OFF`, requires
+`HIPBLASLT_ENABLE_JIT`) builds a backend that serves
+[HipKittens](https://github.com/HazyResearch/HipKittens) kernels. The `jit`
+preset and the JIT CI workflow turn it on; other presets leave it off, and a
+build with it off installs nothing for HipKittens. When no `GPU_TARGETS` entry
+has a HipKittens kernel, configuration prints a warning and builds without the
+backend. Tests create it with `jit::hipkittens::createBackend` and use it
+through `getJitAlgo` and `getLibraryAlgos`; heuristic queries and
+`HIPBLASLT_JIT` do not use it.
+
+**Kernel.** `library/src/amd_detail/hipkittens/` holds one variant,
+`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1`: the kernel of the HipKittens
+256x256x64 BF16 GEMM, behind a wrapper that takes `A, B, D, m, n, k` (36 bytes
+of kernel arguments) and passes B and A to the kernel in that order: the
+kernel's row-major `C = a·bᵀ` is then hipBLASLt's column-major `D = Aᵀ·B`.
+It uses 160,000 bytes of LDS and 242 VGPRs, and launches
+512 threads per 256x256 output tile. It serves gfx950 problems with:
+
+- `opA = T` and `opB = N`, BF16 A, B, C and D, and FP32 compute;
+- alpha 1 on the host, beta 0, and no bias, activation or alpha vector;
+- one batch, M and N multiples of 256, and K a multiple of 128 (the kernel
+  computes wrong results when K is an odd multiple of 64);
+- packed leading dimensions (`lda = ldb = K`, `ldd = M`) and tensors under
+  4 GiB.
+
+Other problems get `NotSupported`, and other devices `TargetMismatch`.
+
+**Entries.** At build time `make_entries.py` runs TensileLite to write each
+variant's one-solution library entry, a custom kernel with the variant's
+ProblemType and size predicates, and compiles it into the library. For each
+request the backend adds predicates that pin the packed strides, because JIT
+library rows match only sizes, and checks the request against the entry before
+returning the solution. The comgr builder compiles the source with the
+variant's flags (`-std=c++20 -DKITTENS_CDNA4 -w`) after its own.
+
+**Cache key.** The backend identifier is `hipkittens`, and its version is a
+hash of the header manifest and of each variant's name, source, entry and
+flags. Its solutions are published in their own key directory, and
+`getAlgosFromIndex` resolves them with JIT off, as for any backend.
+
+**Headers.** Configuration downloads HipKittens at commit `be1c918`, pinned by
+the archive's SHA-256; for an offline build, set
+`FETCHCONTENT_SOURCE_DIR_HIPKITTENS` to an unpacked archive of that commit. The
+build stages the headers the kernel includes (`include/kittens.cuh`,
+`include/pyutils/util.cuh` and `include/cdna4/`, 70 files) and a
+`manifest.json` of their sizes and SHA-256 hashes next to the built library, in
+`hipblaslt/hipkittens/be1c91841b81/`. The runtime component installs them in
+`<libdir>/hipblaslt/hipkittens/be1c91841b81/`. The backend uses the first of
+these directories that exists:
+
+1. `jit::hipkittens::Options::headers`;
+2. `HIPBLASLT_JIT_HIPKITTENS_PATH`;
+3. `hipblaslt/hipkittens/be1c91841b81` next to the loaded `libhipblaslt`, so a
+   moved installation still finds its headers;
+4. the configured installation directory.
+
+Its `manifest.json` must equal the manifest compiled into the library, and each
+listed file must be a regular file inside the directory with the listed size
+and hash. The ROCm HIP headers must exist at
+`<ROCm path>/include/hip/hip_runtime.h`. Otherwise `createBackend` returns
+`HIPBLAS_STATUS_INVALID_VALUE` and its diagnostic names the cause, for example:
+
+```text
+JIT backend HipKittens not available: headers not found at /opt/rocm/lib/hipblaslt/hipkittens/be1c91841b81; set HIPBLASLT_JIT_HIPKITTENS_PATH
+```
+
+**License.** HipKittens is MIT-licensed, Copyright (c) 2024 HazyResearch. The
+runtime component installs its license as
+`share/doc/hipblaslt/third-party/hipkittens/LICENSE`, and the kernel source
+names the HipKittens commit and file that its kernel comes from.
 
 ### Algorithm lifetime and failures
 
@@ -738,7 +815,7 @@ TensileLite.
 | Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| HipKittens, other backends | Future extension points behind the same interface. A HipKittens backend is planned: it instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It is not implemented. |
+| HipKittens, other backends | Extension points behind the same interface. The HipKittens backend instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It serves one gfx950 kernel through the internal entry points (see [HipKittens backend](#hipkittens-backend)); heuristic queries do not use it yet. |
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
@@ -751,8 +828,8 @@ TensileLite.
 Jit is the component name; the design does not introduce a `JitInterface`
 type name. Jit passes the algorithm parameters and gfx target to the selected
 backend and receives solutions back. Backend implementations are backend
-specific and independent of one another: TensileLite is live, HipKittens is a
-future extension point, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
+specific and independent of one another: TensileLite is live, HipKittens serves
+the internal entry points, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
 does not depend on TensileLite.
 
 Backends generate code at run time. Prebuilt or handwritten assembly kernels are
@@ -933,6 +1010,6 @@ The following work sits outside the seven steps and remains future:
 | --- | --- |
 | Exact epilogue specialization | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
-| HipKittens and other backends | Implement the backend interface. A HipKittens backend is planned: run-time instantiation through comgr, opt-in, in developer builds only. It is not implemented. |
+| HipKittens and other backends | Implement the backend interface. The [HipKittens backend](#hipkittens-backend) serves one gfx950 BF16 GEMM kernel through the internal entry points. Serving it from heuristic queries next to TensileLite, more kernels and more targets remain future. |
 | KFA metadata convergence | Complete the KFA metadata that JIT generators emit, then prove argument, launch, helper, workspace and synchronization equivalence before generated kernels share the custom-kernel dispatch path. This reuses the KFA path; it does not make the JIT load prebuilt kernels. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |
