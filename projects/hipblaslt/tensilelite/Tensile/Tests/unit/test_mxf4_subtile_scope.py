@@ -13,6 +13,8 @@ that failure mode is invisible in a test that only drives MXF4 configs.
 These are pure-predicate tests: no emit, no GPU, no toolchain.
 """
 
+import itertools
+
 import pytest
 
 from Tensile.Common.DataType import DataType
@@ -139,6 +141,36 @@ def test_tile_scope_requires_the_type_scope():
     assert plsinEarlyStoreTile(outOfScope) is False
     assert plsinBlockSchedTile(outOfScope) is False
     assert plsinStagingEligible(outOfScope) is False
+
+
+def test_block_scheduling_stays_inside_the_mxf4_path():
+    """Every tile predicate is a subset of the type/subtile gate.
+
+    The block-scheduled tail, its staged store and the finer store grid are all
+    reached through ``plsinStagingEligible``, never through
+    ``isMxf4SubtilePath`` directly, so no call site checks the containment. The
+    barrier and wait-accounting changes are scoped the other way, on
+    ``isMxf4SubtilePath`` itself, and the two only agree as long as the tile
+    predicates stay inside it. Loosening one -- dropping the type check from
+    ``plsinEarlyStoreTile``, say, or widening the tile bound past it -- would
+    start building the block schedule for kernels none of this was measured on,
+    and the first sign of it would be a library diff rather than a failing test.
+    """
+    tiles = (64, 128, 192, 256, 320)
+    for dtA, dtB, dtD, subtile, mt0, mt1, plsin in itertools.product(
+            (FP4, BF16), (FP4, BF16), (BF16, FP32, FP16), (True, False),
+            tiles, tiles, (True, False)):
+        kernel = kern(dtA=dtA, dtB=dtB, dtD=dtD, subtile=subtile,
+                      mt0=mt0, mt1=mt1, plsin=plsin)
+        early = plsinEarlyStoreTile(kernel)
+        blockSched = plsinBlockSchedTile(kernel)
+        if early:
+            assert isMxf4SubtilePath(kernel), \
+                f"early-store work escaped the MXF4 path: {kernel}"
+        if blockSched:
+            assert early and isMxf4SubtilePath(kernel), \
+                f"block scheduling escaped the MXF4 path: {kernel}"
+        assert plsinStagingEligible(kernel) is blockSched
 
 
 @pytest.mark.parametrize("kernel", [
