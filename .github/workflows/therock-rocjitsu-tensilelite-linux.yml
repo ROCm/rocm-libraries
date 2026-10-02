@@ -68,7 +68,8 @@ jobs:
         with:
           repository: ROCm/rocm-systems
           # Keep the emulator fixed so retries compare the same implementation.
-          ref: e4826ad8d82ccbcf703649981a5b13e9c83d3d77
+          # Pinned at ROCm/rocm-systems#12515 (reduce VM and wave dispatch overhead).
+          ref: bbd1525f379c1ed3dd7f4d1b8bd77d3802c556ac
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
