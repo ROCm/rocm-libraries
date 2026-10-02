@@ -218,11 +218,6 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 64>
 {
     using ArchType = gfx125_t;
 
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
-
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
@@ -249,11 +244,6 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 64>
     : WmmaTraitsBase<gfx12_t, bf8_t, bf8_t, float, 64>
 {
     using ArchType = gfx125_t;
-
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -282,11 +272,6 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 64>
 {
     using ArchType = gfx125_t;
 
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
-
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
@@ -313,11 +298,6 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 64>
     : WmmaTraitsBase<gfx12_t, bf8_t, fp8_t, float, 64>
 {
     using ArchType = gfx125_t;
-
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -346,11 +326,6 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, fp16_t, 16, 16, 64>
 {
     using ArchType = gfx125_t;
 
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
-
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
@@ -378,11 +353,6 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, fp16_t, 16, 16, 64>
 {
     using ArchType = gfx125_t;
 
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
-
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
@@ -408,11 +378,6 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, fp16_t, 16, 16, 64>
     : WmmaTraitsBase<gfx12_t, bf8_t, fp8_t, fp16_t, 64>
 {
     using ArchType = gfx125_t;
-
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -440,11 +405,6 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, fp16_t, 16, 16, 64>
     : WmmaTraitsBase<gfx12_t, bf8_t, bf8_t, fp16_t, 64>
 {
     using ArchType = gfx125_t;
-
-    static constexpr index_t kAK1PerLane = 16;
-    static constexpr index_t kAK0PerLane = 2;
-    static constexpr index_t kBK1PerLane = 16;
-    static constexpr index_t kBK0PerLane = 2;
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
