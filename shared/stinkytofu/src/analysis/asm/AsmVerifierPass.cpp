@@ -122,6 +122,24 @@ static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
     return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
 }
 
+// GLOBAL/FLAT addressing: the vaddr field is declared as a 64-bit address, which
+// is its width when saddr is null ("off"). With a register saddr, vaddr is
+// instead a 32-bit offset from that 64-bit base.
+static bool isSaddrOffsetVaddr(const StinkyInstruction* inst, const HwInstDesc* hwDesc,
+                               const HwInstDesc::OperandFieldDesc& field, unsigned actualWidth) {
+    if (field.isDest || field.encodeField != EncodeField::vaddr || actualWidth != 1) return false;
+    const auto& srcRegs = inst->getSrcRegs();
+    unsigned srcIdx = 0;
+    for (const auto& f : hwDesc->operandFields) {
+        if (f.isDest) continue;
+        if (f.encodeField == EncodeField::saddr)
+            return srcIdx < srcRegs.size() &&
+                   srcRegs[srcIdx].dataType == StinkyRegister::Type::Register;
+        srcIdx++;
+    }
+    return false;
+}
+
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                        const AsmVerifierConfig& config) {
     const HwInstDesc* hwDesc = inst->getHwInstDesc();
@@ -164,8 +182,10 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
             bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(hwDesc, isDest, operandIndex,
                                                                   expectedWidth, reg.reg.num);
+            bool saddrOffset = isSaddrOffsetVaddr(inst, hwDesc, field, reg.reg.num);
 
-            if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
+            if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth &&
+                !saddrOffset) {
                 errors << "Instruction '";
                 inst->dump(errors);
                 errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
