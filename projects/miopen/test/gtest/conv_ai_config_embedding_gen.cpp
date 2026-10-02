@@ -44,8 +44,6 @@
 
 #include <gtest/gtest.h>
 
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
-
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
@@ -59,6 +57,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 
 namespace {
 
@@ -174,7 +174,7 @@ void BuildTableForSolver(const std::string& arch,
 
     std::vector<int> indexes;
     std::vector<std::vector<std::string>> heuristic_kernels;
-    miopen::solver::FillHeuristicKernels(all_kernels, indexes, heuristic_kernels);
+    miopen::solver::conv::FillHeuristicKernels(all_kernels, indexes, heuristic_kernels);
     ASSERT_FALSE(heuristic_kernels.empty());
 
     const auto& model = GetCandidateSelectionModel(arch, spec.solver_name);
