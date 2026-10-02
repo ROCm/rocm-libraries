@@ -21,8 +21,9 @@ hipBLASLt runs a GEMM with a kernel from its pre-tuned library, so a problem
 that the library serves poorly, or not at all, has no better kernel available.
 JIT generation produces kernels for a problem when they are needed. The `Jit`
 component defines the stages of that generation and the order in which they
-run. Its interfaces are implemented; no backend, builder, loader or store is
-implemented yet, and nothing in hipBLASLt calls `Jit`.
+run. Its interfaces and a comgr code-object builder are implemented; no
+backend, loader or store is implemented yet, and nothing in hipBLASLt calls
+`Jit`.
 
 ## Current behavior
 
@@ -61,8 +62,11 @@ plugin application binary interface (ABI).
 
 ### Build
 
-`HIPBLASLT_ENABLE_JIT` is disabled by default. It requires the host library. A
-disabled build compiles none of the JIT sources. From the repository root:
+`HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles none of
+the JIT sources. The enabled build requires the host library, ROCm and ROCm's
+`amd_comgr` CMake package, which only a JIT build links. comgr compiles helper
+sources against the host's C and C++ standard library headers, so those must
+be installed where JIT runs. From the repository root:
 
 ```bash
 project_root="$PWD"
@@ -77,3 +81,40 @@ cmake --build "$project_build" --parallel
 The `jit` CMake preset enables this feature for a new configuration. The
 [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
 validation commands.
+
+### Building generated sources
+
+Generators emit assembly or HIP source plus metadata only; they do not assemble,
+link or bundle. `makeComgrBuilder()` returns the `CodeObjectBuilder` that builds
+code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
+`hipblaslt-jit-code-object.cpp`). It uses three comgr actions:
+
+- Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. A unit's
+  `.amdgcn_target` directive must name the device's processor and only
+  features the device has; it is then rewritten to the device's full target
+  ID. Assembly units that declare different wavefront sizes are rejected.
+- HIP helper source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
+  `--rocm-path` and a content-derived `-cuid`, so helper objects link together.
+  The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
+  runtime.
+- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the main kernel
+  and helper relocatables into one code object per solution, with
+  `-Xlinker --build-id=sha1`.
+
+The generator and the builder use the same code-object version, which
+`GenerationRequest::codeObjectVersion` carries (4 by default). The output is a
+raw, uncompressed executable code object. comgr cannot bundle or compress it,
+and `hipModuleLoadData` accepts raw executable and linkable format (ELF)
+objects. A generator needs no offload bundler.
+
+After linking, the builder reads the code object's metadata and checks that its
+instruction set architecture (ISA) is the device's and that it defines the
+solution's main kernel. A build failure has the build stage. Its message
+carries the first error line of the comgr log, and the builder appends the full
+log to `comgr.log` in the request's scratch directory and names that file in
+the message.
+
+comgr's own on-disk cache (`~/.cache/comgr`) keeps its default: hipBLASLt never
+sets `AMD_COMGR_CACHE`. That cache holds the results of comgr actions for every
+comgr user in the process, such as hipRTC, and comgr reads its setting once per
+process.

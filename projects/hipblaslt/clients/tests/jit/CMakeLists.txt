@@ -40,4 +40,18 @@ target_link_libraries(hipblaslt-jit-component-test PRIVATE
     roc::hipblaslt hip::host Threads::Threads)
 hipblaslt_jit_test(jit-component jit-cpu
     $<TARGET_FILE:hipblaslt-jit-component-test> "${hipblaslt_jit_scratch}/component")
-hipblaslt_jit_stage(hipblaslt-jit-component-test)
+
+# Compiles the comgr builder directly; runs without a GPU unless --gpu is given.
+add_executable(hipblaslt-jit-code-object-test
+    code_object_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp")
+target_include_directories(hipblaslt-jit-code-object-test PRIVATE
+    "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_link_libraries(hipblaslt-jit-code-object-test PRIVATE amd_comgr hip::host Threads::Threads)
+hipblaslt_jit_test(jit-code-object jit-cpu
+    $<TARGET_FILE:hipblaslt-jit-code-object-test>
+    --target gfx950 --out "${hipblaslt_jit_scratch}/code-object")
+hipblaslt_jit_test(jit-code-object-gpu jit-gpu
+    $<TARGET_FILE:hipblaslt-jit-code-object-test>
+    --gpu --out "${hipblaslt_jit_scratch}/code-object-gpu")
+hipblaslt_jit_stage(hipblaslt-jit-component-test hipblaslt-jit-code-object-test)

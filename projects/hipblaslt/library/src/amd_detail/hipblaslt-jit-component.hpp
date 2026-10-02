@@ -153,6 +153,10 @@ namespace hipblaslt_jit
             build(const GeneratedSolution&, const GenerationRequest&, BuiltSolution&) const = 0;
     };
 
+    // Builds every unit of a solution with comgr and links them into one code
+    // object for GenerationRequest::target.
+    std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
+
     class SolutionLoader
     {
     public:
