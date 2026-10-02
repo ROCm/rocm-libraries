@@ -4,13 +4,20 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "HipdnnMiopenHandle.hpp"
 
 namespace miopen_plugin
 {
+
+/// @brief Each MIOpen engine's declared L1 models: ranking metric to the UUID of the UHD
+/// that answers in it. A deployer installs a model by publishing a UHD with that id.
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS;
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.
