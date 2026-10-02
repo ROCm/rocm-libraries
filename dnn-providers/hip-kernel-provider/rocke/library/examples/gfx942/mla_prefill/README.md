@@ -28,6 +28,10 @@
   - [Kept — read-path transpose for the PV operand](#kept--read-path-transpose-for-the-pv-operand)
   - [Kept — two workgroups per CU](#kept--two-workgroups-per-cu)
   - [Rejected in the second pass](#rejected-in-the-second-pass)
+- [Third pass — counter-guided levers](#third-pass--counter-guided-levers)
+  - [Reading the counters](#reading-the-counters)
+  - [Kept — transposed score and PV](#kept--transposed-score-and-pv)
+  - [Kept — the smaller VALU levers](#kept--the-smaller-valu-levers)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -156,6 +160,11 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 21 | Score A operand held in registers | **Kept** | `qa_lds` dead in the loop; measured improvement on every shape |
 | 22 | `r_kv_tile` 64 → 32 with a gated absorb | **Kept** | pool 31488 B and VGPR 228: two workgroups per CU; large gain on every shape |
 | 23 | Read-path transpose in the epilogue | Rejected | neutral at two workgroups per CU |
+| 24 | No AGPRs (`agpr_alloc = (0, 0)`) | **Kept** | the rescale no longer copies accumulators out of and back into AGPRs; VGPR fell; measured improvement on every shape |
+| 25 | `exp2_fast` in the online softmax | **Kept** | one `v_exp_f32` per exp, no range-reduction guard; measured improvement on every shape |
+| 26 | Transposed score and PV (`Sᵀ`, `accᵀ`) | **Kept** | P stays in registers, one barrier per tile fewer, row reduce mostly in-lane; large gain on every shape |
+| 27 | Buffer loads for the k-tile stage | **Kept** | page base in the SGPR offset; no per-tile address math; measured improvement on every shape |
+| 28 | Unmasked main loop, masked tail loop | **Kept** | per-element masks only on the last tile or two; small gain, none clearly slower |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -496,6 +505,60 @@ slot. The static result is a 31488 B pool and 228 VGPR: two workgroups per CU.
 - **Epilogue read-path transpose (23).** Neutral once a second workgroup hides
   the epilogue.
 
+## Third pass — counter-guided levers
+
+At two workgroups per CU a single-CU trace stops ranking levers reliably, so
+levers 24–28 were chosen from PMC counters and the k-loop's instruction mix
+instead, on the same part and shape set as the second pass.
+
+### Reading the counters
+
+```bash
+rocprofv3 --pmc SQ_WAVE_CYCLES SQ_BUSY_CYCLES SQ_WAIT_ANY SQ_WAIT_INST_LDS \
+                SQ_ACTIVE_INST_LDS SQ_ACTIVE_INST_VALU SQ_ACTIVE_INST_ANY SQ_INSTS_LDS \
+  --kernel-include-regex mla_prefill_fwd -- <bench command>
+rocprofv3 --pmc SQ_LDS_BANK_CONFLICT SQ_LDS_IDX_ACTIVE SQ_VALU_MFMA_BUSY_CYCLES \
+                SQ_BUSY_CU_CYCLES SQ_INSTS_MFMA SQ_INSTS_VALU SQ_INSTS_SALU \
+  --kernel-include-regex mla_prefill_fwd -- <bench command>
+```
+
+`ROCKE_COMGR_LIB` is needed here too (see [Capturing a trace](#capturing-a-trace)).
+They showed the loop issuing many VALU instructions per MFMA, with LDS bank
+conflicts a small share of LDS-active cycles. The instruction mix of the k-loop
+body then said where the VALU went: the accumulator rescale's AGPR round trip,
+the `exp2` range-reduction guard, the 16-lane row reduce, 64-bit addresses for the
+tile loads, and the per-element masks.
+
+### Kept — transposed score and PV
+
+The score GEMM's two operands are swapped, so it produces `Sᵀ` (key x query). In
+that fragment a lane owns one query, so the softmax row reduce is in-lane over the
+lane's four keys plus two cross-lane stages, instead of four stages per row for
+four rows. `P` comes out already laid out as the B operand of the PV GEMM, which is
+also swapped to produce `accᵀ`: `P` never goes through LDS, and the barrier pair
+around it is gone. The rescale by `alpha` becomes lane-local. The epilogue's
+`W_UV` GEMM is transposed the same way, so each lane normalizes its own query and
+writes four consecutive output columns at once.
+
+The removed `p_lds` had been the small buffer that kept `kv_lds` below the prologue
+peak (see [Kept — two workgroups per CU](#kept--two-workgroups-per-cu)), so the score
+partials move out of `kv_lds` into their own `s_part` buffer and take that role.
+
+### Kept — the smaller VALU levers
+
+- **No AGPRs (24).** Left free, the backend parks the PV accumulators in AGPRs and
+  every per-tile rescale reads them out and writes them back. gfx942 MFMAs use
+  arch VGPRs directly, and the register budget still fits two waves per SIMD.
+- **`exp2_fast` (25).** Both softmax exponents are `<= 0`, so the guard against
+  overflow is dead weight and an underflow to 0 is the right answer.
+- **Buffer loads (27).** The tile stage uses `raw_ptr_buffer_load` with each thread's
+  in-page byte offset computed once outside the loop and the page base, which is
+  uniform across the workgroup, in the SGPR offset.
+- **Loop split (28).** A key tile is fully visible when its last key is below `S_k`
+  and at or below the causal bound of the tile's first query row. Those tiles run
+  in a loop with no per-element masks; the rest run in a masked tail loop that
+  continues from the first loop's results.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -529,10 +592,11 @@ They are not deliverables and their output does not belong in this repository.
   redundancy. But removing it adds a workspace buffer, a second launch and new
   host-visible pointer arguments, which makes it an algorithmic change, not a
   tuning lever. It belongs to its own milestone.
-- **Bank-conflict degree is inferred, not counted.** ATT traces located the
-  conflicted reads (levers 14 and 17) by their wait time; no LDS bank-conflict
-  counter was read.
+- **The buffer-load bound is by design, not tested at scale.** The range check
+  covers each load's in-page offset, not the page base in the SGPR offset, so the
+  reachable cache size is the same 32-bit byte range as the global loads it
+  replaced. No test reaches a cache that large.
 - **Untried next levers.** `block_q = 32` would reuse every key-tile read across
-  two query blocks but needs `qa_lds` staged in halves to stay under 32 KB; the
-  last two `ds_swizzle` reduce stages need a `row_mirror` / `row_half_mirror`
-  DPP op, which is a platform change in both engines.
+  two query blocks but needs `qa_lds` staged in halves and its VGPR cost risks
+  occupancy. The PV operand gather still packs bf16 pairs with `v_perm`; the
+  backend did not form `ds_read_u16_d16` for it, even through `half`.
