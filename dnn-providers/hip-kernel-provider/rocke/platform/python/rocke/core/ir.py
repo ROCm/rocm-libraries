@@ -24,6 +24,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 from dataclasses import dataclass, field
@@ -100,11 +101,28 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same bit values
 # are SC0 (1) and NT (2).
 #
-# Not the same thing as the ``nontemporal=True`` keyword of
-# ``global_load_vN`` / ``global_store_vN``. That keyword emits LLVM
-# ``!nontemporal`` and the backend picks the bits per arch: on gfx942 /
-# gfx950 it sets NT only, i.e. the bits of CACHE_STREAM, NOT NON_TEMPORAL
-# (which also sets SC0).
+# Not the same thing as ``TemporalHint.STREAMING`` on ``global_load_vN`` /
+# ``global_store_vN``. That hint emits LLVM ``!nontemporal`` and the backend
+# picks the bits per arch: on gfx942 / gfx950 it sets NT only, i.e. the bits
+# of CACHE_STREAM, NOT NON_TEMPORAL (which also sets SC0).
+
+
+class TemporalHint(enum.Enum):
+    """Temporal-locality intent for ``global_load_vN`` / ``global_store_vN``.
+
+    A semantic hint, not raw cache bits: the backend chooses the bits per
+    arch. C twin: ``rocke_temporal_hint_t`` in ``rocke/ir.h``.
+    """
+
+    DEFAULT = "default"  # the existing cache policy; IR unchanged
+    STREAMING = "streaming"  # read/written once; lowers to LLVM !nontemporal
+
+
+def _streaming(temporal_hint: TemporalHint) -> bool:
+    """True for STREAMING; any value that is not a TemporalHint is rejected."""
+    if not isinstance(temporal_hint, TemporalHint):
+        raise TypeError(f"temporal_hint must be a TemporalHint, got {temporal_hint!r}")
+    return temporal_hint is TemporalHint.STREAMING
 
 
 # ----- target-neutral MMA metadata ---------------------------------------
@@ -1577,7 +1595,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
-        nontemporal: bool = False,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
@@ -1590,14 +1608,15 @@ class IRBuilder:
         element alignment for 12-byte loads. An explicit alignment is a caller
         guarantee about the address after adding idx.
 
-        ``nontemporal=True`` marks the load as streaming: the lowering emits
-        LLVM ``!nontemporal`` and the AMDGPU backend picks the cache-policy
-        bits per arch. On gfx942 / gfx950 that is the ``nt`` bit only -- the
-        same bits as ``CACHE_STREAM`` on a buffer op, NOT ``NON_TEMPORAL``
-        (which also sets SC0). gfx90a gets GLC + SLC, and gfx12 a TH_NT
-        policy. It is a bool hint rather than a ``coherency=`` value because a
-        plain LLVM ``load`` has no slot for raw cache bits. The attr is
-        recorded only when set, so default loads are unchanged.
+        ``temporal_hint`` states the access's temporal-locality intent.
+        ``TemporalHint.STREAMING`` means the data is read once, so it should
+        not displace reused lines. Today it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_load``) and the AMDGPU backend chooses
+        the cache-policy bits per arch -- on gfx942 / gfx950 the ``nt`` bit
+        (the bits of ``CACHE_STREAM``, NOT ``NON_TEMPORAL``). ``DEFAULT``
+        keeps the existing policy and records nothing, so default loads are
+        unchanged. Any value that is not a ``TemporalHint`` raises
+        ``TypeError``.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
@@ -1629,9 +1648,7 @@ class IRBuilder:
                 align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
             ),
         }
-        if not isinstance(nontemporal, bool):
-            raise TypeError(f"nontemporal must be a bool, got {nontemporal!r}")
-        if nontemporal:
+        if _streaming(temporal_hint):
             attrs["nontemporal"] = True
         return self._op(
             "memref.global_load_vN",
@@ -4198,7 +4215,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
-        nontemporal: bool = False,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> None:
         """Vectorised global store of N consecutive elements.
 
@@ -4208,10 +4225,10 @@ class IRBuilder:
         a single ``store <N x elem>`` and AMDGPU coalesces into one
         ``global_store_dwordxN`` transaction.
 
-        ``nontemporal=True`` marks the store as streaming (LLVM
-        ``!nontemporal``); the attr is recorded only when set. The bits it
-        sets are chosen per arch, as for ``global_load_vN`` -- on gfx942 /
-        gfx950 the ``nt`` bit only, i.e. ``CACHE_STREAM``, NOT ``NON_TEMPORAL``.
+        ``temporal_hint`` as for ``global_load_vN``: ``TemporalHint.STREAMING``
+        means the data is written once; it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_store``) and the backend chooses the
+        bits per arch (gfx942 / gfx950: ``nt``). ``DEFAULT`` records nothing.
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
@@ -4240,9 +4257,7 @@ class IRBuilder:
             "vec": n,
             "align": int(align or (n * elem_bytes)),
         }
-        if not isinstance(nontemporal, bool):
-            raise TypeError(f"nontemporal must be a bool, got {nontemporal!r}")
-        if nontemporal:
+        if _streaming(temporal_hint):
             attrs["nontemporal"] = True
         self._op("memref.global_store_vN", [ptr, idx, value], attrs=attrs)
 

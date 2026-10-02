@@ -565,6 +565,23 @@ typedef struct rocke_inline_asm_opts
     bool convergent_set;
 } rocke_inline_asm_opts_t;
 
+/* Temporal hint for vector global memory ops (Python rocke.core.ir.TemporalHint).
+ * It states intent; the backend picks the cache bits per arch. */
+typedef enum rocke_temporal_hint
+{
+    ROCKE_TEMPORAL_DEFAULT = 0, /* existing cache policy; IR unchanged          */
+    ROCKE_TEMPORAL_STREAMING = 1 /* read/written once: lowers to LLVM !nontemporal */
+} rocke_temporal_hint_t;
+
+/* Options for vector global memory ops (rocke_b_global_load_vN_ex,
+ * rocke_b_global_store_vN_ex, and the io helpers' _ex forms). NULL = all
+ * defaults. Rules: fields are only appended; 0 always means "default"; callers
+ * zero-init ({0}). A new option is a new field here, never a new _ex2 entry. */
+typedef struct rocke_mem_opts
+{
+    rocke_temporal_hint_t temporal_hint;
+} rocke_mem_opts_t;
+
 /* ============================== TYPE SYSTEM ============================== */
 
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
@@ -892,18 +909,20 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n,
                                       int align /* <=0 => default */);
-/* Like rocke_b_global_load_vN but nontemporal != 0 records the
- * `nontemporal=True` attr (Python keyword; lowered to `!nontemporal`). The
- * plain rocke_b_global_load_vN forwards here with nontemporal=0.
- * The backend picks the cache bits per arch: on gfx942 / gfx950 only `nt`,
- * i.e. ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). */
+/* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
+ * and the plain rocke_b_global_load_vN forwards here with NULL.
+ * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
+ * LLVM `!nontemporal`); the backend picks the cache bits per arch: on gfx942 /
+ * gfx950 only `nt`, i.e. ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which
+ * also sets SC0). An out-of-range temporal_hint puts the builder in its error
+ * state (ROCKE_ERR_VALUE). */
 rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,
                                          const rocke_type_t* dtype,
                                          int n,
                                          int align,
-                                         int nontemporal);
+                                         const rocke_mem_opts_t* opts);
 rocke_value_t* rocke_b_global_load_vN_f16(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
@@ -1357,16 +1376,16 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align /* <=0 => default */);
-/* Like rocke_b_global_store_vN but nontemporal != 0 records the
- * `nontemporal=True` attr. The plain form forwards here with 0. Per-arch bits
- * as for rocke_b_global_load_vN_ex (gfx942 / gfx950: `nt` only). */
+/* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
+ * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
+ * (gfx942 / gfx950: `nt` only). */
 void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
                                 rocke_value_t* ptr,
                                 rocke_value_t* idx,
                                 rocke_value_t* value,
                                 int n,
                                 int align,
-                                int nontemporal);
+                                const rocke_mem_opts_t* opts);
 void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* ptr,
                                  rocke_value_t* idx,

@@ -1,15 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/core/test_nontemporal_hip.cpp -- the C++ HIP lowerer's side of the
- * `nontemporal=` flag on global_load_vN / global_store_vN.
+ * tests/core/test_nontemporal_hip.cpp -- the C++ side of the temporal hint
+ * (rocke_mem_opts_t.temporal_hint) on global_load_vN / global_store_vN.
  *
- * With no arguments it self-checks: a flagged op lowers to
- * __builtin_nontemporal_load / __builtin_nontemporal_store, an unflagged one
- * does not, the unaligned memcpy load path does not yet lower the flag
+ * With no arguments it self-checks: a ROCKE_TEMPORAL_STREAMING op lowers to
+ * __builtin_nontemporal_load / __builtin_nontemporal_store, a default one
+ * does not, the unaligned memcpy load path does not yet lower the hint
  * (ROCKE_ERR_NOTIMPL; it still lowers without it), a non-bool attr is rejected
- * rather than coerced, and the io helpers (load_vec, load_vec_as_f32,
- * store_vec) forward the flag to the op they emit.
+ * rather than coerced, an out-of-range hint puts the builder in its error
+ * state, the io helpers' _ex forms (load_vec, load_vec_as_f32, store_vec)
+ * forward the hint to the op they emit, and the original io helper
+ * signatures still build and emit no nontemporal access (HIP or LLVM).
  *
  * With `--hip <case> <arch>` it prints the lowered HIP source of one copy
  * kernel built exactly like tests/core/test_nontemporal_lowering.py's
@@ -20,9 +22,11 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
 
 namespace
@@ -36,6 +40,13 @@ void fail(const char* what, const char* where, int line)
     ++g_failures;
 }
 
+rocke_mem_opts_t hint_opts(bool streaming)
+{
+    rocke_mem_opts_t o = {};
+    o.temporal_hint = streaming ? ROCKE_TEMPORAL_STREAMING : ROCKE_TEMPORAL_DEFAULT;
+    return o;
+}
+
 /* One copy kernel: S -> D, n elements per thread. */
 struct CopyCase
 {
@@ -43,18 +54,18 @@ struct CopyCase
     bool f16; /* false -> bf16 */
     int n;
     int load_align; /* <=0 -> default */
-    int load_nt;
-    int store_nt;
+    bool load_streaming;
+    bool store_streaming;
 };
 
 const CopyCase CASES[] = {
-    {"both", false, 8, 0, 1, 1},
-    {"load", false, 8, 0, 1, 0},
-    {"store", false, 8, 0, 0, 1},
-    {"plain", false, 8, 0, 0, 0},
+    {"both", false, 8, 0, true, true},
+    {"load", false, 8, 0, true, false},
+    {"store", false, 8, 0, false, true},
+    {"plain", false, 8, 0, false, false},
     /* align 2 < 16-byte payload: the memcpy load path. */
-    {"memcpy_nt", true, 8, 2, 1, 0},
-    {"memcpy_plain", true, 8, 2, 0, 0},
+    {"memcpy_nt", true, 8, 2, true, false},
+    {"memcpy_plain", true, 8, 2, false, false},
 };
 
 const CopyCase* find_case(const char* name)
@@ -96,10 +107,12 @@ void build(rocke_ir_builder_t* b, const CopyCase& c, BadAttr bad)
     rocke_value_t* dst = copy_param(b, "D", elem, false);
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, c.n));
-    rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c.n, c.load_align, c.load_nt);
+    const rocke_mem_opts_t load_opts = hint_opts(c.load_streaming);
+    const rocke_mem_opts_t store_opts = hint_opts(c.store_streaming);
+    rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c.n, c.load_align, &load_opts);
     if(bad == BadAttr::load && v && v->op)
         rocke_attr_set_int(b, &v->op->attrs, "nontemporal", 1);
-    rocke_b_global_store_vN_ex(b, dst, off, v, c.n, 0, c.store_nt);
+    rocke_b_global_store_vN_ex(b, dst, off, v, c.n, 0, &store_opts);
     if(bad == BadAttr::store)
     {
         /* The store returns no value; find its op in the entry region. */
@@ -111,6 +124,45 @@ void build(rocke_ir_builder_t* b, const CopyCase& c, BadAttr bad)
     rocke_b_ret(b);
 }
 
+/* Lower a built kernel to HIP; returns the status and fills `hip` on success. */
+rocke_status_t lower_built(rocke_ir_builder_t* b, const char* arch, std::string* hip)
+{
+    if(!rocke_ir_builder_ok(b))
+    {
+        fprintf(stderr, "builder error: %s\n", rocke_ir_builder_error(b));
+        return ROCKE_ERR_VALUE;
+    }
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = arch;
+    const rocke_status_t st = rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out);
+    if(st == ROCKE_OK && hip)
+        hip->assign(rocke_strbuf_cstr(&out));
+    rocke_strbuf_free(&out);
+    return st;
+}
+
+/* Lower a built kernel to LLVM IR; "" on failure. */
+std::string lower_built_llvm(rocke_ir_builder_t* b, const char* arch)
+{
+    std::string ll;
+    if(!rocke_ir_builder_ok(b))
+        return ll;
+    char* text = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = 0;
+    if(rocke_lower_kernel_to_llvm_ex(
+           rocke_ir_builder_kernel(b), ROCKE_LLVM_FLAVOR_AUTO, arch, &text, err, sizeof err)
+           == ROCKE_OK
+       && text)
+        ll.assign(text);
+    else
+        fprintf(stderr, "LLVM lowering failed: %s\n", err);
+    free(text);
+    return ll;
+}
+
 /* Lower one case to HIP; returns the status and fills `hip` on success. */
 rocke_status_t lower(const CopyCase& c, const char* arch, BadAttr bad, std::string* hip)
 {
@@ -118,20 +170,7 @@ rocke_status_t lower(const CopyCase& c, const char* arch, BadAttr bad, std::stri
     if(rocke_ir_builder_init(&b, "nt_copy") != ROCKE_OK)
         return ROCKE_ERR_VALUE;
     build(&b, c, bad);
-    rocke_status_t st = ROCKE_ERR_VALUE;
-    if(rocke_ir_builder_ok(&b))
-    {
-        rocke_strbuf_t out;
-        rocke_strbuf_init(&out, 0);
-        rocke_lower_hip_opts_t opts{};
-        opts.arch = arch;
-        st = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
-        if(st == ROCKE_OK && hip)
-            hip->assign(rocke_strbuf_cstr(&out));
-        rocke_strbuf_free(&out);
-    }
-    else
-        fprintf(stderr, "builder error: %s\n", rocke_ir_builder_error(&b));
+    const rocke_status_t st = lower_built(&b, arch, hip);
     rocke_ir_builder_free(&b);
     return st;
 }
@@ -149,66 +188,148 @@ int count(const std::string& s, const char* needle)
     return k;
 }
 
-/* load_vec -> store_vec, plus a load_vec_as_f32 whose lanes are stored back,
- * each helper flagged by its own bit of `nt` (1 load_vec, 2 load_vec_as_f32,
- * 4 store_vec). Returns the lowered HIP source, or "" on failure. */
-std::string lower_io_helpers(const char* arch, int nt)
+/* load_vec -> store_vec, plus a load_vec_as_f32 whose lanes are stored back.
+ * nt < 0 builds it with the original (opts-less) helper signatures; otherwise
+ * with the _ex forms, each helper STREAMING by its own bit of `nt`
+ * (1 load_vec, 2 load_vec_as_f32, 4 store_vec). Lowers to HIP (llvm=false)
+ * or LLVM IR (llvm=true); returns "" on failure. */
+std::string lower_io_helpers(const char* arch, int nt, bool llvm)
 {
-    std::string hip;
+    std::string text;
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "nt_io") != ROCKE_OK)
-        return hip;
+        return text;
     rocke_value_t* src = copy_param(&b, "S", rocke_bf16(), true);
     rocke_value_t* dst = copy_param(&b, "D", rocke_bf16(), false);
     rocke_value_t* acc = copy_param(&b, "A", rocke_f32(), false);
     rocke_value_t* off = rocke_b_mul(&b, rocke_b_thread_id_x(&b), rocke_b_const_i32(&b, 8));
-    rocke_value_t* v = rocke_b_load_vec(&b, src, off, "bf16", 8, nt & 1);
+    rocke_value_t* v = nullptr;
     rocke_value_t* f[8] = {};
-    if(rocke_b_load_vec_as_f32(&b, src, off, "bf16", 8, (nt >> 1) & 1, f))
-        rocke_b_global_store(&b, acc, off, f[7], 0);
-    rocke_b_store_vec(&b, dst, off, v, 8, (nt >> 2) & 1);
-    rocke_b_ret(&b);
-    if(rocke_ir_builder_ok(&b))
+    int loaded = 0;
+    if(nt < 0)
     {
-        rocke_strbuf_t out;
-        rocke_strbuf_init(&out, 0);
-        rocke_lower_hip_opts_t opts{};
-        opts.arch = arch;
-        if(rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out) == ROCKE_OK)
-            hip.assign(rocke_strbuf_cstr(&out));
-        rocke_strbuf_free(&out);
+        v = rocke_b_load_vec(&b, src, off, "bf16", 8);
+        loaded = rocke_b_load_vec_as_f32(&b, src, off, "bf16", 8, f);
     }
+    else
+    {
+        const rocke_mem_opts_t vec_opts = hint_opts(nt & 1);
+        const rocke_mem_opts_t f32_opts = hint_opts(nt & 2);
+        v = rocke_b_load_vec_ex(&b, src, off, "bf16", 8, &vec_opts);
+        loaded = rocke_b_load_vec_as_f32_ex(&b, src, off, "bf16", 8, f, &f32_opts);
+    }
+    if(loaded)
+        rocke_b_global_store(&b, acc, off, f[7], 0);
+    if(nt < 0)
+        rocke_b_store_vec(&b, dst, off, v, 8);
+    else
+    {
+        const rocke_mem_opts_t store_opts = hint_opts(nt & 4);
+        rocke_b_store_vec_ex(&b, dst, off, v, 8, &store_opts);
+    }
+    rocke_b_ret(&b);
+    if(llvm)
+        text = lower_built_llvm(&b, arch);
+    else if(lower_built(&b, arch, &text) != ROCKE_OK)
+        text.clear();
     rocke_ir_builder_free(&b);
-    return hip;
+    return text;
+}
+
+/* Which builder receives the out-of-range hint. */
+enum class BadHint
+{
+    load_vN,
+    store_vN,
+    load_vec,
+    load_vec_as_f32,
+    store_vec
+};
+
+/* An out-of-range temporal_hint must leave the builder in its error state
+ * (ROCKE_ERR_VALUE), never be treated as streaming. */
+void check_bad_hint(BadHint which, const char* what)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "nt_bad") != ROCKE_OK)
+    {
+        fail("builder init failed", what, __LINE__);
+        return;
+    }
+    rocke_value_t* p = copy_param(&b, "P", rocke_bf16(), false);
+    rocke_value_t* off = rocke_b_thread_id_x(&b);
+    rocke_value_t* v = rocke_b_global_load_vN(&b, p, off, rocke_bf16(), 8, 0);
+    if(!rocke_ir_builder_ok(&b))
+        fail("valid setup load must succeed", what, __LINE__);
+    const int ops_before = rocke_ir_builder_kernel(&b)->body->num_ops;
+    rocke_mem_opts_t bad = {};
+    bad.temporal_hint = static_cast<rocke_temporal_hint_t>(2);
+    rocke_value_t* f[8] = {};
+    /* The engine reports builder errors as the sticky status or as a thrown
+     * ckc::Error, depending on the boundary; accept either, as other tests do. */
+    bool rejected = false;
+    try
+    {
+        bool produced = false;
+        switch(which)
+        {
+        case BadHint::load_vN:
+            produced = rocke_b_global_load_vN_ex(&b, p, off, rocke_bf16(), 8, 0, &bad) != nullptr;
+            break;
+        case BadHint::store_vN:
+            rocke_b_global_store_vN_ex(&b, p, off, v, 8, 0, &bad);
+            break;
+        case BadHint::load_vec:
+            produced = rocke_b_load_vec_ex(&b, p, off, "bf16", 8, &bad) != nullptr;
+            break;
+        case BadHint::load_vec_as_f32:
+            produced = rocke_b_load_vec_as_f32_ex(&b, p, off, "bf16", 8, f, &bad) != 0;
+            break;
+        case BadHint::store_vec:
+            rocke_b_store_vec_ex(&b, p, off, v, 8, &bad);
+            break;
+        }
+        rejected = !produced && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+                   && has(rocke_ir_builder_error(&b), "invalid temporal_hint 2");
+    }
+    catch(const ckc::Error& error)
+    {
+        rejected = error.code() == ROCKE_ERR_VALUE && has(error.what(), "invalid temporal_hint 2");
+    }
+    if(!rejected)
+        fail("out-of-range temporal_hint must be a ROCKE_ERR_VALUE builder error", what, __LINE__);
+    if(rocke_ir_builder_kernel(&b)->body->num_ops != ops_before)
+        fail("out-of-range temporal_hint must not record an op", what, __LINE__);
+    rocke_ir_builder_free(&b);
 }
 
 void self_check(const char* arch)
 {
     std::string hip;
     if(lower(*find_case("both"), arch, BadAttr::none, &hip) != ROCKE_OK)
-        fail("flagged copy kernel failed to lower", arch, __LINE__);
+        fail("streaming copy kernel failed to lower", arch, __LINE__);
     if(!has(hip, "__builtin_nontemporal_load(reinterpret_cast<const bf16x8*>("))
-        fail("flagged load is not __builtin_nontemporal_load", arch, __LINE__);
+        fail("streaming load is not __builtin_nontemporal_load", arch, __LINE__);
     if(!has(hip, "__builtin_nontemporal_store("))
-        fail("flagged store is not __builtin_nontemporal_store", arch, __LINE__);
+        fail("streaming store is not __builtin_nontemporal_store", arch, __LINE__);
 
     for(const char* one : {"load", "store"})
     {
         hip.clear();
         if(lower(*find_case(one), arch, BadAttr::none, &hip) != ROCKE_OK)
-            fail("single-flag kernel failed to lower", arch, __LINE__);
+            fail("single-hint kernel failed to lower", arch, __LINE__);
         const bool load = strcmp(one, "load") == 0;
         if(has(hip, "__builtin_nontemporal_load(") != load)
-            fail("load flag leaked to/from the other op", arch, __LINE__);
+            fail("load hint leaked to/from the other op", arch, __LINE__);
         if(has(hip, "__builtin_nontemporal_store(") == load)
-            fail("store flag leaked to/from the other op", arch, __LINE__);
+            fail("store hint leaked to/from the other op", arch, __LINE__);
     }
 
     hip.clear();
     if(lower(*find_case("plain"), arch, BadAttr::none, &hip) != ROCKE_OK)
         fail("plain copy kernel failed to lower", arch, __LINE__);
     if(has(hip, "__builtin_nontemporal"))
-        fail("unflagged ops must not use the nontemporal builtins", arch, __LINE__);
+        fail("default ops must not use the nontemporal builtins", arch, __LINE__);
 
     /* The HIP memcpy path does not yet lower nontemporal (NOTIMPL), and
      * the same kernel without it still lowers through memcpy. */
@@ -217,24 +338,42 @@ void self_check(const char* arch)
     hip.clear();
     if(lower(*find_case("memcpy_plain"), arch, BadAttr::none, &hip) != ROCKE_OK
        || !has(hip, "__builtin_memcpy("))
-        fail("unflagged unaligned load must still take the memcpy path", arch, __LINE__);
+        fail("default unaligned load must still take the memcpy path", arch, __LINE__);
 
     if(lower(*find_case("load"), arch, BadAttr::load, nullptr) != ROCKE_ERR_VALUE)
         fail("a non-bool nontemporal attr on the load must be ROCKE_ERR_VALUE", arch, __LINE__);
     if(lower(*find_case("store"), arch, BadAttr::store, nullptr) != ROCKE_ERR_VALUE)
         fail("a non-bool nontemporal attr on the store must be ROCKE_ERR_VALUE", arch, __LINE__);
 
-    /* Each io helper forwards the flag to exactly the op it emits. */
+    /* Each io helper _ex forwards the hint to exactly the op it emits. */
     for(int nt = 0; nt < 8; ++nt)
     {
-        hip = lower_io_helpers(arch, nt);
+        hip = lower_io_helpers(arch, nt, /*llvm=*/false);
         if(hip.empty())
             fail("io-helper kernel failed to lower", arch, __LINE__);
         if(count(hip, "__builtin_nontemporal_load(") != (nt & 1) + ((nt >> 1) & 1))
-            fail("load_vec / load_vec_as_f32 did not forward nontemporal", arch, __LINE__);
+            fail("load_vec_ex / load_vec_as_f32_ex did not forward the hint", arch, __LINE__);
         if(has(hip, "__builtin_nontemporal_store(") != bool(nt & 4))
-            fail("store_vec did not forward nontemporal", arch, __LINE__);
+            fail("store_vec_ex did not forward the hint", arch, __LINE__);
     }
+
+    /* The _ex helpers with STREAMING reach LLVM `!nontemporal` on every
+     * global vector access (2 loads + 1 store). */
+    const std::string ll_streaming = lower_io_helpers(arch, 7, /*llvm=*/true);
+    if(ll_streaming.empty() || count(ll_streaming, ", !nontemporal !5") != 3
+       || !has(ll_streaming, "!5 = !{i32 1}"))
+        fail("STREAMING io helpers must emit !nontemporal in LLVM IR", arch, __LINE__);
+
+    /* The original io helper signatures still build and keep the default
+     * policy: no nontemporal access in either backend. */
+    hip = lower_io_helpers(arch, -1, /*llvm=*/false);
+    if(hip.empty() || has(hip, "__builtin_nontemporal"))
+        fail("original io helpers must emit no nontemporal HIP access", arch, __LINE__);
+    const std::string ll_plain = lower_io_helpers(arch, -1, /*llvm=*/true);
+    if(ll_plain.empty() || has(ll_plain, "nontemporal"))
+        fail("original io helpers must emit no !nontemporal", arch, __LINE__);
+    if(ll_plain != lower_io_helpers(arch, 0, /*llvm=*/true))
+        fail("original io helpers must equal the _ex helpers with DEFAULT", arch, __LINE__);
 }
 
 } // namespace
@@ -266,6 +405,11 @@ int main(int argc, char** argv)
     }
     for(const char* arch : {"gfx942", "gfx950"})
         self_check(arch);
+    check_bad_hint(BadHint::load_vN, "global_load_vN_ex");
+    check_bad_hint(BadHint::store_vN, "global_store_vN_ex");
+    check_bad_hint(BadHint::load_vec, "load_vec_ex");
+    check_bad_hint(BadHint::load_vec_as_f32, "load_vec_as_f32_ex");
+    check_bad_hint(BadHint::store_vec, "store_vec_ex");
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);

@@ -1,8 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * tests/parity/nontemporal_emit.c -- C-side emitter for the `nontemporal`
- * flag of global_load_vN / global_store_vN. Builds each copy kernel
+ * tests/parity/nontemporal_emit.c -- C-side emitter for the temporal hint
+ * (rocke_mem_opts_t) of global_load_vN_ex / global_store_vN_ex. Builds each copy kernel
  * identically to nontemporal_emit.py so run_diff.py can byte-compare the two
  * engines' .ll; see that file for the config rationale.
  *
@@ -17,20 +17,24 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* Shorthands for the CONFIGS table. */
+#define NT_DFLT ROCKE_TEMPORAL_DEFAULT
+#define NT_STRM ROCKE_TEMPORAL_STREAMING
+
 typedef struct nt_config
 {
     int f32; /* 0 -> bf16, 1 -> f32 */
     int n;
-    int load_nt;
-    int store_nt;
+    rocke_temporal_hint_t load_hint;
+    rocke_temporal_hint_t store_hint;
     const char* arch;
 } nt_config_t;
 
 static const nt_config_t CONFIGS[] = {
-    {0, 8, 1, 1, "gfx950"},
-    {0, 8, 0, 0, "gfx950"},
-    {0, 8, 1, 0, "gfx942"},
-    {1, 4, 0, 1, "gfx942"},
+    {0, 8, NT_STRM, NT_STRM, "gfx950"},
+    {0, 8, NT_DFLT, NT_DFLT, "gfx950"},
+    {0, 8, NT_STRM, NT_DFLT, "gfx942"},
+    {1, 4, NT_DFLT, NT_STRM, "gfx942"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
@@ -62,8 +66,10 @@ static void build(rocke_ir_builder_t* b, const nt_config_t* c)
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* width = rocke_b_const_i32(b, c->n);
     rocke_value_t* off = rocke_b_mul(b, tid, width);
-    rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c->n, 0, c->load_nt);
-    rocke_b_global_store_vN_ex(b, dst, off, v, c->n, 0, c->store_nt);
+    rocke_mem_opts_t load_opts = {c->load_hint};
+    rocke_mem_opts_t store_opts = {c->store_hint};
+    rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c->n, 0, &load_opts);
+    rocke_b_global_store_vN_ex(b, dst, off, v, c->n, 0, &store_opts);
     rocke_b_ret(b);
 }
 

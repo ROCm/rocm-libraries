@@ -168,12 +168,18 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
     return rocke_b_cast_to_f32(b, v);
 }
 
-rocke_value_t* rocke_b_load_vec(rocke_ir_builder_t* b,
-                                rocke_value_t* ptr,
-                                rocke_value_t* idx,
-                                const char* dtype,
-                                int n,
-                                int nontemporal)
+rocke_value_t* rocke_b_load_vec(
+    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, const char* dtype, int n)
+{
+    return rocke_b_load_vec_ex(b, ptr, idx, dtype, n, NULL);
+}
+
+rocke_value_t* rocke_b_load_vec_ex(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
+                                   const char* dtype,
+                                   int n,
+                                   const rocke_mem_opts_t* opts)
 {
     const rocke_type_t* ty;
 
@@ -196,9 +202,9 @@ rocke_value_t* rocke_b_load_vec(rocke_ir_builder_t* b,
         return NULL;
     }
     /* Python: return b.global_load_vN(ptr, idx, io_ir_type(dtype), n,
-     *                                 nontemporal=nontemporal)
+     *                                 temporal_hint=temporal_hint)
      * Python passes no align -> default (0). */
-    return rocke_b_global_load_vN_ex(b, ptr, idx, ty, n, 0, nontemporal);
+    return rocke_b_global_load_vN_ex(b, ptr, idx, ty, n, 0, opts);
 }
 
 int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
@@ -206,8 +212,18 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
                             rocke_value_t* idx,
                             const char* dtype,
                             int n,
-                            int nontemporal,
                             rocke_value_t** out)
+{
+    return rocke_b_load_vec_as_f32_ex(b, ptr, idx, dtype, n, out, NULL);
+}
+
+int rocke_b_load_vec_as_f32_ex(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               const char* dtype,
+                               int n,
+                               rocke_value_t** out,
+                               const rocke_mem_opts_t* opts)
 {
     rocke_value_t* v;
     int i;
@@ -221,8 +237,8 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
         return 0;
     }
 
-    /* Python: v = load_vec(b, ptr, idx, dtype=dtype, n=n, nontemporal=nontemporal) */
-    v = rocke_b_load_vec(b, ptr, idx, dtype, n, nontemporal);
+    /* Python: v = load_vec(b, ptr, idx, dtype=dtype, n=n, temporal_hint=temporal_hint) */
+    v = rocke_b_load_vec_ex(b, ptr, idx, dtype, n, opts);
     if(v == NULL)
     {
         return 0;
@@ -260,7 +276,7 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
     if(rocke_io_is_vec_width(ept))
     {
         return rocke_b_load_vec_as_f32(
-            b, ptr, rocke_b_add(b, row_base, lane_d_base), dtype, ept, 0, out);
+            b, ptr, rocke_b_add(b, row_base, lane_d_base), dtype, ept, out);
     }
     /* Python scalar fallback:
      *   return [load_scalar_as_f32(
@@ -282,12 +298,18 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
     return 1;
 }
 
-void rocke_b_store_vec(rocke_ir_builder_t* b,
-                       rocke_value_t* ptr,
-                       rocke_value_t* idx,
-                       rocke_value_t* value,
-                       int n,
-                       int nontemporal)
+void rocke_b_store_vec(
+    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int n)
+{
+    rocke_b_store_vec_ex(b, ptr, idx, value, n, NULL);
+}
+
+void rocke_b_store_vec_ex(rocke_ir_builder_t* b,
+                          rocke_value_t* ptr,
+                          rocke_value_t* idx,
+                          rocke_value_t* value,
+                          int n,
+                          const rocke_mem_opts_t* opts)
 {
     if(!rocke_i_live(b))
     {
@@ -301,9 +323,9 @@ void rocke_b_store_vec(rocke_ir_builder_t* b,
             b, ROCKE_ERR_VALUE, "store_vec n must be 2/4/8 (got %d); use store_scalar for n=1", n);
         return;
     }
-    /* Python: b.global_store_vN(ptr, idx, value, n, nontemporal=nontemporal).
+    /* Python: b.global_store_vN(ptr, idx, value, n, temporal_hint=temporal_hint).
      * No align -> default (0). */
-    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, 0, nontemporal);
+    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, 0, opts);
 }
 
 rocke_value_t* rocke_b_pack_f32_to(rocke_ir_builder_t* b,

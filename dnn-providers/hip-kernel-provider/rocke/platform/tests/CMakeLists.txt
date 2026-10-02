@@ -101,7 +101,8 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
-  # nontemporal= on global_load_vN/global_store_vN through the C++ HIP lowerer.
+  # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
+  # io helpers, through the C++ builders and HIP/LLVM lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
     add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
     target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)

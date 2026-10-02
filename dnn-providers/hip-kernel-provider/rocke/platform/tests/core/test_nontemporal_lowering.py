@@ -1,12 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``nontemporal=`` on ``global_load_vN`` / ``global_store_vN``.
+"""``temporal_hint=`` on ``global_load_vN`` / ``global_store_vN``.
 
-The flag lowers to clang's form -- ``..., align N, !nontemporal !5`` with one
-module-level ``!5 = !{i32 1}`` node -- identically through the Python and C++
-lowerers, adds nothing when unset (so every existing kernel's serialized IR and
-``.ll`` bytes stay put), and is rejected rather than coerced when the attr
-arrives with a non-bool value (IR can be hand-built or deserialized).
+``TemporalHint.STREAMING`` records the op's ``nontemporal`` attr, which lowers
+to clang's form -- ``..., align N, !nontemporal !5`` with one module-level
+``!5 = !{i32 1}`` node -- identically through the Python and C++ lowerers.
+``DEFAULT`` adds nothing (so every existing kernel's serialized IR and ``.ll``
+bytes stay put). The builder rejects any hint that is not a ``TemporalHint``,
+and the lowerers reject rather than coerce a non-bool attr (IR can be
+hand-built or deserialized).
 
 No GPU: text lowering, plus an optional COMGR compile + ``llvm-objdump`` check
 that skips when either tool is missing. The C++ HIP lowerer is reached through
@@ -25,10 +27,14 @@ from pathlib import Path
 
 import pytest
 
-from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType
+from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType, TemporalHint
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers.compile import _lower_llvm_via_backend, compile_kernel
+
+
+def _hint(streaming: bool) -> TemporalHint:
+    return TemporalHint.STREAMING if streaming else TemporalHint.DEFAULT
 
 
 def _copy_kernel(*, load_nt: bool, store_nt: bool, elem=BF16, n=8, align=None):
@@ -36,8 +42,8 @@ def _copy_kernel(*, load_nt: bool, store_nt: bool, elem=BF16, n=8, align=None):
     src = b.param("S", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     dst = b.param("D", PtrType(elem, "global"), noalias=True, align=16)
     off = b.mul(b.thread_id_x(), b.const_i32(n))
-    v = b.global_load_vN(src, off, elem, n, align=align, nontemporal=load_nt)
-    b.global_store_vN(dst, off, v, n, nontemporal=store_nt)
+    v = b.global_load_vN(src, off, elem, n, align=align, temporal_hint=_hint(load_nt))
+    b.global_store_vN(dst, off, v, n, temporal_hint=_hint(store_nt))
     b.ret()
     return b.kernel
 
@@ -56,7 +62,7 @@ def _lower_both(kernel, arch, monkeypatch):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_flag_emits_clang_nontemporal_form_in_both_engines(arch, monkeypatch):
+def test_streaming_emits_clang_nontemporal_form_in_both_engines(arch, monkeypatch):
     py, cpp = _lower_both(_copy_kernel(load_nt=True, store_nt=True), arch, monkeypatch)
     assert py == cpp
     assert re.search(
@@ -72,7 +78,7 @@ def test_flag_emits_clang_nontemporal_form_in_both_engines(arch, monkeypatch):
 
 
 @pytest.mark.parametrize("load_nt,store_nt", [(True, False), (False, True)])
-def test_flag_stays_on_the_op_that_set_it(load_nt, store_nt, monkeypatch):
+def test_hint_stays_on_the_op_that_set_it(load_nt, store_nt, monkeypatch):
     py, cpp = _lower_both(
         _copy_kernel(load_nt=load_nt, store_nt=store_nt), "gfx950", monkeypatch
     )
@@ -132,40 +138,47 @@ def test_non_bool_attr_is_rejected_by_both_engines(which, monkeypatch):
         _lower_llvm_via_backend(kernel, arch="gfx950", backend="cpp", spec=None)
 
 
-@pytest.mark.parametrize("value", [1, 0, "yes", None])
+# The bools of the earlier API included: True must not mean STREAMING.
+@pytest.mark.parametrize("value", [True, False, 1, 0, "streaming", None])
 @pytest.mark.parametrize("which", ["load", "store"])
-def test_builder_rejects_non_bool_flag(which, value):
+def test_builder_rejects_a_hint_that_is_not_a_temporal_hint(which, value):
     b = IRBuilder("nt_bad")
     p = b.param("P", PtrType(BF16, "global"))
     off = b.thread_id_x()
     v = b.global_load_vN(p, off, BF16, 8)
-    with pytest.raises(TypeError, match="nontemporal must be a bool"):
+    with pytest.raises(TypeError, match="temporal_hint must be a TemporalHint"):
         if which == "load":
-            b.global_load_vN(p, off, BF16, 8, nontemporal=value)
+            b.global_load_vN(p, off, BF16, 8, temporal_hint=value)
         else:
-            b.global_store_vN(p, off, v, 8, nontemporal=value)
+            b.global_store_vN(p, off, v, 8, temporal_hint=value)
 
 
-@pytest.mark.parametrize("nt", range(8))
-def test_io_helpers_forward_the_flag(nt):
-    # One bit per helper: 1 load_vec, 2 load_vec_as_f32, 4 store_vec. The C++
-    # twins run the same matrix in rocke_nontemporal_hip's self-check.
+@pytest.mark.parametrize("nt", [None, *range(8)])
+def test_io_helpers_forward_the_hint(nt):
+    # One bit per helper: 1 load_vec, 2 load_vec_as_f32, 4 store_vec; None
+    # calls them without the keyword. The C++ twins run the same matrix in
+    # rocke_nontemporal_hip's self-check.
     from rocke.helpers.io import load_vec, load_vec_as_f32, store_vec
 
     b = IRBuilder("nt_io")
     src = b.param("S", PtrType(BF16, "global"))
     dst = b.param("D", PtrType(BF16, "global"))
     off = b.thread_id_x()
-    v = load_vec(b, src, off, dtype="bf16", n=8, nontemporal=bool(nt & 1))
-    load_vec_as_f32(b, src, off, dtype="bf16", n=8, nontemporal=bool(nt & 2))
-    store_vec(b, dst, off, v, n=8, nontemporal=bool(nt & 4))
+    if nt is None:
+        v = load_vec(b, src, off, dtype="bf16", n=8)
+        load_vec_as_f32(b, src, off, dtype="bf16", n=8)
+        store_vec(b, dst, off, v, n=8)
+    else:
+        v = load_vec(b, src, off, dtype="bf16", n=8, temporal_hint=_hint(nt & 1))
+        load_vec_as_f32(b, src, off, dtype="bf16", n=8, temporal_hint=_hint(nt & 2))
+        store_vec(b, dst, off, v, n=8, temporal_hint=_hint(nt & 4))
     b.ret()
     flags = [
         op.attrs.get("nontemporal")
         for op in b.kernel.body.ops
         if op.name in _OP.values()
     ]
-    assert flags == [True if nt & bit else None for bit in (1, 2, 4)]
+    assert flags == [True if nt and nt & bit else None for bit in (1, 2, 4)]
 
 
 def test_hip_backend_uses_nontemporal_builtins():
@@ -180,12 +193,12 @@ def test_hip_backend_uses_nontemporal_builtins():
 
 def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
     # align 2 < 16-byte payload takes the memcpy path, which the HIP backend
-    # does not yet lower with the flag (the LLVM path does).
+    # does not yet lower with the hint (the LLVM path does).
     kernel = _copy_kernel(load_nt=True, store_nt=False, elem=F16, n=8, align=2)
     with pytest.raises(NotImplementedError, match="does not yet lower nontemporal"):
         lower_kernel_to_hip(kernel, arch="gfx950")
-    # Without the flag the same kernel still lowers through memcpy, so the
-    # rejection above is the flag's, not the alignment's.
+    # Without the hint the same kernel still lowers through memcpy, so the
+    # rejection above is the hint's, not the alignment's.
     plain = _copy_kernel(load_nt=False, store_nt=False, elem=F16, n=8, align=2)
     assert "__builtin_memcpy(" in lower_kernel_to_hip(plain, arch="gfx950")
 
@@ -257,9 +270,9 @@ def _global_mem_lines(kernel, arch: str) -> list[str]:
 @pytest.mark.parametrize(
     "load_nt,store_nt", [(True, True), (True, False), (False, False)]
 )
-def test_flag_sets_the_nt_bit_in_the_isa(arch, load_nt, store_nt):
-    """The flag reaches the instruction: the AMDGPU backend sets the ``nt``
-    cache-policy bit on exactly the flagged global load/store."""
+def test_streaming_sets_the_nt_bit_in_the_isa(arch, load_nt, store_nt):
+    """The hint reaches the instruction: the AMDGPU backend sets the ``nt``
+    cache-policy bit on exactly the STREAMING global load/store."""
     lines = _global_mem_lines(_copy_kernel(load_nt=load_nt, store_nt=store_nt), arch)
     loads = [ln for ln in lines if ln[0].startswith("global_load_dwordx4")]
     stores = [ln for ln in lines if ln[0].startswith("global_store_dwordx4")]
@@ -295,9 +308,11 @@ def _width_kernel(elem, n: int, align):
     src = b.param("S", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     dst = b.param("D", PtrType(elem, "global"), noalias=True, align=16)
     off = b.mul(b.thread_id_x(), b.const_i32(n))
-    v = b.global_load_vN(src, off, elem, n, align=align, nontemporal=True)
+    v = b.global_load_vN(
+        src, off, elem, n, align=align, temporal_hint=TemporalHint.STREAMING
+    )
     if _stores_vector(n):
-        b.global_store_vN(dst, off, v, n, nontemporal=True)
+        b.global_store_vN(dst, off, v, n, temporal_hint=TemporalHint.STREAMING)
     else:
         # Use every element: storing only one lets the backend shrink the load
         # to that element, which would hide a split of the full-width access.
@@ -310,7 +325,7 @@ def _width_kernel(elem, n: int, align):
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("width", sorted(_WIDTHS))
 def test_nt_bit_survives_every_width_and_split(arch, width):
-    """Every instruction a flagged access lowers to carries ``nt`` -- including
+    """Every instruction a STREAMING access lowers to carries ``nt`` -- including
     when the backend splits one access into several (the 32 B case)."""
     elem, n, align = _WIDTHS[width]
     lines = _global_mem_lines(_width_kernel(elem, n, align), arch)

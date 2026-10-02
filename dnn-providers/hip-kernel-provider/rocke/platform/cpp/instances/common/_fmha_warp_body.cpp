@@ -230,7 +230,7 @@ void rocke_fmha_warp_fwd_inner_body(rocke_ir_builder_t* b, const rocke_fmha_warp
         }
         else
         {
-            rocke_load_vec_as_f32(b, o->Q, q_lane_addr, dtype, ept, 0, q_f32_list);
+            rocke_load_vec_as_f32(b, o->Q, q_lane_addr, dtype, ept, q_f32_list);
         }
 
         /* iter_args = [("m", neg_inf), ("l", zero_f)] + [("aSLOT", zero_f)...] */
@@ -442,7 +442,7 @@ void rocke_fmha_warp_fwd_inner_body(rocke_ir_builder_t* b, const rocke_fmha_warp
         rocke_value_t* out_v_f32;
         rocke_value_t* out_v_dtype;
 
-        rocke_load_vec_as_f32(b, o->Q, q_lane_addr, dtype, ept, 0, q_f32_list);
+        rocke_load_vec_as_f32(b, o->Q, q_lane_addr, dtype, ept, q_f32_list);
         q_vec_f32 = rocke_b_vec_pack(b, q_f32_list, ept, rocke_f32());
 
         /* Python: b.scf_for_iter(b.const_i32(0), seqlen_k, b.const_i32(1),
@@ -486,11 +486,11 @@ void rocke_fmha_warp_fwd_inner_body(rocke_ir_builder_t* b, const rocke_fmha_warp
         rocke_fmha_row_bases(b, o, k_idx, k_off, v_off, &k_row_base, &v_row_base);
 
         k_lane_addr = rocke_b_add(b, k_row_base, lane_d_base);
-        rocke_load_vec_as_f32(b, o->K, k_lane_addr, dtype, ept, 0, k_f32_list);
+        rocke_load_vec_as_f32(b, o->K, k_lane_addr, dtype, ept, k_f32_list);
         k_vec_f32 = rocke_b_vec_pack(b, k_f32_list, ept, rocke_f32());
 
         v_lane_addr = rocke_b_add(b, v_row_base, lane_d_base);
-        rocke_load_vec_as_f32(b, o->V, v_lane_addr, dtype, ept, 0, v_f32_list);
+        rocke_load_vec_as_f32(b, o->V, v_lane_addr, dtype, ept, v_f32_list);
         v_vec_f32 = rocke_b_vec_pack(b, v_f32_list, ept, rocke_f32());
 
         partial = rocke_b_vector_sum(b, rocke_b_vector_mul(b, q_vec_f32, k_vec_f32));
