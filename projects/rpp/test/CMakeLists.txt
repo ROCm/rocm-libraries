@@ -16,3 +16,21 @@ else()
 endif()
 
 add_test(NAME rpp_backend_macro COMMAND test_rpp_backend_macro)
+
+# Linux executable symbols interpose the HIP calls made by the shared RPP library.
+# This keeps fault injection independent of GPU access and avoids LD_PRELOAD
+# interfering with sanitizer runtime initialization. Other platforms still run
+# the backend macro test above.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_handle_lifecycle test_handle_lifecycle.cpp)
+    target_link_libraries(test_handle_lifecycle PRIVATE ${PROJECT_NAME})
+    target_link_options(test_handle_lifecycle PRIVATE "-Wl,--export-dynamic")
+    set(lifecycle_cases host_default host_explicit host_mismatch host_invalid null)
+    if("${BACKEND}" STREQUAL "HIP")
+        list(APPEND lifecycle_cases hip_default hip_explicit hip_mismatch
+             hip_device_retry hip_pinned_retry)
+    endif()
+    foreach(case IN LISTS lifecycle_cases)
+        add_test(NAME rpp_handle_${case} COMMAND test_handle_lifecycle ${case})
+    endforeach()
+endif()

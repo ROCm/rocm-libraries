@@ -198,16 +198,22 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 }
 
 void Handle::rpp_destroy_object_gpu() {
-    free(this->GetInitHandle()->mem.mcpu.scratchBufferHost);
-
-    auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
-    if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
-    status = hipHostFree(this->GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
-    if (status != hipSuccess)
-        RPP_THROW_HIP_STATUS(status, "hipHostFree failed for scratchBufferPinned");
-
-    delete this->GetInitHandle();
-    this->impl = nullptr;
+    auto& memory = this->GetInitHandle()->mem;
+    // A failed HIP release leaves the handle available for another destroy attempt.
+    // Never release an allocation twice or discard the remaining allocation state.
+    if (memory.mgpu.scratchBufferHip.floatmem != nullptr) {
+        auto status = hipFree(memory.mgpu.scratchBufferHip.floatmem);
+        if (status != hipSuccess)
+            RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
+        memory.mgpu.scratchBufferHip.floatmem = nullptr;
+    }
+    if (memory.mgpu.scratchBufferPinned.floatmem != nullptr) {
+        auto status = hipHostFree(memory.mgpu.scratchBufferPinned.floatmem);
+        if (status != hipSuccess)
+            RPP_THROW_HIP_STATUS(status, "hipHostFree failed for scratchBufferPinned");
+        memory.mgpu.scratchBufferPinned.floatmem = nullptr;
+    }
+    this->rpp_destroy_object_host();
 }
 
 void Handle::rpp_destroy_object_host() {

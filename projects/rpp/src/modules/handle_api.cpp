@@ -44,20 +44,27 @@ extern "C" rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize, Rpp32u 
 }
 
 extern "C" rppStatus_t rppDestroy(rppHandle_t handle, RppBackend backend) {
-    if (backend == RppBackend::RPP_HOST_BACKEND) {
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_host(); });
-        if (status == rppStatusSuccess) delete handle;
-        return status;
-    }
-#if GPU_SUPPORT
-    else if (backend == RppBackend::RPP_HIP_BACKEND) {
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu(); });
-        if (status == rppStatusSuccess) delete handle;
-        return status;
-    }
-#endif  // GPU_SUPPORT
-    else
+    if (backend != RppBackend::RPP_HOST_BACKEND && backend != RppBackend::RPP_HIP_BACKEND)
         return rppStatusNotImplemented;
+
+    // The handle owns its allocations. The caller's backend (including the default)
+    // must not select a cleanup path that leaves some of them behind.
+    auto status = rpp::try_([&] {
+        auto& object = rpp::deref(handle);
+        if (object.GetBackend() == RppBackend::RPP_HOST_BACKEND) {
+            object.rpp_destroy_object_host();
+        }
+#if GPU_SUPPORT
+        else if (object.GetBackend() == RppBackend::RPP_HIP_BACKEND) {
+            object.rpp_destroy_object_gpu();
+        }
+#endif
+        else {
+            RPP_THROW(rppStatusNotImplemented, "Unknown handle backend");
+        }
+    });
+    if (status == rppStatusSuccess) delete &rpp::deref(handle);
+    return status;
 }
 
 extern "C" rppStatus_t rppSetBatchSize(rppHandle_t handle, size_t batchSize) {
