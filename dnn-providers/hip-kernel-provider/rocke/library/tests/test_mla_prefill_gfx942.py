@@ -183,16 +183,16 @@ class TestMlaPrefillFwdLowering(unittest.TestCase):
         self.assertIn(self.kernel.name, self.ir)
 
     def test_lds_slot_is_shared(self):
-        # Seven buffers, 80928 B if none aliased, packed by the lowerer's
+        # Seven buffers, 79872 B if none aliased, packed by the lowerer's
         # liveness pass into 31488 B. That is under gfx942's 65536 B workgroup
         # limit -- a hard gate, the kernel cannot launch above it -- and, the
         # point of the layout, under 32768 B, so two workgroups fit per CU.
         #
-        # The achieved layout, by phase (bf16, so 2 B/elem):
+        # The achieved layout, by phase (bf16 except s_part, which is f32):
         #
         #   offset  buffer                       bytes
-        #        0  q_lds / p_lds / wt_lds       4224 / 512 / 9216
-        #     4224  wq_lds / kv_lds              8704 / 23200
+        #        0  q_lds / s_part / wt_lds      4224 / 4096 / 9216
+        #     4224  wq_lds / kv_lds              8704 / 18560
         #    12928  qa_lds / accl_lds            18560 / 16512
         #                                 total = 31488 (prologue peak)
         #
