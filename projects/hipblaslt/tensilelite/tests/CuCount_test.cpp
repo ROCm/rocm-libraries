@@ -1374,7 +1374,7 @@ TEST_P(DataParallelLaunchLimitsTest, PackedGridFitsHipWorkItemLimit)
     // HIP receives a uint32 global work size. The actual workgroup count and
     // the kernel's persistent tile stride must agree after that conversion.
     const uint32_t hipWorkItems = static_cast<uint32_t>(invocation.numWorkItems.x);
-    const char* gridArgName = "skGrid";
+    const char* gridArgName = layoutVersion == 0 ? "skGrid" : "PersistentGrid";
     auto gridArg = KernelArguments::const_iterator(invocation.args, gridArgName);
     ASSERT_NE(gridArg, invocation.args.end());
     ASSERT_EQ((*gridArg).second, sizeof(uint32_t));
@@ -1387,7 +1387,7 @@ INSTANTIATE_TEST_SUITE_P(
     PersistentPayloads,
     DataParallelLaunchLimitsTest,
     ::testing::Combine(
-        ::testing::Values(0),
+        ::testing::Values(0, 1),
         ::testing::Values(
             DataParallelLaunchLimitCase{"AnalyticalZeroWorkspace", {32, 8, 1}, true, 0},
             DataParallelLaunchLimitCase{"FixedBelowLimit", {32, 8, 1}, false, -1},

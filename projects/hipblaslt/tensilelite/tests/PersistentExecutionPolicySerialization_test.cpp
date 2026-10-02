@@ -245,7 +245,7 @@ namespace
         {"StreamK", "Hybrid", 5, 0},
     }};
 
-    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateScheduling)
+    TEST(PersistentExecutionPolicyTest, NonPersistentAssignmentsDoNotActivateSchedulingOrDataParallelArgsV1)
     {
         for(auto assignment : {WorkAssignment::StaticGrid,
                                WorkAssignment::DynamicWorkQueue,
@@ -633,13 +633,79 @@ namespace
         }
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresDataParallel)
+    {
+        internalArgs["persistentLoopArgsVersion"] = object(1);
+        internalArgs["version"]                   = object(3);
+        for(const auto& policy : policies)
+        {
+            canonical(policy);
+            if(std::string(policy.strategy) == "DataParallel")
+                EXPECT_EQ(readSolution()->internalArgsSupport.persistentLoopArgsVersion, 1);
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresOuterProtocolThree)
+    {
+        canonical(policies[1]);
+        internalArgs["persistentLoopArgsVersion"] = object(1);
+        for(int version : {0, 1, 2})
+        {
+            SCOPED_TRACE(version);
+            internalArgs["version"] = object(version);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_EQ(decoded->internalArgsSupport.version, 3);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 1);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, UnknownArgumentLayoutVersionsAreRejected)
     {
         canonical(policies[1]);
         internalArgs["version"] = object(3);
-        for(int version : {-1, 1, 2, 10})
+        for(int version : {-1, 2, 10})
         {
             internalArgs["persistentLoopArgsVersion"] = object(version);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, InvalidDataParallelDescriptorRejectedOnLoad)
+    {
+        canonical(policies[1]);
+        internalArgs["version"] = object(3);
+        internalArgs["persistentLoopArgsVersion"] = object(1);
+        CustomKernel descriptor;
+        descriptor.name = "data_parallel_v1";
+        descriptor.macrotile = {128, 128, 64};
+        descriptor.threads = {256, 1, 1};
+        descriptor.grid = {CustomGridSize::PersistentGrid, CustomGridSize::One, CustomGridSize::One};
+        descriptor.args = {{CustomArgType::uint32, CustomArgSemantic::ItersPerTile},
+                           {CustomArgType::uint32, CustomArgSemantic::PersistentGrid}};
+        for(bool generated : {false, true})
+        {
+            SCOPED_TRACE(generated);
+            descriptor.generated = generated;
+            custom = output(descriptor);
+            ASSERT_NO_THROW(readSolution());
+
+            auto invalid = descriptor;
+            invalid.args[1].type = CustomArgType::uint64;
+            custom = output(invalid);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+
+            invalid = descriptor;
+            invalid.args[1].semantic = CustomArgSemantic::SKGrid;
+            custom = output(invalid);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+
+            invalid = descriptor;
+            invalid.args.push_back({CustomArgType::address, CustomArgSemantic::Synchronizer});
+            custom = output(invalid);
             EXPECT_THROW(readSolution(), std::runtime_error);
         }
     }
