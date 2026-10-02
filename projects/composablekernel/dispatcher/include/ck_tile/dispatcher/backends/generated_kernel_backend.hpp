@@ -71,7 +71,16 @@ class GeneratedKernelInstance : public KernelInstance
 
         // Padding does not relax the global vector widths; gate on them so the
         // registry falls through to a narrower kernel instead of failing at launch.
-        return vector_widths_divide(key_, problem.M, problem.N, problem.K);
+        using Pipeline = typename SelectedKernel::GemmPipeline;
+        // Select the host-side A/B distribution for this kernel's target.
+        // This avoids a HIP device query for every candidate in the registry.
+        const bool wave32  = key_.gfx_arch.rfind("gfx9", 0) != 0;
+        const auto width_a = wave32 ? Pipeline::template GetVectorSizeA<true>()
+                                    : Pipeline::template GetVectorSizeA<false>();
+        const auto width_b = wave32 ? Pipeline::template GetVectorSizeB<true>()
+                                    : Pipeline::template GetVectorSizeB<false>();
+        return vector_widths_divide(
+            key_, problem.M, problem.N, problem.K, width_a, width_b, SelectedKernel::VectorSizeC);
     }
 
     std::string get_name() const override { return name_; }

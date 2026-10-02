@@ -171,6 +171,57 @@ class TestResolution(unittest.TestCase):
         self.assertIsNotNone(reason)
 
 
+class TestNativeEpilogueWidths(unittest.TestCase):
+    def test_default_epilogue_architecture_and_layout(self):
+        for arch, dtype, col_width in [
+            ("gfx90a", "bf16", 4), ("gfx942", "fp16", 4),
+            ("gfx950", "bf16", 4), ("gfx950", "fp64", 1),
+            ("gfx1100", "fp16", 1), ("gfx1201", "fp16", 8),
+            ("gfx1250:xnack-", "bf16", 8), ("gfx1250", "fp32", 8),
+        ]:
+            for layout, width in (("rcr", 1), ("rcc", col_width)):
+                with self.subTest(arch=arch, dtype=dtype, layout=layout):
+                    got = gemm_native_vector_sizes(
+                        dtype_a=dtype, dtype_b=dtype, dtype_c=dtype,
+                        layout=layout, gfx_arch=arch, epilogue="default", **TILE,
+                    )
+                    self.assertEqual(got[2], width)
+
+    def test_default_widths_canonicalize_without_fixed_suffix(self):
+        self.assertEqual(_resolve("rcr", (8, 8, 1), epilogue="default"),
+                         ((0, 0, 0), None))
+        self.assertEqual(_resolve("rcc", (8, 8, 4), epilogue="default"),
+                         ((0, 0, 0), None))
+        self.assertIn("epilogue", _resolve("rcc", (8, 8, 2), epilogue="default")[1])
+
+    def test_pairing_retains_native_default_epilogue(self):
+        native, _ = _bridge_config(vec=(0, 0, 0))
+        for variant in ("standard", "batched"):
+            cfg = replace(native, epilogue="default", variant=variant)
+            problem = {"M": 256, "N": 257, "K": 512}
+            fallback = VectorFallback([problem], "rcr", "bf16", variant)
+            self.assertEqual(cfg.effective_vector_sizes, (8, 8, 1))
+            self.assertEqual(fallback.pairs([problem], [(cfg, Path("built.so"))]), [[0]])
+            self.assertNotIn("_vec", cfg.name)
+
+    def test_pairing_retains_tile_derived_native_ab(self):
+        cfg, _ = _bridge_config(vec=(0, 0, 0), pipeline="mem")
+        cfg = replace(cfg, tile_m=64, tile_n=64, tile_k=16)
+        problem = {"M": 256, "N": 256, "K": 516}
+        fallback = VectorFallback([problem], "rcr", "bf16", "standard")
+        self.assertEqual(cfg.effective_vector_sizes, (4, 4, 8))
+        self.assertEqual(fallback.pairs([problem], [(cfg, Path("built.so"))]), [[0]])
+
+    def test_pairing_uses_extents_for_default_c_above_16_bytes(self):
+        cfg, _ = _bridge_config(vec=(0, 0, 0))
+        cfg = replace(cfg, dtype_a="fp32", dtype_b="fp32", dtype_c="fp32",
+                      layout_c="col", epilogue="default", gfx_arch="gfx1250")
+        problems = [{"M": 256, "N": 256, "K": 512}, {"M": 260, "N": 256, "K": 512}]
+        fallback = VectorFallback(problems, "rcc", "fp32", "standard")
+        self.assertEqual(cfg.effective_vector_sizes[2], 8)
+        self.assertEqual(fallback.pairs(problems, [(cfg, Path("built.so"))]), [[0], []])
+
+
 class TestFixedWidthLdsCapacity(unittest.TestCase):
     def test_gfx950_reported_tiles(self):
         # The reported cutoff is the 160 KiB gfx950 capacity, not a tile-size
@@ -412,6 +463,26 @@ class TestExpandSweep(unittest.TestCase):
         # Without the fallback it stays the plain slice.
         off = VectorFallback([], "rcr", "bf16", "standard", disabled=True)
         self.assertEqual(off.limit_base_kernels(self.cfgs, 2), self.cfgs[:2])
+
+    def test_disabled_fallback_overrides_fixed_widths_in_json(self):
+        from gemm_utils import expand_sweep
+
+        config = _bridge_config(vec=(4, 4, 8))[0].to_codegen_json()
+        for section in ("tile_config", "trait_config"):
+            config[section] = {key: {"values": value} for key, value in config[section].items()}
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "fixed_widths.json"
+            path.write_text(json.dumps(config))
+            # Confirm that this JSON would otherwise request fixed widths.
+            original = expand_sweep(str(path), "gfx950", dtype="bf16")
+            self.assertEqual([c.vector_sizes for c in original], [(4, 4, 8)])
+            for variant in ("standard", "batched"):
+                fallback = VectorFallback([{"M": 256, "N": 256, "K": 257}],
+                                          "rcr", "bf16", variant, disabled=True)
+                configs = expand_sweep(str(path), "gfx950", dtype="bf16", variant=variant,
+                                       **fallback.expand_kwargs)
+                self.assertEqual([c.vector_sizes for c in configs], [(0, 0, 0)])
+                self.assertTrue(all("_vec" not in c.name for c in configs))
 
     def test_fixed_widths_force_padding(self):
         cfg = GemmKernelConfig(

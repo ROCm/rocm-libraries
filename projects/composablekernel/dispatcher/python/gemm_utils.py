@@ -464,7 +464,9 @@ class GemmKernelConfig:
         """A/B/C widths the kernel really uses (native ones when unset)."""
         if any(self.vector_sizes):
             return self.vector_sizes
-        return _codegen_common().gemm_native_vector_sizes(**self._vector_args())
+        return _codegen_common().gemm_native_vector_sizes(
+            **self._vector_args(), epilogue=self.epilogue
+        )
 
     def with_vector_sizes(
         self, requested: Tuple[int, int, int]

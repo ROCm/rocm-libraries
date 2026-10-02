@@ -3,9 +3,9 @@
 
 """Vector-width fallback shared by the GEMM full-benchmark drivers.
 
-A problem whose contiguous A/B/C extent is not a multiple of the native vector
-width (e.g. K=257 for a row-major A) cannot run any native kernel. With the
-fallback on, the sweep also builds kernels with narrower fixed widths, reports
+A kernel requires each contiguous A/B/C extent to be a multiple of its effective
+vector width, which depends on the tile and epilogue. With the fallback on,
+the sweep also builds kernels with narrower fixed widths, reports
 how many (tile, width) combinations were rejected or failed to compile, and
 pairs every problem only with the kernels whose widths divide its own.
 """
@@ -35,17 +35,27 @@ class VectorFallback:
 
     def __init__(self, problems, layout, dtype, variant, disabled=False):
         out_dtype = CommonTypeMappings.get_output_dtype(dtype)
-        # Per-problem widest legal A/B/C widths; a kernel may run a problem iff
-        # each of its effective widths divides the problem's.
+        # Per-problem widest legal A/B/C widths for the fixed-width sweep.
         self.prob_vecs = [
             gemm_problem_vector_sizes(
                 int(p["M"]), int(p["N"]), int(p["K"]), layout[:3], dtype, dtype, out_dtype
             )
             for p in problems
         ]
+        # Pair using the full extents: native default epilogues can exceed
+        # the fixed-width sweep's 16-byte cap (e.g. column-major fp32 on gfx12).
+        self.prob_extents = [
+            (
+                int(p["K"] if layout[0] == "r" else p["M"]),
+                int(p["N"] if layout[1] == "r" else p["K"]),
+                int(p["N"] if layout[2] == "r" else p["M"]),
+            )
+            for p in problems
+        ]
         self.enabled = not disabled and variant in VECTOR_SIZE_VARIANTS
         self.rejects = {}
-        self.expand_kwargs = {}
+        # An explicit native override must win over fixed widths in the JSON.
+        self.expand_kwargs = {"vector_sizes": [(0, 0, 0)]} if disabled else {}
         if self.enabled:
             # Every power-of-two width <= the problem's, for misaligned tensors
             # only; the per-problem winner among them is the width's cost.
@@ -99,7 +109,7 @@ class VectorFallback:
             kernel_vecs = [cfg.effective_vector_sizes for cfg, _ in built_kernels]
             pairs = [
                 [i for i, kv in enumerate(kernel_vecs) if all(p % k == 0 for p, k in zip(pv, kv))]
-                for pv in self.prob_vecs
+                for pv in self.prob_extents
             ]
         else:
             pairs = [list(range(len(built_kernels)))] * len(problems)

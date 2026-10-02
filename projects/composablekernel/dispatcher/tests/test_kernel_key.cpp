@@ -158,15 +158,23 @@ TEST(KernelKeyTest, VectorWidthsDivide)
     vec.algorithm.vector_size_c = 8;
 
     // Aligned problem: both run.
-    EXPECT_TRUE(vector_widths_divide(native, 512, 512, 512));
-    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 512));
+    EXPECT_TRUE(vector_widths_divide(native, 512, 512, 512, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 512, 1, 1, 8));
     // K=257: native 8-wide A/B loads cannot run, the vec1_1_8 kernel can.
-    EXPECT_FALSE(vector_widths_divide(native, 512, 512, 257));
-    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 257));
+    EXPECT_FALSE(vector_widths_divide(native, 512, 512, 257, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 257, 1, 1, 8));
     // N=129 misaligns C, which vec1_1_8 still stores 8 wide.
-    EXPECT_FALSE(vector_widths_divide(vec, 512, 129, 257));
+    EXPECT_FALSE(vector_widths_divide(vec, 512, 129, 257, 1, 1, 8));
     // M does not gate rcr at all.
-    EXPECT_TRUE(vector_widths_divide(native, 257, 512, 512));
+    EXPECT_TRUE(vector_widths_divide(native, 257, 512, 512, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(native, 256, 256, 516, 4, 4, 8));
+    EXPECT_TRUE(vector_widths_divide(native, 256, 257, 512, 8, 8, 1));
+    EXPECT_FALSE(vector_widths_divide(native, 256, 256, 512, 0, 8, 8));
+    native.signature.layout_a = LayoutTag::ColMajor;
+    native.signature.layout_b = LayoutTag::RowMajor;
+    native.signature.layout_c = LayoutTag::ColMajor;
+    EXPECT_TRUE(vector_widths_divide(native, 260, 264, 257, 4, 8, 4));
+    EXPECT_FALSE(vector_widths_divide(native, 258, 264, 257, 4, 8, 4));
 }
 
 TEST(KernelKeyTest, EncodeIdentifierWithSparsity)

@@ -39,6 +39,7 @@ from codegen_common import (
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
     gfx1250_pipeline_reject_reason,
     gemm_lockstep_vector_bytes,
+    gemm_default_epilogue_vector_size,
     gemm_vector_size_suffix,
     resolve_gemm_vector_sizes,
 )
@@ -872,6 +873,16 @@ using CLayout = {ns_name}::CLayout;
             f"\n{indent}}}"
         )
 
+    def _registry_c_vector_size(self, config: KernelConfig) -> str:
+        if config.trait.epilogue == "default":
+            # The gfx1250 legacy dispatcher selects MFMA in the host pass,
+            # where GetVectorSizeC() differs from the device for column C.
+            # Emit the target distribution's width for registry support checks.
+            return str(gemm_default_epilogue_vector_size(
+                self.datatype, self.layout, self.gpu_target
+            ))
+        return "GemmEpilogue::GetVectorSizeC()"
+
     def _launch_function(self, config: KernelConfig) -> str:
         """Generate launch function"""
         if config.variant == GemmVariant.MULTI_ABD:
@@ -891,6 +902,23 @@ using CLayout = {ns_name}::CLayout;
     def _launch_function_standard(self, config: KernelConfig) -> str:
         """Generate launch function for standard GEMM"""
         return f"""
+    // Shared with the registry so support checks use the launched kernel's widths.
+    static constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+
+    using UniversalGemmProblem = UniversalGemmPipelineProblem<
+        ADataType, BDataType, AccDataType, TileShape,
+        TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                        ALayout, BLayout, CLayout, TransposeC,
+                                        UseStructuredSparsity, UsePersistentKernel,
+                                        NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
+        scheduler{self._vector_size_tails(config)[0]}>;
+
+    using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+    {self._epilogue_code(config)}
+
+    using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+    static constexpr index_t VectorSizeC = {self._registry_c_vector_size(config)};
+
     static float launch(const GemmHostArgs& args, const stream_config& stream) {{
         const index_t k_grain = args.k_batch * TileK;
         const index_t K_split = (args.K + k_grain - 1) / k_grain * TileK;
@@ -899,21 +927,6 @@ using CLayout = {ns_name}::CLayout;
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
         
         float ave_time{{0}};
-        
-        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
-        
-        using UniversalGemmProblem = UniversalGemmPipelineProblem<
-            ADataType, BDataType, AccDataType, TileShape,
-            TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                            ALayout, BLayout, CLayout, TransposeC,
-                                            UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
-            scheduler{self._vector_size_tails(config)[0]}>;
-        
-        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
-        {self._epilogue_code(config)}
-        
-        using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(config, "            ")}
@@ -1090,6 +1103,24 @@ using CLayout = {ns_name}::CLayout;
         API than standard pipelines. It's designed for weight-preshuffled GEMM operations.
         """
         return f"""
+    // Shared with the registry so support checks use the launched kernel's widths.
+    static constexpr auto scheduler = GemmPipelineScheduler::Default;  // Preshuffle uses Default scheduler
+
+    // Preshuffle uses TileFlatmmShape instead of TileGemmShape for the problem
+    using UniversalGemmProblem = UniversalGemmPipelineProblem<
+        ADataType, BDataType, AccDataType, TileShape,
+        TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                        ALayout, BLayout, CLayout, TransposeC,
+                                        UseStructuredSparsity, UsePersistentKernel,
+                                        NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
+        scheduler{self._vector_size_tails(config)[0]}>;
+
+    using GemmPipeline = WeightPreshufflePipelineAGmemBGmemCRegV2<UniversalGemmProblem>;
+    {self._epilogue_code(config)}
+
+    using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+    static constexpr index_t VectorSizeC = {self._registry_c_vector_size(config)};
+
     static float launch(const GemmHostArgs& args, const stream_config& stream) {{
         const index_t k_grain = args.k_batch * TileK;
         const index_t K_split = (args.K + k_grain - 1) / k_grain * TileK;
@@ -1098,22 +1129,6 @@ using CLayout = {ns_name}::CLayout;
         const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
         
         float ave_time{{0}};
-        
-        constexpr auto scheduler = GemmPipelineScheduler::Default;  // Preshuffle uses Default scheduler
-        
-        // Preshuffle uses TileFlatmmShape instead of TileGemmShape for the problem
-        using UniversalGemmProblem = UniversalGemmPipelineProblem<
-            ADataType, BDataType, AccDataType, TileShape,
-            TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                            ALayout, BLayout, CLayout, TransposeC,
-                                            UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle{self._vector_size_tails(config)[1]}>,
-            scheduler{self._vector_size_tails(config)[0]}>;
-        
-        using GemmPipeline = WeightPreshufflePipelineAGmemBGmemCRegV2<UniversalGemmProblem>;
-        {self._epilogue_code(config)}
-        
-        using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
             auto kargs = GemmKernel::MakeKernelArgs(args);

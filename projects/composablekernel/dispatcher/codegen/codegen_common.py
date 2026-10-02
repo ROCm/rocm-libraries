@@ -816,7 +816,26 @@ def gemm_problem_vector_sizes(m: int, n: int, k: int, layout: str, dtype_a: str,
     return tuple(math.gcd(e, 16 // _VEC_ELEMENT_BYTES[d]) for e, d in zip(extents, dtypes))
 
 
-def _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch):
+def gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch):
+    """DefaultGemm2DEpilogue::GetVectorSizeC for codegen's TransposeC=false.
+
+    Row-major C uses kCNLane * kBNBlock / kN, which is 1 for the
+    supported MFMA/WMMA distributions. Column-major C uses kCM1PerLane:
+    4 for MFMA (1 for fp64), 1 for gfx11 WMMA, and 8 for gfx12 WMMA.
+    See warp_gemm_attribute_mfma_impl.hpp and WmmaTraitsBase.
+    """
+    if layout[2] == "r":
+        return 1
+    arch = normalize_gfx_arch(gfx_arch)
+    if arch.startswith("gfx12"):
+        return 8
+    if arch.startswith("gfx11") or dtype_a == "fp64":
+        return 1
+    return 4
+
+
+def _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch,
+                     epilogue="cshuffle"):
     """Shared derivation for the vector-size helpers below.
 
     Returns ``(native, a_yx, b_yx, c_row, block_size, warp_size, elem_bytes)``;
@@ -830,17 +849,24 @@ def _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, 
     a_row, b_row, c_row = (ch == "r" for ch in layout[:3])
     a_yx = (tile_m, tile_k) if a_row else (tile_k, tile_m)
     b_yx = (tile_k, tile_n) if b_row else (tile_n, tile_k)
+    if epilogue == "default":
+        native_c = gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch)
+    elif epilogue == "tdm":
+        native_c = 1  # TdmEpilogue::GetVectorSizeC
+    else:
+        native_c = min((warp_tile[1] * warp_n) if c_row else (warp_tile[0] * warp_m), 16 // ec)
     native = (
         _native_ab_vector_size(ea, tile_m, a_yx[1], tile_k, block_size),
         _native_ab_vector_size(eb, tile_n, b_yx[1], tile_k, block_size),
-        min((warp_tile[1] * warp_n) if c_row else (warp_tile[0] * warp_m), 16 // ec),
+        native_c,
     )
     return native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec)
 
 
-def gemm_native_vector_sizes(*, dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch) -> Tuple[int, int, int]:
+def gemm_native_vector_sizes(*, dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch,
+                             epilogue="cshuffle") -> Tuple[int, int, int]:
     """A/B/C global vector widths a kernel uses when no widths are fixed."""
-    return _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch)[0]
+    return _vector_geometry(dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue)[0]
 
 
 def resolve_gemm_vector_sizes(
@@ -867,7 +893,7 @@ def resolve_gemm_vector_sizes(
     this tile (otherwise a short human-readable string).
     """
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
-        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch
+        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
     )
     tile_m, tile_n, tile_k = tile
     warp_tile_m, warp_tile_n, warp_tile_k = warp_tile
