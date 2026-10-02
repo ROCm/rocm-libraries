@@ -1195,10 +1195,11 @@ inline bool versionAccepted(const nlohmann::json& document, int major, int minor
 }
 
 /// What one pass over a KDP's text learned. When the pack's only `kernelDescriptors` is its
-/// last top-level key -- the layout the packer writes -- the header was validated as the
-/// kernels began and the kernels were parsed as they streamed past, so @c pack or
-/// @c headerError is set and the text is not read again. Otherwise the loader validates the
-/// finished header and reads the kernels in a second pass.
+/// last top-level key -- the layout the packer writes -- and the header before it passes
+/// the version rule, the header was validated as the kernels began and the kernels were
+/// parsed as they streamed past, so @c pack or @c headerError is set and the text is not
+/// read again. Otherwise, unless the walk's own version check declines the file first, the
+/// loader validates the finished header and reads the kernels in a second pass.
 struct PackScan
 {
     /// Top-level `kernelDescriptors` arrays in the text; with a repeated key a DOM keeps
@@ -2722,9 +2723,9 @@ inline std::deque<std::string>& registeredEngineNames()
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
  *
- * @param stateManagers When non-null, receives the state manager validation built for each
- *        returned set, index for index, so a caller constructing engines from these sets
- *        need not build each one a second time. Null discards them.
+ * @param stateManagers When non-null, replaced by the state manager validation built for
+ *        each returned set, index for index, so a caller constructing engines from these
+ *        sets need not build each one a second time. Null discards them.
  */
 template <typename THandle>
 inline std::vector<DescriptorSet> loadValidatedDescriptorSets(
@@ -2732,6 +2733,10 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(
     std::vector<std::unique_ptr<KernelIngestorStateManager<THandle>>>* stateManagers = nullptr)
 {
     std::vector<DescriptorSet> validated;
+    if(stateManagers != nullptr)
+    {
+        stateManagers->clear();
+    }
 
     for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {

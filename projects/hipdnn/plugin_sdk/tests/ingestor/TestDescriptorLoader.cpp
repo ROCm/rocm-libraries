@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -233,6 +234,38 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
     };
 }
 
+/// A document's top-level members, in the order a file states them. A repeated key is two
+/// members: nlohmann::json can hold neither that nor an order of its own choosing.
+using Members = std::vector<std::pair<std::string, nlohmann::json>>;
+
+std::string membersText(const Members& members)
+{
+    std::string text = "{";
+    for(const auto& [key, value] : members)
+    {
+        text += (text.size() == 1 ? "" : ",") + nlohmann::json(key).dump() + ":" + value.dump();
+    }
+    return text + "}";
+}
+
+/// @p pack's members as the packer writes them: every header key, then `kernelDescriptors`
+/// last. nlohmann::json sorts keys, which would put `matchers`, `name` and `version` after
+/// the kernels and send every pack through the loader's second pass instead of the single
+/// pass a packed tree takes.
+Members packerLayout(const nlohmann::json& pack)
+{
+    Members members;
+    for(auto it = pack.begin(); it != pack.end(); ++it)
+    {
+        if(it.key() != "kernelDescriptors")
+        {
+            members.emplace_back(it.key(), it.value());
+        }
+    }
+    members.emplace_back("kernelDescriptors", pack.at("kernelDescriptors"));
+    return members;
+}
+
 void writeDocument(const std::filesystem::path& directory, const TestDocument& document)
 {
     std::filesystem::create_directories(directory);
@@ -241,7 +274,9 @@ void writeDocument(const std::filesystem::path& directory, const TestDocument& d
     std::ofstream file(
         directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
         std::ios::binary);
-    file << document.body.dump(2) << '\n';
+    const bool packed
+        = document.suffix == ".kdp.json" && document.body.contains("kernelDescriptors");
+    file << (packed ? membersText(packerLayout(document.body)) : document.body.dump(2)) << '\n';
 }
 
 void writeDocuments(const std::filesystem::path& directory, const Documents& documents)
@@ -334,6 +369,15 @@ std::vector<DescriptorSet> loadFrom(const std::filesystem::path& root)
 std::vector<DescriptorSet> loadFromRoots(const std::vector<std::filesystem::path>& roots)
 {
     return resolveDescriptorSets(loadDescriptorCatalog(roots));
+}
+
+size_t countLogsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
+                           const std::string& text)
+{
+    const auto logs = recorder.getRecordedLogs();
+    return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [&text](const auto& log) {
+        return log.message.find(text) != std::string::npos;
+    }));
 }
 
 } // namespace
@@ -1429,6 +1473,33 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
     EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
 }
 
+/// A provider builds engine i over state manager i, so the two vectors must line up even
+/// when validation drops a set between two that survive: off by one, an engine serves its
+/// neighbor's kernels while every id it advertises is still correct.
+TEST(TestDescriptorLoader, HandsBackOneStateManagerPerValidatedSetInTheSameOrder)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("state_managers"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:first_valid"));
+    auto unregistered = makeSetDocuments('2', "test:unregistered");
+    documentOfType(unregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+    writeDocuments(dir.path(), makeSetDocuments('3', "test:second_valid"));
+
+    std::vector<std::unique_ptr<KernelIngestorStateManager<LoaderHandle>>> stateManagers;
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(
+        std::vector<std::filesystem::path>{dir.path()}, &stateManagers);
+
+    ASSERT_EQ(sets.size(), 2u);
+    ASSERT_EQ(stateManagers.size(), sets.size());
+    for(size_t i = 0; i < sets.size(); ++i)
+    {
+        ASSERT_NE(stateManagers[i], nullptr) << sets[i].engine.name;
+        EXPECT_EQ(toString(stateManagers[i]->metadataSchema().id), toString(sets[i].schema.id))
+            << sets[i].engine.name;
+    }
+}
+
 /// The graph_match arm of the same pre-flight. An engine naming a graph match this build
 /// does not ship is dropped while it is read, rather than constructing and then throwing
 /// from the state manager after its id has been advertised.
@@ -2271,7 +2342,8 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     // Which two, not merely how many: the gate has to drop the entry that declared 1.1.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.1"))
+    // Exactly once: the packer's layout is read in a single pass.
+    EXPECT_EQ(countLogsContaining(recorder, "declares version 1.1"), 1u)
         << recorder.getRecordedLogsAsString();
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
     // and a shard layout ships the same filename under every arch.
@@ -2353,6 +2425,192 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
     EXPECT_EQ(sets.front().engine.name, "test:valid");
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which no descriptor defines"))
         << recorder.getRecordedLogsAsString();
+}
+
+namespace
+{
+
+/// Replaces the `.kdp.json` writeDocuments() wrote for @p documents with @p text: a layout
+/// the packer never writes, or text no packer could write at all.
+void overwritePack(const std::filesystem::path& directory,
+                   Documents& documents,
+                   const std::string& text)
+{
+    const auto id = documentOfType(documents, ".kdp.json").at("id").get<std::string>();
+    std::ofstream(directory / (id + ".kdp.json"), std::ios::binary | std::ios::trunc)
+        << text << '\n';
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, LoadsAPackTheSameWhetherOrNotItsKernelsComeLast)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory packed(uniqueDirectory("layout_packed"));
+    const hipdnn_test_sdk::utilities::ScopedDirectory sorted(uniqueDirectory("layout_sorted"));
+    auto documents = makeSetDocuments('1', "test:layout");
+    referenceLastKernel(documents);
+    writeDocuments(packed.path(), documents);
+    writeDocuments(sorted.path(), documents);
+    overwritePack(sorted.path(), documents, documentOfType(documents, ".kdp.json").dump(2));
+
+    const auto fromPacked = loadFrom(packed.path());
+    const auto fromSorted = loadFrom(sorted.path());
+
+    ASSERT_EQ(fromPacked.size(), 1u);
+    ASSERT_EQ(fromSorted.size(), 1u);
+    ASSERT_EQ(fromPacked.front().packs.size(), 1u);
+    ASSERT_EQ(fromSorted.front().packs.size(), 1u);
+    const auto& actual = fromPacked.front().packs.front().kernels;
+    const auto& expected = fromSorted.front().packs.front().kernels;
+    ASSERT_EQ(actual.size(), 3u);
+    ASSERT_EQ(actual.size(), expected.size());
+    for(size_t i = 0; i < actual.size(); ++i)
+    {
+        EXPECT_EQ(toString(actual[i].id), toString(expected[i].id));
+        EXPECT_EQ(actual[i].name, expected[i].name);
+        EXPECT_TRUE(actual[i].metadata == expected[i].metadata) << "kernel " << actual[i].name;
+        EXPECT_EQ(actual[i].priority, expected[i].priority);
+        EXPECT_EQ(actual[i].source.sourceFile, expected[i].source.sourceFile);
+    }
+}
+
+TEST(TestDescriptorLoader, ReportsAPacksHeaderErrorAheadOfItsKernelErrors)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("header_first"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& pack = documentOfType(broken, ".kdp.json");
+    pack["bogus"] = 1;
+    pack.at("kernelDescriptors").front().erase("id");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'bogus'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("missing required key 'id'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, FailsAPackAtItsFirstBadKernel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("first_bad_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& kernels = documentOfType(broken, ".kdp.json").at("kernelDescriptors");
+    kernels[1].erase("id");
+    kernels[2]["zzz"] = 1;
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'id'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("'zzz'")) << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, ReportsASyntaxErrorAfterThePacksKernelsAheadOfAKernelError)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("syntax_last"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& pack = documentOfType(broken, ".kdp.json");
+    pack.at("kernelDescriptors").front().erase("id");
+    writeDocuments(dir.path(), broken);
+    auto truncated = membersText(packerLayout(pack));
+    truncated.pop_back(); // the closing brace, after every kernel
+    overwritePack(dir.path(), broken, truncated);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "failed to parse"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("missing required key 'id'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The pack's arch arrives after the kernels, and the kernel reaches past it: only the whole
+/// header shows that.
+TEST(TestDescriptorLoader, JudgesAPacksKernelsAgainstAHeaderKeyThatFollowsThem)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_last"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& pack = documentOfType(broken, ".kdp.json");
+    pack.at("kernelDescriptors").front()["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), broken);
+    auto members = packerLayout(pack);
+    members.emplace_back("arch", nlohmann::json::array({"gfx90a"}));
+    overwritePack(dir.path(), broken, membersText(members));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "reaches past the pack's"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// Last wins both ways: a bad earlier array is ignored, and a bad later one replaces a good one.
+TEST(TestDescriptorLoader, ReadsTheLastOfARepeatedKernelDescriptors)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("repeated_kernels"));
+    const auto badKernels = nlohmann::json::parse(R"([{"version": "1.0"}])");
+
+    auto lastGood = makeSetDocuments('2', "test:last_good");
+    auto& goodPack = documentOfType(lastGood, ".kdp.json");
+    writeDocuments(dir.path(), lastGood);
+    auto goodMembers = packerLayout(goodPack);
+    goodMembers.insert(goodMembers.end() - 1,
+                       std::make_pair(std::string("kernelDescriptors"), badKernels));
+    overwritePack(dir.path(), lastGood, membersText(goodMembers));
+
+    auto lastBad = makeSetDocuments('3', "test:last_bad");
+    auto& badPack = documentOfType(lastBad, ".kdp.json");
+    writeDocuments(dir.path(), lastBad);
+    auto badMembers = packerLayout(badPack);
+    badMembers.emplace_back("kernelDescriptors", badKernels);
+    overwritePack(dir.path(), lastBad, membersText(badMembers));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:last_good");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, IgnoresAKernelDescriptorsKeyNestedInAPacksHeader)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("nested_kernels_key"));
+    auto documents = makeSetDocuments('1', "test:nested");
+    documentOfType(documents, ".kdp.json")["x-note"]
+        = nlohmann::json{{"kernelDescriptors", nlohmann::json::array({42})}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
 }
 
 namespace
