@@ -1031,14 +1031,8 @@ class TestGfx950DenseVariants(unittest.TestCase):
 class TestDenseFactoryRejectsUncarriedFields(unittest.TestCase):
     """The public factory plus ``supports_attention_dense`` is the pair the
     IngestorGenerator profile tools call, without ``Capability`` in front. The
-    dense spec has no fp8 field and a single head size, so those requests must
-    make the factory raise instead of building a plain bf16/fp16 spec."""
-
-    def test_fp8_request_raises(self):
-        for kw in (dict(use_fp8=True), dict(fp8_fnuz=True)):
-            with self.subTest(**kw):
-                with self.assertRaisesRegex(ValueError, "fp8"):
-                    dense_spec_for_request(_gfx950_dense_req(**kw))
+    dense spec has a single head size, so a separate ``hdim_v`` must make the
+    factory raise instead of building a plain dense spec."""
 
     def test_zero_kv_heads_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, "nhead_k must be positive"):

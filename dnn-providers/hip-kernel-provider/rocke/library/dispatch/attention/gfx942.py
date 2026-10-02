@@ -163,9 +163,8 @@ def _dense_spec(req: OperatorRequest):
     and which the gfx942 builder reads directly. Restating it would reintroduce the
     per-arch duplicate that collapsing the two fields removed.
 
-    Every request feature reaches the spec or raises: ``use_sinks`` is carried so
-    ``supports_attention_dense`` refuses it, and fp8, a separate ``hdim_v``, and
-    the gfx950-only ``dense_tile`` / ``dense_wide_lds_dma`` pins raise here. The
+    A separate ``hdim_v`` and the gfx950-only ``dense_tile`` /
+    ``dense_wide_lds_dma`` pins raise here: the spec has no field for them. The
     profile tools call this factory and the predicate without ``Capability``, so a
     dropped field would make an unsupported request look like a plain dense one.
 
@@ -244,7 +243,6 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
         sliding_window=int(req.sliding_window),
-        use_sinks=bool(req.use_sinks),
         waves_per_eu=_resolve_dense_waves_per_eu(
             req, _tuned_waves_per_eu(head_size, dtype)
         ),

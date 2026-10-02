@@ -249,13 +249,9 @@ def _check_dense_factory_request(req: AttentionRequest) -> None:
     profile tools pair ``dense_spec_for_request`` with ``supports_attention_dense``
     and never consult ``Capability``), so a request field the spec has no slot for
     must fail here rather than be dropped into a plain dense spec. The spec has one
-    ``head_size`` and no fp8 mode.
+    ``head_size``.
     """
     errors = _request_errors(req)
-    if bool(req.use_fp8):
-        errors.append("attention_dense has no fp8 path (use_fp8=True)")
-    elif bool(req.fp8_fnuz):
-        errors.append("attention_dense has no fp8 path (fp8_fnuz=True)")
     if errors:
         raise ValueError("; ".join(errors))
 

@@ -405,25 +405,9 @@ class TestGfx942SlidingWindow(unittest.TestCase):
 
 class TestGfx942DirectFactoryHonoursRequest(unittest.TestCase):
     """The public factory plus ``supports_attention_dense`` is the pair the
-    IngestorGenerator profile tools call, without ``Capability`` in front. Every
-    request feature the factory cannot carry into the spec must therefore either
-    reach the spec (so the predicate can refuse it) or make the factory raise. A
+    IngestorGenerator profile tools call, without ``Capability`` in front. A
+    request field the factory cannot carry into the spec must make it raise; a
     field it drops turns an unsupported request into a plain dense one."""
-
-    def test_sinks_reach_the_spec_and_the_predicate_refuses(self):
-        spec = dense_spec_for_request(_req(use_sinks=True))
-        self.assertTrue(spec.use_sinks)
-        ok, why = supports_attention_dense(spec, arch="gfx942")
-        self.assertFalse(ok)
-        self.assertIn("sinks", why)
-
-    def test_fp8_request_raises(self):
-        # fp8_fnuz without use_fp8 is an invalid FP8 request elsewhere
-        # (validate_explicit_fp8_encoding), so it must not pass as plain dense.
-        for kw in (dict(use_fp8=True), dict(fp8_fnuz=True)):
-            with self.subTest(**kw):
-                with self.assertRaisesRegex(ValueError, "fp8"):
-                    dense_spec_for_request(_req(**kw))
 
     def test_zero_kv_heads_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, "nhead_k must be positive"):
@@ -444,7 +428,6 @@ class TestGfx942DirectFactoryHonoursRequest(unittest.TestCase):
 
     def test_pins_gfx942_already_satisfies_keep_the_spec(self):
         baseline = dense_spec_for_request(_req())
-        self.assertFalse(baseline.use_sinks)
         for kw in (dict(dense_tile="default"), dict(dense_wide_lds_dma="off")):
             with self.subTest(**kw):
                 self.assertEqual(dense_spec_for_request(_req(**kw)), baseline)

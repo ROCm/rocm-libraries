@@ -269,8 +269,8 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     stays on the request (``auto`` selects GQA-local mappings inside the spec).
     Non-tile-multiple self-attention lengths use the on-chip ragged path.
     ``variant=None`` keeps the one-argument call used by existing tests and
-    selects the auto-policy variant. fp8 and a separate ``hdim_v`` have no spec
-    field, so they raise here rather than build a plain dense spec.
+    selects the auto-policy variant. A separate ``hdim_v`` has no spec field, so
+    it raises here rather than build a plain dense spec.
     """
     assert isinstance(req, AttentionRequest)
     _check_dense_factory_request(req)
