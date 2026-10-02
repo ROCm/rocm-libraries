@@ -29,7 +29,7 @@ from .correctness import (
     suppress_timings,
 )
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
-from .evaluate import problem_keys, resolve_grouping, split_problems
+from .evaluate import BENCHMARK_COLUMN, problem_keys, resolve_grouping, split_problems
 from .features import (
     build_features_signature,
     require_admissible_kernel_axes,
@@ -145,6 +145,13 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "model. Train on every shape and report accuracy over all of them as "
         "recall, instead of holding --eval-fraction of them out of the model",
     )
+    parser.add_argument(
+        "--eval-benchmarks",
+        metavar="FILE",
+        help="JSON list of graph ids (benchmark) to hold out, on every device, instead of "
+        "drawing --eval-fraction of the problems. Fixed when a corpus is generated, so the "
+        "same graphs score every model trained from it however its collections grow",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
@@ -226,6 +233,20 @@ COLLECTION_MANIFEST = "collection_manifest.json"
 def _corpus_name(sources: list, source) -> str:
     """One corpus per metric source, named plainly when there is only one."""
     return "corpus" if len(sources) == 1 else f"corpus_{source}"
+
+
+def _eval_benchmarks(path: str) -> set[str]:
+    """The graph ids `--eval-benchmarks` names: a JSON list, or an object whose `benchmarks`
+    is one (the evaluation slice a corpus records)."""
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    listed = document.get("benchmarks") if isinstance(document, dict) else document
+    if not isinstance(listed, list) or not all(
+        isinstance(b, str) and b for b in listed
+    ):
+        raise ValueError(f"{path}: --eval-benchmarks needs a list of graph ids")
+    if not listed:
+        raise ValueError(f"{path}: --eval-benchmarks names no graph")
+    return set(listed)
 
 
 def write_collection(
@@ -1283,7 +1304,15 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError(
                 "--output-dir must be outside the shipping descriptor tree"
             )
-        if not args.recall and not 0 < args.eval_fraction < 1:
+        if args.eval_benchmarks and args.recall:
+            raise ValueError(
+                "--eval-benchmarks holds graphs out; --recall trains on every one of them"
+            )
+        if (
+            not args.recall
+            and not args.eval_benchmarks
+            and not 0 < args.eval_fraction < 1
+        ):
             raise ValueError(
                 "generate requires a true problem holdout: 0 < --eval-fraction < 1 "
                 "(or --recall for an engine whose shape space is closed)"
@@ -1498,6 +1527,29 @@ def run_generate(args: argparse.Namespace) -> int:
                     )
                 )
         grouping = resolve_grouping(frames[sources[0]])
+        held = _eval_benchmarks(args.eval_benchmarks) if args.eval_benchmarks else None
+        eval_corpora = {}
+        if held is not None:
+            measured = set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)) & held
+            if not measured:
+                raise ValueError(
+                    f"none of the {len(held)} --eval-benchmarks graphs was measured in this "
+                    "corpus; there is nothing to evaluate on"
+                )
+            # The graphs scored are exactly the ones named, every row of them on every device:
+            # evaluate scores the whole of this file rather than drawing its own split.
+            for source in sources:
+                eval_corpora[source] = stage / f"{staged('eval_corpus', source)}.json"
+                _write_json(
+                    eval_corpora[source],
+                    _absent_as_null(
+                        [
+                            row
+                            for row in rows[source]
+                            if str(row.get(BENCHMARK_COLUMN)) in held
+                        ]
+                    ),
+                )
         train_frames = {}
         for source in sources:
             candidates = usable[source]
@@ -1505,6 +1557,10 @@ def run_generate(args: argparse.Namespace) -> int:
                 # Every shape the engine can ever be asked about is in the corpus: holding some
                 # out would ship a model that has not seen shapes it will certainly meet.
                 train_frames[source] = candidates
+            elif held is not None:
+                train_frames[source] = candidates[
+                    ~candidates[BENCHMARK_COLUMN].astype(str).isin(held)
+                ]
             else:
                 split = split_problems(
                     problem_keys(frames[source], grouping),
@@ -1619,11 +1675,11 @@ def run_generate(args: argparse.Namespace) -> int:
             eval_args = [
                 "evaluate",
                 "--input",
-                str(corpora[source]),
+                str(eval_corpora.get(source, corpora[source])),
                 "--model-dir",
                 str(model_dir),
                 "--eval-fraction",
-                "1.0" if args.recall else str(args.eval_fraction),
+                "1.0" if args.recall or held is not None else str(args.eval_fraction),
                 "--seed",
                 str(args.seed),
                 "--include-per-problem",
@@ -1708,10 +1764,28 @@ def run_generate(args: argparse.Namespace) -> int:
                 # report only the second without saying so.
                 "catalog_density": density.as_dict() if density else None,
                 "seed": args.seed,
-                "eval_fraction": None if args.recall else args.eval_fraction,
+                "eval_fraction": (
+                    None if args.recall or held is not None else args.eval_fraction
+                ),
                 # "recall": trained on every shape and scored on all of them (a closed shape
-                # space); "holdout": scored on shapes the model never saw.
-                "evaluation": "recall" if args.recall else "holdout",
+                # space); "holdout": scored on a drawn fraction of shapes the model never saw;
+                # "eval_set": scored on the named graphs, fixed when their corpus was made.
+                "evaluation": (
+                    "recall"
+                    if args.recall
+                    else ("eval_set" if held is not None else "holdout")
+                ),
+                "eval_benchmarks": (
+                    None
+                    if held is None
+                    else {
+                        "path": str(Path(args.eval_benchmarks).resolve()),
+                        "listed": len(held),
+                        "measured": len(
+                            set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)) & held
+                        ),
+                    }
+                ),
                 "shipping_knobs": shipping_knobs,
                 "collection_knobs": collection_knobs,
                 # What each knob's pinned integer addressed, as the engine reported it on the

@@ -539,3 +539,71 @@ def test_a_closed_shape_space_trains_on_every_shape_and_reports_recall(
         (output / "model" / "eval_report.json").read_text(encoding="utf-8")
     )
     assert report["metrics"]["problems_scored"] == GRAPHS, "recall scores every shape"
+
+
+def test_a_named_evaluation_set_holds_out_exactly_its_graphs(world, evaluator):
+    """`--eval-benchmarks`: the held-out graphs are the ones a corpus fixed when it was made,
+    not a fraction drawn from whatever this run happens to train on -- so they stay held out,
+    and keep scoring, however the collections grow."""
+    first = _collect(
+        world, "a", collected_at="2026-01-01T00:00:00+00:00", device="board-0"
+    )
+    second = _collect(
+        world, "b", collected_at="2026-01-02T00:00:00+00:00", device="board-1"
+    )
+    named = ["graph-1", "graph-4", "graph-9", "graph-12"]
+    eval_set = world["root"] / "eval_slice.json"
+    eval_set.write_text(
+        json.dumps({"benchmarks": [*named, "graph-never-measured"]}), encoding="utf-8"
+    )
+    code, output = _train(
+        world,
+        "sliced",
+        evaluator,
+        collections=[first, second],
+        extra=["--eval-benchmarks", str(eval_set)],
+    )
+    assert code == 0
+    trained = {
+        r["benchmark"]
+        for r in json.loads((output / "train.json").read_text(encoding="utf-8"))
+    }
+    assert not trained & set(named)
+    assert trained == {f"graph-{i}" for i in range(GRAPHS)} - set(named)
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["evaluation"] == "eval_set" and manifest["eval_fraction"] is None
+    assert (
+        manifest["eval_benchmarks"]["listed"],
+        manifest["eval_benchmarks"]["measured"],
+    ) == (5, 4)
+    # Every named graph measured is scored -- once, on the newest measurement of it, as
+    # training takes one measurement per shape -- and none trains, whichever board took it.
+    scored = manifest["models"][0]["eval_problem_keys"]
+    assert sorted(scored) == sorted([graph, "board-1"] for graph in named)
+
+
+@pytest.mark.parametrize(
+    "contents, extra, message",
+    [
+        (["graph-1"], ["--recall"], "--recall trains on every one"),
+        (["graph-absent"], [], "none of the 1 --eval-benchmarks graphs was measured"),
+        ([], [], "names no graph"),
+    ],
+)
+def test_an_evaluation_set_that_cannot_hold_anything_out_is_refused(
+    world, evaluator, caplog, contents, extra, message
+):
+    collection = _collect(world, "col")
+    eval_set = world["root"] / "eval.json"
+    eval_set.write_text(json.dumps(contents), encoding="utf-8")
+    code, _ = _train(
+        world,
+        "refused",
+        evaluator,
+        collections=[collection],
+        extra=["--eval-benchmarks", str(eval_set), *extra],
+    )
+    assert code != 0
+    assert message in caplog.text
