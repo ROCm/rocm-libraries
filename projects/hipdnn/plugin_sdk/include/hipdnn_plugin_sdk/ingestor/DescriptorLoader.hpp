@@ -1220,7 +1220,10 @@ struct PackScan
 /// built as its own small document, parsed and discarded as it streams past. The first
 /// failure -- header or kernel -- is kept rather than thrown, so a later syntax error still
 /// wins, as it does for a DOM parse; the caller applies it once the text proved well formed.
-class PackScanSax final : public nlohmann::json_sax<nlohmann::json>
+///
+/// No `nlohmann::json_sax` base: sax_parse takes any type with these members, and the base's
+/// virtual template members fail clang-tidy.
+class PackScanSax final
 {
 public:
     PackScanSax(nlohmann::json& header, PackScan& scan, std::string where, int major, int minor)
@@ -1234,35 +1237,37 @@ public:
     {
     }
 
-    bool null() override
+    // NOLINTBEGIN(readability-identifier-naming) - nlohmann's SAX interface names these
+    bool null()
     {
         return scalar(nullptr);
     }
-    bool boolean(bool value) override
+    bool boolean(bool value)
     {
         return scalar(value);
     }
-    bool number_integer(number_integer_t value) override
+    bool number_integer(nlohmann::json::number_integer_t value)
     {
         return scalar(value);
     }
-    bool number_unsigned(number_unsigned_t value) override
+    bool number_unsigned(nlohmann::json::number_unsigned_t value)
     {
         return scalar(value);
     }
-    bool number_float(number_float_t value, const string_t& /*text*/) override
+    bool number_float(nlohmann::json::number_float_t value,
+                      const nlohmann::json::string_t& /*text*/)
     {
         return scalar(value);
     }
-    bool string(string_t& value) override
+    bool string(nlohmann::json::string_t& value)
     {
         return scalar(std::move(value));
     }
-    bool binary(binary_t& value) override
+    bool binary(nlohmann::json::binary_t& value)
     {
         return scalar(nlohmann::json::binary(value));
     }
-    bool start_object(std::size_t /*elements*/) override
+    bool start_object(std::size_t /*elements*/)
     {
         if(_skipDepth == 0)
         {
@@ -1279,7 +1284,7 @@ public:
         }
         return true;
     }
-    bool key(string_t& name) override
+    bool key(nlohmann::json::string_t& name)
     {
         if(_skipDepth == 0)
         {
@@ -1296,7 +1301,7 @@ public:
         }
         return true;
     }
-    bool end_object() override
+    bool end_object()
     {
         --_depth;
         if(_skipDepth == 0)
@@ -1309,7 +1314,7 @@ public:
         }
         return true;
     }
-    bool start_array(std::size_t /*elements*/) override
+    bool start_array(std::size_t /*elements*/)
     {
         if(_skipDepth == 0)
         {
@@ -1336,7 +1341,7 @@ public:
         }
         return true;
     }
-    bool end_array() override
+    bool end_array()
     {
         if(_skipDepth == 0)
         {
@@ -1355,13 +1360,14 @@ public:
         endContainer();
         return true;
     }
-    bool parse_error(std::size_t /*position*/,
-                     const std::string& /*lastToken*/,
-                     const nlohmann::detail::exception& error) override
+    static bool parse_error(std::size_t /*position*/,
+                            const std::string& /*lastToken*/,
+                            const nlohmann::json::exception& error)
     {
         // What a DOM parse would throw, message and position included.
         throw error;
     }
+    // NOLINTEND(readability-identifier-naming)
 
 private:
     /// The header so far is the whole header whenever the kernels are the last key, which
@@ -1462,7 +1468,7 @@ private:
 /// order, so @p visit sees exactly what a loop over the DOM array would, and an exception
 /// from it ends the walk there.
 template <typename Visit>
-class PackKernelsSax final : public nlohmann::json_sax<nlohmann::json>
+class PackKernelsSax final
 {
 public:
     PackKernelsSax(size_t targetArray, Visit visit)
@@ -1472,35 +1478,37 @@ public:
     {
     }
 
-    bool null() override
+    // NOLINTBEGIN(readability-identifier-naming) - nlohmann's SAX interface names these
+    bool null()
     {
         return scalar(nullptr);
     }
-    bool boolean(bool value) override
+    bool boolean(bool value)
     {
         return scalar(value);
     }
-    bool number_integer(number_integer_t value) override
+    bool number_integer(nlohmann::json::number_integer_t value)
     {
         return scalar(value);
     }
-    bool number_unsigned(number_unsigned_t value) override
+    bool number_unsigned(nlohmann::json::number_unsigned_t value)
     {
         return scalar(value);
     }
-    bool number_float(number_float_t value, const string_t& /*text*/) override
+    bool number_float(nlohmann::json::number_float_t value,
+                      const nlohmann::json::string_t& /*text*/)
     {
         return scalar(value);
     }
-    bool string(string_t& value) override
+    bool string(nlohmann::json::string_t& value)
     {
         return scalar(std::move(value));
     }
-    bool binary(binary_t& value) override
+    bool binary(nlohmann::json::binary_t& value)
     {
         return scalar(nlohmann::json::binary(value));
     }
-    bool start_object(std::size_t /*elements*/) override
+    bool start_object(std::size_t /*elements*/)
     {
         _kernelsNext = false;
         if(beginElement())
@@ -1513,7 +1521,7 @@ public:
         }
         return true;
     }
-    bool key(string_t& name) override
+    bool key(nlohmann::json::string_t& name)
     {
         if(_building)
         {
@@ -1525,11 +1533,11 @@ public:
         }
         return true;
     }
-    bool end_object() override
+    bool end_object()
     {
         return endContainer();
     }
-    bool start_array(std::size_t /*elements*/) override
+    bool start_array(std::size_t /*elements*/)
     {
         if(beginElement())
         {
@@ -1547,7 +1555,7 @@ public:
         }
         return true;
     }
-    bool end_array() override
+    bool end_array()
     {
         if(!_building && _kernelsDepth != 0 && _depth == _kernelsDepth)
         {
@@ -1557,11 +1565,12 @@ public:
     }
     bool parse_error(std::size_t /*position*/,
                      const std::string& /*lastToken*/,
-                     const nlohmann::detail::exception& error) override
+                     const nlohmann::json::exception& error)
     {
         // Unreachable once pass one has succeeded; rethrown rather than swallowed if not.
         throw error;
     }
+    // NOLINTEND(readability-identifier-naming)
 
 private:
     bool atElementLevel() const

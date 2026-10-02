@@ -74,7 +74,7 @@ using MetadataTupleValues = std::vector<MetadataValue>;
 
 struct MetadataTupleValuesHash
 {
-    size_t operator()(const MetadataTupleValues& values) const noexcept
+    size_t operator()(const MetadataTupleValues& values) const
     {
         size_t seed = values.size();
         const auto combine = [&seed](size_t hash) {
