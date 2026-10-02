@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -258,13 +259,17 @@ namespace
         }
     };
 
-    jit::Backend backend(const std::string& replay, mock::Options::Fault fault = {})
+    jit::Backend backend(const mock::Options& options)
     {
         jit::Backend     result;
         jit::Diagnostics diagnostics;
-        const auto       status = mock::createBackend({replay, fault}, result, diagnostics);
+        const auto       status = mock::createBackend(options, result, diagnostics);
         require(status == HIPBLAS_STATUS_SUCCESS, "Mock backend: " + diagnostics.message);
         return result;
+    }
+    jit::Backend backend(const std::string& replay, mock::Options::Fault fault = {})
+    {
+        return backend(mock::Options{{replay}, fault});
     }
 
     void test(const std::string& replay)
@@ -519,7 +524,7 @@ namespace
             require(jit::getJitAlgo(device, mismatched, provider, bytes, solution, diagnostics)
                             == HIPBLAS_STATUS_NOT_SUPPORTED
                         && !abi::SolutionAccess::get(solution)
-                        && diagnostics.message.find("does not solve") != std::string::npos,
+                        && diagnostics.message.find("solves this problem") != std::string::npos,
                     "A mismatched ProblemType was not declined: " + diagnostics.message);
         }
         std::cout << "PASS non-GEMM request and mismatched ProblemType are not supported\n";
@@ -538,6 +543,50 @@ namespace
         }
         std::cout << "PASS generation and build faults clear the solution and report their stage\n";
 
+        const auto record = std::filesystem::temp_directory_path()
+                            / ("hipblaslt-jit-mock-record-" + std::to_string(getpid()) + ".txt");
+        std::filesystem::remove(record);
+        mock::Options recording{{replay}, mock::Options::Fault::Record, record.u8string()};
+        for(int call = 0; call < 2; ++call)
+            require(jit::getJitAlgo(device, request, backend(recording), bytes, solution, diagnostics)
+                            == HIPBLAS_STATUS_INTERNAL_ERROR
+                        && !abi::SolutionAccess::get(solution)
+                        && diagnostics.message.find("recorded its request") != std::string::npos,
+                    "The record fault did not fail generation: " + diagnostics.message);
+        std::vector<std::string> lines;
+        {
+            std::ifstream file(record);
+            for(std::string line; std::getline(file, line);)
+                lines.push_back(line);
+        }
+        std::filesystem::remove(record);
+        const auto sizes = " sizes=" + std::to_string(M) + "," + std::to_string(N) + ",1,"
+                           + std::to_string(K) + " count=1 exclude=";
+        require(lines.size() == 2 && lines[0] == lines[1]
+                    && lines[0].find(sizes) != std::string::npos,
+                "The record fault did not append one line per request");
+        std::cout << "PASS the record fault appends each request and fails: " << lines[0] << '\n';
+
+        mock::Options predicted{{replay}};
+        predicted.contract = "origami.gemm.dp.v1";
+        require(jit::getJitAlgo(device, request, backend(predicted), bytes, solution, diagnostics)
+                        == HIPBLAS_STATUS_SUCCESS
+                    && diagnostics.message.find("ranked candidates") != std::string::npos,
+                "The mock did not consume an Origami prediction: " + diagnostics.message);
+        std::cout << "PASS the mock replays after an Origami prediction: " << diagnostics.message
+                  << '\n';
+
+        jit::Backend rejected;
+        predicted.contract = "test.unmodeled.v1";
+        mock::Options unrecorded{{replay}, mock::Options::Fault::Record};
+        for(const auto& options : {mock::Options{}, unrecorded, predicted})
+            require(mock::createBackend(options, rejected, diagnostics)
+                            == HIPBLAS_STATUS_INVALID_VALUE
+                        && !abi::BackendAccess::get(rejected) && !diagnostics.message.empty(),
+                    "Invalid mock options were accepted");
+        std::cout << "PASS no bundle, a record fault without a file and an unmodeled contract "
+                     "rejected\n";
+
         std::weak_ptr<const abi::CompiledSolution> released;
         std::weak_ptr<const abi::KernelBundle>     releasedBundle;
         {
@@ -553,7 +602,7 @@ namespace
                      "algorithms\n";
 
         jit::Backend missing;
-        require(mock::createBackend({replay + "/missing"}, missing, diagnostics)
+        require(mock::createBackend({{replay + "/missing"}}, missing, diagnostics)
                         == HIPBLAS_STATUS_INVALID_VALUE
                     && !abi::BackendAccess::get(missing) && !diagnostics.message.empty(),
                 "A missing replay bundle was accepted");
@@ -616,6 +665,25 @@ namespace
         require(libraryAlgos(p, backend(replay, mock::Options::Fault::Trap), "Repeated lookup")[0]
                     == index,
                 "A repeated lookup returned another index");
+        {
+            int device = -1;
+            HIP(hipGetDevice(&device));
+            float                alpha = 1.25f, beta = 0.5f;
+            std::vector<int32_t> indices;
+            jit::Diagnostics     diagnostics;
+            const auto           status = jit::getLibraryAlgos(device,
+                                                     p.request(alpha, beta),
+                                                     backend(replay),
+                                                     2,
+                                                     std::numeric_limits<size_t>::max(),
+                                                     indices,
+                                                     diagnostics);
+            require(status == HIPBLAS_STATUS_SUCCESS && indices == std::vector<int32_t>{index}
+                        && diagnostics.message == "Nothing was published",
+                    "Generating for a shortfall did not skip the published kernel: "
+                        + diagnostics.message);
+        }
+        std::cout << "PASS a shortfall generation skips the kernels the library already holds\n";
         runIndex(p, index, replay, "Published index");
         std::cout << "PASS mock solution published into the JIT library and run by its index\n";
 

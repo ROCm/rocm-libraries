@@ -595,7 +595,7 @@ int main(int argc, char** argv)
         options.cxxCompiler            = argv[7];
         require(options.configPath != "-", "This sample requires an explicit YAML recipe");
 #else
-        options.replay = argv[2];
+        options.replay = {argv[2]};
 #endif
         auto integer = [](const std::string& value) {
             size_t consumed = 0;
@@ -649,7 +649,7 @@ int main(int argc, char** argv)
             another.pythonExecutable = secondPython;
 #else
         if(!secondReplay.empty())
-            another.replay = secondReplay;
+            another.replay = {secondReplay};
 #endif
         Problem problem;
         problem.create();

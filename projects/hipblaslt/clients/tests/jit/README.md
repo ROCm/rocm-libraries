@@ -37,7 +37,12 @@ cmake --build "$project_build" --parallel 8 --target \
 ```
 
 `HIPBLASLT_JIT_TESTING=ON` links the mock backend that
-`hipblaslt-jit-mock-backend-test` replays bundles through. The tests that need
+`hipblaslt-jit-mock-backend-test` replays bundles through. In a build without a
+generator backend it is also the process's JIT backend: heuristic queries rank
+candidates with Origami and replay the bundles `HIPBLASLT_JIT_TEST_REPLAY` lists,
+separated by `:` (`;` on Windows). `HIPBLASLT_JIT_TEST_FAULT` set to `generate`,
+`build`, `record` or `trap` injects the mock's fault, and `record` appends each
+request to the file `HIPBLASLT_JIT_TEST_RECORD` names. The tests that need
 no generator are also CTest tests:
 `ctest --test-dir "$project_build/clients/tests/jit" -L jit-cpu` runs the ones
 that need no GPU, and `-L jit-gpu` runs the rest.
@@ -86,8 +91,8 @@ to replay, publish or rebuild it.
 | `code-object` | comgr builds, loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk-api` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, loaded and resolved |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
-| `mock-backend` | The in-process mock backend replaying the `splitk-api` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation and build faults, and bundle lifetime |
-| `mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
+| `mock-backend` | The in-process mock backend replaying the `splitk-api` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, a replay after an Origami prediction, rejected mock options, and bundle lifetime |
+| `mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A query for two solutions generates only for the shortfall and skips the published kernel. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
 | `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
 | `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
@@ -172,7 +177,8 @@ that `Tensile.SingleSolution --source-only` wrote; the driver passes
 `<output>/splitk-api/bundle`. It creates the mock backend with
 `jit::mock::createBackend` from `hipblaslt-jit-mock.hpp`, so generation runs no
 Python and no subprocess, and checks the same FP16 problem as the direct and
-generic tests. With `--library` after the bundle it runs the
+generic tests, the record fault, a replay after an Origami prediction and
+rejected mock options. With `--library` after the bundle it runs the
 `mock-backend-library` checks instead, and starts its second process itself.
 That mode refuses to run unless `HIPBLASLT_JIT_LIBRARY_PATH` is set, so that it
 never publishes into the default library.
