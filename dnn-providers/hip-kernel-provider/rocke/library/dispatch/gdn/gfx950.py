@@ -63,6 +63,9 @@ BLOCKS_PER_V_DIM = (1, 2, 4, 8, 16, 32)
 DEFAULT_TILE = (2, 16, 8)
 
 _LEXICOGRAPHIC_TILES = tuple(product(NUM_WARPS, WARP_THREADS_K, BLOCKS_PER_V_DIM))
+# Known limitation: when DEFAULT_TILE is illegal (e.g. head_k_dim 64/192), the
+# fallback is the first legal tile in product order, (1,1,1), which is
+# register-heavy. Needs a footprint-based fallback order.
 CONFIGURED_TILES = (DEFAULT_TILE,) + tuple(
     tile for tile in _LEXICOGRAPHIC_TILES if tile != DEFAULT_TILE
 )
