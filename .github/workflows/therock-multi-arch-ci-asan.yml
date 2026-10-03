@@ -47,7 +47,7 @@ jobs:
     with:
       build_variant: "host-asan"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || 'test_filter:comprehensive' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (github.event_name == 'workflow_dispatch' && github.repository) || '' }}
@@ -86,7 +86,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
+    uses: ./.github/workflows/host-asan-linux.yml
     secrets: inherit
     with:
       build_config: ${{ needs.configure_test_runner.outputs.build_config }}
@@ -108,6 +108,7 @@ jobs:
     needs:
       - setup
       - linux_build_and_test
+      - configure_test_runner
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
