@@ -969,6 +969,87 @@ namespace
         }
     }
 
+    // amaxD without an activation is the largest |D| over scale_d. A value outside the range the
+    // type stores exactly may have been rounded, so neither amaxD nor the activation can be
+    // checked from it, and both say so rather than report a wrong value.
+    TEST(FastCheckDevice_pre_checkin, amax_and_activation_need_exact_values)
+    {
+        DeviceMatrix       d, e;
+        std::vector<float> he(DeviceMatrix::total, 99.f), hd(DeviceMatrix::total, 99.f);
+        for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
+            if(DeviceMatrix::in_region(idx))
+            {
+                he[idx] = float(int(idx % 7) - 3);
+                hd[idx] = std::max(he[idx], 0.f);
+            }
+        e.write(he);
+        d.write(hd);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 2, 0), 1.5);
+        double amax = -1;
+        auto   res  = fast_check_activation_device(d.matrix(),
+                                                e.matrix(),
+                                                DeviceMatrix::batch,
+                                                1,
+                                                1,
+                                                FastCheckActivation::relu,
+                                                0,
+                                                0,
+                                                0,
+                                                &amax);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(amax, 3);
+
+        // f32 stores integers exactly below 2^24.
+        e.set(39, 16777216.f);
+        d.set(39, 16777216.f);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 1, 0)));
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           1,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("1 elements of E are outside the range its type stores exactly"),
+                  std::string::npos)
+            << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+    }
+
+    // Scales must be integers for the modular sums; a fractional one is refused with its name.
+    TEST(FastCheck_pre_checkin, non_integer_scales_are_refused)
+    {
+        auto refused = [](const FastCheckProblem& p, const char* reason) {
+            auto res = fast_check_gemm(p);
+            EXPECT_FALSE(res.passed) << reason;
+            EXPECT_NE(res.message.find(reason), std::string::npos) << res.message;
+        };
+        HostProblem      hp = default_problem();
+        FastCheckProblem p  = hp.problem();
+        p.scale_c           = 1.5;
+        refused(p, "integer scaleC and scaleD");
+
+        std::vector<float> sa(size_t(hp.M), 2.f), sb(size_t(hp.N), 2.f);
+        sa[5]            = 2.5f;
+        p                = hp.problem();
+        p.scale_a        = sa.data();
+        p.scale_a_vector = true;
+        refused(p, "integer scaleA entries");
+
+        sb[3]            = 0.5f;
+        p                = hp.problem();
+        p.scale_b        = sb.data();
+        p.scale_b_vector = true;
+        refused(p, "integer scaleB entries");
+
+        const float v = 5;
+        EXPECT_EQ(fast_check_load(&v, HIP_R_32F, 0), 5.0);
+    }
+
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
     // the value it had: a correct value becomes the sentinel, and the sentinel becomes poison.
     TEST(FastCheckDevice_pre_checkin, corrupt_element_changes_exactly_one_element)
