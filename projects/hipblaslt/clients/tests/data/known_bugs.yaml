@@ -52,7 +52,7 @@ Known bugs:
   # leave 256 elements of D unwritten at 65,536 x 65,552) fails the Stream-K tile case
   # on gfx942 and gfx950. REMOVE each entry in the PR that fixes the last defect it
   # lists. Review by 2026-11-01.
-  - { name: matmul_fast_check_threshold_d_bytes, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_d_bytes_bf16, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_threshold_d_bytes_all_solutions, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_threshold_tiles, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
