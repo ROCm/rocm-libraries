@@ -31,7 +31,13 @@ from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_
 from ...core.storage import BitPacking
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
-_LOWBIT_FORMATS = {"fp8e4m3": "fp8", "bf8e5m2": "bf8", "fp4e2m1": "fp4"}
+_LOWBIT_FORMATS = {
+    "fp8e4m3": "fp8",
+    "bf8e5m2": "bf8",
+    "fp6e2m3": "fp6",
+    "fp6e3m2": "bf6",
+    "fp4e2m1": "fp4",
+}
 _LOWBIT_DTYPES = frozenset(_LOWBIT_FORMATS)
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
 _SCALE_DTYPES = {"fp16", "f16", "fp32", "f32"}
@@ -107,6 +113,7 @@ class BlockScaledGemmSpec:
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
+            f"out_{normalize_dtype(self.dtype_c)}",
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
@@ -168,10 +175,12 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         or normalize_dtype(spec.dtype_b) not in _LOWBIT_DTYPES
     ):
         return False, (
-            f"A/B must be fp8, bf8, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
+            f"A/B must be fp8, bf8, fp6, bf6, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
         )
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
+    if native_scale and _canon_lowbit(spec.dtype_a) != _canon_lowbit(spec.dtype_b):
+        return False, "native gfx1250 SCALE/SCALE16 requires matching matrix formats"
     family = matrix_path if native_scale else "wmma"
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
     if not native_scale and not target.mma.has_shape(
@@ -197,7 +206,7 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
             return False, (
-                f"{matrix_path} requires block_k={required_block_k} E8M0 groups "
+                f"{matrix_path} requires block_k={required_block_k} scale groups "
                 f"(got {spec.block_k})"
             )
         try:
@@ -297,9 +306,12 @@ def build_block_scaled_gemm(
     low-bit bytes per lane as ``<8 x i32>``. For FP8/BF8, native fragments carry 64 bytes as
     ``<16 x i32>`` as four 16-byte K chunks, alternating chunks between lane
     halves. Both paths use the gfx12 column-distributed ``<8 x f32>``
-    accumulator layout. FP4 uses prepacked E2M1 bytes: A is [M, K/2], B
-    is [N, K/2], low nibble first along K. Each lane loads two K=32
-    chunks and pads eight packed i32 words to the sixteen-word builtin ABI.
+    accumulator layout. FP6 uses prepacked E2M3 or E3M2 bytes: A is
+    [M, 3*K/4], B is [N, 3*K/4], four codes per three little-endian bytes.
+    Each lane pads twelve packed i32 words to the sixteen-word builtin ABI.
+    FP4 uses prepacked E2M1 bytes: A is [M, K/2], B is [N, K/2],
+    low nibble first along K. Each lane pads eight packed i32 words
+    to the sixteen-word builtin ABI.
     Scale arrays remain A_scale[M, K/block_k] and B_scale[K/block_k, N].
     """
     ok, reason = is_valid_spec(spec, arch=arch)
