@@ -243,6 +243,73 @@ inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& me
     return focus;
 }
 
+/// @brief Every label @p metadata's regime facets can spell: each facet's declared labels and its
+/// `otherwise`, crossed in declaration order and joined as `regimeLabel` joins them.
+///
+/// A label here may still name nothing the engine serves, or nothing a declared constraint
+/// admits -- cross attention, under a constraint that rules it out. That is for a focused search
+/// to find, and to report as a shortfall, not for this list to guess.
+inline std::vector<std::string> declaredRegimeLabels(const OperationMetadata& metadata)
+{
+    std::vector<std::string> joined;
+    if(metadata.regimeLabel.empty())
+    {
+        return joined;
+    }
+    joined.emplace_back();
+    for(const auto& axis : metadata.regimeLabel)
+    {
+        std::vector<std::string> options;
+        for(const auto& label : axis.labels)
+        {
+            if(std::find(options.begin(), options.end(), label) == options.end())
+            {
+                options.push_back(label);
+            }
+        }
+        if(!axis.otherwise.empty()
+           && std::find(options.begin(), options.end(), axis.otherwise) == options.end())
+        {
+            options.push_back(axis.otherwise);
+        }
+        std::vector<std::string> next;
+        for(const auto& prefix : joined)
+        {
+            for(const auto& option : options)
+            {
+                next.push_back(prefix.empty() ? option : prefix + "_" + option);
+            }
+        }
+        joined = std::move(next);
+    }
+    return joined;
+}
+
+/// @brief A floor of @p floor problems for every regime @p metadata spells that @p quotas does not
+/// already name, as a focus per regime (`--regime-floor`).
+///
+/// A combination of facet labels no single assignment spells is left out rather than refused:
+/// the list is the cross product, and a floor is asked of what exists.
+inline std::map<std::string, RegimeFocus> regimeFloors(const OperationMetadata& metadata,
+                                                       const std::map<std::string, int64_t>& quotas)
+{
+    std::map<std::string, RegimeFocus> floors;
+    for(const auto& regime : declaredRegimeLabels(metadata))
+    {
+        if(quotas.count(regime) > 0)
+        {
+            continue;
+        }
+        std::string error;
+        auto focus = compileRegimeFocus(metadata, regime, error);
+        if(focus.has_value())
+        {
+            floors.emplace(regime, std::move(*focus));
+        }
+    }
+    return floors;
+}
+
 /// @brief What a focused search delivered for one regime.
 struct RegimeSearchResult
 {

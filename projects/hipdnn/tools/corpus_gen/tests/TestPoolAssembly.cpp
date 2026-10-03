@@ -326,3 +326,37 @@ TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
     EXPECT_EQ(allocation.at("model"), 1);
     EXPECT_EQ(allocation.at("sweep"), 1);
 }
+
+TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
+{
+    // The served edges: a spread cut treats each as one more point of its stratum and can drop
+    // it. Reserved, they are in the corpus whatever the cut, they count against the total, and
+    // one in a quota's regime counts towards that quota.
+    std::vector<PoolEntry> pool;
+    pool.reserve(100);
+    for(int64_t index = 0; index < 100; ++index)
+    {
+        pool.push_back(entryAt("sweep", index, index < 90 ? "common" : "rare"));
+    }
+    const std::set<std::string> reserved{detail::describe(pool[89].point),
+                                         detail::describe(pool[99].point)};
+
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+    const auto selected = select(
+        {{"sweep", pool}}, 10, defaultShares(), allocation, {{"rare", 3}}, outcome, reserved);
+
+    EXPECT_EQ(selected.size(), 10U);
+    std::set<std::string> taken;
+    for(const auto& entry : selected)
+    {
+        taken.insert(detail::describe(entry.point));
+    }
+    for(const auto& key : reserved)
+    {
+        EXPECT_EQ(taken.count(key), 1U) << key;
+    }
+    EXPECT_EQ(outcome.at("rare").taken, 3) << "the reserved rare point is one of the three";
+    EXPECT_EQ(regimeCounts(selected), (std::map<std::string, int64_t>{{"common", 7}, {"rare", 3}}));
+    EXPECT_EQ(allocation.at("sweep"), 10);
+}

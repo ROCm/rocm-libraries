@@ -9,7 +9,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
+#include <set>
 #include <string>
 
 /// @file TestRegimeLabel.cpp
@@ -335,4 +337,38 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
     EXPECT_TRUE(found.problems.empty());
     EXPECT_TRUE(found.saturated);
     EXPECT_FALSE(found.searchCapped);
+}
+
+TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
+{
+    // What `--regime-floor` asks a floor of: each facet's labels and its `otherwise`, crossed.
+    // A label in the list can still name nothing the engine serves -- that is the search's
+    // finding -- but it can always be compiled into a focus.
+    const auto metadata = shippedSdpa();
+    const auto labels = declaredRegimeLabels(metadata);
+    size_t expected = 1;
+    for(const auto& axis : metadata.regimeLabel)
+    {
+        std::set<std::string> options(axis.labels.begin(), axis.labels.end());
+        options.insert(axis.otherwise);
+        expected *= options.size();
+    }
+    EXPECT_EQ(labels.size(), expected);
+    EXPECT_EQ(std::set<std::string>(labels.begin(), labels.end()).size(), labels.size());
+    for(const auto& label : labels)
+    {
+        std::string error;
+        EXPECT_TRUE(compileRegimeFocus(metadata, label, error).has_value()) << error;
+    }
+    EXPECT_NE(std::find(labels.begin(), labels.end(), "decode_short_mha"), labels.end());
+    EXPECT_NE(std::find(labels.begin(), labels.end(), "append_long_gqa"), labels.end());
+}
+
+TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
+{
+    const auto metadata = shippedSdpa();
+    const auto floors = regimeFloors(metadata, {{"decode_short_mha", 9}});
+    EXPECT_EQ(floors.count("decode_short_mha"), 0U) << "a named quota is not overridden";
+    EXPECT_EQ(floors.size(), declaredRegimeLabels(metadata).size() - 1);
+    EXPECT_EQ(floors.at("decode_long_gqa").pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
 }

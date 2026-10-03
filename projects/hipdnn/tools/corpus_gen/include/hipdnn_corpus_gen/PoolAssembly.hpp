@@ -318,12 +318,17 @@ struct RegimeQuotaOutcome
 /// @p count below the quotas' sum does not trim them; above it, the difference is allocated
 /// over what the quotas left, by @p shares. @p quotaOutcome reports each regime's asked and
 /// taken, since a quota the pools cannot fill is a finding about what the engine serves.
+///
+/// @p reserved names points (by `detail::describe`) taken before anything else -- the served
+/// edges, which spreading would otherwise treat as one more point of their stratum. They count
+/// against @p count, and towards the quota of the regime each is in.
 inline std::vector<PoolEntry> select(const SourcePools& pools,
                                      int64_t count,
                                      const std::map<std::string, double>& shares,
                                      std::map<std::string, int64_t>& allocation,
                                      const std::map<std::string, int64_t>& quotas,
-                                     std::map<std::string, RegimeQuotaOutcome>& quotaOutcome)
+                                     std::map<std::string, RegimeQuotaOutcome>& quotaOutcome,
+                                     const std::set<std::string>& reserved = {})
 {
     SourcePools ordered;
     for(const auto& source : corpusSources())
@@ -337,11 +342,30 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
 
     std::map<std::string, std::vector<bool>> chosen;
     std::map<std::string, int64_t> fromQuotas;
+    std::map<std::string, int64_t> reservedIn;
+    int64_t reservedTotal = 0;
+    for(const auto& source : corpusSources())
+    {
+        const auto& pool = ordered[source];
+        auto& marks = chosen[source];
+        marks.resize(pool.size(), false);
+        for(size_t i = 0; i < pool.size() && !reserved.empty(); ++i)
+        {
+            if(reserved.count(detail::describe(pool[i].point)) > 0)
+            {
+                marks[i] = true;
+                ++fromQuotas[source];
+                ++reservedIn[pool[i].regime];
+                ++reservedTotal;
+            }
+        }
+    }
     quotaOutcome.clear();
     for(const auto& [regime, asked] : quotas)
     {
         auto& outcome = quotaOutcome[regime];
         outcome.asked = asked;
+        outcome.taken = std::min(asked, reservedIn[regime]);
         for(const auto& source : corpusSources())
         {
             const auto& pool = ordered[source];
@@ -359,10 +383,11 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
         }
     }
 
-    int64_t quotaTotal = 0;
+    // Everything already marked: the reserved points, and what the quotas took beyond them.
+    int64_t quotaTotal = reservedTotal;
     for(const auto& entry : quotaOutcome)
     {
-        quotaTotal += entry.second.taken;
+        quotaTotal += entry.second.taken - std::min(entry.second.taken, reservedIn[entry.first]);
     }
 
     // What the quotas left, still in spread order, cut by shares for the remainder of `count`.

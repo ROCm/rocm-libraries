@@ -24,6 +24,7 @@
 #include <hipdnn_corpus_gen/PoolAssembly.hpp>
 #include <hipdnn_corpus_gen/RegimeFocus.hpp>
 #include <hipdnn_corpus_gen/RegimeLabel.hpp>
+#include <hipdnn_corpus_gen/ServedExtent.hpp>
 
 #include <hipdnn_frontend.hpp>
 #include <sstream>
@@ -40,8 +41,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -190,6 +193,16 @@ struct Options
     std::vector<std::filesystem::path> regimeQuotaFiles;
     std::string quotaError;
 
+    /// At least this many problems in every regime the declaration can spell, where the engine
+    /// serves them (`--regime-floor`). A floor is not a quota: a regime the engine does not
+    /// serve is reported short, and the run still succeeds -- for a corpus that has to represent
+    /// what is served, that it serves none of a regime is the answer, not a failure.
+    int64_t regimeFloor = 0;
+
+    /// Take the served extremes -- for each numeric parameter, the served point with its
+    /// smallest and its largest value -- before anything else (`--include-extremes`).
+    bool includeExtremes = false;
+
     /// Benchmarking ceiling in bytes across a problem's tensors. 256 MiB by default: large
     /// enough for real layers, small enough that no single problem dominates a corpus run.
     int64_t maxBytes = 256LL * 1024 * 1024;
@@ -244,6 +257,15 @@ void printHelp(const char* program)
               << "                         with quotas means the quotas alone. Exit 3 when a\n"
               << "                         quota is short and not shown saturated.\n"
               << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
+              << "  --regime-floor <n>     At least n problems in every regime the declaration\n"
+              << "                         can spell (a named quota overrides it). Searched as\n"
+              << "                         quotas are; a regime the engine does not serve is\n"
+              << "                         reported short in manifest.json, never an error.\n"
+              << "  --include-extremes     Take, before anything else, the served point with the\n"
+              << "                         smallest and the largest value of each numeric\n"
+              << "                         parameter: the edges of what the engine serves, which\n"
+              << "                         a spread cut can leave out. Counts against --count.\n"
+              << "                         manifest.json's served_extent is reported either way.\n"
               << "  --budget <n>           First-pass oracle calls per combination (default\n"
               << "                         20000); growth toward --count may reach 64x this\n"
               << "  --ceiling <n>          Largest extent to propose (default 4096)\n"
@@ -360,6 +382,14 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         {
             options.regimeQuotaFiles.emplace_back(next());
         }
+        else if(arg == "--regime-floor")
+        {
+            options.regimeFloor = std::strtoll(next().c_str(), nullptr, 10);
+        }
+        else if(arg == "--include-extremes")
+        {
+            options.includeExtremes = true;
+        }
         else if(arg == "--budget")
         {
             options.exploration.budgetPerCombination = std::strtoll(next().c_str(), nullptr, 10);
@@ -411,6 +441,76 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
 
 /// Renders a problem point as `q.*` columns, which is the half of a training row the corpus
 /// owns and the form RFC 0019.13 §7 requires.
+
+/// The manifest's `served_extent` for one operation, and with @p takeEdges the edge points added
+/// to the sweep pool (where no pool holds them) and named in @p reserved, so the cut keeps them.
+/// @p admit stamps a new pool entry and returns its graph id, or empty when it is held out.
+nlohmann::json
+    reportServedExtent(const hipdnn_corpus_gen::OperationMetadata& metadata,
+                       const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                       hipdnn_corpus_gen::SourcePools& pools,
+                       bool takeEdges,
+                       bool searched,
+                       std::set<std::string>& reserved,
+                       const std::function<std::string(hipdnn_corpus_gen::PoolEntry&)>& admit)
+{
+    std::vector<hipdnn_corpus_gen::ProblemPoint> pooled;
+    std::set<std::string> pooledKeys;
+    for(const auto& pool : pools)
+    {
+        for(const auto& entry : pool.second)
+        {
+            pooled.push_back(entry.point);
+            pooledKeys.insert(hipdnn_corpus_gen::detail::describe(entry.point));
+        }
+    }
+    const auto extent = hipdnn_corpus_gen::servedExtent(
+        metadata, hipdnn_corpus_gen::servedPoints(corpus, pooled));
+
+    nlohmann::json parameters = nlohmann::json::object();
+    for(const auto& [name, range] : extent.ranges)
+    {
+        parameters[name] = {{"min", range.first}, {"max", range.second}};
+    }
+    nlohmann::json taken = nlohmann::json::array();
+    for(const auto& edge : takeEdges ? extent.edges : std::vector<hipdnn_corpus_gen::ServedEdge>{})
+    {
+        const auto key = hipdnn_corpus_gen::detail::describe(edge.point);
+        hipdnn_corpus_gen::PoolEntry entry;
+        entry.point = edge.point;
+        entry.source = "sweep";
+        entry.origin = metadata.operation + " extreme " + edge.end + " " + edge.parameter;
+        entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
+        // Pooled or not, the id comes from the same stamp emission uses.
+        const auto id = admit(entry);
+        if(id.empty())
+        {
+            continue; // held out; the next most extreme is not searched for
+        }
+        if(pooledKeys.insert(key).second)
+        {
+            pools["sweep"].push_back(std::move(entry));
+        }
+        reserved.insert(key);
+        taken.push_back({{"parameter", edge.parameter},
+                         {"end", edge.end},
+                         {"value", edge.value},
+                         {"benchmark", id}});
+    }
+    bool capped = false;
+    for(const auto& combination : corpus.combinations)
+    {
+        capped = capped || combination.searchCapped;
+    }
+    // How far the walks reached: a lower bound on the served region, never a proof of its edge.
+    // `search_capped`: some search stopped while still finding new points, so the edge is known
+    // to lie further out.
+    return {{"parameters", parameters},
+            {"served_points", extent.servedPoints},
+            {"searched", searched},
+            {"search_capped", capped},
+            {"extremes", taken}};
+}
 
 int runGenerator(const std::vector<std::string>& args)
 {
@@ -609,6 +709,27 @@ int runGenerator(const std::vector<std::string>& args)
                 quotasFor[metadata.operation][regime] = count;
                 focusFor[metadata.operation].emplace(regime, *focus);
             }
+        }
+    }
+    // Floors: every regime the declaration spells, where no quota named it. Kept apart so a
+    // short floor reports instead of failing the run.
+    std::map<std::string, std::set<std::string>> floorsFor;
+    if(options.regimeFloor < 0)
+    {
+        std::cerr << "--regime-floor is negative\n";
+        return 1;
+    }
+    for(const auto& entry : selected.operations)
+    {
+        const auto& operation = entry.second.operation;
+        for(auto& [regime, focus] :
+            options.regimeFloor > 0
+                ? hipdnn_corpus_gen::regimeFloors(entry.second, quotasFor[operation])
+                : std::map<std::string, hipdnn_corpus_gen::RegimeFocus>{})
+        {
+            quotasFor[operation][regime] = options.regimeFloor;
+            focusFor[operation].emplace(regime, std::move(focus));
+            floorsFor[operation].insert(regime);
         }
     }
 
@@ -943,6 +1064,8 @@ int runGenerator(const std::vector<std::string>& args)
     nlohmann::json quotaReports = nlohmann::json::object();
     /// A quota left short without its focused search being shown saturated.
     std::vector<std::string> quotaShort;
+    /// Per operation: each numeric parameter's served extent, and the extremes taken.
+    nlohmann::json servedExtent = nlohmann::json::object();
     /// Whether the search found any served problem beyond the pack and model shapes.
     bool searchFoundMore = false;
     std::ofstream commands;
@@ -1297,6 +1420,25 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
+        // The served edges, reported always and taken first with --include-extremes.
+        std::set<std::string> reserved;
+        servedExtent[result.operation] = reportServedExtent(
+            metadata,
+            result.corpus,
+            pools,
+            options.includeExtremes,
+            searched,
+            reserved,
+            [&](hipdnn_corpus_gen::PoolEntry& entry) {
+                if(!admit(entry, true))
+                {
+                    return std::string(); // held out
+                }
+                return stamped
+                    .at(result.operation + "|" + hipdnn_corpus_gen::detail::describe(entry.point))
+                    .id;
+            });
+
         // Spread a cut over every categorical combination as well as the regime, so a count
         // below the pools' size takes a proportional share of each dtype, layout and mode.
         for(auto& pool : pools)
@@ -1356,13 +1498,15 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
         const auto chosen = hipdnn_corpus_gen::select(
-            deduplicated, cut, options.shares, allocation, owed, quotaOutcome);
+            deduplicated, cut, options.shares, allocation, owed, quotaOutcome, reserved);
         for(const auto& [regime, outcome] : quotaOutcome)
         {
             const auto search = focused.find(regime);
             const bool focusSearched = search != focused.end();
             const bool saturated = coverageIsPack || (focusSearched && search->second.saturated);
+            const bool floor = floorsFor[result.operation].count(regime) > 0;
             quotaReports[result.operation][regime] = nlohmann::json{
+                {"floor", floor},
                 {"asked", outcome.asked},
                 {"delivered", outcome.taken},
                 {"pooled_before_focus", pooledBefore[regime]},
@@ -1371,7 +1515,7 @@ int runGenerator(const std::vector<std::string>& args)
                 {"focus_proposals_in_regime", focusSearched ? search->second.inRegime : 0},
                 {"saturated", saturated},
                 {"search_capped", focusSearched && search->second.searchCapped}};
-            if(outcome.taken < outcome.asked && !saturated)
+            if(outcome.taken < outcome.asked && !saturated && !floor)
             {
                 quotaShort.push_back(result.operation + " " + regime + ": "
                                      + std::to_string(outcome.taken) + " of "
@@ -1501,6 +1645,10 @@ int runGenerator(const std::vector<std::string>& args)
         if(!quotaReports.empty())
         {
             manifest.reports["regime_quota"] = quotaReports;
+        }
+        if(!servedExtent.empty())
+        {
+            manifest.reports["served_extent"] = servedExtent;
         }
         if(options.count > 0 && total < requested && !shortfall.empty())
         {

@@ -471,4 +471,57 @@ TEST(TestProblemSpace, AllOfAdmitsOnlyWhatEveryEngineServes)
     EXPECT_TRUE(allOf({})(ProblemPoint{{"M", int64_t{1}}})) << "no engine named, no constraint";
 }
 
+TEST(TestProblemSpace, ReportsTheServedEdgesOfEveryCombinationNotOnlyOfWhatItSelected)
+{
+    // The edges come from every point the engine accepted, so they bound the selection; and
+    // each is a served point, inside the region the oracle describes.
+    const ProblemOracle bounded = [](const ProblemPoint& point) {
+        return std::get<int64_t>(point.at("M")) <= 300 && std::get<int64_t>(point.at("N")) <= 50;
+    };
+    ExplorationRequest request;
+    request.pointsPerCombination = 8;
+    request.seed = 11;
+
+    const auto corpus = exploreProblemSpace(twoDimsAndADtype(), request, bounded);
+
+    for(const auto& combination : corpus.combinations)
+    {
+        ASSERT_EQ(combination.lowest.size(), 2U);
+        ASSERT_EQ(combination.highest.size(), 2U);
+        for(size_t d = 0; d < 2; ++d)
+        {
+            const auto& name = corpus.numericParameters[d];
+            const auto low = std::get<int64_t>(combination.lowest[d].at(name));
+            const auto high = std::get<int64_t>(combination.highest[d].at(name));
+            EXPECT_TRUE(bounded(combination.lowest[d]));
+            EXPECT_TRUE(bounded(combination.highest[d]));
+            EXPECT_EQ(combination.lowest[d].at("dtype"), combination.categorical.at("dtype"));
+            for(const auto& point : combination.problems)
+            {
+                EXPECT_LE(low, std::get<int64_t>(point.at(name)));
+                EXPECT_GE(high, std::get<int64_t>(point.at(name)));
+            }
+        }
+    }
+    // Reproducible from the seed, ties included.
+    const auto again = exploreProblemSpace(twoDimsAndADtype(), request, bounded);
+    EXPECT_EQ(detail::describe(again.combinations.front().highest.front()),
+              detail::describe(corpus.combinations.front().highest.front()));
+}
+
+TEST(TestProblemSpace, NothingServedHasNoEdges)
+{
+    ExplorationRequest request;
+    request.pointsPerCombination = 4;
+    request.budgetPerCombination = 200;
+    request.probeBudget = 100;
+    const auto corpus = exploreProblemSpace(
+        twoDimsAndADtype(), request, [](const ProblemPoint&) { return false; });
+    for(const auto& combination : corpus.combinations)
+    {
+        EXPECT_TRUE(combination.lowest.empty());
+        EXPECT_TRUE(combination.highest.empty());
+    }
+}
+
 } // namespace hipdnn_corpus_gen
