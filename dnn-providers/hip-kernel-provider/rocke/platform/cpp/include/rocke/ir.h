@@ -595,7 +595,10 @@ typedef struct rocke_mem_opts
     rocke_temporal_hint_t temporal_hint;
 } rocke_mem_opts_t;
 
-#define ROCKE_MEM_OPTS_INIT {(uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT}
+#define ROCKE_MEM_OPTS_INIT                                        \
+    {                                                              \
+        (uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT \
+    }
 
 /* ============================== TYPE SYSTEM ============================== */
 
