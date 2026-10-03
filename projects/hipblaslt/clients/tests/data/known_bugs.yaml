@@ -57,6 +57,12 @@ Known bugs:
   - { name: matmul_fast_check_threshold_tiles, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
   - { name: matmul_fast_check_threshold_custom_kernel_ROCM31258, function: matmul, known_bug_platforms: gfx950 }
+  # ROCM-32151: some bf16 solutions write about half the right value, in the last
+  # partial M tile or, for gfx950 solution 354888, everywhere. On gfx942 the Stream-K
+  # case sees them. REMOVE these entries in the PR that fixes ROCM-32151. Review by
+  # 2026-11-01.
+  - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
   # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
   # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
   # unit_check fails a correct GPU result. Host-side, so every platform is affected
