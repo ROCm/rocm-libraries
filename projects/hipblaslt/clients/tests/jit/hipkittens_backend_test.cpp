@@ -102,6 +102,8 @@ namespace
         int64_t                m = 1024, n = 1024, k = 1024;
         int64_t                lda = 0, ldb = 0, ldc = 0, ldd = 0; // 0 is packed
         int32_t                batch = 1;
+        int64_t                gap   = 0; // elements between batches
+        bool                   pointerArray = false;
         float                  alpha = 1, beta = 0;
         bool                   cIsD = false; // C aliases D
         hipblasLtPointerMode_t pointerMode = HIPBLASLT_POINTER_MODE_HOST;
@@ -131,10 +133,31 @@ namespace
         {
             return ldd ? ldd : m;
         }
+        // Batch strides.
+        int64_t strideA() const
+        {
+            return leadA() * (opA == HIPBLAS_OP_N ? k : m) + gap;
+        }
+        int64_t strideB() const
+        {
+            return leadB() * (opB == HIPBLAS_OP_N ? n : k) + gap;
+        }
+        int64_t strideC() const
+        {
+            return leadC() * n + gap;
+        }
+        int64_t strideD() const
+        {
+            return leadD() * n + gap;
+        }
         std::string name() const
         {
             std::ostringstream out;
             out << m << 'x' << n << 'x' << k;
+            if(batch != 1)
+                out << " batch " << batch;
+            if(gap)
+                out << " gap " << gap;
             if(alpha != 1)
                 out << " alpha " << alpha;
             if(beta)
@@ -166,18 +189,26 @@ namespace
                                     hipDataType              type,
                                     int64_t                  rows,
                                     int64_t                  cols,
-                                    int64_t                  lead) {
+                                    int64_t                  lead,
+                                    int64_t                  stride) {
                 BLAS(hipblasLtMatrixLayoutCreate(&l, type, rows, cols, lead));
-                const int64_t stride = lead * cols;
                 BLAS(hipblasLtMatrixLayoutSetAttribute(
                     l, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &c.batch, sizeof(c.batch)));
                 BLAS(hipblasLtMatrixLayoutSetAttribute(
                     l, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride, sizeof(stride)));
+                if(c.pointerArray)
+                {
+                    const hipblasLtBatchMode_t mode = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+                    BLAS(hipblasLtMatrixLayoutSetAttribute(
+                        l, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode)));
+                }
             };
-            layout(la, c.typeAB, c.rowsA(), c.opA == HIPBLAS_OP_N ? c.k : c.m, c.leadA());
-            layout(lb, c.typeAB, c.rowsB(), c.opB == HIPBLAS_OP_N ? c.n : c.k, c.leadB());
-            layout(lc, c.typeCD, c.m, c.n, c.leadC());
-            layout(ld, c.typeCD, c.m, c.n, c.leadD());
+            layout(la, c.typeAB, c.rowsA(), c.opA == HIPBLAS_OP_N ? c.k : c.m, c.leadA(),
+                   c.strideA());
+            layout(lb, c.typeAB, c.rowsB(), c.opB == HIPBLAS_OP_N ? c.n : c.k, c.leadB(),
+                   c.strideB());
+            layout(lc, c.typeCD, c.m, c.n, c.leadC(), c.strideC());
+            layout(ld, c.typeCD, c.m, c.n, c.leadD(), c.strideD());
         }
         ~Descriptors()
         {
@@ -386,7 +417,10 @@ namespace
         };
         for(const auto& c : {Case{"beta 1", with([](Config& c) { c.beta = 1; })},
                              Case{"beta -0.5", with([](Config& c) { c.beta = -0.5f; })},
-                             Case{"alpha 1.5", with([](Config& c) { c.alpha = 1.5f; })}})
+                             Case{"alpha 1.5", with([](Config& c) { c.alpha = 1.5f; })},
+                             Case{"batch 2", with([](Config& c) { c.batch = 2; })},
+                             Case{"batch 3 with gaps",
+                                  with([](Config& c) { c.batch = 3, c.gap = 100; })}})
         {
             status = generate(provider, r.make(c.config), target, solutions);
             require(status.ok() && solutions.size() == 1,
@@ -405,7 +439,8 @@ namespace
              with([](Config& c) {
                  c.pointerMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
              })},
-            {"batch 2", with([](Config& c) { c.batch = 2; })},
+            {"pointer-array batch",
+             with([](Config& c) { c.batch = 2, c.pointerArray = true; })},
             {"M = 300", with([](Config& c) { c.m = 300; })},
             {"N = 384", with([](Config& c) { c.n = 384; })},
             {"K = 192", with([](Config& c) { c.k = 192; })},
@@ -418,6 +453,8 @@ namespace
             {"bias", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_BIAS; })},
             {"ReLU", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_RELU; })},
             {"8 GiB D", with([](Config& c) { c.m = c.n = 65536, c.k = 128; })},
+            {"4 GiB of D in batches",
+             with([](Config& c) { c.m = c.n = 4096, c.k = 128, c.batch = 128; })},
         };
         for(const auto& c : cases)
         {
@@ -466,8 +503,8 @@ namespace
             types.insert(term->type());
         require(!types.count("BetaZero"), "The entry still requires beta 0");
         require(!types.count("AlphaValue"), "The entry still requires alpha 1");
-        for(const char* type : {"BatchSizeEqual",
-                                "Free0SizeMultiple",
+        require(!types.count("BatchSizeEqual"), "The entry still requires one batch");
+        for(const char* type : {"Free0SizeMultiple",
                                 "Free1SizeMultiple",
                                 "BoundSizeMultiple",
                                 "TypesEqual",
@@ -527,9 +564,10 @@ namespace
         std::cout << "PASS build matches the variant's resources\n";
     }
 
-    // One packed GEMM on the device, with canaries around D. C holds random
-    // values, or NaN for beta 0, which must not read it; with cIsD it is D's
-    // initial content.
+    // One GEMM with packed leading dimensions on the device, with canaries
+    // around D and in the gaps between its batches. C holds random values, or
+    // NaN for beta 0, which must not read it; with cIsD it is D's initial
+    // content.
     struct Gemm
     {
         static constexpr size_t guard = 4096; // elements on each side of D
@@ -544,23 +582,23 @@ namespace
         Gemm(const Config& config, size_t offset = 0)
             : c(config)
             , offset(offset)
-            , hostA(size_t(c.k) * c.m)
-            , hostB(size_t(c.k) * c.n)
-            , hostC(size_t(c.m) * c.n, canary)
+            , hostA(size_t(c.strideA()) * c.batch)
+            , hostB(size_t(c.strideB()) * c.batch)
+            , hostC(size_t(c.strideC()) * c.batch, canary)
             , A(hostA.size() * 2 + offset)
             , B(hostB.size() * 2 + offset)
             , C(hostC.size() * 2 + offset)
-            , D((size_t(c.m) * c.n + 2 * guard) * 2 + offset)
+            , D((size_t(c.strideD()) * c.batch + 2 * guard) * 2 + offset)
         {
             HIP(hipStreamCreate(&stream));
             uint32_t seed = 12345;
             for(auto* host : {&hostA, &hostB, &hostC})
-                for(auto& value : *host)
+                for(size_t i = 0; i < host->size(); ++i)
                 {
-                    if(host == &hostC && !c.beta)
-                        break;
+                    if(host == &hostC && (!c.beta || !inMatrix(i)))
+                        continue;
                     seed = seed * 1664525u + 1013904223u;
-                    value = toBf16(static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
+                    (*host)[i] = toBf16(static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
                 }
             HIP(hipMemcpy(a(), hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
             HIP(hipMemcpy(b(), hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
@@ -570,6 +608,11 @@ namespace
         ~Gemm()
         {
             static_cast<void>(hipStreamDestroy(stream));
+        }
+        // Whether element i of C or D belongs to a batch's matrix, not a gap.
+        bool inMatrix(size_t i) const
+        {
+            return i % size_t(c.strideD()) < size_t(c.m) * c.n;
         }
         void* a() const
         {
@@ -613,7 +656,7 @@ namespace
         }
         void poison()
         {
-            std::vector<uint16_t> fill(size_t(c.m) * c.n + 2 * guard, canary);
+            std::vector<uint16_t> fill(size_t(c.strideD()) * c.batch + 2 * guard, canary);
             if(c.cIsD)
                 std::copy(hostC.begin(), hostC.end(), fill.begin() + guard);
             HIP(hipMemcpy(base(), fill.data(), fill.size() * 2, hipMemcpyHostToDevice));
@@ -643,40 +686,47 @@ namespace
         std::vector<uint16_t> verify(const std::string& label)
         {
             HIP(hipStreamSynchronize(stream));
-            std::vector<uint16_t> all(size_t(c.m) * c.n + 2 * guard);
+            std::vector<uint16_t> all(size_t(c.strideD()) * c.batch + 2 * guard);
             HIP(hipMemcpy(all.data(), base(), all.size() * 2, hipMemcpyDeviceToHost));
             for(size_t i = 0; i < guard; ++i)
                 require(all[i] == canary && all[all.size() - 1 - i] == canary,
                         label + ": wrote outside D");
             std::vector<uint16_t> out(all.begin() + guard, all.end() - guard);
-            require(std::none_of(out.begin(), out.end(), [](uint16_t v) { return v == canary; }),
-                    label + ": left part of D unwritten");
-            const bool full    = double(c.m) * c.n * c.k <= double(1 << 30);
-            const auto samples = full ? size_t(c.m) * c.n : size_t(8192);
+            for(size_t i = 0; i < out.size(); ++i)
+                require((out[i] == canary) != inMatrix(i),
+                        label + (inMatrix(i) ? ": left part of D unwritten"
+                                             : ": wrote between batches of D"));
+            const auto matrix  = size_t(c.m) * c.n;
+            const bool full    = double(matrix) * c.k * c.batch <= double(1 << 30);
+            const auto samples = full ? matrix * c.batch : size_t(8192);
             uint32_t   seed    = 777;
             const auto bound   = 0.5 * std::sqrt(double(c.k) / 8192);
             for(size_t s = 0; s < samples; ++s)
             {
-                size_t row = s % c.m, col = s / c.m;
+                size_t row = s % c.m, col = s / c.m % c.n, batch = s / matrix;
                 if(!full)
                 {
                     seed = seed * 1664525u + 1013904223u;
                     row  = seed % c.m;
                     seed = seed * 1664525u + 1013904223u;
                     col  = seed % c.n;
+                    seed = seed * 1664525u + 1013904223u;
+                    batch = seed % c.batch;
                 }
-                double sum = 0;
+                const auto* a   = &hostA[batch * c.strideA()];
+                const auto* b   = &hostB[batch * c.strideB()];
+                double      sum = 0;
                 for(int64_t k = 0; k < c.k; ++k)
-                    sum += double(fromBf16(hostA[k + row * c.k]))
-                           * double(fromBf16(hostB[k + col * c.k]));
+                    sum += double(fromBf16(a[k + row * c.k])) * double(fromBf16(b[k + col * c.k]));
                 sum *= c.alpha;
                 if(c.beta)
-                    sum += double(c.beta) * fromBf16(hostC[row + col * c.m]);
-                const double got = fromBf16(out[row + col * c.m]);
+                    sum += double(c.beta)
+                           * fromBf16(hostC[batch * c.strideC() + row + col * c.m]);
+                const double got = fromBf16(out[batch * c.strideD() + row + col * c.m]);
                 require(std::abs(got - sum) <= bound + 0.01 * std::abs(sum),
-                        label + ": D(" + std::to_string(row) + ", " + std::to_string(col)
-                            + ") = " + std::to_string(got) + ", expected "
-                            + std::to_string(sum));
+                        label + ": D(" + std::to_string(row) + ", " + std::to_string(col) + ", "
+                            + std::to_string(batch) + ") = " + std::to_string(got)
+                            + ", expected " + std::to_string(sum));
             }
             return out;
         }
@@ -723,6 +773,16 @@ namespace
             auto& c = configs.back();
             c.m = shape[0], c.n = shape[1], c.k = shape[2];
             c.alpha = alpha, c.beta = beta, c.cIsD = cIsD;
+        }
+        for(const auto& [shape, batch, gap, beta, cIsD] :
+            {std::tuple{shapes[1], 3, 0, 0.0f, false},
+             std::tuple{shapes[0], 4, 64, 1.0f, true},
+             std::tuple{shapes[2], 2, 512, -0.5f, false}})
+        {
+            configs.emplace_back();
+            auto& c = configs.back();
+            c.m = shape[0], c.n = shape[1], c.k = shape[2];
+            c.batch = batch, c.gap = gap, c.beta = beta, c.cIsD = cIsD;
         }
         for(const auto& c : configs)
         {

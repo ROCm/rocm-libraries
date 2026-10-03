@@ -145,6 +145,11 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             {
                 return {Status::Code::NotSupported, Stage::Generate, e.what()};
             }
+            // The custom call passes base addresses and batch strides only.
+            if(problem.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+                return {Status::Code::NotSupported,
+                        Stage::Generate,
+                        "HipKittens kernels need strided batches"};
             for(const auto* tensor : {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
                 if(tensor->totalAllocatedBytes() >= tensorLimit)
                     return {Status::Code::NotSupported,
