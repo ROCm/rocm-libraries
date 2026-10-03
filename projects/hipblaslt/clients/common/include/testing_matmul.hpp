@@ -1136,6 +1136,10 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(scaleDataType(arg.scaleA) != HIP_R_8F_UE8M0
            || scaleDataType(arg.scaleB) != HIP_R_8F_UE8M0)
             return "fast_check supports MX scales only in an E8M0 (UE8M0) format";
+        // The reference recomputes each element's scale as its linear index over the block size,
+        // which holds only when no K block is partial.
+        if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
+            return "fast_check supports MX scales only when K is a multiple of the scale block";
         if(arg.batch_count > 1)
             return "fast_check supports MX scales for a single batch only";
     }
