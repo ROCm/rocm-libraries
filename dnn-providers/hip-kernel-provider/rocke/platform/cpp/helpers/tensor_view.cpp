@@ -294,7 +294,8 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
 
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
-        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+           || rocke_tv_name_is(dt, "fp8e4m3") || rocke_tv_name_is(dt, "bf8e5m2"))
             return rocke_b_smem_load_vN(b, v->base, indices, num_indices, dt, n);
         if(rocke_tv_name_is(dt, "f32"))
             return rocke_b_smem_load_vN_f32(b, v->base, indices, num_indices, n);
@@ -311,7 +312,8 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
         return NULL;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+       || rocke_tv_name_is(dt, "fp8e4m3") || rocke_tv_name_is(dt, "bf8e5m2"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
     if(rocke_tv_name_is(dt, "f32"))
     {

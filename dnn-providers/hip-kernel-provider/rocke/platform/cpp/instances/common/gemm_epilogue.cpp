@@ -83,9 +83,15 @@ static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name
     return rocke_b_io_ir_type(b, name);
 }
 
-/* _storage_dtype(spec): validates homogeneous A/B/C dtypes, fp32 acc, RCR
- * layout, then resolves the A dtype to its IR type. Returns NULL with the
- * builder sticky error set on failure.
+/* _c_storage_dtype(spec): validates the spec's dtypes (A/B homogeneous with C
+ * except on the fp8/bf8 path, fp32 acc, RCR layout), then resolves the *C*
+ * dtype to its IR type. Returns NULL with the builder sticky error set on
+ * failure.
+ *
+ * Every consumer in this file is an epilogue, i.e. a C-side value -- the two
+ * call sites mirror Python's _emit_default_epilogue / _emit_cshuffle_epilogue,
+ * both of which read `c_dtype = _c_storage_dtype(spec)`. C stays a 16-bit float
+ * even when A/B are 8-bit, so io_ir_type still covers every reachable case.
  *
  * Note: in Python the three validation branches raise ValueError directly. The
  * C port has no public sticky-error setter, so on a homogeneity / acc / layout
@@ -99,33 +105,41 @@ static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name
  * reached before emission, so these emit-path call sites only need the resolved
  * IR type. When a shared _storage_dtype validator lands, call it here so the
  * ValueError messages match byte-for-byte. */
-static const rocke_type_t* gemm_storage_dtype(rocke_ir_builder_t* b,
-                                              const rocke_gemm_universal_spec_t* spec)
+static const rocke_type_t* gemm_c_storage_dtype(rocke_ir_builder_t* b,
+                                                const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_gemm_data_spec_t* d = &spec->data;
     const char* a = d->dtype_a;
     const char* bb = d->dtype_b;
     const char* c = d->dtype_c;
     const char* acc = d->dtype_acc;
+    bool is_fp8_ab;
     bool ab_ne;
     bool ac_ne;
+    bool c_ok;
     bool acc_ok;
     bool layout_ok;
 
     if(!rocke_ir_builder_ok(b))
         return NULL;
 
+    is_fp8_ab = (a != NULL && (strcmp(a, "fp8e4m3") == 0 || strcmp(a, "bf8e5m2") == 0))
+                || (bb != NULL && (strcmp(bb, "fp8e4m3") == 0 || strcmp(bb, "bf8e5m2") == 0));
     ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
     ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
+    /* The fp8/bf8 path is the one case where A/B and C differ: A/B are 8-bit
+     * floats, C is a 16-bit float (there is no fp8 accumulator). */
+    c_ok = c != NULL
+           && (strcmp(c, "f16") == 0 || strcmp(c, "fp16") == 0 || strcmp(c, "bf16") == 0);
     acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
     layout_ok = d->layout != NULL && strcmp(d->layout, "RCR") == 0;
 
-    if(ab_ne || ac_ne || !acc_ok || !layout_ok)
+    if(ab_ne || (is_fp8_ab ? !c_ok : ac_ne) || !acc_ok || !layout_ok)
     {
         /* Force the ValueError-equivalent sticky error through the io helper. */
         return rocke_b_io_ir_type(b, NULL);
     }
-    return gemm_dtype_ir(b, d->dtype_a);
+    return gemm_dtype_ir(b, d->dtype_c);
 }
 
 /* =====================================================================
@@ -381,7 +395,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       bool fused_is_mde)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
-    const rocke_type_t* storage_dtype = gemm_storage_dtype(b, spec);
+    const rocke_type_t* storage_dtype = gemm_c_storage_dtype(b, spec);
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     bool pad_m = spec->trait.pad_m;
@@ -692,7 +706,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        bool fused_is_mde)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
-    const rocke_type_t* storage_dtype = gemm_storage_dtype(b, spec);
+    const rocke_type_t* storage_dtype = gemm_c_storage_dtype(b, spec);
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     rocke_value_t* Cs;

@@ -264,6 +264,40 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=1024,
             batched=False,
         )
+    if idx == 11:
+        # gfx1250 (RDNA) fp8 coverage: fp8e4m3 A/B into a bf16 C on the
+        # 16x16x64 WMMA atom. The only config in this family whose A/B and C
+        # dtypes differ, and the only one on a wave32 arch -- it exercises the
+        # K=64 low-bit intrinsic ABI (no leading sign-extend immargs), the
+        # dword-carried LDS fragment load, and the truncated i8 padding zero,
+        # none of which the fp16/bf16 configs above reach. Padding is on so the
+        # masked-load path is covered too.
+        return (
+            UniversalGemmSpec(
+                name="test_fp8_gfx1250",
+                tile=TileSpec(
+                    tile_m=64, tile_n=64, tile_k=64,
+                    warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                ),
+                trait=TraitSpec(
+                    pipeline="mem",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    pad_m=True,
+                    pad_n=True,
+                    pad_k=True,
+                ),
+                data=DataSpec(
+                    dtype_a="fp8e4m3", dtype_b="fp8e4m3",
+                    dtype_c="bf16", dtype_acc="fp32", layout="RCR",
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -271,7 +305,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..10>\n",
+        usage="usage: gemm_emit.py <config_index 0..11>\n",
     )
 
 

@@ -314,12 +314,40 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
  *  helpers of the same name). None of these emit IR.
  * ===================================================================== */
 
+/* _FP8_AB_DTYPES: A/B storage dtypes that are 8-bit floats. These are the one
+ * case where the GEMM's A/B storage dtype differs from its C storage dtype (see
+ * ck_gemm_storage_dtype), and the one case where an element is narrower than
+ * the 2 bytes the LDS plan historically hardcoded. */
+static bool ck_gemm_is_fp8_ab(const char* name)
+{
+    return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
+}
+
 /* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
- * Python wraps io_ir_type; returns NULL for an unsupported dtype (Python
- * ValueError path -- the caller turns it into a structured reject). */
+ * A/B/C are f16 or bf16 with f32 accumulation, except on the gfx1250 fp8/bf8
+ * WMMA path where A/B are 8-bit floats and C stays 16-bit.
+ *
+ * The 8-bit cases are resolved here rather than in io_ir_type, whose contract is
+ * deliberately f16/bf16-only: the small ops that share it promote to f32 on
+ * read, which is not what a packed fp8 MMA operand wants.
+ *
+ * Returns NULL for an unsupported dtype (Python ValueError path -- the caller
+ * turns it into a structured reject). */
 static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
 {
+    if(ck_gemm_is_fp8_ab(name))
+    {
+        return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
+    }
     return rocke_io_ir_type(name);
+}
+
+/* _ab_dtype_bytes(spec): bytes per A/B element -- 2 for f16/bf16, 1 for the
+ * fp8/bf8 operands. Python: dtype_info(spec.data.dtype_a).encoded_bits // 8. */
+static int ck_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(spec->data.dtype_a);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
 }
 
 /* _mma_family(arch): "wmma" for the RDNA wave32 targets, "mma" (MFMA) for CDNA.
@@ -334,17 +362,60 @@ static const char* ck_gemm_mma_family(const rocke_archtarget_t* target)
     return (target->wave_size == 32) ? "wmma" : "mma";
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C, fp32 acc, RCR layout, then
- * return the A dtype's IR type. On a validation failure returns NULL and (when
- * `reason`/`reason_cap` are non-NULL) writes the Python ValueError text. */
-static const rocke_type_t*
-    ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
+/* _validate_storage(spec): validate the spec's storage dtypes and return the
+ * A/B IR type, writing the C IR type to `c_ty_out` when it is non-NULL.
+ *
+ * f16/bf16 GEMMs are homogeneous A/B/C -- the long-standing contract, and the
+ * reason the two returned types are the same object for every pre-fp8 spec.
+ *
+ * The gfx1250 fp8/bf8 WMMA path is the single exception: A and B are 8-bit
+ * floats while C is 16-bit. There is no fp8 accumulator -- the WMMA atom
+ * accumulates into <8 x float> whatever the operand dtype is -- and writing C
+ * back as fp8 would need an output quantisation scale this spec has no field
+ * for, so C stays a 16-bit float and the epilogue's f32 -> C cast is unchanged.
+ *
+ * On a validation failure returns NULL and (when `reason`/`reason_cap` are
+ * non-NULL) writes the Python ValueError text. */
+static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec,
+                                                 const rocke_type_t** c_ty_out,
+                                                 char* reason,
+                                                 size_t reason_cap)
 {
     const rocke_gemm_data_spec_t* d;
     const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
 
     d = &spec->data;
-    if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
+    if(ck_gemm_is_fp8_ab(d->dtype_a) || ck_gemm_is_fp8_ab(d->dtype_b))
+    {
+        if(strcmp(d->dtype_a, d->dtype_b) != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "UniversalGemmSpec fp8/bf8 GEMM requires matching A/B dtypes; "
+                         "got A=%s, B=%s",
+                         d->dtype_a,
+                         d->dtype_b);
+            }
+            return NULL;
+        }
+        if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
+           && strcmp(d->dtype_c, "bf16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "UniversalGemmSpec fp8/bf8 GEMM requires an f16/bf16 C dtype "
+                         "(there is no fp8 accumulator), got C=%s",
+                         d->dtype_c);
+            }
+            return NULL;
+        }
+    }
+    else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -383,11 +454,33 @@ static const rocke_type_t*
     }
 
     ty = ck_gemm_dtype_ir(d->dtype_a);
-    if(ty == NULL && reason != NULL && reason_cap > 0)
+    if(ty == NULL)
     {
-        /* io_ir_type ValueError surface (unsupported A dtype). */
-        snprintf(
-            reason, reason_cap, "unsupported I/O dtype '%s'; expected f16/fp16/bf16", d->dtype_a);
+        if(reason != NULL && reason_cap > 0)
+        {
+            /* io_ir_type ValueError surface (unsupported A dtype). */
+            snprintf(reason,
+                     reason_cap,
+                     "unsupported I/O dtype '%s'; expected f16/fp16/bf16",
+                     d->dtype_a);
+        }
+        return NULL;
+    }
+    c_ty = ck_gemm_dtype_ir(d->dtype_c);
+    if(c_ty == NULL)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "unsupported I/O dtype '%s'; expected f16/fp16/bf16",
+                     d->dtype_c);
+        }
+        return NULL;
+    }
+    if(c_ty_out != NULL)
+    {
+        *c_ty_out = c_ty;
     }
     return ty;
 }
@@ -432,7 +525,7 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     bool db_fits_2wg;
     bool db;
 
-    ab_single = ((t->tile_m * t->tile_k) + (t->tile_n * t->tile_k)) * 2;
+    ab_single = ((t->tile_m * t->tile_k) + (t->tile_n * t->tile_k)) * ck_gemm_ab_dtype_bytes(spec);
     lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
     db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
     db = (strcmp(spec->trait.pipeline, "compv4") == 0)
@@ -549,7 +642,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     t = &spec->tile;
 
     /* _storage_dtype(spec): validates homogeneous dtypes / fp32 acc / RCR. */
-    if(ck_gemm_storage_dtype(spec, reason, reason_cap) == NULL)
+    if(ck_gemm_storage_dtype(spec, NULL, reason, reason_cap) == NULL)
     {
         /* reason already written by ck_gemm_storage_dtype. */
         return false;
@@ -582,20 +675,38 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "spec wave_size %d != %s wave_size %d", spec->wave_size, arch, target->wave_size);
     }
 
-    /* WMMA coverage is narrower than CDNA's MFMA matrix. */
+    /* WMMA coverage is narrower than CDNA's MFMA matrix: gfx11/gfx12 RDNA
+     * supports the 16x16x16 atom and gfx1250 supports the gfx1250-class
+     * 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all through the simple
+     * 'mem'/'wmma_v1' pipeline + 'default' epilogue. */
     if(strcmp(family, "wmma") == 0)
     {
-        if(!(atom_m == 16 && atom_n == 16 && atom_k == 16))
+        bool is_gfx1250 = strcmp(arch, "gfx1250") == 0;
+        bool atom_ok;
+
+        if(is_gfx1250)
         {
-            CK_GEMM_REJECT("WMMA path supports only 16x16x16 (got (%d, %d, %d)) on %s",
+            atom_ok = (atom_m == 16 && atom_n == 16 && (atom_k == 32 || atom_k == 64));
+        }
+        else
+        {
+            atom_ok = (atom_m == 16 && atom_n == 16 && atom_k == 16);
+        }
+        if(!atom_ok)
+        {
+            /* Python: ", ".join(f"{m}x{n}x{k}" for ... in sorted(supported_atoms)). */
+            CK_GEMM_REJECT("WMMA path supports only %s (got (%d, %d, %d)) on %s",
+                           is_gfx1250 ? "16x16x32, 16x16x64" : "16x16x16",
                            atom_m,
                            atom_n,
                            atom_k,
                            arch);
         }
-        if(strcmp(spec->trait.pipeline, "mem") != 0)
+        if(strcmp(spec->trait.pipeline, "mem") != 0
+           && strcmp(spec->trait.pipeline, "wmma_v1") != 0)
         {
-            CK_GEMM_REJECT("WMMA path supports only the 'mem' pipeline (got '%s') on %s",
+            CK_GEMM_REJECT("WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
+                           "(got '%s') on %s",
                            spec->trait.pipeline,
                            arch);
         }

@@ -154,7 +154,7 @@
       "virtual_address_bits": 57,
       "wgp_cache_lds_shared": true,
       "wave_size": 32,
-      "lds_capacity_bytes": 163840,
+      "lds_capacity_bytes": 327680,
       "vmcnt_bits": 6,
       "memory": {
         "has_async_lds": false,

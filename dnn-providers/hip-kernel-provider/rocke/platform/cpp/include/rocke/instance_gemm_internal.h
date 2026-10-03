@@ -87,7 +87,8 @@ typedef struct rocke_gemm_build_ctx
     const char* arch; /* `arch` (NULL-normalised "gfx950")*/
     const rocke_archtarget_t* target; /* ArchTarget.from_gfx(arch)        */
     const rocke_mmaop_t* op; /* _resolve_mma_op(spec, arch)      */
-    const rocke_type_t* storage_dtype; /* _storage_dtype(spec)             */
+    const rocke_type_t* storage_dtype; /* _storage_dtype(spec)   -- A/B    */
+    const rocke_type_t* c_storage_dtype; /* _c_storage_dtype(spec) -- C      */
     bool is_wmma; /* op->family == "wmma"             */
 
     /* ---- kernel params (Values) -- */

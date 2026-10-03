@@ -39,6 +39,13 @@
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
 
+/* storage_dtype in (FP8E4M3, BF8E5M2) -- the 8-bit A/B operands of the gfx1250
+ * low-bit WMMA path, which the f16/bf16 storage paths never produce. */
+static bool rocke_gemm_storage_is_fp8(const rocke_type_t* ty)
+{
+    return rocke_type_eq(ty, rocke_fp8e4m3()) || rocke_type_eq(ty, rocke_bf8e5m2());
+}
+
 /* The driver populates the param + environment fields then calls this; declared
  * here (not in the shared header, to keep that surface frozen) and referenced by
  * the driver part-file via an extern prototype of its own. */
@@ -541,7 +548,14 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                               : (rvar))))
 
 #define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
-#define STORAGE_ZERO() rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype)
+/* _zero_storage_scalar(): cast_f32_to has no 8-bit arm, and the cvt_f32_to_fp8
+ * route would burn a conversion intrinsic to produce a byte we already know:
+ * +0.0 is all-zero in both e4m3 and e5m2, and both lower to i8, so truncating a
+ * zero i32 is the whole job. */
+#define STORAGE_ZERO()                                                                  \
+    (rocke_gemm_storage_is_fp8(ctx->storage_dtype)                                      \
+         ? rocke_b_trunc(b, rocke_b_const_i32(b, 0), ctx->storage_dtype)                \
+         : rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype))
 #define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
 
     /* A-load loop. */
@@ -735,6 +749,30 @@ rocke_value_t* rocke_gemm_emit_frag_smem_load(rocke_gemm_build_ctx_t* ctx,
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
+    /* fp8/bf8 is the one case where frag_len is not an element count: the
+     * gfx1250 K=64 WMMA carries its operands as <frag_len x i32>, one dword per
+     * slot covering four K-contiguous bytes. 8-bit LDS loads cap at 16 elements
+     * (ds_read_b128), so read the 4*frag_len bytes as 16-byte chunks, bitcast
+     * each to <4 x i32>, and concatenate into the <frag_len x i32> operand. */
+    if(rocke_gemm_storage_is_fp8(ctx->storage_dtype))
+    {
+        const rocke_type_t* dword4 = rocke_vector_type(b, rocke_i32(), 4);
+        rocke_value_t* fp8_frag = NULL;
+
+        for(int off = 0; off < frag_len * 4; off += 16)
+        {
+            rocke_value_t* chunk
+                = rocke_gemm_emit_smem_load(b,
+                                            src,
+                                            lds_row,
+                                            rocke_b_add(b, lds_col, rocke_b_const_i32(b, off)),
+                                            16,
+                                            ctx->storage_dtype);
+            rocke_value_t* dwords = rocke_b_vec_bitcast(b, chunk, dword4);
+            fp8_frag = (fp8_frag == NULL) ? dwords : rocke_b_vec_concat(b, fp8_frag, dwords);
+        }
+        return fp8_frag;
+    }
     /* max_vec = 8 if storage_dtype in (F16, BF16) else frag_len */
     bool is_half = rocke_type_eq(ctx->storage_dtype, rocke_f16())
                    || rocke_type_eq(ctx->storage_dtype, rocke_bf16());

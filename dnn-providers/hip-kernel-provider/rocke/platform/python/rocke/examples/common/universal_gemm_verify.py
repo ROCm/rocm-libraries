@@ -52,8 +52,17 @@ def _pick_atom(target: ArchTarget, dtype: str, want):
         family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
     )
     if op is None:
-        raise SystemExit(f"no f16/bf16 16x16 {family} atom for {dtype} on {target.gfx}")
+        raise SystemExit(f"no 16x16 {family} atom for {dtype} on {target.gfx}")
     return (op.m, op.n, op.k)
+
+
+# The 8-bit operand dtypes: A/B are fp8/bf8 but C is bf16, so these need a
+# distinct C type through the whole manifest and a distinct runner kind.
+_F8_DTYPES = ("fp8e4m3", "bf8e5m2")
+
+
+def _c_dtype_for(dtype: str) -> str:
+    return "bf16" if dtype in _F8_DTYPES else dtype
 
 
 def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
@@ -65,9 +74,18 @@ def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
     runner reads the ``A`` pointer type back out to choose its reference dtype
     (``manifest_runner.gemm._gemm_is_bf16``). Dropping the kwarg below would
     therefore not fail loudly; it would decode a bf16 kernel's output as fp16.
+
+    The 8-bit arm additionally overrides ``kind``, which ``make_gemm_manifest``
+    hardcodes to ``gemm_fp16``; ``extra`` is applied last, so no change to the
+    helper is needed. Without it the fp16 runner would feed the kernel 2-byte
+    operands.
     """
     wtm, wtn, wtk = atom
     atom_family = "wmma" if wave_size == 32 else "mfma"
+    c_dtype = _c_dtype_for(dtype)
+    # The 8-bit atoms name both operand dtypes (they may be mixed fp8/bf8).
+    suffix = f"{dtype}_{dtype}" if dtype in _F8_DTYPES else dtype
+    extra = {"kind": "gemm_fp8"} if dtype in _F8_DTYPES else None
     return make_gemm_manifest(
         artifact=artifact,
         block_m=tile.tile_m,
@@ -75,8 +93,9 @@ def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
         block_k=tile.tile_k,
         threads_per_block=spec.block_size,
         default_shape=shape,
-        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{dtype}"],
-        args_signature=gemm_args_signature(dtype=dtype),
+        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{suffix}"],
+        args_signature=gemm_args_signature(dtype=dtype, c_dtype=c_dtype),
+        extra=extra,
     )
 
 
@@ -86,7 +105,12 @@ def main() -> int:
     p.add_argument("--m", type=int, default=512)
     p.add_argument("--n", type=int, default=512)
     p.add_argument("--k", type=int, default=512)
-    p.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    p.add_argument(
+        "--dtype",
+        default="fp16",
+        choices=["fp16", "bf16", "fp8e4m3", "bf8e5m2"],
+        help="A/B operand dtype; the 8-bit choices emit a bf16 C.",
+    )
     p.add_argument(
         "--warp-tile",
         default=None,
@@ -145,7 +169,7 @@ def main() -> int:
     data = DataSpec(
         dtype_a=args.dtype,
         dtype_b=args.dtype,
-        dtype_c=args.dtype,
+        dtype_c=_c_dtype_for(args.dtype),
         dtype_acc="fp32",
         layout="RCR",
     )
@@ -211,9 +235,13 @@ def main() -> int:
     # different order, so a handful of elements drift by ~1 fp16 ULP; we judge
     # the WMMA result against the reported ``max_abs_diff`` and a tolerance
     # instead of the exact bad count (matching the standalone wmma_gemm_verify).
-    tol = (
-        args.tol if args.tol is not None else (1e-2 if target.wave_size == 32 else 0.0)
-    )
+    # The 8-bit runner's inputs keep every fp32 partial sum under 2^24, so its
+    # accumulation is exact whatever order the hardware picks and the only
+    # rounding left is the final RNE to bf16, which the reference reproduces.
+    # Order-independence is the reason WMMA needs a tolerance at 16 bits; it
+    # does not apply here, so do not inherit the wave32 default.
+    default_tol = 0.0 if args.dtype in _F8_DTYPES or target.wave_size == 64 else 1e-2
+    tol = args.tol if args.tol is not None else default_tol
     m = re.search(r"max_abs_diff=([0-9.eE+-]+)", r.stdout)
     if m is None:
         # No verify line -> a real launch/runtime failure, not a tolerance miss.

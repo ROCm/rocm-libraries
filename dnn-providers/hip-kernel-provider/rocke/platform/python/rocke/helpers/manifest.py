@@ -123,7 +123,7 @@ def _provenance_fields() -> Dict[str, str]:
 
 
 def gemm_args_signature(
-    *, with_bytes: bool = False, dtype: str = "fp16"
+    *, with_bytes: bool = False, dtype: str = "fp16", c_dtype: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
@@ -131,19 +131,33 @@ def gemm_args_signature(
     M, N, K dimensions (this is the implicit-GEMM convolution
     signature; the universal GEMM doesn't need them since it doesn't
     use buffer_rsrc).
+
+    `dtype` types the A/B operands; `c_dtype` types C and defaults to
+    `dtype`. They differ for the 8-bit GEMMs, whose operands are fp8/bf8
+    but whose output is bf16 — an fp8 C would quantize the result to ~2
+    decimal digits for no bandwidth win worth having.
     """
-    _dtype_map = {"fp16": "f16", "bf16": "bf16"}
-    if dtype not in _dtype_map:
-        raise ValueError(
-            f"gemm_args_signature: unsupported dtype {dtype!r}; "
-            f"supported: {list(_dtype_map)}"
-        )
+    _dtype_map = {
+        "fp16": "f16",
+        "bf16": "bf16",
+        "fp8e4m3": "fp8e4m3",
+        "bf8e5m2": "bf8e5m2",
+    }
+    if c_dtype is None:
+        c_dtype = dtype
+    for name, val in (("dtype", dtype), ("c_dtype", c_dtype)):
+        if val not in _dtype_map:
+            raise ValueError(
+                f"gemm_args_signature: unsupported {name} {val!r}; "
+                f"supported: {list(_dtype_map)}"
+            )
     ir_type = _dtype_map[dtype]
     ptr_type = f"ptr<{ir_type}, global>"
+    c_ptr_type = f"ptr<{_dtype_map[c_dtype]}, global>"
     sig: List[Dict[str, Any]] = [
         {"name": "A", "type": ptr_type, "size_bytes": 8},
         {"name": "B", "type": ptr_type, "size_bytes": 8},
-        {"name": "C", "type": ptr_type, "size_bytes": 8},
+        {"name": "C", "type": c_ptr_type, "size_bytes": 8},
     ]
     if with_bytes:
         sig += [

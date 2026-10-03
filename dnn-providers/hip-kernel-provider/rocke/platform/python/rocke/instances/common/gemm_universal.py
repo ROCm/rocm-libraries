@@ -55,15 +55,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterator, List, Literal, Optional, Sequence, Tuple
 
+from ...core.dtypes import dtype_info
 from ...core.ir import (
     BF16,
+    BF8E5M2,
     F16,
+    FP8E4M3,
     I32,
     IRBuilder,
     KernelDef,
     PtrType,
     Type,
     Value,
+    VectorType,
 )
 from ...helpers.io import io_ir_type
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
@@ -345,12 +349,25 @@ _BF16_WARP_TILE_SHAPES_GFX950 = {
 }
 
 
+# A/B storage dtypes that are 8-bit floats. These are the one case where the
+# GEMM's A/B storage dtype differs from its C storage dtype (see
+# :func:`_validate_storage`), and the one case where an element is narrower
+# than the 2 bytes the LDS plan historically hardcoded.
+_FP8_AB_DTYPES = ("fp8e4m3", "bf8e5m2")
+
+
 def _dtype_ir(name: str) -> Type:
     """Resolve GEMM storage dtype strings to IR types.
 
-    Universal GEMM currently supports homogeneous A/B/C storage dtypes
-    for f16 and bf16 with f32 accumulation.
+    A/B/C are f16 or bf16 with f32 accumulation, except on the gfx1250 fp8/bf8
+    WMMA path where A/B are 8-bit floats and C stays 16-bit.
+
+    The 8-bit cases are resolved here rather than in :func:`io_ir_type`, whose
+    contract is deliberately f16/bf16-only: the small ops that share it promote
+    to f32 on read, which is not what a packed fp8 MMA operand wants.
     """
+    if name in _FP8_AB_DTYPES:
+        return FP8E4M3 if name == "fp8e4m3" else BF8E5M2
     return io_ir_type(name)
 
 
@@ -393,9 +410,32 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
     )
 
 
-def _storage_dtype(spec: UniversalGemmSpec) -> Type:
+def _validate_storage(spec: UniversalGemmSpec) -> Tuple[Type, Type]:
+    """Validate the spec's storage dtypes and return ``(ab_dtype, c_dtype)``.
+
+    f16/bf16 GEMMs are homogeneous A/B/C -- the long-standing contract, and the
+    reason the two returned types are the same object for every pre-fp8 spec.
+
+    The gfx1250 fp8/bf8 WMMA path is the single exception: A and B are 8-bit
+    floats while C is 16-bit. There is no fp8 accumulator -- the WMMA atom
+    accumulates into ``<8 x float>`` whatever the operand dtype is -- and
+    writing C back as fp8 would need an output quantisation scale this spec has
+    no field for, so C stays a 16-bit float and the epilogue's f32 -> C cast is
+    unchanged.
+    """
     d = spec.data
-    if d.dtype_a != d.dtype_b or d.dtype_a != d.dtype_c:
+    if d.dtype_a in _FP8_AB_DTYPES or d.dtype_b in _FP8_AB_DTYPES:
+        if d.dtype_a != d.dtype_b:
+            raise ValueError(
+                "UniversalGemmSpec fp8/bf8 GEMM requires matching A/B dtypes; "
+                f"got A={d.dtype_a}, B={d.dtype_b}"
+            )
+        if d.dtype_c not in ("f16", "fp16", "bf16"):
+            raise ValueError(
+                "UniversalGemmSpec fp8/bf8 GEMM requires an f16/bf16 C dtype "
+                f"(there is no fp8 accumulator), got C={d.dtype_c}"
+            )
+    elif d.dtype_a != d.dtype_b or d.dtype_a != d.dtype_c:
         raise ValueError(
             "UniversalGemmSpec currently requires homogeneous A/B/C dtypes; "
             f"got A={d.dtype_a}, B={d.dtype_b}, C={d.dtype_c}"
@@ -408,7 +448,22 @@ def _storage_dtype(spec: UniversalGemmSpec) -> Type:
         raise ValueError(
             f"UniversalGemmSpec only supports RCR layout, got {d.layout!r}"
         )
-    return _dtype_ir(d.dtype_a)
+    return _dtype_ir(d.dtype_a), _dtype_ir(d.dtype_c)
+
+
+def _storage_dtype(spec: UniversalGemmSpec) -> Type:
+    """A/B storage dtype -- also C's, for every spec except fp8/bf8 A/B."""
+    return _validate_storage(spec)[0]
+
+
+def _c_storage_dtype(spec: UniversalGemmSpec) -> Type:
+    """C storage dtype. Equals :func:`_storage_dtype` unless A/B are fp8/bf8."""
+    return _validate_storage(spec)[1]
+
+
+def _ab_dtype_bytes(spec: UniversalGemmSpec) -> int:
+    """Bytes per A/B element -- 2 for f16/bf16, 1 for the fp8/bf8 operands."""
+    return dtype_info(spec.data.dtype_a).encoded_bits // 8
 
 
 def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
@@ -417,7 +472,9 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     Returns ``(ab_single, db, two_buf)`` as pure Python ints/bools:
 
     * ``ab_single`` — bytes for one (single-buffered) AB LDS region,
-      ``(tile_m*tile_k + tile_n*tile_k) * 2``.
+      ``(tile_m*tile_k + tile_n*tile_k) * sizeof(A elem)``. The element width
+      is 2 for every f16/bf16 spec (so this is byte-identical to the long-
+      standing hardcoded ``* 2``) and 1 for the fp8/bf8 operands.
     * ``db`` — whether the compv4 software-pipelined double buffer is
       enabled (compv4, direct epilogue, not DTL, and the doubled buffer
       still fits 2 WG/CU).
@@ -431,7 +488,7 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     from ...core.arch import ArchTarget
 
     t = spec.tile
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
+    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * _ab_dtype_bytes(spec)
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
     db = (
@@ -498,15 +555,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
-    # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
-    # interleave, cshuffle LDS-staged C, DTLA, preshuffle) encode MFMA-shaped
-    # assumptions and are gated off until ported. CDNA MFMA keeps the full
-    # matrix.
+    # gfx1250-class 16x16x32 (f16/bf16) and 16x16x64 (fp8/bf8) atoms, all
+    # through the simple ``mem`` pipeline + ``default`` epilogue. The richer
+    # pipelines (compv3 / compv4 scheduler interleave, cshuffle LDS-staged C,
+    # DTLA, preshuffle) encode MFMA-shaped assumptions and are gated off until
+    # ported. CDNA MFMA keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
-            supported_atoms = {(16, 16, 32)}
+            supported_atoms = {(16, 16, 32), (16, 16, 64)}
         if atom not in supported_atoms:
             supported = ", ".join(
                 f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
@@ -868,7 +925,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _agpr_alloc = _os_agpr.environ.get("ROCKE_EXP_AGPR_ALLOC")
     if _agpr_alloc:
         b.kernel.attrs["agpr_alloc"] = _agpr_alloc
-    storage_dtype = _storage_dtype(spec)
+    storage_dtype, c_storage_dtype = _validate_storage(spec)
     _split_k = spec.trait.split_k
     _is_split_k = _split_k > 1
     A = b.param(
@@ -888,7 +945,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     else:
         C = b.param(
             "C",
-            PtrType(storage_dtype, "global"),
+            PtrType(c_storage_dtype, "global"),
             noalias=True,
             writeonly=True,
             align=16,
@@ -1449,6 +1506,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return b.cmp_lt(b.add(k_off, elem_col), K)
 
         def _zero_storage_scalar() -> Value:
+            if storage_dtype in (FP8E4M3, BF8E5M2):
+                # cast_f32_to has no 8-bit arm, and the cvt_f32_to_fp8 route
+                # would burn a conversion intrinsic to produce a byte we
+                # already know: +0.0 is all-zero in both e4m3 and e5m2, and
+                # both lower to i8, so truncating a zero i32 is the whole job.
+                return b.trunc(b.const_i32(0), storage_dtype)
             return b.cast_f32_to(b.const_f32(0.0), storage_dtype)
 
         def _mask_storage_scalar(value: Value, valid: Value) -> Value:
@@ -1603,9 +1666,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         WMMA layout maps, whose A/B fragment slots are K-contiguous. fp16/bf16
         smem loads cap at 8 lanes, so a wider fragment (WMMA ``<16 x half>``) is
         assembled from 8-wide chunks.
+
+        fp8/bf8 is the one case where ``frag_len`` is not an element count: the
+        gfx1250 K=64 WMMA carries its operands as ``<frag_len x i32>``, one
+        dword per slot covering four K-contiguous bytes. The lane therefore
+        reads ``4 * frag_len`` LDS elements, and the byte vector is bitcast to
+        the dword vector the intrinsic takes.
         """
         lds_row = b.add(atom_mn_base, mn_in_atom)
         lds_col = b.add(k_tile_base, k_in_atom)
+        if storage_dtype in (FP8E4M3, BF8E5M2):
+            # 8-bit LDS loads cap at 16 elements (ds_read_b128), so read the
+            # 4*frag_len bytes as 16-byte chunks, bitcast each to <4 x i32>,
+            # and concatenate into the <frag_len x i32> operand.
+            frag = None
+            for off in range(0, frag_len * 4, 16):
+                chunk = _emit_smem_load(
+                    b,
+                    src,
+                    lds_row,
+                    b.add(lds_col, b.const_i32(off)),
+                    16,
+                    storage_dtype,
+                )
+                dwords = b.vec_bitcast(chunk, VectorType(I32, 4))
+                frag = dwords if frag is None else b.vec_concat(frag, dwords)
+            return frag
         max_vec = 8 if storage_dtype in (F16, BF16) else frag_len
         if frag_len <= max_vec:
             return _emit_smem_load(b, src, lds_row, lds_col, frag_len, storage_dtype)
@@ -1635,8 +1721,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         in both LDS tiles the M/N index is the row and K the column, so we read
         the M-coord from the A map and the N-coord (= ``col``) from the B map.
         """
-        a_map = op.a_layout()  # (row, k):   row = lane % 16, k = slot
-        b_map = op.b_layout()  # (k, col):   col = lane % 16, k = slot
+        # Only slot 0 is read: the maps' K coords are K-contiguous across slots,
+        # so slot 0 is the lane's fragment base and the loader walks K from
+        # there. The per-slot step is the element itself for the f16/bf16 atoms
+        # but four bytes for the dword-carried gfx1250 K=64 fp8/bf8 atom, which
+        # is why the base -- not the stride -- is what we take from the map.
+        a_map = op.a_layout()  # (row, k):  row = lane % 16
+        b_map = op.b_layout()  # (k, col):  col = lane % 16
         a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
@@ -2154,7 +2245,7 @@ def _emit_mfma_acc_scatter(
     m_base_off: Value,
     n_base_off: Value,
     c_per_lane: int,
-    storage_dtype: Type,
+    c_dtype: Type,
     per_cell,
     *,
     n_base_first: bool = False,
@@ -2241,7 +2332,7 @@ def _emit_mfma_acc_scatter(
         for ni in range(mfmas_n):
             acc = accs[flat]
             flat += 1
-            acc_h = b.vec_cast_f32_to(acc, storage_dtype)
+            acc_h = b.vec_cast_f32_to(acc, c_dtype)
             if n_base_first:
                 c_n = b.add(
                     b.add(n_base_off, b.const_i32(ni * t.warp_tile_n)),
@@ -2295,7 +2386,7 @@ def _emit_epilogue_default(
     so the per-lane row stride between 4-element groups is 8 (not 4).
     """
     t = spec.tile
-    storage_dtype = _storage_dtype(spec)
+    c_dtype = _c_storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
     pad_m = bool(spec.trait.pad_m)
@@ -2351,7 +2442,7 @@ def _emit_epilogue_default(
                 acc = accs[flat]
                 flat += 1
                 atom_n = b.add(block_warp_n_off, b.const_i32(ni * t.warp_tile_n))
-                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
+                acc_h = b.vec_cast_f32_to(acc, c_dtype)
                 for i in range(c_per_lane):
                     row_in_atom, col_in_atom = c_map.coord(b, lane, i)
                     c_m = b.add(atom_m, row_in_atom)
@@ -2393,7 +2484,7 @@ def _emit_epilogue_default(
         block_warp_m_off,
         block_warp_n_off,
         c_per_lane,
-        storage_dtype,
+        c_dtype,
         _store_cell,
     )
 
@@ -2532,7 +2623,7 @@ def _emit_epilogue_cshuffle(
     mapping, just an extra LDS pass).
     """
     t = spec.tile
-    storage_dtype = _storage_dtype(spec)
+    c_dtype = _c_storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
 
@@ -2553,7 +2644,7 @@ def _emit_epilogue_cshuffle(
     # ``cshuffle_no_alias`` marks it exclusive so the smem-pool packer gives it
     # its own byte range instead of aliasing the A/B staging bytes.
     Cs = b.smem_alloc(
-        storage_dtype,
+        c_dtype,
         [t.tile_m, t.tile_n],
         name_hint="C_smem",
         exclusive=spec.trait.cshuffle_no_alias,
@@ -2608,7 +2699,7 @@ def _emit_epilogue_cshuffle(
         warp_m_off,
         warp_n_off,
         c_per_lane,
-        storage_dtype,
+        c_dtype,
         _smem_cell,
         n_base_first=True,
     )
@@ -2680,7 +2771,7 @@ def _emit_epilogue_cshuffle(
             in_bounds = checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
 
         if store_vec == 1:
-            h = _load_smem_scalar(b, Cs, row, col, storage_dtype)
+            h = _load_smem_scalar(b, Cs, row, col, c_dtype)
             if fused_epilogue is not None:
                 # Treat the scalar as a length-1 vector for op uniformity.
                 # The fused epilogue may transform the value (bias-add,
@@ -2693,7 +2784,7 @@ def _emit_epilogue_cshuffle(
             else:
                 b.global_store(C, c_off, h, align=2)
         else:
-            hv = _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
+            hv = _load_smem_vec(b, Cs, row, col, store_vec, c_dtype)
             if pad_n:
                 for i in range(store_vec):
                     c_n_i = b.add(c_n, b.const_i32(i)) if i else c_n

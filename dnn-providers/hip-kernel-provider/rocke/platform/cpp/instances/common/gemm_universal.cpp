@@ -85,14 +85,54 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          nullptr);
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc + RCR layout,
- * then map the storage dtype string to its IR type. On a Python ValueError
- * path this returns NULL and sets the builder's sticky error. */
+/* _FP8_AB_DTYPES: A/B storage dtypes that are 8-bit floats -- the one case where
+ * the GEMM's A/B storage dtype differs from its C storage dtype. */
+static bool rocke_gemm_is_fp8_ab(const char* name)
+{
+    return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
+}
+
+/* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
+ * The 8-bit cases are resolved here rather than in io_ir_type, whose contract is
+ * deliberately f16/bf16-only. */
+static const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
+{
+    if(rocke_gemm_is_fp8_ab(name))
+    {
+        return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
+    }
+    return rocke_b_io_ir_type(b, name);
+}
+
+/* _validate_storage(spec): validate the spec's storage dtypes, then map the A/B
+ * storage dtype string to its IR type and write C's to `c_ty_out` (when
+ * non-NULL). A/B/C are homogeneous except on the gfx1250 fp8/bf8 WMMA path,
+ * where A/B are 8-bit floats and C stays 16-bit (there is no fp8 accumulator).
+ * On a Python ValueError path this returns NULL and sets the builder's sticky
+ * error. */
 static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
-                                                    const rocke_gemm_universal_spec_t* spec)
+                                                    const rocke_gemm_universal_spec_t* spec,
+                                                    const rocke_type_t** c_ty_out)
 {
     const rocke_gemm_data_spec_t* d = &spec->data;
-    if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
+    const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
+
+    if(rocke_gemm_is_fp8_ab(d->dtype_a) || rocke_gemm_is_fp8_ab(d->dtype_b))
+    {
+        if(strcmp(d->dtype_a, d->dtype_b) != 0)
+        {
+            /* "fp8/bf8 GEMM requires matching A/B dtypes" */
+            return rocke_b_io_ir_type(b, "");
+        }
+        if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
+           && strcmp(d->dtype_c, "bf16") != 0)
+        {
+            /* "fp8/bf8 GEMM requires an f16/bf16 C dtype" */
+            return rocke_b_io_ir_type(b, "");
+        }
+    }
+    else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
     {
         /* "requires homogeneous A/B/C dtypes" */
         return rocke_b_io_ir_type(b, "");
@@ -105,7 +145,25 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
     {
         return rocke_b_io_ir_type(b, "");
     }
-    return rocke_b_io_ir_type(b, d->dtype_a); /* _dtype_ir == io_ir_type */
+    ty = rocke_gemm_dtype_ir(b, d->dtype_a);
+    c_ty = rocke_gemm_dtype_ir(b, d->dtype_c);
+    if(ty == NULL || c_ty == NULL)
+    {
+        return NULL;
+    }
+    if(c_ty_out != NULL)
+    {
+        *c_ty_out = c_ty;
+    }
+    return ty;
+}
+
+/* _ab_dtype_bytes(spec): bytes per A/B element -- 2 for f16/bf16, 1 for the
+ * fp8/bf8 operands. Python: dtype_info(spec.data.dtype_a).encoded_bits // 8. */
+static int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(spec->data.dtype_a);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
 }
 
 /* _ilog2(x): bit_length()-1 for powers of two, else -1 (Python returns None). */
@@ -479,7 +537,9 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
         return NULL;
     }
     rocke_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &c_per_lane);
-    storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    /* Python gemm_wsp3.py calls _storage_dtype(spec) (= _validate_storage(spec)[0]);
+     * A/B are fp16-only here (rejected above), so C never differs. */
+    storage_dtype = rocke_gemm_storage_dtype(b, spec, NULL);
     if(storage_dtype == NULL)
     {
         return NULL;
@@ -1003,7 +1063,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->trait.waves_per_eu);
     }
 
-    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec, &ctx.c_storage_dtype);
     if(ctx.storage_dtype == NULL)
     {
         return NULL;
@@ -1046,7 +1106,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             opts.writeonly_set = true;
             opts.align = 16;
             opts.align_set = true;
-            ctx.C = rocke_b_param(b, "C", ptr_storage, &opts);
+            ctx.C = rocke_b_param(
+                b, "C", rocke_ptr_type(b, ctx.c_storage_dtype, "global"), &opts);
         }
 
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
@@ -1216,7 +1277,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure host
          * arithmetic, ported inline to mirror gemm_universal.py:_ab_lds_plan:
          *
-         *   ab_single   = (tile_m*tile_k + tile_n*tile_k) * 2
+         *   ab_single   = (tile_m*tile_k + tile_n*tile_k) * _ab_dtype_bytes(spec)
          *   db_fits_2wg = (2*ab_single)*2 <= lds_capacity_bytes
          *   db          = compv4 && epilogue!=cshuffle && !direct_to_lds
          *                 && db_fits_2wg
@@ -1228,7 +1289,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
          * smem [512x64] + a fully-unrolled prefetch prologue that Python never
          * emits. Apply the same arithmetic the validity gate and the load-path
          * helper (instance_gemm_build_load.c) use. */
-        long ab_single = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k) * 2;
+        long ab_single = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k)
+                         * rocke_gemm_ab_dtype_bytes(spec);
         bool db_fits_2wg = false;
         bool db = false;
         bool two_buf = false;
