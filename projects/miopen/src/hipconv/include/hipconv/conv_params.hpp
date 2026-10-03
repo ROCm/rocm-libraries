@@ -39,7 +39,9 @@ enum class Algorithm
     // Depthwise (1 channel per group, groups == C == K).
     Depthwise,
     Direct,
-    Pointwise
+    // Layers run as an explicit GEMM through hipBLASLt, as opposed to the
+    // implicit GEMM the direct family convolves with.
+    ExplicitGemm
 };
 
 // Every Direction value, in declaration order.
@@ -49,7 +51,7 @@ inline constexpr std::array all_directions{Direction::Fprop, Direction::Dgrad, D
 inline constexpr std::array all_algorithms{Algorithm::Grouped,
                                            Algorithm::Depthwise,
                                            Algorithm::Direct,
-                                           Algorithm::Pointwise};
+                                           Algorithm::ExplicitGemm};
 
 // DataType values the driver accepts as input tags, in declaration order.
 inline constexpr std::array input_data_types{DataType::fp16, DataType::bf16, DataType::tf32};
@@ -65,7 +67,8 @@ auto to_string(Algorithm algo) -> char const*;
 
 // Parse an algorithm name (the inverse of to_string(Algorithm)).
 //
-// Returns nullopt for any string that is not one of grouped|depthwise|direct|pointwise.
+// Returns nullopt for any string that is not one of
+// grouped|depthwise|direct|explicit_gemm.
 std::optional<Algorithm> parse_algorithm(std::string_view name);
 
 // Parse a supported input data-type name (fp16|bf16|tf32).

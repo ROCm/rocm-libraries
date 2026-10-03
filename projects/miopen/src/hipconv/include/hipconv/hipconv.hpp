@@ -44,6 +44,20 @@ using ConvKernelHandle = ConvKernel*;
 // Returns nullopt if this build has no support for that architecture.
 HIPCONV_API std::optional<ArchHandle> resolve_arch(std::string_view name);
 
+// Look up a GFX arch name in the registry without asking a device.
+//
+// Reports what the registry serves rather than what this binary can run: it
+// makes no HIP call and needs no context, so a caller can enumerate coverage for
+// a named architecture off-device. A caller that intends to launch wants
+// resolve_arch, which adds the device-code check.
+HIPCONV_API std::optional<ArchHandle> find_arch(std::string_view name);
+
+// Every architecture in this build's registry, in registry order.
+//
+// A name here is one find_arch accepts. Whether this binary carries device code
+// for it is a separate question; see resolve_arch.
+HIPCONV_API std::vector<std::string_view> arch_names();
+
 // Error code returned by hipconv's launch API. Currently a hipError_t and
 // carries the standard hipError_t values; may be extended with hipconv-specific
 // codes in the future.

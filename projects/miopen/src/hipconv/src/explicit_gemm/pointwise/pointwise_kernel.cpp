@@ -1,12 +1,12 @@
 #include "conv_kernel_table.h"
 #include "launch_params.h"
-#include "pointwise/hipblaslt_matmul.hpp"
+#include "explicit_gemm/hipblaslt_matmul.hpp"
 #include "pointwise_conv_kernel.h"
 #include "hipconv/conv_params.hpp"
 
 #include <array>
 
-namespace hipconv::pointwise_fp16bf16
+namespace hipconv::pointwise_kernel
 {
 
 void launch_impl(const LaunchParams&,
@@ -17,7 +17,7 @@ void launch_impl(const LaunchParams&,
                  void*,
                  hipStream_t stream)
 {
-    hipconv::pointwise::launch_pointwise_gemm(par, in, wei, out, stream);
+    hipconv::explicit_gemm::launch_gemm(par, in, wei, out, stream);
 }
 
 // The pointwise family has a single, stateless implementation: the GEMM
@@ -39,6 +39,6 @@ public:
 PointwiseConvKernelImpl kernel;
 std::array<ConvKernel*, 1> kernel_ptrs = {&kernel};
 
-} // namespace hipconv::pointwise_fp16bf16
+} // namespace hipconv::pointwise_kernel
 
-HIPCONV_EXPORT_KERNEL_TABLE(pointwise_fp16bf16_kernels, hipconv::pointwise_fp16bf16);
+HIPCONV_EXPORT_KERNEL_TABLE(pointwise_kernels, hipconv::pointwise_kernel);

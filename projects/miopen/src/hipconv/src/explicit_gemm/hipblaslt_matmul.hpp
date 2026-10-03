@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipconv::pointwise
+namespace hipconv::explicit_gemm
 {
 
 // Thrown when a hipBLASLt API call returns a non-success status. Derives from
@@ -31,10 +31,10 @@ private:
     hipblasStatus_t status_;
 };
 
-void launch_pointwise_gemm(const ConvParams& par,
-                           const void* in,
-                           const void* wei,
-                           void* out,
-                           hipStream_t stream);
+void launch_gemm(const ConvParams& par,
+                 const void* in,
+                 const void* wei,
+                 void* out,
+                 hipStream_t stream);
 
-} // namespace hipconv::pointwise
+} // namespace hipconv::explicit_gemm
