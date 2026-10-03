@@ -1,7 +1,22 @@
 name: Host-ASan comprehensive component tests
-run-name: Host-ASan comprehensive tests from build 37104386895
+run-name: Host-ASan comprehensive tests from build ${{ inputs.artifact_run_id }}
 on:
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Host-ASan artifact build run in this repository
+        required: true
+        type: string
+      test_labels:
+        description: Comma-separated test labels; empty selects all components
+        required: false
+        default: ''
+        type: string
+      changed_projects:
+        description: Comma-separated projects to test; empty selects all projects
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -10,15 +25,15 @@ jobs:
     name: Comprehensive gfx942
     uses: ./.github/workflows/host-asan-test-artifacts.yml
     with:
-      artifact_run_id: '37104386895'
+      artifact_run_id: ${{ inputs.artifact_run_id }}
       artifact_group: multi-arch-host-asan
       amdgpu_families: gfx94X-dcgpu
       amdgpu_targets: gfx942
       test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
       sanity_check_only_for_family: false
       test_type: comprehensive
-      test_labels: ''
-      changed_projects: ''
+      test_labels: ${{ inputs.test_labels }}
+      changed_projects: ${{ inputs.changed_projects }}
       release_type: ci
       repository: ROCm/TheRock
       ref: 498444ae814a961ace81aed8717054208e41a7d8
