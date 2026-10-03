@@ -72,8 +72,9 @@ def _cases():
         )
 
     def probe(num_heads):
+        # The probe is single-tile, so it pins block_q to one MFMA tile.
         return lambda: build_mla_prefill_score_probe(
-            MlaPrefillSpec(num_heads=num_heads), arch=_ARCH
+            MlaPrefillSpec(num_heads=num_heads, block_q=16), arch=_ARCH
         )
 
     def dispatched(num_heads):
@@ -211,7 +212,9 @@ def test_dispatch_case_tracks_the_shipped_spec():
                 arch=_ARCH,
             )
         )
-        assert result.spec == MlaPrefillSpec(num_heads=num_heads)
+        assert result.spec == MlaPrefillSpec(
+            num_heads=num_heads, heads_per_wg=4, num_warps=4, block_q=16
+        )
 
 
 if __name__ == "__main__":
