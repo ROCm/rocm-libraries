@@ -2578,15 +2578,18 @@ void testing_matmul_with_bias(const Arguments& arg,
             hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)
                          + size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)
                          + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
-            // The host buffers: operands, the reference and epilogue copies of D, bias and E.
+            // The host buffers: operands, the reference and epilogue copies of D, bias, E and the
+            // scale vectors, counted as the device counts them, which is at least their size.
             if(!fast_check_only)
                 hostBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB);
             if(!fast_check_only || arg.c_equal_d)
                 hostBytes += size_C[i] * sizeTo;
-            hostBytes
-                += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
-                   + 2 * size_bias[i] * realDataTypeSize(Tbias)
-                   + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1);
+            hostBytes += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
+                         + 2 * size_bias[i] * realDataTypeSize(Tbias)
+                         + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
+                         + (size_scaleAlphaVec[i]
+                            + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
+                               * sizeAlpha;
         }
         // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
         // reference); the device count reuses the host's, which is at least as large.
