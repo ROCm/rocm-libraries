@@ -13,22 +13,12 @@
 # - Better parallelization across GPU architectures
 
 name: TheRock Multi-Arch CI
+run-name: "Compiler/runtime experiment | ${{ contains(inputs.prebuilt_stages, 'compiler-runtime') && 'reuse' || 'rebuild' }} | ${{ github.ref_name }}"
 
 # TheRock ref: pinned to ROCm/TheRock commit 498444ae814a961ace81aed8717054208e41a7d8.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
-  push:
-    branches:
-      - develop
-      - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -50,15 +40,18 @@ on:
       prebuilt_stages:
         type: string
         default: ""
+        required: true
         description: "Comma-separated build stages to skip (or 'all' for all stages); artifacts are copied from baseline_run_id instead"
       baseline_run_id:
         type: string
         default: ""
+        required: true
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
       baseline_repository:
         type: string
-        default: ""
-        description: "Repository to query for baseline_run_id. Defaults to github.repository for workflow_dispatch."
+        default: "ROCm/TheRock"
+        required: true
+        description: "Repository containing the experiment's baseline_run_id"
       build_python_packages:
         type: boolean
         default: false
@@ -80,12 +73,9 @@ permissions:
   actions: read
 
 concurrency:
-  # A PR number if a pull request and otherwise the commit hash. This cancels
-  # queued and in-progress runs for the same PR (presubmit) or commit
-  # (postsubmit). The workflow name is prepended to avoid conflicts between
-  # different workflows.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+  # Both experiment arms use the same commit and must finish independently.
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   ci-env:
@@ -183,14 +173,9 @@ jobs:
       # Preserve manual workflow_dispatch control and enable native package
       # builds for pull requests carrying the opt-in label.
       build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
-      # A missing baseline disables artifact reuse and causes TheRock to
-      # perform a full stage build.
-      stage_reuse_mode: >-
-        ${{
-          needs.ci-env.outputs.baseline-run-id != '' &&
-          'reuse-stage' ||
-          'off'
-        }}
+      # Analyze automatic reuse without applying it, so only the supplied
+      # prebuilt list differs between the two arms. Explicit reuse remains active.
+      stage_reuse_mode: dry-run
       repository: ROCm/TheRock
       ref: 498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
       # Pass external repo info for stage-impact analysis.
