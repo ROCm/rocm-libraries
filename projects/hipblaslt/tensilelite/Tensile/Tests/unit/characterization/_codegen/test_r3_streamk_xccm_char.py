@@ -6,18 +6,18 @@
 
 Exercises the non-power-of-2 branch in ``XCCMappingOn.__call__``
 (Tensile/Components/StreamK.py lines 78-79) by using
-``StreamKXCCMapping=3`` (non-power-of-2 divisor):
+``PersistentXCCMapping=3`` (non-power-of-2 divisor):
 
 Target missing range (methodology-A):
   78-79  XCCMappingOn.__call__ non-power-of-2 branch
          Condition: (divisor & (divisor - 1)) != 0
-         StreamKXCCMapping=3 => 3 & 2 = 2 != 0 => triggers allocation of
+         PersistentXCCMapping=3 => 3 & 2 = 2 != 0 => triggers allocation of
          extra temp SGPRs via checkOutAligned(2, 2, "sTmp") (line 78)
          and ContinuousRegister(idx=sTmp, size=2) (line 79).
 
-The existing R2 StreamK test uses StreamKXCCMapping=0 (power-of-2),
+The existing R2 StreamK test uses PersistentXCCMapping=0 (power-of-2),
 which skips the ``if ((divisor & (divisor - 1)) != 0)`` branch.
-StreamKXCCMapping=3 is valid (valid values: {0, 2, 3, 4, 5, 6, 7, 8}).
+PersistentXCCMapping=3 is valid (valid values: {0, 2, 3, 4, 5, 6, 7, 8}).
 
 CPU-only: no GPU required. The emit harness instantiates rocisa and runs
 Python+rocisa codegen without compiling or launching any GPU kernels.
