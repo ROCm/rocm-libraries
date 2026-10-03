@@ -69,6 +69,19 @@ def _forward_true16(rocisa_item: Any, logical: Any) -> None:
     )
 
 
+def _forward_gir_action(rocisa_item: Any, logical: Any) -> None:
+    """Copy stable GIR action identity onto logical instructions."""
+    getter = getattr(rocisa_item, "getGirActionData", None)
+    data = getter() if callable(getter) else None
+    if data is None:
+        return
+    targets = logical if isinstance(logical, list) else (logical,)
+    for inst in targets:
+        setter = getattr(inst, "set_gir_action", None)
+        if callable(setter):
+            setter(int(data))
+
+
 # Synthetic instruction-group name that marks the DAG-scheduler region spanning
 # the persistent prefetch prologue + main loop. Must match the registered gfx125x
 # group name (see Gfx1250Backend.cpp) and native's kPGR literal.
@@ -376,6 +389,16 @@ class _PostProcessModule:
 # We mirror every one of these points so an adapter swap is byte-identical
 # at both the asm-emit layer (``Module.toString``) and the debug-dump layer
 # (``Module.prettyPrint``).
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate anything not overridden to the wrapped module.
+
+        The explicit methods above exist to ADD behaviour; everything else on
+        ``StinkyAsmModule`` (setPluginDataStr, pass controls, ...) should reach it
+        unchanged rather than be enumerated one at a time.
+        """
+        return getattr(self._inner, name)
+
 class TextBlock(Item):
     """Raw text leaf; mirror of ``rocisa::TextBlock`` (code.hpp:133-160).
 
@@ -1551,6 +1574,7 @@ class Module(Item):
         # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
         _forward_memtoken(it, logical)
         _forward_true16(it, logical)
+        _forward_gir_action(it, logical)
         if isinstance(logical, list):
             for inst in logical:
                 if comment and not inst.comment:
@@ -1576,6 +1600,7 @@ class Module(Item):
                 continue
             _forward_memtoken(it, logical)
             _forward_true16(it, logical)
+            _forward_gir_action(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:

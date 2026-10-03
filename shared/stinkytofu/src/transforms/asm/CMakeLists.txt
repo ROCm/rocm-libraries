@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     BuildDefUseChain.cpp
     DefUseAnalysisCleanup.cpp
     CFGBuilderPass.cpp
+    GirFrameContractImportPass.cpp
     StinkyUnreachableBlockElimPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
@@ -28,8 +29,11 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
+    GirFencePlacementPass.cpp
+    GirWaitCntInsertionPass.cpp
     Gfx1250HazardPass.cpp
     waitcnt/WaitDataflow.cpp
+    waitcnt/GirFrameCounterFlow.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
     RemoveDscntPass.cpp

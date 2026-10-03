@@ -28,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -50,6 +51,8 @@ class STINKYTOFU_EXPORT Function {
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works
     GemmTileConfig gemmConfig;
     std::unordered_map<std::string, uint64_t> metadata_;
+    std::unordered_map<std::string, std::string> stringMetadata_;
+    std::unordered_map<std::string, std::shared_ptr<const void>> structMetadata_;
     bool isCallable = false;
 
    public:
@@ -162,6 +165,28 @@ class STINKYTOFU_EXPORT Function {
     }
     bool hasMetaData(const std::string& key) const {
         return metadata_.find(key) != metadata_.end();
+    }
+    void setStringMetaData(const std::string& key, std::string value) {
+        stringMetadata_[key] = std::move(value);
+    }
+    std::optional<std::string> getStringMetaData(const std::string& key) const {
+        auto it = stringMetadata_.find(key);
+        if (it == stringMetadata_.end()) return std::nullopt;
+        return it->second;
+    }
+
+    /// Structured metadata: a producer hands over the object it already built instead of a text
+    /// encoding two hand-written parsers have to agree on.  Ownership is shared, the payload is
+    /// opaque here, and the reader names the type it expects.
+    template <class T>
+    void setStructMetaData(const std::string& key, std::shared_ptr<const T> value) {
+        structMetadata_[key] = std::move(value);
+    }
+    template <class T>
+    const T* getStructMetaData(const std::string& key) const {
+        auto it = structMetadata_.find(key);
+        if (it == structMetadata_.end()) return nullptr;
+        return static_cast<const T*>(it->second.get());
     }
 
     // Iteration over basic blocks

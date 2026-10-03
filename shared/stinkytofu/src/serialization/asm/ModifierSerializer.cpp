@@ -47,6 +47,16 @@ int getInt(const std::unordered_map<std::string, std::string>& m, const std::str
     return static_cast<int>(val);
 }
 
+uint64_t getUInt64(const std::unordered_map<std::string, std::string>& m, const std::string& key,
+                   uint64_t def) {
+    auto it = m.find(key);
+    if (it == m.end() || it->second.empty()) return def;
+    char* end = nullptr;
+    const unsigned long long value = std::strtoull(it->second.c_str(), &end, 0);
+    if (end != it->second.c_str() + it->second.size()) return def;
+    return static_cast<uint64_t>(value);
+}
+
 bool getBool(const std::unordered_map<std::string, std::string>& m, const std::string& key,
              bool def) {
     auto it = m.find(key);
@@ -484,6 +494,52 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// GirActionData
+GirActionKind parseGirActionKind(const std::string& kind) {
+    if (kind == "read") return GirActionKind::Read;
+    if (kind == "copy") return GirActionKind::Copy;
+    if (kind == "fence") return GirActionKind::Fence;
+    if (kind == "wmma") return GirActionKind::Wmma;
+    if (kind == "waitcnt") return GirActionKind::WaitCnt;
+    return GirActionKind::Other;
+}
+
+const char* girActionKindName(GirActionKind kind) {
+    switch (kind) {
+        case GirActionKind::Read:
+            return "read";
+        case GirActionKind::Copy:
+            return "copy";
+        case GirActionKind::Fence:
+            return "fence";
+        case GirActionKind::Wmma:
+            return "wmma";
+        case GirActionKind::WaitCnt:
+            return "waitcnt";
+        default:
+            return "other";
+    }
+}
+
+bool serializeVisit(const GirActionData& mod, std::ostream& os) {
+    os << ", mod.gir_action = { action = " << mod.actionId << ", anchor = " << mod.anchorAction
+       << ", kind = " << girActionKindName(mod.kind);
+    // Indexed flat fields: the parsed dict merges repeated keys, so a nested list would not
+    // round-trip.  `accessN_` is verbose but symmetric and handles any count.
+    for (size_t n = 0; n < mod.accesses.size(); ++n) {
+        const GirAccessData& access = mod.accesses[n];
+        const std::string tag = "access" + std::to_string(n) + "_";
+        os << ", " << tag << "write = " << (access.isWrite ? 1 : 0) << ", " << tag
+           << "operand = " << access.operand << ", " << tag << "ring = " << access.ring;
+        if (access.genId >= 0) os << ", " << tag << "gen = " << access.genId;
+        if (access.gdelta) os << ", " << tag << "gdelta = " << access.gdelta;
+        if (access.absolute >= 0) os << ", " << tag << "abs = " << access.absolute;
+        if (access.crossAgent) os << ", " << tag << "cross = 1";
+    }
+    os << " }";
+    return true;
+}
+
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
     os << ", mod.label = { label = \"" << mod.label << "\""
@@ -512,7 +568,7 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
                           SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
-                          CallTargetData>(mod, os);
+                          CallTargetData, GirActionData>(mod, os);
 }
 
 /*
@@ -651,6 +707,25 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.gir_action") {
+        const uint64_t action = getUInt64(fields, "action", 0);
+        std::vector<GirAccessData> accesses;
+        for (size_t n = 0;; ++n) {
+            const std::string tag = "access" + std::to_string(n) + "_";
+            if (!fields.contains(tag + "operand")) break;
+            GirAccessData access;
+            access.isWrite = getInt(fields, tag + "write", 0) != 0;
+            access.operand = getInt(fields, tag + "operand", -1);
+            access.ring = getInt(fields, tag + "ring", 1);
+            access.genId = getInt(fields, tag + "gen", -1);
+            access.gdelta = getInt(fields, tag + "gdelta", 0);
+            access.absolute = getInt(fields, tag + "abs", -1);
+            access.crossAgent = getInt(fields, tag + "cross", 0) != 0;
+            accesses.push_back(access);
+        }
+        inst->addModifier(GirActionData(action, getUInt64(fields, "anchor", action),
+                                        parseGirActionKind(getStr(fields, "kind", "other")),
+                                        std::move(accesses)));
     } else if (attrKey == "mod.label") {
         inst->addModifier(LabelData(getStr(fields, "label", ""),
                                     static_cast<uint16_t>(getInt(fields, "alignment", 1))));

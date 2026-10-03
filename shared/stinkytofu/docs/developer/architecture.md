@@ -53,6 +53,8 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 | `CFGBuilderPass` | Splits `BasicBlock`s at labels, builds CFG edges |
 | `StinkyDAGSchedulerPass` | DAG-based instruction scheduling. Calls `buildUseDefChain` (inserts pseudo-PHI nodes) before scheduling |
 | `StinkyWaitCntInsertionPass` | Def-use based wait count insertion for memory operations |
+| `GirFencePlacementPass` | Places workgroup barriers (`s_barrier_signal/wait -1`) discharging cross-agent LDS hazards named by the GIR frame contract. Runs before wait insertion. See [GIR Frame Passes](gir-frame-passes.md) |
+| `GirWaitCntInsertionPass` | Derives `s_wait_dscnt`/`s_wait_tensorcnt` from the frame graph, anchoring cross-agent drains on the barrier that discharges them. Gated on `UseLoopModel`. See [GIR Frame Passes](gir-frame-passes.md) |
 | `DeadCodeEliminationPass` | Block-local forward scan: removes instructions whose destination is overwritten before use. Iterates to fixpoint. Preserves memory ops, barriers, side-effects, in-place ops, and dummy registers |
 | `RedundantMovEliminationPass` | Block-local backward search: removes duplicate mov-type instructions (same opcode + dest + src, source unmodified between occurrences) |
 | `PeepholeOptimizationPass` | Declarative pattern-based optimizations compiled from `.pattern` files. See [Adding Peephole Patterns](adding-peephole-patterns.md) |

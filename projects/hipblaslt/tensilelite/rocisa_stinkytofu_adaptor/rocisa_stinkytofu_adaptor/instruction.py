@@ -81,7 +81,7 @@ class Instruction:
     __slots__ = (
         "name", "parent",
         "instType", "comment", "instStr", "outputInlineAsm",
-        "m_memToken",
+        "m_memToken", "m_girAction",
     )
 
     def __init__(self, instType: Any, comment: str = ""):
@@ -96,6 +96,7 @@ class Instruction:
         self.instStr: str = ""
         self.outputInlineAsm: bool = False
         self.m_memToken: Any = None
+        self.m_girAction: Any = None
 
     # ---------------------------------------------------- memToken / inline
     def setMemToken(self, token: Any) -> None:
@@ -103,6 +104,12 @@ class Instruction:
 
     def getMemToken(self) -> Any:
         return self.m_memToken
+
+    def setGirActionData(self, action_id: int, *_args: Any, **_kwargs: Any) -> None:
+        self.m_girAction = int(action_id)
+
+    def getGirActionData(self) -> Any:
+        return self.m_girAction
 
     def setInlineAsm(self, is_true: bool) -> None:
         self.outputInlineAsm = bool(is_true)

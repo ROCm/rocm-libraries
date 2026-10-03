@@ -35,6 +35,10 @@ struct WaitCntInsertionOptions {
     /// sweep, preventing tensor state from propagating through back-edges.
     /// Enable to restore conservative tensor fixed-point iteration.
     bool enableLoopCarriedTokenDeps = false;
+
+    /// Skip the s_wait_tensorcnt arm only; every other counter is still inserted.
+    /// For a producer that owns its tensorcnt waits already and wants the rest.
+    bool disableTensorcntInsertion = false;
 };
 
 /**

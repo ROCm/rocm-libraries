@@ -24,6 +24,7 @@
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 
 #include <cassert>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -33,6 +34,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
 // Before dag/*.hpp so PASS_DEBUG inside those headers uses this pass name.
@@ -143,11 +145,14 @@ bool isHardBoundary(const StinkyInstruction& inst,
 
 std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstruction*>& instructions,
                                               const WaitAnchorMap& anchors,
+                                              const GirFrameHazardAnalysis::Result& girHazards,
+                                              const GirFrameAnalysis::Result& girFrames,
                                               const PassContext& passCtx,
                                               unsigned slotsToMovePastAnchor) {
     if (instructions.empty()) return {};
 
     RegionDAG dag = buildRegisterDependencyDAG(instructions);
+    addGirFrameHazardEdges(dag, girHazards, girFrames);
     addCounterOrderEdges(dag, instructions, anchors);
 
     WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
@@ -166,7 +171,9 @@ void emitInstWithWaits(std::vector<IRBase*>& output, StinkyInstruction* inst,
     output.push_back(inst);
 }
 
-void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMovePastAnchor) {
+void repairBlock(BasicBlock& bb, const GirFrameHazardAnalysis::Result& girHazards,
+                 const GirFrameAnalysis::Result& girFrames, const PassContext& passCtx,
+                 unsigned slotsToMovePastAnchor) {
     const WaitAnchorMap anchors = discoverWaitAnchors(bb);
     // Without a wait-anchored WMMA there is nothing for this pass to repair.
     if (anchors.empty()) return;
@@ -182,7 +189,7 @@ void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMov
     auto flushSegment = [&]() {
         if (segment.empty()) return;
         const std::vector<StinkyInstruction*> repaired =
-            repairSegment(segment, anchors, passCtx, slotsToMovePastAnchor);
+            repairSegment(segment, anchors, girHazards, girFrames, passCtx, slotsToMovePastAnchor);
         for (StinkyInstruction* inst : repaired) emitInstWithWaits(output, inst, anchors);
         segment.clear();
     };
@@ -215,6 +222,31 @@ void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMov
     }
 }
 
+void validateFrameOrderAfterRepair(const GirFrameHazardAnalysis::Result& hazards) {
+    std::unordered_map<const StinkyInstruction*, size_t> positions;
+    std::unordered_set<const BasicBlock*> visited;
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        if (hazard.gap != 0 || hazard.producerBlock != hazard.consumerBlock ||
+            !hazard.producerBlock || !visited.insert(hazard.producerBlock).second)
+            continue;
+        size_t position = 0;
+        for (IRBase& node : *hazard.producerBlock) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst) positions[inst] = position++;
+        }
+    }
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        if (hazard.gap != 0 || hazard.producer == hazard.consumer ||
+            hazard.producerBlock != hazard.consumerBlock)
+            continue;
+        auto producer = positions.find(hazard.producer);
+        auto consumer = positions.find(hazard.consumer);
+        if (producer != positions.end() && consumer != positions.end() &&
+            producer->second >= consumer->second)
+            report_fatal_error("WaitAwareScheduleRepairPass violated a required GIR frame hazard");
+    }
+}
+
 class WaitAwareScheduleRepairPass : public StinkyInstPass {
    public:
     static char ID;
@@ -231,8 +263,10 @@ class WaitAwareScheduleRepairPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
-        (void)AM;
         if (kSlotsToMovePastAnchor_ <= 0) return PreservedAnalyses::all();
+        const GirFrameAnalysis::Result girFrames = AM.getResult<GirFrameAnalysis>(func);
+        const GirFrameHazardAnalysis::Result girHazards =
+            AM.getResult<GirFrameHazardAnalysis>(func);
 
         const GfxArchID archId =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
@@ -244,9 +278,11 @@ class WaitAwareScheduleRepairPass : public StinkyInstPass {
 
             AsmIRBuilder builder(bb, archId);
             collapseExecMaskedRegions(bb, builder, wavefrontSize);
-            repairBlock(bb, passCtx, static_cast<unsigned>(kSlotsToMovePastAnchor_));
+            repairBlock(bb, girHazards, girFrames, passCtx,
+                        static_cast<unsigned>(kSlotsToMovePastAnchor_));
             expandExecMaskedGroups(bb);
         }
+        validateFrameOrderAfterRepair(girHazards);
         return PreservedAnalyses::none();
     }
 

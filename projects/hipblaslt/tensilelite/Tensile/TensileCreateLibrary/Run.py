@@ -64,6 +64,7 @@ from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
 from ..SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
+from ..Components.LoopModel.Program import loopModelGirTextCached, loopModelIrTextCached
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from ..KernelWriterAssembly import KernelWriterAssembly
@@ -224,6 +225,8 @@ class KernelCodeGenResult(NamedTuple):
     pgr: int
     mathclk: int
     customKernelDef: Optional[dict] = None
+    ir: Optional[str] = None  # LoopModel θ-IR text dump (only when OutputLoopIR is set)
+    gir: Optional[str] = None  # finalized GIR + emit plan (only when OutputLoopIR is set)
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -341,11 +344,23 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
             f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
             f"runtime will clamp to 1."
         )
+    irText = girText = None
+    if globalParameters.get("OutputLoopIR", False):
+        # Observability only, and never allowed to break codegen: both render what the writer
+        # already cached, so neither can disagree with the `.s` beside it.
+        try:
+            irText = loopModelIrTextCached(kernelWriter)
+        except Exception as e:
+            irText = f"# LoopModel IR unavailable (bridge error): {e}\n"
+        try:
+            girText = loopModelGirTextCached(kernelWriter)
+        except Exception as e:
+            girText = f"# GIR unavailable (dump error): {e}\n"
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"], \
-        customKernelDef
+        customKernelDef, irText, girText
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -495,7 +510,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         print(f"{'='*80}\n")
                         raise
 
-def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
+def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult, irPath: Optional[Union[Path, str]] = None):
     if result.err:
         printExit(f"Failed to build kernel {result.name} because it has error code {result.err}")
     path = Path(asmPath) / f"{result.name}.s"
@@ -506,6 +521,26 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
         if isinstance(src, bytes):
             src = memDecompress(src)
         f.write(src)
+
+    # OutputLoopIR: mirror the .s write into the adjacent ir/ dir as a plain-text .txt.
+    # The IR string is already ASCII-sanitized in adapter.kernel_to_ir_text.
+    if irPath is not None and result.ir is not None:
+        try:
+            irFile = Path(irPath) / f"{result.name}.txt"
+            with open(irFile, "w", encoding="utf-8") as f:
+                f.write(result.ir)
+        except Exception as e:
+            printWarning(f"Failed to write LoopModel IR for {result.name}: {e}")
+
+    # ...and the finalized GIR + emit plan as a sibling .gir, so a defect can be localized to a
+    # layer by diffing the two dumps against the .s (LoopIR decided / GIR carried / L3 emitted).
+    if irPath is not None and result.gir is not None:
+        try:
+            girFile = Path(irPath) / f"{result.name}.gir"
+            with open(girFile, "w", encoding="utf-8") as f:
+                f.write(result.gir)
+        except Exception as e:
+            printWarning(f"Failed to write GIR for {result.name}: {e}")
 
     minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
     return path, isa, wfsize, minResult
@@ -584,6 +619,8 @@ def writeSolutionsAndKernels(
         objectTmpPath = ensurePath(
             buildTmpPath / "code_object_tmp"
         )  # Temp path for HSA code object files (.hsaco)
+        # OutputLoopIR: ir/ dir ADJACENT to the assembly/ dir (both under build_tmp).
+        irOutputPath = ensurePath(buildTmpPath / "ir") if globalParameters.get("OutputLoopIR", False) else None
 
         asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
@@ -638,7 +675,7 @@ def writeSolutionsAndKernels(
         if removeTemporaries:
             p.unlink()
 
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
+    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath, irPath=irOutputPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     with timing_context("python_kernel_write_assemble"):
         ret = ParallelMap2(
@@ -733,6 +770,8 @@ def writeSolutionsAndKernelsTCL(
     # also writes. HelperKernelCache keys on their contents read from this same
     # directory, so the three have to travel together.
     copyStaticFiles(buildTmpPath)
+    # OutputLoopIR: ir/ dir ADJACENT to the assembly/ dir (both under build_tmp).
+    irOutputPath = ensurePath(buildTmpPath / "ir") if globalParameters.get("OutputLoopIR", False) else None
 
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
@@ -777,7 +816,7 @@ def writeSolutionsAndKernelsTCL(
         compress = memcompress,
     )
 
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
+    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath, irPath=irOutputPath)
     def compose(assemble, unaryWriteAssembly, unaryProcessKernelSource):
         def composed_function(kernel):
             processed_kernel = unaryProcessKernelSource(kernel)

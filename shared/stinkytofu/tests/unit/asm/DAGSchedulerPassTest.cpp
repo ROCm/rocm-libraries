@@ -1219,6 +1219,35 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
         << "DS loads should be prioritized before VALU during WMMA latency";
 }
 
+TEST_F(DAGSchedulerPassTest, GirModeledTensorLoadDoesNotCutSchedulingRegion) {
+    StinkyInstruction* independentRead = createDsReadB128InBlock(bb, arch, 0, 80);
+    independentRead->addModifier<GirActionData>(
+        GirActionData{0, 0, GirActionKind::Read, {GirAccessData{false, 1, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* tensorLoad = createTensorLoadInBlock(bb, arch, 300, 308);
+    ASSERT_TRUE(hasSideEffect(*tensorLoad));
+    tensorLoad->addModifier<GirActionData>(
+        GirActionData{1, 0, GirActionKind::Copy, {GirAccessData{true, 0, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* dependentRead = createDsReadB128InBlock(bb, arch, 4, 84);
+    dependentRead->addModifier<GirActionData>(
+        GirActionData{2, 0, GirActionKind::Read, {GirAccessData{false, 0, 1, -1, 0, 0, false}}});
+
+    StinkyInstruction* independentWmma = createWmmaF32_16x16x16_bf16(100, 200);
+    ASSERT_NE(independentWmma, nullptr);
+    func->setStringMetaData(kGirFrameContractKey, "gir-frame-contract\n");
+
+    ASSERT_FALSE(hasSideEffect(*independentRead));
+    ASSERT_FALSE(hasSideEffect(*tensorLoad));
+    ASSERT_FALSE(hasSideEffect(*dependentRead));
+
+    runPassWithUnrollGemm();
+
+    const std::string order = scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, independentWmma), positionOf(*bb, independentRead)) << order;
+    EXPECT_LT(positionOf(*bb, tensorLoad), positionOf(*bb, dependentRead)) << order;
+}
+
 // ---------------------------------------------------------------------------
 // Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be

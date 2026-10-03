@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/pipeline/CloneSpec.hpp"
@@ -86,7 +87,11 @@
     X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
+    X(DisableWaitCntRemoval, bool)                \
+    X(DisableTensorcntInsertion, bool)            \
     X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableGirFramePipeline, bool)               \
+    X(EnableGirFrameWaitCntInsertion, bool)       \
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
@@ -359,6 +364,11 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 
     void setPluginDataI64(const std::string& key, int64_t value);
     int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    /// The GIR frame contract as the object Python already built -- no text, so no pair of
+    /// hand-written parsers to keep in step.
+    void setGirFrameContract(std::shared_ptr<const GirFrameContract> contract);
+    std::shared_ptr<const GirFrameContract> getGirFrameContract() const;
 
     void setPluginDataStr(const std::string& key, const std::string& value);
     std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;
