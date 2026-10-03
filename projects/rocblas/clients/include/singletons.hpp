@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,37 @@
 #pragma once
 
 #include <memory.h>
+#include <string>
 
 // global for device memory padding see d_vector.hpp
 
 extern size_t g_DVEC_PAD;
 void          d_vector_set_pad_length(size_t pad);
+
+// Reporting for the device-memory guards in d_vector.hpp.
+//
+// These exist so that d_vector.hpp, and the geometry and layout of d_vector<T>, need no
+// reference to GOOGLE_TEST. Its members are templates, so they carry the same mangled names
+// however the translation unit was compiled; a body or a member whose presence varies with
+// the macro would give one symbol two definitions, and rocblas-gemm-tune links objects built
+// both ways. Only the definitions in singletons.cpp, compiled once per binary, may depend on
+// the macro. (Other client headers still violate this; see AIROCBLAS-1390.)
+//
+// Where a binary compiles singletons.cpp *with* Google Test -- rocblas-test, rocblas-bench
+// and rocblas-gemm-tune, which all link rocblas_clients_common -- a failure is recorded as a
+// non-fatal test failure, and also printed when no test is running. Where it is compiled
+// *without* Google Test -- the samples, which build this file themselves -- a failure is
+// printed and the process exits non-zero.
+//
+// So a failed free is not fatal to bench or the tuner. On develop that was not a decision:
+// teardown used CHECK_HIP_ERROR, which has a different definition either side of the macro,
+// so which one those binaries ran was whichever the linker happened to keep. This makes it
+// a deliberate choice instead.
+void d_vector_report_failure(const std::string& message);
+
+// For a guard region that failed its comparison: names how many bytes differ, the first
+// differing offset, and the bytes expected and found there.
+void d_vector_report_guard_corruption(const unsigned char* host,
+                                      const unsigned char* reference,
+                                      size_t               guard_bytes,
+                                      const char*          tag);
