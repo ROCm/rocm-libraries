@@ -29,8 +29,9 @@ JIT solution library on disk, whose solution indices any later process runs
 without generating again. For a backend that consumes a prediction, an Origami
 predictor first ranks candidate configurations. In a build with
 `HIPBLASLT_ENABLE_JIT=ON`, the environment variable `HIPBLASLT_JIT` lets
-`hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` return
-solutions from that library and generate the ones it lacks; see
+`hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and
+`hipblasLtMatmul` without an algorithm return solutions from that library and
+generate the ones it lacks; see
 [heuristic integration](#heuristic-integration). The only backend is a test
 mock that replays pre-generated source bundles. No generator backend is
 implemented yet, so outside the tests those queries report that hipBLASLt was
@@ -410,13 +411,12 @@ the root directory, or one key directory, while no process is using it.
 
 ### Heuristic integration
 
-`HIPBLASLT_JIT` selects the JIT mode of `hipblasLtMatmulAlgoGetHeuristic` and
-`GemmInstance::algoGetHeuristic` for the process. hipBLASLt reads it once, when
-the first handle is created.
+`HIPBLASLT_JIT` selects the JIT mode for the process. hipBLASLt reads it once,
+when the first handle is created.
 
 | `HIPBLASLT_JIT` | Mode | Behavior |
 | --- | --- | --- |
-| unset, empty or `0` | Off | Heuristic queries behave as in a build without JIT. |
+| unset, empty or `0` | Off | Heuristic queries and `hipblasLtMatmul` behave as in a build without JIT. |
 | `1` | Fallback | JIT comes after the Equality results: a query takes the Equality results, then JIT solutions, then the results of the other pre-tuned libraries and the `getAllSolutions` fill, each only for what is still missing. |
 | `2` | Forced | JIT is the only source. The query skips the override file, every pre-tuned library, every other hipBLASLt source and the `getAllSolutions` fill. |
 
@@ -472,6 +472,13 @@ be loaded, succeeds when JIT adds a result and otherwise keeps its error. In
 forced mode the query succeeds even when JIT fails; it then returns no results
 and reports the failure.
 
+**`hipblasLtMatmul` without an algorithm.** In fallback mode it runs the first
+solution of the same order: an Equality result, else a JIT solution, else a
+result of the other pre-tuned libraries. When another hipBLASLt route answers the
+problem before the Tensile lookup, it uses a JIT solution only when that route
+finds none. In forced mode it uses only JIT solutions. When no solution is found
+it returns `HIPBLAS_STATUS_INTERNAL_ERROR`.
+
 **Failure reporting.** JIT problems are printed on stderr without any
 `HIPBLASLT_LOG_LEVEL` setting, once per distinct message in a process, and are
 also passed to the existing error or info log. A failure is an error when the
@@ -499,11 +506,35 @@ An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
 rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
 reports an error.
 
+**Stream capture.** `hipblasLtMatmul` without an algorithm checks its stream
+with `hipStreamIsCapturing`; the null and legacy streams never capture. While
+the stream captures, in any capture mode, JIT only looks up solutions already
+published to the JIT solution library: it starts no generation, comgr build or
+publication, and the other sources keep their order. A published solution
+whose code object the process has not loaded yet is loaded during the capture,
+as pre-tuned code objects are; HIP allows module loads in every capture mode,
+and the capture stays valid. When nothing is found the call returns
+`HIPBLAS_STATUS_INTERNAL_ERROR`, as outside a capture, and reports one line:
+
+```text
+hipblaslt error: JIT generation skipped during stream capture for GEMM M=256 N=128 K=576 ... EPILOGUE_DEFAULT
+```
+
+When a pre-tuned solution is found instead, the skipped generation goes only to
+the info log.
+
+The heuristic queries take no stream and may generate during a capture: they
+follow the mode as they do outside one. Generating inside a capture was verified
+to keep the capture valid in global, thread-local and relaxed capture modes
+with HIP 7.17. Generation takes seconds, so warm the JIT solution library or run
+the query before the capture: run the same queries beforehand, in this process
+or an earlier one, or run the query first and pass the returned algorithm to
+`hipblasLtMatmul` inside the capture.
+
 A query that generates waits for the whole generation. Generation runs in a new
 directory under the system temporary directory (`TMPDIR` on Linux). It is
 removed after success and kept after a failure, whose report names the log
-inside it. The heuristic queries take no stream; run them before a HIP stream
-capture and pass the returned algorithm to `hipblasLtMatmul` inside it.
+inside it.
 
 ### Diagnostics with `HIPBLASLT_JIT_DEBUG`
 
@@ -513,7 +544,7 @@ comma-separated list of category names, in any case:
 
 | Name | Lines |
 | --- | --- |
-| `timing` | One line when each heuristic query, `hipblasLtMatmul` call with a JIT solution, generation and generated solution finishes, with the duration of each step |
+| `timing` | One line when each heuristic query, `hipblasLtMatmul` call, generation and generated solution finishes, with the duration of each step |
 | `progress` | One line per step as it happens: lookups, waits, generation stages, builds and publication |
 | `knowledge`, `prediction` | Reserved; no lines yet |
 | `all` | Every category, including categories added later |
@@ -560,7 +591,7 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 | `setup` | The first JIT use in the process: its `status`, and the time to open the JIT solution library (`store`) and create the components. A backend can add its own fields and steps, such as creating itself |
 | `library.init` | A device's pre-tuned library initialization |
 | `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`; `best` from the pre-tuned query, split into `equality`, `jit` and `others` when JIT runs between them; `all` from the `getAllSolutions` fill; otherwise `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
-| `matmul` | `hipblasLtMatmul` with a JIT solution: the first call for each problem and algorithm, and every call that loaded a code object (`loaded` is `now`), with the library lookup, preparation, code-object load and launch durations |
+| `matmul` | `hipblasLtMatmul` without an algorithm or with a JIT solution: the first call for each problem and algorithm, and every call that generated, loaded a code object (`loaded` is `now`) or skipped generation during a capture, with the selection, library lookup, preparation, code-object load and launch durations |
 | `generation` | Each generation: the requested and candidate counts, failures, the problem, the generated, `fresh`, `reused` and published counts, and the durations of prediction, scratch, the backend, building, support checks, publication (lock wait, time holding the lock, refresh) and loading, with `other` the rest. A backend can add its own fields and the durations of its own steps within `backend` |
 | `solution` | One per generated solution: rank, kernel, `outcome` (`built`, `build_failed`, `unsupported`, `published`, `publish_failed`, `loaded` or `load_failed`), index, message, assembly and HIP unit counts with each HIP unit's compile time as `hip_units`, and the metadata, assembly, HIP compile, link, build and support durations |
 | `query.aggregate`, `matmul.aggregate` | At most once per second, and at exit: the calls not printed in full, per API or per problem and algorithm, as `calls`, `ns.sum` and `ns.max` |
@@ -569,8 +600,9 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 
 | `ev` | When and what |
 | --- | --- |
-| `query.start`, `query.end` | A heuristic query starts and ends |
+| `query.start`, `query.end` | A heuristic query or `hipblasLtMatmul` without an algorithm starts and ends |
 | `lookup` | The JIT solution library lookup: `result` (`hit`, `partial` or `miss`), `found` and `needed` |
+| `capture.skip` | Generation skipped because the stream is being captured |
 | `generation.wait` | The query waited for another thread's generation of the same problem, named in `waited_on` |
 | `generation.repeated` | The problem fell short in an earlier generation in this process, so it is not generated again |
 | `generation.start`, `generation.end` | A generation starts, with the requested and candidate counts and the problem, and ends, with `outcome` (`ok`, `partial`, `failed` or `empty`) and the generated, published and loaded counts |

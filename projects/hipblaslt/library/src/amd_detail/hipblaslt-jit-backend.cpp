@@ -141,6 +141,27 @@ namespace hipblaslt_jit
 
     namespace
     {
+        thread_local LookupOnly* innermostLookupOnly = nullptr;
+    }
+
+    LookupOnly::LookupOnly() noexcept
+        : m_outer(innermostLookupOnly)
+    {
+        innermostLookupOnly = this;
+    }
+
+    LookupOnly::~LookupOnly()
+    {
+        innermostLookupOnly = m_outer;
+    }
+
+    LookupOnly* LookupOnly::active() noexcept
+    {
+        return innermostLookupOnly;
+    }
+
+    namespace
+    {
         struct Generation
         {
             std::mutex  mutex;
@@ -229,6 +250,18 @@ namespace hipblaslt_jit
                     .write(debug::Rate::Limited);
             if(fill.indices.size() >= count)
                 return fill;
+            if(auto* lookupOnly = LookupOnly::active())
+            {
+                lookupOnly->skipped = true;
+                fill.skipped        = true;
+                HIPBLASLT_JIT_DEBUG_NOTE("jit.capture_skip", 1);
+                if(debug::on(debug::Progress))
+                    debug::Line(debug::Progress, "capture.skip")
+                        .add("found", found)
+                        .add("needed", count)
+                        .write();
+                return fill;
+            }
 
             auto&        generating = generation(generationKey(request, target, workspaceLimit));
             debug::Phase waiting("jit_wait");

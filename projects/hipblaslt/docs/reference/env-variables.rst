@@ -100,10 +100,13 @@ and prints one warning when it is set to a nonzero value.
       - **Value**
 
     * - | ``HIPBLASLT_JIT``
-        | Lets ``hipblasLtMatmulAlgoGetHeuristic`` and ``GemmInstance::algoGetHeuristic`` return
-          JIT solutions. hipBLASLt reads it once, when the first handle is created.
+        | Lets ``hipblasLtMatmulAlgoGetHeuristic``, ``GemmInstance::algoGetHeuristic`` and
+          ``hipblasLtMatmul`` without an algorithm use JIT solutions. hipBLASLt reads it once, when
+          the first handle is created.
         | Each JIT solution is published to the JIT solution library and returned by solution index,
           so later processes run it without generating it again.
+        | While its stream is being captured, ``hipblasLtMatmul`` without an algorithm uses only
+          JIT solutions already published and reports one error when none is found.
       - | 0 or unset: Off (default)
         | 1: Equality results of the pre-tuned libraries first, then JIT solutions, then the
           other pre-tuned results, each only for what is still missing
@@ -123,8 +126,8 @@ and prints one warning when it is set to a nonzero value.
         | Unset or empty prints nothing. A number or an unknown name prints one warning and is
           ignored.
       - | Comma-separated category names, in any case:
-        | ``timing``: durations of each heuristic query, ``hipblasLtMatmul`` call with a JIT
-          solution, generation and generated solution
+        | ``timing``: durations of each heuristic query, ``hipblasLtMatmul`` call without an
+          algorithm or with a JIT solution, generation and generated solution
         | ``progress``: lookups, waits, generation stages, builds and publication as they happen
         | ``knowledge``, ``prediction``: reserved; no lines yet
         | ``all``: every category

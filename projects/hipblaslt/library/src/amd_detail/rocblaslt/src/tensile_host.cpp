@@ -3422,6 +3422,17 @@ namespace
     }
 
 #ifdef HIPBLASLT_ENABLE_JIT
+    // The legacy stream never captures, and querying it while another stream
+    // captures fails and leaves that error for the caller's hipGetLastError.
+    bool isCapturing(hipStream_t stream)
+    {
+        if(stream == nullptr || stream == hipStreamLegacy)
+            return false;
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        return hipStreamIsCapturing(stream, &status) == hipSuccess
+               && status != hipStreamCaptureStatusNone;
+    }
+
     std::string describeJitProblem(const RocblasltContractionProblem& prob);
 #endif
 }
@@ -3727,17 +3738,20 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        std::shared_ptr<void>              gemmData)
 {
 #ifdef HIPBLASLT_ENABLE_JIT
-    // A matmul line for JIT solutions, at most one per problem and algorithm
-    // unless the call loaded code.
+    // A matmul line for null algorithms and JIT solutions, at most one per
+    // problem and algorithm unless the call generated or loaded code.
     std::optional<hipblaslt_jit::debug::Query> matmul;
-    if(hipblaslt_jit::debug::categories() && isJitSolution(algo))
+    if(hipblaslt_jit::debug::categories() && (algo == nullptr || isJitSolution(algo)))
     {
         int32_t index = 0;
-        std::memcpy(&index, algo->data, sizeof(index));
-        matmul.emplace("matmul", 1, [] { return size_t(1); }, false);
+        if(algo)
+            std::memcpy(&index, algo->data, sizeof(index));
+        matmul.emplace(
+            "matmul", 1, [&algo] { return size_t(algo != nullptr); }, algo == nullptr);
         matmul->aggregateBy(describeJitProblem(prob)
-                            + (isJitAlgorithm(algo) ? " explicit"
-                                                    : " index=" + std::to_string(index)));
+                            + (!algo                   ? " heuristic"
+                               : isJitAlgorithm(algo) ? " explicit"
+                                                      : " index=" + std::to_string(index)));
         hipblaslt_jit::debug::problem(describeJitProblem(prob));
     }
     if(isJitAlgorithm(algo))
@@ -3758,6 +3772,53 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
+#ifdef HIPBLASLT_ENABLE_JIT
+        rocblaslt_matmul_heuristic_result selected;
+        if(algo == nullptr && hipblaslt_jit::mode() != hipblaslt_jit::Mode::Off)
+        {
+            std::optional<hipblaslt_jit::LookupOnly> lookupOnly;
+            const bool                               capturing = isCapturing(prob.stream);
+            if(capturing)
+                lookupOnly.emplace();
+            HIPBLASLT_JIT_DEBUG_LAP("capture_check");
+            if(matmul)
+                hipblaslt_jit::debug::set("capturing", capturing ? "true" : "false");
+            int count = 0;
+            if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback)
+            {
+                getBestSolutions(prob, handle, gemmData, 1, &selected, &count, prob.workspaceSize);
+                HIPBLASLT_JIT_DEBUG_LAP("get_best");
+                HIPBLASLT_JIT_DEBUG_NOTE("from.best", count);
+            }
+            if(count == 0 && !jitAfterEquality(handle, prob))
+            {
+                auto jitProb = prob;
+                jitHeuristicFill(
+                    handle, jitProb, gemmData, 1, prob.workspaceSize, &selected, &count);
+                HIPBLASLT_JIT_DEBUG_LAP("jit");
+            }
+            if(lookupOnly && lookupOnly->skipped)
+            {
+                if(matmul)
+                    matmul->notable();
+                const auto message
+                    = "generation skipped during stream capture for " + describeJitProblem(prob);
+                if(count == 0)
+                    hipblaslt_jit::report(hipblaslt_jit::Severity::Error, message);
+                else
+                    log_info(__func__, "JIT " + message);
+            }
+            if(count == 0)
+                return rocblaslt_status_not_implemented;
+            algo = &selected.algo;
+            if(matmul)
+            {
+                int32_t index = 0;
+                std::memcpy(&index, algo->data, sizeof(index));
+                hipblaslt_jit::debug::set("selected", std::to_string(index));
+            }
+        }
+#endif
 #ifdef HIPBLASLT_USE_ROCROLLER
         if(!isJitSolution(algo) && useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
@@ -6187,7 +6248,7 @@ namespace
             hipblaslt_jit::report(severity, hipblaslt_jit::describe(failure, problem));
         if(fill.repeated)
             log_info(__func__, "JIT generation already fell short for", problem);
-        else if(added.size() < needed && fill.failures.empty())
+        else if(added.size() < needed && fill.failures.empty() && !fill.skipped)
             hipblaslt_jit::report(hipblaslt_jit::Severity::Warning,
                                   "returned " + std::to_string(added.size()) + " of "
                                       + std::to_string(needed) + " requested solutions for "

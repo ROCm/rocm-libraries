@@ -105,6 +105,13 @@ def recording(path):
     return dict(HIPBLASLT_JIT_TEST_FAULT="record", HIPBLASLT_JIT_TEST_RECORD=str(path))
 
 
+def picked(stderr):
+    """The solution index of the last hipblasLtMatmul, from its bench log line."""
+    found = re.findall(r"--solution_index (\d+)", stderr)
+    require(found, "No hipblasLtMatmul was logged")
+    return int(found[-1])
+
+
 def check_jit_results(stderr, records, apis, requested):
     for api in apis:
         found = queries(records, api)
@@ -162,7 +169,10 @@ def cache_hit(run, output):
     check_jit_results(stderr, first, ("c",), 1)
     published = queries(first, "c")[0]["indices"]
     stderr, second = run(
-        "reuse", ["--api", "both", "--requested", "1"], HIPBLASLT_JIT="2", **recording(trap)
+        "reuse",
+        ["--api", "both", "--requested", "1", "--null-algo"],
+        HIPBLASLT_JIT="2",
+        **recording(trap),
     )
     check_jit_results(stderr, second, ("c", "cpp"), 1)
     for api in ("c", "cpp"):
@@ -170,6 +180,7 @@ def cache_hit(run, output):
             queries(second, api)[0]["indices"] == published,
             f"{api} query did not return the published solution",
         )
+    require(queries(second, "null-algo")[0]["status"] == 0, "Null algorithm failed")
     require(not trap.exists(), f"The second process generated: {trap}")
     require(not reports(stderr), "The second process reported a JIT problem")
     stderr, third = run(
@@ -316,6 +327,176 @@ def concurrent(run, output):
     print(
         f"PASS heuristic-concurrent: {processes} processes x {threads} threads agree"
         " and publish each solution once"
+    )
+
+
+def null_algo(run, output):
+    for mode in ("1", "2"):
+        library = output / f"lib-mode-{mode}"
+        stderr, records = run(
+            f"mode-{mode}",
+            ["--api", "none", "--null-algo"],
+            HIPBLASLT_JIT=mode,
+            HIPBLASLT_JIT_LIBRARY_PATH=str(library),
+        )
+        require(queries(records, "null-algo")[0]["status"] == 0, f"Mode {mode} failed")
+        require(
+            "hipblasLtMatmul without an algorithm PASS" in stderr,
+            f"Mode {mode} result was not checked",
+        )
+        require(entries(library), f"Mode {mode} did not publish its solution")
+    library = output / "lib-mode-0"
+    stderr, records = run(
+        "mode-0",
+        ["--api", "none", "--null-algo", "--no-run"],
+        HIPBLASLT_JIT_LIBRARY_PATH=str(library),
+    )
+    require(
+        queries(records, "null-algo")[0]["status"] != 0,
+        "Mode 0 found a solution without a device library",
+    )
+    require(not library.exists() and not reports(stderr), "Mode 0 used JIT")
+    print("PASS heuristic-null-algo: modes 1 and 2 select a JIT solution, mode 0 does not")
+
+
+def capture(run, output):
+    unpublished = (256, 128, 576)
+    trap = output / "trap.txt"
+    trapped = recording(trap)
+    _, records = run(
+        "publish", ["--api", "c", "--requested", "1", "--no-run"], HIPBLASLT_JIT="2"
+    )
+    (published,) = queries(records, "c")
+    require(published["count"] == 1, f"The JIT library was not seeded: {published}")
+    library = output / "lib"
+    held = (len(entries(library)), allocated(library))
+    failed = output / "failing-generation.txt"
+    _, records = run(
+        "failing-generation",
+        ["--api", "none", "--null-algo"] + size_args(unpublished),
+        HIPBLASLT_JIT="2",
+        **recording(failed),
+    )
+    missing = queries(records, "null-algo")[0]["status"]
+    require(
+        missing != 0 and failed.exists(), "Generation outside a capture did not fail"
+    )
+
+    def captured(name, capture_mode, size, drop=(), **overrides):
+        args = ["--api", "none", "--null-algo", "--capture", capture_mode]
+        stderr, records = run(
+            name, args + size_args(size), drop, **trapped, **overrides
+        )
+        (record,) = queries(records, "null-algo")
+        require(
+            record["capture"] == "active" and record["ended"] == 0,
+            f"{name}: the capture did not stay valid: {record}",
+        )
+        require(not trap.exists(), f"{name}: JIT generated during the capture")
+        return stderr, record
+
+    def replayed(name, stderr, record):
+        require(
+            record["status"] == 0 and record["nodes"] > 0,
+            f"{name}: no solution was captured: {record}",
+        )
+        require(
+            all(f"replay {replay} PASS" in stderr for replay in (0, 1)),
+            f"{name}: the graph replays were not checked",
+        )
+        require(not reports(stderr), f"{name}: a JIT problem was reported")
+
+    for mode in ("1", "2"):
+        for capture_mode in ("global", "thread-local", "relaxed"):
+            name = f"mode-{mode}-{capture_mode}"
+            stderr, record = captured(
+                name, capture_mode, DEFAULT_SIZE, HIPBLASLT_JIT=mode
+            )
+            replayed(name, stderr, record)
+            name += "-unpublished"
+            stderr, record = captured(
+                name, capture_mode, unpublished, HIPBLASLT_JIT=mode
+            )
+            require(
+                record["status"] == missing and record["nodes"] == 0,
+                f"{name}: expected status {missing} and an empty graph: {record}",
+            )
+            lines = reports(stderr)
+            require(
+                len(lines) == 1
+                and lines[0].startswith(
+                    "hipblaslt error: JIT generation skipped during stream capture for"
+                    " GEMM M=256 N=128 K=576 "
+                ),
+                f"{name}: expected one 'generation skipped' error, got {lines}",
+            )
+    require(
+        (len(entries(library)), allocated(library)) == held,
+        "A solution was published during a capture",
+    )
+
+    drop = ("HIPBLASLT_TENSILE_LIBPATH",)
+    _, records = run(
+        "mode-0-device-library",
+        ["--api", "none", "--null-algo"] + size_args(unpublished),
+        drop,
+    )
+    pretuned = queries(records, "null-algo")[0]["status"] == 0
+    for capture_mode in ("global", "thread-local", "relaxed") if pretuned else ():
+        name = f"mode-1-{capture_mode}-device-library"
+        stderr, record = captured(
+            name, capture_mode, unpublished, drop, HIPBLASLT_JIT="1"
+        )
+        replayed(name, stderr, record)
+    print(
+        "PASS heuristic-capture: during stream capture, hipblasLtMatmul without an"
+        " algorithm runs published JIT solutions and reports instead of generating"
+        + ("; a pre-tuned solution fills in mode 1" if pretuned else "")
+    )
+
+
+def capture_query(run, output):
+    for mode in ("1", "2"):
+        for capture_mode in ("global", "thread-local", "relaxed"):
+            for api, label in (("c", "C"), ("cpp", "C++")):
+                name = f"mode-{mode}-{capture_mode}-{api}"
+                library = output / f"lib-{name}"
+                stderr, records = run(
+                    name,
+                    ["--api", api, "--requested", "1", "--capture", capture_mode],
+                    HIPBLASLT_JIT=mode,
+                    HIPBLASLT_JIT_LIBRARY_PATH=str(library),
+                )
+                (record,) = queries(records, api)
+                require(
+                    record["status"] == 0
+                    and record["count"] == 1
+                    and record["indices"][0] >= JIT_INDEX,
+                    f"{name}: the query did not return a JIT solution: {record}",
+                )
+                require(
+                    len(entries(library)) == 1,
+                    f"{name}: the query did not generate and publish its solution",
+                )
+                require(
+                    record["capture"] == "active"
+                    and record["ended"] == 0
+                    and record["launch"] == 0
+                    and record["nodes"] > 0,
+                    f"{name}: the capture did not stay valid: {record}",
+                )
+                require(
+                    all(
+                        f"Captured {label} result 0, replay {replay} PASS" in stderr
+                        for replay in (0, 1)
+                    ),
+                    f"{name}: the graph replays were not checked",
+                )
+                require(not reports(stderr), f"{name}: a JIT problem was reported")
+    print(
+        "PASS heuristic-capture-query: during stream capture, both heuristic queries"
+        " generate and publish, the capture stays valid, and the captured launch"
+        " replays"
     )
 
 
@@ -507,8 +688,10 @@ def provider_order(run, output):
 
     stderr, records = run(
         "equality-fills",
-        ["--api", "both", "--requested", "1", "--no-run"] + size_args(equality),
+        ["--api", "both", "--requested", "1", "--no-run", "--null-algo"]
+        + size_args(equality),
         drop,
+        HIPBLASLT_LOG_MASK="32",
         **trapped,
     )
     for api in ("c", "cpp"):
@@ -517,6 +700,11 @@ def provider_order(run, output):
             record["indices"] == base_equality[api]["indices"][:1],
             f"{api} did not return the mode 0 result: {record['indices']}",
         )
+    require(queries(records, "null-algo")[0]["status"] == 0, "Null algorithm failed")
+    require(
+        picked(stderr) == base_equality["c"]["indices"][0],
+        "The null algorithm did not pick the Equality solution",
+    )
     require(
         not trap.exists() and not entries(library) and not reports(stderr),
         "JIT was consulted although the Equality results fill the request",
@@ -559,8 +747,10 @@ def provider_order(run, output):
     for name, args, requested, base in cases:
         stderr, records = run(
             f"reuse-{name}",
-            ["--api", "both", "--requested", str(requested), "--no-run"] + args,
+            ["--api", "both", "--requested", str(requested), "--no-run", "--null-algo"]
+            + args,
             drop,
+            HIPBLASLT_LOG_MASK="32",
             **trapped,
         )
         for api in ("c", "cpp"):
@@ -570,6 +760,13 @@ def provider_order(run, output):
                 and record["kernels"] == first[name][api]["kernels"],
                 f"{name}: {api} differs in a second process: {record['indices']}",
             )
+        require(queries(records, "null-algo")[0]["status"] == 0, "Null algorithm failed")
+        choice = picked(stderr)
+        require(
+            choice == first[name]["c"]["indices"][0]
+            and (choice >= JIT_INDEX) == (name == "other"),
+            f"{name}: the null algorithm picked {choice}",
+        )
         require(
             not trap.exists() and not reports(stderr),
             f"{name}: the second process generated or reported a JIT problem",
@@ -604,7 +801,7 @@ def provider_order(run, output):
             )
     print(
         "PASS heuristic-provider-order: Equality results, then JIT, then the other"
-        " providers"
+        " providers; the null algorithm picks the same way"
     )
 
 
@@ -786,9 +983,26 @@ def debug_progress(run, output):
     require(events(lines, "lookup")[0]["result"] == "miss", "The first lookup hit")
     (end,) = events(lines, "generation.end")
     require(end["outcome"] == "ok" and end["published"] == 2, f"Wrong end: {end}")
+
+    stderr, records = run(
+        "capture",
+        ["--api", "none", "--null-algo", "--capture", "global"] + size_args((256, 128, 576)),
+        HIPBLASLT_JIT="2",
+        HIPBLASLT_JIT_DEBUG="progress",
+    )
+    lines = debug_lines(stderr)
+    (skip,) = events(lines, "capture.skip")
+    require(skip["found"] == 0 and not events(lines, "generation.start"), f"{skip}")
+    require(
+        len(reports(stderr)) == 1
+        and reports(stderr)[0].startswith(
+            "hipblaslt error: JIT generation skipped during stream capture for"
+        ),
+        "The capture report changed",
+    )
     print(
         "PASS heuristic-debug-progress: query, lookup, generation, build and publish"
-        " events in order"
+        " events in order; a capture reports capture.skip"
     )
 
 
@@ -942,6 +1156,9 @@ ROUTES = {
     "distinct": distinct,
     "unsupported": unsupported,
     "concurrent": concurrent,
+    "null-algo": null_algo,
+    "capture": capture,
+    "capture-query": capture_query,
     "report": report,
     "partial-fill": partial_fill,
     "override": tuning_override,

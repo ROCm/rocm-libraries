@@ -158,8 +158,8 @@ if(HIPBLASLT_JIT_TESTING)
                        --replay "${hipblaslt_jit_data}/gfx950/rank-2"
                        --replay "${hipblaslt_jit_splitk}")
             foreach(route fallback-c fallback-cpp forced cache-hit distinct unsupported
-                          concurrent report partial-fill override provider-order debug-timing
-                          debug-progress debug-off debug-file)
+                          concurrent null-algo capture capture-query report partial-fill override
+                          provider-order debug-timing debug-progress debug-off debug-file)
                 hipblaslt_jit_python_test(jit-heuristic-${route} jit-gpu test_heuristic.py
                     $<TARGET_FILE:hipblaslt-jit-heuristic-test> ${route}
                     "${hipblaslt_jit_scratch}/heuristic-${route}" ${replay})
