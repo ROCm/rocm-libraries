@@ -41,9 +41,9 @@ AMDGPU code object resolved relative to the descriptor that names it (inside the
 root, no root-relative fallback) and `symbol` is authored. The packer copies the bytes
 as-is into the arch's archive with no compile step, reads the signature from the
 object's metadata, and declares `metadata_fields: []`. It does not check the object's
-format or target processor, so restrict each `hsaco` KDP to the arch its object was
-built for; an unrestricted one ships the same bytes to every shard and fails at module
-load on the wrong device. `hsaco_file` (direct load) remains unsupported.
+format or target processor, so every `hsaco` kernel must state a non-empty `arch` listing the arch(es) its
+object runs on (a generic-target object lists each one); the generator rejects a kernel
+without one, since an unrestricted one would ship the same bytes to every shard. `hsaco_file` (direct load) remains unsupported.
 
 Both dialects are packed and staged per architecture, and **neither registers a
 descriptor in CMake**: the authored subpath is the whole mechanism. Only

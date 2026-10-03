@@ -517,8 +517,9 @@ producing compiler. `hsaco` authoring also uses the packaged path: `kernel_sourc
 descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
 with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
 like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
-object's format or target processor: an hsaco kernel must carry a per-kernel `arch` (or sit
-in a single-arch pack) matching its object, otherwise the same file enters every shard.
+object's format or target processor: every hsaco kernel must carry a non-empty per-kernel `arch` listing the
+arch(es) its object runs on (a generic-target object lists each one), and the loader
+rejects one without.
 `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
 prerequisite on `IKernelDispatchHandler`.
 

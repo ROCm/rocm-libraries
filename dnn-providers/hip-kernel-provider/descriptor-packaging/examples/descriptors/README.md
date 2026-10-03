@@ -78,9 +78,9 @@ compiled artifact. Authoring it would let the descriptor disagree with the kerne
 authored.** `file` resolves relative to the descriptor that names it, must stay
 inside the source root, and has no root-relative fallback, like a hip `source`.
 The object is packed as-is, with no compile. This tree contains no hsaco example.
-Restrict each hsaco UKD with `arch` to the arch its object was built for: an
-unrestricted one repeats its bytes in every arch's shard, where they fail at
-module load on the wrong device.
+Each hsaco UKD must list in `arch` the arch(es) its object runs on (a
+generic-target object lists every arch it runs on); an absent or empty `arch`
+is rejected.
 
 **`arch` filters which shard a descriptor ships in.** It does not select a
 builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code.

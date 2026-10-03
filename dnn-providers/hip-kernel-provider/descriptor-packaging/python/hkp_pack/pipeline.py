@@ -13,7 +13,7 @@ from .hip_compile import (
     hip_source_relpath,
     hip_variant_key,
 )
-from .hsaco_source import hsaco_file_relpath, hsaco_variant_key, resolve_hsaco_file
+from .hsaco_source import hsaco_file_identity, hsaco_variant_key, resolve_hsaco_file
 from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     KPACK_DIR_NAME,
@@ -56,8 +56,7 @@ class InlineUKD:
     provenance: dict = field(default_factory=dict)
     observations: dict = field(default_factory=dict)
     consumers: list = field(default_factory=list)
-    # hsaco only: the authored `file`, and its normalized root-relative identity.
-    file: object = None
+    # hsaco only: the authored file's resolved root-relative identity.
     rel_file: object = None
 
 
@@ -217,7 +216,7 @@ def _compile_ukd_variant(
     (source, builder, spec) and is location-independent (its source is a dotted
     module resolved by import), so source_root/rel_dir are accepted only for
     signature uniformity. hsaco resolves its `file` the way hip resolves its
-    source, keys on the file's normalized root-relative path, and runs no
+    source, keys on the file's resolved root-relative path, and runs no
     producer: the authored path itself is recorded as the variant's code object.
     Returns (variant_key, symbol, record_fields).
     """
@@ -305,7 +304,7 @@ def _compile_ukd_variant(
         file = ks["file"]
         symbol = ks["symbol"]
         path = resolve_hsaco_file(source_root, rel_dir, file, where)
-        rel_file = hsaco_file_relpath(rel_dir, file)
+        rel_file = hsaco_file_identity(Path(source_root).resolve(), path)
         vk = hsaco_variant_key(rel_file)
         if vk not in variant_co:
             variant_co[vk] = path
@@ -322,7 +321,6 @@ def _compile_ukd_variant(
             "build": None,
             "builder": None,
             "spec": None,
-            "file": file,
             "rel_file": rel_file,
         }
     else:
@@ -1095,7 +1093,7 @@ def _rewrite_ukd_kpack(
     elif ukd.origin_kind == "hsaco":
         provenance = {
             "origin_kind": "hsaco",
-            "file": ukd.file,
+            "file": ukd.rel_file,
             "sha256": sha256,
             "symbol": ukd.symbol,
         }
@@ -1298,9 +1296,24 @@ def pack_arch(
         # variant can catch.
         signature_key = (vk, ukd.symbol)
         if signature_key not in variant_signature:
-            variant_signature[signature_key] = kernel_signature(
-                variant_bytes[vk], ukd.symbol, f"UKD '{ukd.id}'"
-            )
+            if ukd.origin_kind == "hsaco":
+                # Authored bytes are arbitrary: a truncated or corrupt object
+                # fails the metadata parse with a parser-specific exception.
+                try:
+                    variant_signature[signature_key] = kernel_signature(
+                        variant_bytes[vk], ukd.symbol, f"UKD '{ukd.id}'"
+                    )
+                except HkpPackError:
+                    raise
+                except Exception as exc:
+                    raise HkpPackError(
+                        f"UKD '{ukd.id}': cannot read the AMDGPU metadata of "
+                        f"hsaco file '{ukd.rel_file}': {exc!r}"
+                    ) from exc
+            else:
+                variant_signature[signature_key] = kernel_signature(
+                    variant_bytes[vk], ukd.symbol, f"UKD '{ukd.id}'"
+                )
 
     kpack_path = None
     if variant_bytes:

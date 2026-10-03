@@ -49,14 +49,13 @@ holds no `kpack/`. Descriptors but no archive is legal; no descriptors never is.
 has no root-relative fallback — the same rule as a `hip` `source`. No compile runs: the
 bytes are packed as-is into the arch's kpack, the kernel signature is read from the
 object's AMDGPU metadata as for a compiled object, and the UKD ships as `kind: kpack`.
-The toc key derives from the file's normalized root-relative path, so one file serving
+The toc key derives from the file's resolved root-relative path, so one file serving
 several symbols is one archive entry, and one key claimed by two different files is a
-hard error. The packer does not check the object's format or target processor. The
-author restricts each `hsaco` UKD to the arch its object was built for: an unrestricted
-`hsaco` UKD in a multi-arch KDP ships the same bytes into every shard, and they then
-fail at module load on the wrong device. The author's own load test on the target arch
+hard error. The packer does not check the object's format or target processor. An
+`hsaco` UKD must list the arch(es) its object runs on in `arch` (a generic-target
+object lists every arch it runs on); an absent or empty `arch` is rejected. The author's own load test on the target arch
 is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
-`origin_kind: "hsaco"`, the authored `file`, its `sha256` and the `symbol`, and makes no
+`origin_kind: "hsaco"`, the root-relative `file`, its `sha256` and the `symbol`, and makes no
 toolchain claim. As for `hip`, the specialization contract must declare
 `metadata_fields: []`: no compiler ran whose specialization a binding could observe.
 

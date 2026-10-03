@@ -20,6 +20,9 @@
 ## `kind: {{ config.kernel_source_kind }}` to `kind: kpack`. A second, unlowered copy
 ## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack
 ## and then the engine, so the authored files belong under the shipped source root only.
+{% if config.kernel_source_kind == 'hsaco' %}
+## A prebuilt object must sit beside the descriptor that names it.
+{% endif %}
 ##
 ## Authored subpath (preserved verbatim into the staged and installed trees):
 ##     {{ config.descriptor_dir }}/

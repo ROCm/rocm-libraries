@@ -29,10 +29,10 @@ no comgr and no hipcc run. Trim an authored variant set to a covering subset bef
 lands, and register the symbols its UKDs name in a native pack, or the loader refuses the
 engine at provider load and every lowered kernel is wasted build time.
 
-The packer does not check an `hsaco` object's format or target processor. Restrict each
-`hsaco` UKD to the arch its object was built for. An unrestricted `hsaco` UKD in a
-multi-arch KDP ships the same bytes into every shard, and they fail at module load on the
-wrong device.
+The packer does not check an `hsaco` object's format or target processor. Every
+`hsaco` UKD must list its `arch`(es) (non-empty; a generic-target object lists every arch
+it runs on). `hkp_pack` rejects one without, because an unrestricted `hsaco` UKD would ship
+the same bytes into every shard, and they fail at module load on the wrong device.
 
 ## Root selection and dormancy
 

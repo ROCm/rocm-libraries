@@ -737,6 +737,7 @@ def hsaco_corpus(tmp_path):
     hsaco_ukd = _ukd(
         "ukd-hsaco",
         {"kind": "hsaco", "file": "prebuilt.co", "symbol": "H1"},
+        arch=[TARGET_ARCH],
     )
     hip_ukd = _ukd("ukd-hsaco-sibling", _hip_ks(_HSACO_SOURCE, "H1", 64))
     _write_json(

@@ -19,7 +19,7 @@ import pytest
 from hkp_pack import pipeline, toolchain
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
-from hkp_pack.hsaco_source import hsaco_file_relpath, hsaco_variant_key
+from hkp_pack.hsaco_source import hsaco_variant_key
 from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.pipeline import compile_intermediate, run_pipeline
 
@@ -85,6 +85,7 @@ def _hsaco_ukd(template, uid, file=CO_NAME, symbol="HsacoFixtureAdd"):
     ukd["id"] = uid
     ukd["name"] = f"{uid} ({symbol})"
     ukd["kernel_source"] = _hsaco_source(file, symbol)
+    ukd["arch"] = [ARCH]
     return ukd
 
 
@@ -100,6 +101,7 @@ def _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, mutate=None):
     kdp_path = child / "solo.kdp.json"
     doc = _read(kdp_path)
     template = doc["kernelDescriptors"][0]
+    template["arch"] = [ARCH]
     if mutate is None:
         template["kernel_source"] = _hsaco_source()
     else:
@@ -135,7 +137,7 @@ def test_inline_hsaco_round_trips_byte_identical(
     shipped = _read(out / "solo" / "solo.kdp.json")["kernelDescriptors"][0]
     ks = shipped["kernel_source"]
     assert ks["kind"] == "kpack"
-    assert ks["toc_key"] == hsaco_variant_key(hsaco_file_relpath("solo", CO_NAME))
+    assert ks["toc_key"] == hsaco_variant_key(f"solo/{CO_NAME}")
     assert ks["sha256"] == digest
     assert ks["symbol"] == "HsacoFixtureAdd"
     assert ks["signature"] == kernel_signature(fixture, "HsacoFixtureAdd", "fixture")
@@ -148,7 +150,7 @@ def test_inline_hsaco_round_trips_byte_identical(
     assert shipped["provenance"] == {
         **authored["provenance"],
         "origin_kind": "hsaco",
-        "file": CO_NAME,
+        "file": f"solo/{CO_NAME}",
         "sha256": digest,
         "symbol": "HsacoFixtureAdd",
     }
@@ -220,7 +222,7 @@ def test_standalone_and_nested_resolution(
     ks = shipped["kernel_source"]
     assert ks["kind"] == "kpack"
     assert ks["toc_key"] == hsaco_variant_key(f"shared/{CO_NAME}")
-    assert shipped["provenance"]["file"] == f"../shared/{CO_NAME}"
+    assert shipped["provenance"]["file"] == f"shared/{CO_NAME}"
     archive = _load_kpack(rocm_kpack_dir).PackedKernelArchive.read(
         results[ARCH].kpack_path
     )
@@ -234,6 +236,7 @@ def test_standalone_and_nested_resolution(
         kdp_path = folder / f"{sub}.kdp.json"
         doc = _read(kdp_path)
         doc["kernelDescriptors"][0]["kernel_source"] = _hsaco_source()
+        doc["kernelDescriptors"][0]["arch"] = [ARCH]
         _write(kdp_path, doc)
 
     _run(nested / "root", nested, rocm_kpack_dir)
@@ -339,7 +342,7 @@ def test_expected_sha256_applies_to_the_hsaco_key(
     tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir
 ):
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
-    toc_key = hsaco_variant_key(hsaco_file_relpath("solo", CO_NAME))
+    toc_key = hsaco_variant_key(f"solo/{CO_NAME}")
 
     with pytest.raises(HkpPackError, match="sha256 mismatch"):
         _run(root, tmp_path, rocm_kpack_dir, expected_sha256={toc_key: "0" * 64})
@@ -387,3 +390,122 @@ def test_hsaco_cannot_fulfil_compiled_bindings(
 
     with pytest.raises(HkpPackError, match="a 'hsaco' source cannot fulfil"):
         compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["plain", "absolute", "reentering", "symlinked_dir", "symlinked_root"],
+)
+def test_every_spelling_of_one_file_has_one_identity(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir, spelling
+):
+    """The key and provenance follow the file on disk, not how it was named."""
+    root = tmp_path / "root"
+    file = {
+        "plain": f"sub/{CO_NAME}",
+        "absolute": str(root / "solo" / "sub" / CO_NAME),
+        "reentering": f"../solo/sub/{CO_NAME}",
+        "symlinked_dir": f"link/../{CO_NAME}",
+        "symlinked_root": f"sub/{CO_NAME}",
+    }[spelling]
+
+    def set_file(doc, template):
+        template["kernel_source"] = _hsaco_source(file)
+
+    _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_file)
+    (root / "solo" / "sub" / "inner").mkdir(parents=True)
+    shutil.move(root / "solo" / CO_NAME, root / "solo" / "sub" / CO_NAME)
+    (root / "solo" / "link").symlink_to(root / "solo" / "sub" / "inner")
+    source_root = root
+    if spelling == "symlinked_root":
+        source_root = tmp_path / "rootlink"
+        source_root.symlink_to(root)
+
+    _run(source_root, tmp_path, rocm_kpack_dir)
+
+    shipped = _read(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
+    ukd = shipped["kernelDescriptors"][0]
+    identity = f"solo/sub/{CO_NAME}"
+    assert ukd["kernel_source"]["toc_key"] == hsaco_variant_key(identity)
+    assert ukd["provenance"]["file"] == identity
+
+
+@pytest.mark.quick
+def test_symlink_leaving_the_root_is_refused(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir
+):
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    shutil.move(root / "solo" / CO_NAME, outside / CO_NAME)
+    (root / "solo" / CO_NAME).symlink_to(outside / CO_NAME)
+    flat = load_flat_input(root)
+
+    with pytest.raises(HkpPackError, match="hsaco file escapes the source root"):
+        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+
+
+@pytest.mark.quick
+def test_truncated_code_object_names_the_ukd(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir
+):
+    """A corrupt authored object fails as HkpPackError, not a parser exception."""
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
+    fixture = (hsaco_fixture_dir / ARCH / CO_NAME).read_bytes()
+    (root / "solo" / CO_NAME).write_bytes(fixture[:2000])
+
+    with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
+        _run(root, tmp_path, rocm_kpack_dir)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("field", ["file", "symbol"])
+@pytest.mark.parametrize("value", [None, 7, ["a"], ""])
+def test_hsaco_file_and_symbol_must_be_nonempty_strings(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir, field, value
+):
+    def set_field(doc, template):
+        template["kernel_source"] = {**_hsaco_source(), field: value}
+
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_field)
+
+    with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_hsaco_symbol_must_be_ascii(tmp_path, empty_arch_fixture, hsaco_fixture_dir):
+    def set_symbol(doc, template):
+        template["kernel_source"] = _hsaco_source(symbol="Hsaco\u00e9")
+
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_symbol)
+
+    with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("arch", ["absent", []])
+def test_hsaco_without_arch_is_refused(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir, arch
+):
+    def drop_arch(doc, template):
+        template["kernel_source"] = _hsaco_source()
+        if arch == "absent":
+            del template["arch"]
+        else:
+            template["arch"] = arch
+
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, drop_arch)
+
+    with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_hsaco_with_explicit_arch_loads(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir
+):
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
+
+    assert load_flat_input(root).kdps()

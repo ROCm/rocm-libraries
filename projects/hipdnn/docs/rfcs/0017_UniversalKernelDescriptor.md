@@ -117,7 +117,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
-| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources |
+| Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
@@ -283,8 +283,9 @@ There is one family of descriptor formats, one generic engine, and two ways desc
 - **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled (a prebuilt
   code object is taken as authored) and packed per GPU architecture, then installed beside the
   provider.
-- **Runtime drop-in.** Descriptors backed by a prebuilt code object (or JIT source) are placed in a
-  folder and picked up on demand, with no build step and no restart.
+- **Runtime drop-in (deferred).** Descriptors backed by a prebuilt code object (or JIT source) are
+  placed in a folder and picked up on demand, with no build step and no restart. Until it lands, a
+  prebuilt code object ships through build-time packing (`kind: hsaco`).
 
 Both paths produce the same thing the generic engine consumes, so everything downstream (matching,
 selection, launch) is identical regardless of how a kernel arrived.

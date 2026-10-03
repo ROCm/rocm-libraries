@@ -1599,6 +1599,13 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
+            if ks.kind == KERNEL_SOURCE_KIND_HSACO and not kernel.arch:
+                raise ConfigError(
+                    f"{where} is kind 'hsaco' but the kernel states no 'arch'. "
+                    f"A prebuilt code object targets specific processors, so it "
+                    f"must list the arch(es) it runs on; without one it would "
+                    f"enter every arch shard."
+                )
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:

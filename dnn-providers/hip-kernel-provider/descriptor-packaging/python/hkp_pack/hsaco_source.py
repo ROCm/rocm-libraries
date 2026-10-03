@@ -1,24 +1,23 @@
 """A prebuilt code object named by a descriptor: `kernel_source` kind `hsaco`.
 
 No producer runs. The authored file is resolved like a hip source, keyed on its
-normalized root-relative path, and packed byte-for-byte at pack time.
+resolved root-relative path, and packed byte-for-byte at pack time.
 """
 
-import posixpath
 from pathlib import Path
 
 from .hip_compile import resolve_descriptor_file
 from .variant import _hash_payload
 
 
-def hsaco_file_relpath(rel_dir, file):
-    """The authored code object's identity: its normalized root-relative path.
+def hsaco_file_identity(root, path):
+    """The authored code object's identity: its resolved path relative to the root.
 
-    Lexical rather than resolved, so the key depends on the authored tree and
-    not on where a symlink happens to point. `a/../b/K.co` and `b/K.co` name one
-    file and share one identity.
+    `root` and `path` are both resolved, so every spelling of one file (absolute,
+    `..`-re-entering, through an in-root symlink, or via a symlinked source root)
+    names one identity, and the identity does not depend on where the root lives.
     """
-    return posixpath.normpath((Path(rel_dir) / file).as_posix())
+    return path.relative_to(root).as_posix()
 
 
 def hsaco_variant_key(rel_file):
@@ -33,7 +32,7 @@ def hsaco_variant_key(rel_file):
 def resolve_hsaco_file(source_root, rel_dir, file, where):
     """The authored code object on disk, via the hip resolver.
 
-    Relative to the descriptor that named it, contained in the root, with no
-    fallback. In-root symlinks are accepted.
+    Relative to the descriptor that named it, contained in the root once
+    symlinks are resolved, with no fallback.
     """
     return resolve_descriptor_file(source_root, rel_dir, file, "hsaco file", where)

@@ -2754,6 +2754,7 @@ class TestHsacoKernelSource:
                         {
                             "name": "k1",
                             "kernel_source": source,
+                            "arch": ["gfx942"],
                             "metadata": {"block_size": 64},
                         }
                     ],
@@ -2775,6 +2776,16 @@ class TestHsacoKernelSource:
             "HsacoFixture.co",
             "HsacoFixtureAdd",
         )
+
+    @pytest.mark.parametrize("arch", [None, []])
+    def test_a_kernel_without_arch_is_refused(self, tmp_path, arch):
+        raw = self._raw()
+        kernel = raw["packs"][0]["kernels"][0]
+        del kernel["arch"]
+        if arch is not None:
+            kernel["arch"] = arch
+        with pytest.raises(ConfigError, match="states no 'arch'"):
+            self._load(tmp_path, raw)
 
     def test_a_missing_symbol_is_refused(self, tmp_path):
         raw = self._raw()
