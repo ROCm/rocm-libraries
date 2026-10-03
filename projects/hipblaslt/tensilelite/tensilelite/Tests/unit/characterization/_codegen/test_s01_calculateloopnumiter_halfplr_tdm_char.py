@@ -89,7 +89,7 @@ _HALFPLR_PROBLEM = {
 _HALFPLR_MX = dict(_HALFPLR_PROBLEM, MacDataTypeA="F8", MacDataTypeB="F4", DataType="F8",
                    MXBlockA=32, MXBlockB=32, DataTypeMXSA="E8", DataTypeMXSB="E8")
 _HALFPLR_PROBLEMS = {
-    # The two problem types of decouple_pgr_tdm_fuse_gfx1250.yaml, and MX scales on one tensor.
+    # The two problem types of tdm_fuse_gfx1250.yaml (decouple_pgr_gfx1250.yaml has the first), and MX scales on one tensor.
     "mx": _HALFPLR_MX,
     "no_mx": dict(_HALFPLR_PROBLEM, DataType="b", DestDataType="b"),
     "mx_a": dict(_HALFPLR_MX, MacDataTypeB="F8", MXBlockB=0),

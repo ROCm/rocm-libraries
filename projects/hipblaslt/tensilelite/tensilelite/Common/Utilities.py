@@ -448,6 +448,12 @@ def clusterEnabled(clusterDim):
     """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
     return (clusterDim[0] * clusterDim[1]) != 1
 
+def clusterBarrierSplitWaveLoop(kernel):
+    # InitCIterWmma clones every chain head and skips v_mov, so the wave-split
+    # loop has to stay off or that clone cannot cover the accumulators.
+    return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
+                and kernel.get("InitCIterWmma", 0) != 1)
+
 def isPow2(n):
     """True when ``n`` is a positive power of two."""
     return n > 0 and (n & (n - 1)) == 0

@@ -171,11 +171,11 @@ def test_localread_get_lds_read_mem_token():
     assert idx == 3
 
 
-def _dcpWriter(dcpTokenGate=False, **stateKwargs):
+def _dcpWriter(dcpTokenGate=False, kernel=None, **stateKwargs):
     """A writer carrying the per-side token state decoupled PGR installs."""
-    states = types.SimpleNamespace(ldsReadTokenIdx=3, dcpTokenGate=dcpTokenGate,
+    states = types.SimpleNamespace(ldsReadTokenIdx=3, dcpTokenGate=dcpTokenGate, kernel=kernel,
                                    **stateKwargs)
-    return types.SimpleNamespace(states=states, _dcpTokenSide=dcpLdsSide)
+    return types.SimpleNamespace(states=states, _dcpTokenSide=lambda tc: dcpLdsSide(tc, states.kernel))
 
 
 @pytest.mark.parametrize("tc,expected", [("A", 7), ("MXSA", 7), ("B", 9), ("MXSB", 9)])

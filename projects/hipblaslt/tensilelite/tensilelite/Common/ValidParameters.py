@@ -1288,8 +1288,9 @@ validParameters = { # we need to make sure this matches develop
     #   - a value outside this list;
     #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
     #     with UseSubtileImpl;
-    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
-    #     divergent decoupled pair;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or with
+    #     HalfPLR at a divergent decoupled pair (a cluster adds the rejects
+    #     of DecouplePGR.dcpClusterRejectReason);
     #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
     #     live scale shares a data tensor's set and PAP refreshes the scale
     #     descriptors only as a pair;

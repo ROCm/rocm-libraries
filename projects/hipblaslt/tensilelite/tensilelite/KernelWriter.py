@@ -43,7 +43,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
-from rocisa.instruction import SSchedulingFence
+from rocisa.instruction import CommonInstruction, ReadWriteInstruction, SSchedulingFence, SWaitTensorcnt
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -58,7 +58,8 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide, dcpLateFillIncrements
-from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
+from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS, dcpClusterHandshakeViolations, DCP_DSCNT_DRAIN_RE, dcpThinSideAndAxis, dcpThinSet
+from .Common.Utilities import clusterBarrierSplitWaveLoop
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
@@ -94,19 +95,29 @@ import itertools
 from pprint import pprint
 
 
+def moduleLeaves(module):
+  """(item, owning module, position) for every non-Module item under `module`, in order."""
+  for pos, item in enumerate(module.items()):
+    if isinstance(item, Module):
+      yield from moduleLeaves(item)
+    else:
+      yield item, module, pos
+
+
+def moduleTree(module):
+  """Every Module under `module`, depth first."""
+  for item in module.items():
+    if isinstance(item, Module):
+      yield item
+      yield from moduleTree(item)
+
+
 def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
   # CMS schedules the loop body independently of the prologue. Any effective
   # local prefetch therefore needs an explicit drain unless an earlier path
   # already emitted one; ForceUnrollSubIter does not change that dependency.
   return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"]
               and not preLoopLocalReadDrainEmitted)
-
-
-def clusterBarrierSplitWaveLoop(kernel):
-  # InitCIterWmma clones every chain head and skips v_mov, so the wave-split
-  # loop has to stay off or that clone cannot cover the accumulators.
-  return bool(kernel.get("HalfPLR", 0) and kernel.get("ClusterBarrier", False)
-              and kernel.get("InitCIterWmma", 0) != 1)
 
 
 # Make const values immutable
@@ -535,6 +546,9 @@ class StateValues:
   # the half-1 block starts past both to keep every token unambiguous.
   memTokenLdsSplitBase: int              = 8
   memTokenEpilogue: int                  = 0
+  # Carried only by the decoupled-PGR cluster barriers, so wait-count insertion
+  # sees them tagged and drains nothing for them; no LDS access uses it.
+  memTokenDcpClusterBarrier: int         = 15
   oneBufferScheduling: bool              = False
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
@@ -910,8 +924,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     late = Module("TDM decoupled late fill %s" % singleTc)
     incNames = dcpLateFillIncrements(kernel, singleTc)
-    pinThinFence = (incNames is not None
-                    and self.states.dcpTokenGate)
+    pinThinFence = ((incNames is not None and self.states.dcpTokenGate)
+                    or self._dcpClusterHandshake(kernel))
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin all local reads before %s-thin WAR fence" % singleTc))
     late.add(SWaitCnt(dscnt=0, comment="TDM decoupled: all ds_reads done before %s refill" % singleTc))
@@ -976,7 +990,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     return masks
 
   def _dcpTokenSide(self, tc):
-    return dcpLdsSide(tc)
+    return dcpLdsSide(tc, self.states.kernel)
 
   def _dcpCurrentToken(self, kind, tc):
     side = self._dcpTokenSide(tc)
@@ -1044,6 +1058,110 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
              "; ".join("line %d %s" % (i, why) for i, why in uncovered)))
       self.states.overflowedResources = 11
     return "".join(lines)
+
+  def _dcpClusterHandshake(self, kernel):
+    """True when a divergent pair multicasts its double-buffered tensor across a cluster."""
+    return (self._dcpDivergent(kernel) and kernel["Multicast"] and kernel["ClusterBarrier"]
+            and clusterEnabled(kernel["ClusterDim"]))
+
+  def _dcpInsertClusterHandshake(self, kernel, rootModule):
+    """Give every late fill a cluster handshake; runs after the barrier rebuild.
+
+    Peers multicast the next thick fill into the block this workgroup read in this
+    iteration, so wave 0 signals right after the workgroup barrier that ends those
+    reads, and every wave waits for all peers before leaving the late fill.
+    """
+    if not self._dcpClusterHandshake(kernel) or self.states.overflowedResources:
+      return
+
+    def fail(why):
+      self.states.overflowedResources = 13
+      printWarning("%s: no decoupled-PGR cluster handshake: %s"
+                   % (getattr(self.states, "kernelName", "?"), why))
+
+    lateModules = [m for m in moduleTree(rootModule) if m.name.startswith("TDM decoupled late fill ")]
+    if not lateModules:
+      return fail("no late fill module")
+    if len({id(m) for m in lateModules}) != len(lateModules):
+      return fail("a late fill module occurs more than once")
+
+    def isWgBarrier(item):
+      return isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]
+
+    def sccAccess(item):
+      name = type(item).__name__
+      if name.startswith(("SCBranchSCC", "SCSelect", "SCMov", "SAddC", "SSubB")):
+        return "read"
+      if name.startswith(("SCmp", "SBitcmp", "SAdd", "SSub", "SAnd", "SOr", "SXor", "SNot",
+                          "SLShift", "SAShift", "SBfe", "SMin", "SMax", "SAbs", "SBcnt")):
+        return "write"
+      return None
+
+    def sccNeutral(item):
+      # Kinds that cannot read SCC: memory and LDS, waits, nops, barriers, scheduling fences, vector ALU (V*), comments.
+      if isinstance(item, TextBlock):
+        return not any(line.split("//", 1)[0].strip() for line in str(item).splitlines())
+      return (isinstance(item, (ReadWriteInstruction, TensorLoadToLds, SWaitCnt, SWaitAlu, SWaitTensorcnt, SNop, VNop,
+                                SBarrier, SSchedulingFence))
+              or (isinstance(item, CommonInstruction) and type(item).__name__.startswith("V")))
+
+    for late in lateModules:
+      leaves = list(moduleLeaves(late))
+      loadIdx = next((i for i, (item, _, _) in enumerate(leaves)
+                      if isinstance(item, TensorLoadToLds)), None)
+      if loadIdx is None:
+        return fail("%s holds no tensor load" % late.name)
+      anchorIdx = next((i for i in range(loadIdx - 1, -1, -1) if isWgBarrier(leaves[i][0])), None)
+      if anchorIdx is None:
+        return fail("no workgroup barrier ahead of the %s refill" % late.name)
+      drainIdx = next((i for i in range(anchorIdx - 1, -1, -1)
+                       if isinstance(leaves[i][0], SWaitCnt) and DCP_DSCNT_DRAIN_RE.match(str(leaves[i][0]))), None)
+      if drainIdx is None or any(isinstance(leaves[i][0], DSLoadInstruction)
+                                 for i in range(drainIdx + 1, anchorIdx)):
+        return fail("%s: LDS reads are not drained before its workgroup barrier" % late.name)
+
+      _, owner, pos = leaves[anchorIdx]
+      following = None
+      for item, _, _ in leaves[anchorIdx + 1:]:
+        following = sccAccess(item)
+        if following:
+          break
+        # An SLongBranch* expansion opens with s_getpc and writes SCC before its s_setpc.
+        if (isinstance(item, (Label, BranchInstruction))
+            or type(item).__name__.startswith(("SGetPC", "SSetPC", "SSwapPC"))):
+          return fail("%s: control flow prevents proving SCC dead after its workgroup barrier"
+                      % late.name)
+        if not sccNeutral(item):
+          return fail("%s: %s after its workgroup barrier may read SCC" % (late.name, type(item).__name__))
+      if following == "read":
+        # The election clobbers SCC, so it must not split an SCC def from its use.
+        defItem, defOwner, defPos = leaves[anchorIdx - 1]
+        if sccAccess(defItem) != "write" or defOwner is not owner or defPos != pos - 1:
+          return fail("%s: SCC is live after its workgroup barrier" % late.name)
+        items = list(owner.items())
+        items.insert(defPos, items.pop(pos))
+        owner.setItems(items)
+        pos = defPos
+      elif following is None:
+        return fail("%s: cannot prove SCC dead after its workgroup barrier" % late.name)
+
+      # Neither half may wait on tensorcnt: the tensor loads in flight fill other blocks.
+      signal = SBarrier(True, False, True, "dcp cluster signal: thick block read")
+      signal.setMemToken(MemTokenData([self.states.memTokenDcpClusterBarrier]))
+      wait = SBarrier(True, True, True, "dcp cluster wait: every peer read its thick block")
+      wait.setMemToken(MemTokenData([self.states.memTokenDcpClusterBarrier]))
+      skip = Label(self.labels.getNameInc("DcpCSigSkip"), "")
+      items = list(owner.items())
+      items[pos + 1:pos + 1] = [
+        SSchedulingFence(),
+        SCmpEQU32(src0=sgpr("WaveIdx"), src1=0),
+        SCBranchSCC0(labelName=skip.getLabelName()),
+        signal,
+        skip]
+      owner.setItems(items)
+      late.add(SSchedulingFence())
+      late.add(wait)
+      late.add(SSchedulingFence())
 
   ##############################################################################
   # packItemsConditional: pack src items into dst items until numPack or searchString is found
@@ -6705,6 +6823,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     pack = loopComponent.compute(self, kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
 
     self.postMainLoopBarrierCheckAndReset(kernel, module)
+    self._dcpInsertClusterHandshake(kernel, module)
 
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")
@@ -7593,6 +7712,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
       st_asm = self._dcpRelaxThickTextGate(kernel, st_asm)
+      if self._dcpClusterHandshake(kernel) and not self.states.overflowedResources:
+        violations = dcpClusterHandshakeViolations(st_asm, dcpThinSideAndAxis(kernel)[0], dcpThinSet(kernel))
+        if violations:
+          printWarning("%s: decoupled-PGR cluster handshake broken: %s"
+                       % (getattr(self.states, "kernelName", "?"), "; ".join(violations[:4])))
+          self.states.overflowedResources = 13
       # Refresh errors after assembly post-processing.
       error = self.states.overflowedResources
       t2_end = time.perf_counter()
@@ -8152,12 +8277,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # Epilogue scratch must not alias a TDM/PAP token: otherwise scheduling
     # its LDS stores drains unrelated prefetched tensor loads.
     self.states.memTokenEpilogue = self.states.memTokenLdsBuffer0
+    usedTokens = set(range(self.states.numLDSBlk)) | {self.states.memTokenLdsBufferMeta}
+    usedTokens.update(token for row in self.states.memTokenLdsSplit for token in row)
+    if self.states.dcpTokenGate:
+      usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
     if kernel.get("_SeparateEpilogueLds", False):
-      usedTokens = set(range(self.states.numLDSBlk)) | {self.states.memTokenLdsBufferMeta}
-      usedTokens.update(token for row in self.states.memTokenLdsSplit for token in row)
-      if self.states.dcpTokenGate:
-        usedTokens.update(token for row in self.states.memTokenLdsDcp.values() for token in row)
       self.states.memTokenEpilogue = max(usedTokens) + 1
+    assert not self._dcpClusterHandshake(kernel) \
+      or self.states.memTokenDcpClusterBarrier not in usedTokens | {self.states.memTokenEpilogue}, \
+      "memTokenDcpClusterBarrier=%u aliases an LDS token" % self.states.memTokenDcpClusterBarrier
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0

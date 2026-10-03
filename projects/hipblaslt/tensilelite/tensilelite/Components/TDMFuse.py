@@ -223,7 +223,7 @@ def tdmSetOwner(ks, tc):
     return group[0]
 
 
-def tdmSharedScaleSet(ks):
+def tdmSharedScaleSet(ks, grouping=None):
     """Return the one live set carrying a data tensor and the live MX scales, or None.
 
     TDMFuse 2/3 seat every live scale on the owner's set, and TDMFuse=1 with one
@@ -231,7 +231,7 @@ def tdmSharedScaleSet(ks):
     of its own. TDMFuse=1 with both scales puts a scale on each data set and
     takes the paired arms instead (tdmFusePaired), so it has no such set.
     """
-    shared = tdmScaleSharesDataSet(ks)
+    shared = tdmScaleSharesDataSet(ks, grouping)
     if len(shared) != 1:
         return None
     group = shared[0]
@@ -240,9 +240,9 @@ def tdmSharedScaleSet(ks):
     return group
 
 
-def tdmSharedScaleSetOwner(ks):
+def tdmSharedScaleSetOwner(ks, grouping=None):
     """The data tensor whose descriptor set the live MX scales ride, or None."""
-    group = tdmSharedScaleSet(ks)
+    group = tdmSharedScaleSet(ks, grouping)
     if group is None:
         return None
     return next(tc for tc in group if tc in TDM_DATA_TENSORS)
