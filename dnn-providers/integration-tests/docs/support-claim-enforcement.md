@@ -4,26 +4,18 @@ A **support claim** is a promise, checked into git next to a bundle, that a name
 engine supports that graph on a given arch and platform. `--enforce-support-claims`
 turns a broken promise into a test failure instead of a silent skip.
 
-This document covers what a claim asserts, how one graph's claims are checked,
-and the lifecycle inside `TestBody()` that decides when a claim is checked and when
-it is published.
+This document is for harness maintainers. It covers what a claim asserts, how one
+graph's claims are checked, and the lifecycle inside `TestBody()` that decides
+when a claim is checked and when it is published. For the sidecar format see
+[File Formats](file-formats.md#support-claim-sidecars--namesupportjson-and-supportjson);
+for running with claims and reading the summary as a developer see
+[Running the Tests](running-tests.md#support-claim-summary); for updating claims
+see [Adding Tests](adding-tests.md#updating-support-claims).
 
-> **Under `ctest`, claims are enforced.** Every lane registered by
-> `add_external_integration_test_target()` names `--test-engine`, so it inherits the
-> enforcing default: the sidecar is queried against the engine under test, every
-> verdict is printed in the summary, and a broken claim fails that bundle's test.
->
-> A claim only applies to the arch and platform the run is on, so a runner with no
-> device has no claim to enforce and nothing goes red on its account.
->
-> Running the binary by hand behaves the same way -- enforcement is the default.
-> `--enforce-support-claims=false` opts out: the sidecar is still queried and the summary
-> still printed, but a broken claim no longer fails the test.
->
-> Enforcement requires `--test-engine`. Typing `--enforce-support-claims` (or `=true`) with no
-> engine named exits 1 rather than degrading to "enforced nothing, exit 0"; inheriting
-> the default with no engine named quietly reports instead, since nothing was asked
-> for that cannot be delivered.
+Every CTest lane names `--test-engine`, so it inherits the enforcing default.
+There is no build option that flips the registered lanes and no environment
+variable that changes the mode; the default is pinned by the
+`TestClaimModeResolution` truth table, so turning it off fails a unit test.
 
 ---
 
@@ -32,7 +24,7 @@ it is published.
 **That the engine accepts the graph — not that the graph produces correct output.**
 
 Correctness is the job of the ordinary comparison against golden data or a
-reference executor (see [Verification modes](../README.md#verification-modes)).
+reference executor (see [Verification modes](running-tests.md#verification-modes)).
 Claims are a separate axis: they catch an engine *dropping* support for a graph it
 previously advertised, which otherwise shows up as a skip nobody notices.
 
@@ -40,31 +32,16 @@ The two axes meet in exactly one place — a claim that was accepted and then fa
 in use is reported as such, and never published as working support. See
 [Phase 3](#phase-3--commit-with-the-outcome).
 
-## Sidecar layout
+## Where a claim applies
 
-`.support.json` files live beside the bundle they describe and are excluded from
-graph discovery, so they can never register as a test.
-
-| Bundle kind | Sidecar path | Shape |
-|---|---|---|
-| Single graph `dir/Small.json` | `dir/Small.support.json` | `claims: {engine: {arch: [platforms]}}` |
-| Template sweep `dir/sweep.json` | `dir/support.json` (one file, whole sweep) | `claims: {engine: [{cases: [ids], support: {arch: [platforms]}}]}` |
-
-```json
-{
-  "version": 1,
-  "claims": {
-    "MIOPEN_ENGINE": { "gfx942": ["linux", "windows"], "gfx1151": ["windows"] }
-  }
-}
-```
-
-A sweep sidecar keys each claim group by `cases[].id`, so one file covers every
-case in the sweep and a case named in no group is simply unclaimed.
+The sidecar formats are described in
+[File Formats](file-formats.md#support-claim-sidecars--namesupportjson-and-supportjson).
+Sidecars are excluded from graph discovery, so they can never register as a test.
 
 **Arch and platform come from the running machine, not the bundle.** The sidecar is
 a matrix; a run picks one cell. `arch` is the base token — `gfx90a:sramecc+:xnack-`
-matches a `gfx90a` claim. `platform` is `linux` or `windows`.
+matches a `gfx90a` claim. `platform` is `linux` or `windows`. A sweep sidecar keys
+each claim group by `cases[].id`, so a case named in no group is simply unclaimed.
 
 ## One lane, one engine
 
@@ -280,8 +257,11 @@ run has no evidence either way about their claims.
 
 The summary is one JSON document under a header line naming the claim mode. It is
 meant to be read by a person in a CI log and parsed by a tool that updates sidecars,
-so every key is always present — zeros and empty lists included — and every list is
-sorted by bundle, so two runs over the same tree print the same document.
+so every list is sorted by bundle and two runs over the same tree print the same
+document. Keys are present with zeros and empty lists, except the three
+subtraction keys noted under [the coverage ladder](#the-coverage-ladder), which
+appear only when `counters_consistent` is true. No summary is printed at all when
+the run found no graph with a sidecar and recorded no verdict.
 
 ```text
 ==== SUPPORT CLAIM SUMMARY (ENFORCING) ====
@@ -410,42 +390,15 @@ cannot see.
 
 ## Running it
 
-```bash
-# Validate checked-in golden data against both references — no engine, no claims
-./bin/hipdnn_golden_data_tests --gtest_filter='quick_*'
+How to run with claims, the hard-stop messages and troubleshooting are in
+[Running the Tests](running-tests.md#hard-stops); the golden-data binary is
+described there too. Two invariants belong here:
 
-# Just the CPU reference, which needs no GPU at all
-./bin/hipdnn_golden_data_tests --reference cpu
-
-# Enforce claims for one engine over the quick tier
-./bin/hipdnn_integration_tests \
-    --test-article /path/to/libmiopen_plugin.so \
-    --test-engine MIOPEN_ENGINE \
-    --enforce-support-claims \
-    --gtest_filter='quick_*'
-```
-
-The `ctest` lanes name `--test-engine` and inherit the enforcing default, so they
-print this summary and fail on a broken claim. There is no build option that flips
-the registered lanes, and no environment variable that changes the mode behind your
-back. The default is pinned by the `TestClaimModeResolution` truth table, so turning
-it off fails a unit test.
-
-`--write-support-claims` records the support a run observed and never removes a
-claim. Retracting a claim is a deliberate, reviewed change.
-
-> Golden `.bin` blobs are DVC-managed. A tree that has not run `dvc pull` in
-> `integration-test-bundles/` registers zero validation tests and says so.
-
-| Symptom | Cause |
-|---|---|
-| `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to check claims against |
-| `support claims exist for X but were never queried` | A code path short-circuited above the query — a harness bug, not a data problem |
-| `FATAL: … not one of them was ever queried` | Claim-bearing graphs ran and none was queried: the GPU or the engine plugin failed to load, or every one of them failed to open (already red on its own account). A filter that selected only unclaimed graphs is *not* a cause |
-| `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |
-| `Engine 'X' is not loaded` | `--test-engine` named an engine this build does not have; startup exits 1 before any test runs |
-| `verification-mode 'golden-check' has been retired` | Run the `hipdnn_golden_data_tests` binary instead, and unset `HIPDNN_TEST_VERIFICATION_MODE` |
-| `No golden-data validation tests ran` | Golden `.bin` blobs are not pulled, so no bundle qualified |
+- `--write-support-claims` records the support a run observed and never removes a
+  claim. Retracting a claim is a deliberate, reviewed change.
+- `FATAL: … not one of them was ever queried` is never caused by a filter that
+  selected only unclaimed graphs: the count behind it is seeded by the tests that
+  ran, not by what registration discovered.
 
 ## Scope: two harnesses, never both — and now two binaries
 
@@ -538,7 +491,8 @@ The pieces this harness is assembled from, and the one question each answers.
 
 ## See Also
 
-- [`README.md`](../README.md) — the integration test suite, bundle formats, tiers,
-  and provider wiring.
-- [`integration-test-bundles/README.md`](../integration-test-bundles/README.md) —
-  on-disk bundle layout and the DVC workflow.
+- [`README.md`](README.md) — index of the integration-test documentation.
+- [File Formats](file-formats.md) — bundle layout, sidecar schemas, and test naming.
+- [Running the Tests](running-tests.md) — lanes, flags, tiers, and reading the summary.
+- [Adding Tests and Updating Claims](adding-tests.md) — the DVC workflow and
+  `--write-support-claims`.
