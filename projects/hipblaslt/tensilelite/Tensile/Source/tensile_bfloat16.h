@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _TENSILE_BFLOAT16_H_
-#define _TENSILE_BFLOAT16_H_
 
 // If this is a C compiler, C++ compiler below C++11, or a host-only compiler,
 // we only include a minimal definition of tensile_bfloat16
@@ -247,5 +245,3 @@ inline tensile_bfloat16 cos(tensile_bfloat16 a)
 }
 
 #endif // __cplusplus < 201103L || !defined(__HIPCC__)
-
-#endif // _TENSILE_BFLOAT16_H_

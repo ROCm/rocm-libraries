@@ -205,14 +205,6 @@ namespace TensileLite
                 }
             }
 
-            // Get elapsed time without stopping
-            double elapsedMs() const
-            {
-                auto now      = clock::now();
-                auto duration = std::chrono::duration<double, std::milli>(now - m_start);
-                return duration.count();
-            }
-
         private:
             const char*                    m_category = nullptr;
             std::chrono::time_point<clock> m_start;
@@ -244,15 +236,6 @@ namespace TensileLite
             g_calibratedPerCallOverheadMs
                 = std::chrono::duration<double, std::milli>(t1 - t0).count() / kIter;
             g_timingBuffer.clear();
-        }
-
-        // Report a timing value directly (for GPU timings already measured)
-        inline void reportTiming(const char* category, double ms)
-        {
-            if(g_timingInstrumentationEnabled)
-            {
-                g_timingBuffer.push_back(TimingRec{category, ms});
-            }
         }
 
         // Report problem context for correlation (single GEMM).
