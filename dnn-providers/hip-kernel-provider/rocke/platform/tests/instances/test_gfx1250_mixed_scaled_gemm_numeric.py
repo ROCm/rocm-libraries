@@ -13,14 +13,19 @@ _MODULE = "rocke.examples.gfx1250.gemm.mixed_scaled_gemm"
 # Every ordered mixed pair with E8M0 through both compiler routes.
 _FORMATS = ("fp8e4m3", "bf8e5m2", "fp6", "bf6", "fp4")
 _MIXED = [(a, b) for a, b in product(_FORMATS, repeat=2) if a != b]
+# Exercise FP16 output with different storage widths in both operand positions.
+_MIXED_OUTPUTS = [(a, b, "bf16") for a, b in _MIXED] + [
+    ("fp8e4m3", "fp4", "fp16"),
+    ("fp4", "fp8e4m3", "fp16"),
+]
 
 
 @pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
 @pytest.mark.parametrize(
-    "a,b,route",
-    [(*case, route) for case in _MIXED for route in ("comgr", "hip")],
+    "a,b,output_dtype,route",
+    [(*case, route) for case in _MIXED_OUTPUTS for route in ("comgr", "hip")],
 )
-def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, route):
+def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, output_dtype, route):
     result = subprocess.run(
         [
             sys.executable,
@@ -30,6 +35,8 @@ def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, route):
             a,
             "--dtype-b",
             b,
+            "--output-dtype",
+            output_dtype,
             "--matrix-path",
             matrix_path,
             "--compile-route",
