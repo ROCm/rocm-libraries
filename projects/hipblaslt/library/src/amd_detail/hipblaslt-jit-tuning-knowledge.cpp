@@ -10,11 +10,13 @@
 #include "rocblaslt_secure_env.hpp"
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <map>
 #include <mutex>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 namespace hipblaslt_jit
 {
@@ -128,7 +130,7 @@ namespace hipblaslt_jit
                     if(installed.database)
                         m_version += (m_version.empty() ? "" : ";") + arch + "="
                                      + installed.database->contentHash();
-                m_id = m_version.empty() ? std::string(m_catalog->id()) : "tensilelite-logic.v2";
+                m_id = m_version.empty() ? std::string(m_catalog->id()) : "tensilelite-logic.v3";
                 if(m_version.empty())
                     m_version = m_catalog->version();
             }
@@ -277,6 +279,25 @@ namespace hipblaslt_jit
                         for(const auto& [name, value] : found.asserts)
                             if(satisfies(problem, shape, name, value))
                                 seed.parameters.push_back({name, std::to_string(value)});
+                        // The runtime maps a persistent kernel at each launch when it
+                        // is built with WorkGroupMapping 0 and WorkGroupMappingXCC -1,
+                        // which Tensile rejects beside a persistent XCC mapping.
+                        if(found.policy.strategy == ExecutionPolicy::Strategy::StreamK
+                           && !jsonInteger(found.parameters, "PersistentXCCMapping")
+                           && !jsonInteger(found.parameters, "StreamKXCCMapping"))
+                            for(const auto& mapping :
+                                {std::pair{"WorkGroupMapping", "0"},
+                                 std::pair{"WorkGroupMappingXCC", "-1"}})
+                            {
+                                auto parameter = std::find_if(
+                                    seed.parameters.begin(),
+                                    seed.parameters.end(),
+                                    [&](const auto& p) { return p.name == mapping.first; });
+                                if(parameter == seed.parameters.end())
+                                    seed.parameters.push_back({mapping.first, mapping.second});
+                                else
+                                    parameter->json = mapping.second;
+                            }
                         seed.cacheHints = {{jsonInteger(found.parameters, "NonTemporalA"),
                                             jsonInteger(found.parameters, "NonTemporalB")}};
                         seed.policies   = {found.policy};

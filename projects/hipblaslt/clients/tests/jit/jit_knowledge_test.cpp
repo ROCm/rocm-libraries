@@ -463,7 +463,7 @@ namespace
         };
 
         const auto installed = hipblaslt_jit::makeTuningLibraryKnowledge(tree, true);
-        require(installed->id() == "tensilelite-logic.v2" && installed->version() == "gfx950=aaaa",
+        require(installed->id() == "tensilelite-logic.v3" && installed->version() == "gfx950=aaaa",
                 "Installed version " + installed->version());
         for(const char* arch : {"gfx950", "gfx942", "gfx1250", "gfx90a"})
             queries(*installed, arch);
