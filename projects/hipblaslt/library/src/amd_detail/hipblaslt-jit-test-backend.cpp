@@ -60,9 +60,10 @@ namespace hipblaslt_jit
             return configure(
                 "HIPBLASLT_JIT_TEST_FAULT=record requires a file in HIPBLASLT_JIT_TEST_RECORD");
 
-        made.predictor    = makeOrigamiPredictor();
-        made.knowledge    = makeCatalogKnowledge();
-        options.contracts = made.predictor->modeledContracts();
+        made.predictor = makeOrigamiPredictor();
+        made.knowledge = makeCatalogKnowledge();
+        // The mock replays bundles; it cannot carry a tuned set to a generator.
+        options.contracts = {"origami.gemm.dp.v1"};
         made.backend      = mock::makeBackend(options);
         return {};
     }

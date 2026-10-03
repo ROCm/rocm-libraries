@@ -140,14 +140,22 @@ plugin application binary interface (ABI).
 The implementations are:
 
 - Predictor: `makeOrigamiPredictor()`, in `hipblaslt-jit-origami-predictor.cpp`,
-  expands the tuning knowledge's candidate seeds across the target's matrix
-  instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1`
-  contract; see [Origami modeled inputs](#origami-modeled-inputs).
+  puts the tuning knowledge's fixed seeds first, each as one
+  `tensilelite.tuned.v1` candidate. It then expands the other seeds across the
+  target's matrix instructions, ranks them with Origami, and emits the
+  `origami.gemm.dp.v1` contract; see
+  [Origami modeled inputs](#origami-modeled-inputs) and
+  [predictor and TuningKnowledge](#predictor-and-tuningknowledge).
 - Tuning knowledge: `makeCatalogKnowledge()`, in
   `hipblaslt-jit-catalog-knowledge.cpp` (id `catalog.v1`): 11 tile shapes, two
   DepthU rules, cache hints that are only the defaults on gfx90a and gfx1250,
   and policy none for every seed. It supplies no values for unmodeled knobs,
   which keep the backend's defaults.
+- Tuning library knowledge: `makeTuningLibraryKnowledge()`, in
+  `hipblaslt-jit-tuning-knowledge.cpp` (id `tensilelite-logic.v1`), returns up
+  to 8 tuned sets from the knowledge file of the device's architecture, then
+  the catalog's seeds. `hipblaslt-jit-knowledge.cpp` reads the files and finds
+  the nearest sets.
 - Code-object builder: `makeComgrBuilder()`; see
   [building generated sources](#building-generated-sources).
 - Loader: `makeTensileLoader()`, in `hipblaslt-jit-loader.cpp`, parses the
@@ -182,7 +190,8 @@ hipBLASLt is configured. By default it comes from
 `hipblaslt-jit-no-backend.cpp`, whose configure failure says that hipBLASLt was
 built without a JIT generator backend. With `HIPBLASLT_JIT_TESTING=ON` it comes
 from `hipblaslt-jit-test-backend.cpp`, which replays bundles through the mock
-backend after an Origami prediction; the
+backend after an Origami prediction from the catalog knowledge, transporting
+only `origami.gemm.dp.v1`; the
 [JIT test guide](clients/tests/jit/README.md) describes its settings.
 
 ### Origami modeled inputs
@@ -228,6 +237,63 @@ Rejection advances to the next ranked candidate; exhausting the ranking fails
 with reasons and emits no selected recipe. A CU budget smaller than the device's
 XCD count is rejected before calling the mapping selectors. Diagnostic manifests
 retain raw outputs, translated parameters, defaults, and rejections.
+
+### Predictor and TuningKnowledge
+
+The predictor ranks the seeds that the tuning knowledge returns for a request
+and a device target. A seed is either a set of fixed tuning parameters or a tile
+shape with DepthU rules and cache hints. `makeTuningLibraryKnowledge()` returns
+fixed seeds taken from the pre-tuned logic files, then the catalog's seeds.
+
+A build with JIT enabled runs `Tensile.JitKnowledge` over the logic files of each
+`GPU_TARGETS` architecture that has them (gfx942, gfx950 and gfx1250). It writes
+`Tensile/library/<arch>/hipblaslt-jit-knowledge-<arch>.dat.zlib` and installs it
+in the runtime component under `lib/hipblaslt/library/<arch>/`. A build with a
+device library installs the file with the rest of that directory. The file holds
+every tuned row with its tuned set, unpruned. It is a header index plus one
+compressed block per hardware branch and ProblemType group. The gfx942 file is
+about 152 MiB, the gfx950 file under 1 MiB.
+
+A backend's provider chooses its tuning knowledge. To use these files, it passes
+`makeTuningLibraryKnowledge()` the Tensile library root from
+`findTensileLibraryRoot()` in `tensile_host.cpp`, the lookup the pre-tuned
+library uses. If `HIPBLASLT_TENSILE_LIBPATH` is set and the process is not
+privileged, it names the directory that holds the files. Otherwise they are
+under the architecture's directory of `hipblaslt/library` next to
+`libhipblaslt`. The headers are read when the first JIT use configures the
+components, and a group's block is inflated on the first request that needs it.
+With `HIPBLASLT_JIT` unset or `0`, no file is opened.
+`HIPBLASLT_JIT_KNOWLEDGE=none` ignores the files. A missing file, a wrong schema
+or a file for another architecture also leaves only the catalog. The `knowledge`
+debug category reports which applies.
+
+For a GEMM, the matcher uses the first hardware branch, in the device library's
+order, that the device matches and that has the request's ProblemType. Exact
+branches come before fallback chip IDs. A ProblemType matches when its data
+types, transposes and other core fields are equal, and it has every epilogue
+feature the request has. The group with the fewest extra features wins. Each set
+is as far from the request as its nearest row, measured as the Euclidean
+distance between the base-2 logarithms of M, N, batch and K. Ties go to the set
+that wastes less of its tiles. The matcher keeps at most two sets per tile and
+wave shape, and at most 8 sets.
+
+A fixed seed becomes one candidate with the `tensilelite.tuned.v1` contract. Its
+`parameters` are the tuned set's as they are, including the nine-value
+`MatrixInstruction`, `DepthU`, `NonTemporalA/B`, the execution policy, the
+workgroup mapping and `GlobalSplitU` (with `-1`) and its algorithm, plus the
+size asserts that the problem satisfies. Its `modeled` field holds `macro_tile`
+(MT0, MT1, DepthU) and `execution` (`strategy`, `assignment`), and its
+provenance, sent as `knowledge`, records the branch, group, logic file, row and
+distance. Fixed seeds keep the knowledge's order, and Origami's latency orders
+seeds that tie. A seed that Origami rejects keeps its place without a latency.
+With no workspace, the predictor skips Stream-K seeds and seeds with a fixed
+`GlobalSplitU` above 1. The catalog's seeds follow in Origami's order.
+
+`Jit` passes a backend only the candidates whose contract it transports. No
+backend in this repository transports `tensilelite.tuned.v1`: the mock and the
+test backend carry only `origami.gemm.dp.v1`, and the test backend uses the
+catalog knowledge. Until a generator backend transports tuned sets, the
+knowledge files and fixed seeds do not change what JIT generates.
 
 ### Pre-tuned heuristic selection
 
@@ -546,7 +612,8 @@ comma-separated list of category names, in any case:
 | --- | --- |
 | `timing` | One line when each heuristic query, `hipblasLtMatmul` call, generation and generated solution finishes, with the duration of each step |
 | `progress` | One line per step as it happens: lookups, waits, generation stages, builds and publication |
-| `knowledge`, `prediction` | Reserved; no lines yet |
+| `knowledge` | Which tuning knowledge each architecture uses |
+| `prediction` | Reserved; no lines yet |
 | `all` | Every category, including categories added later |
 
 Unset or empty prints nothing. A number, including `0` and `1`, or an unknown
@@ -570,7 +637,7 @@ them. The object starts with these keys:
 | Key | Value |
 | --- | --- |
 | `v` | Schema version, `1`. New keys keep the version; a changed meaning increments it |
-| `cat` | `timing` or `progress` |
+| `cat` | `timing`, `progress` or `knowledge` |
 | `ev` | The event |
 | `pid`, `tid` | The process ID and a thread number counted from 1 in each process |
 | `t_ms` | Milliseconds on the monotonic clock since the process's first line |
@@ -587,7 +654,7 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 
 | `ev` | When and what |
 | --- | --- |
-| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. It is a `progress` line when only `progress` is on |
+| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. Without `timing`, it is a line of the first category on, in the order `progress`, `knowledge` |
 | `setup` | The first JIT use in the process: its `status`, and the time to open the JIT solution library (`store`) and create the components. A backend can add its own fields and steps, such as creating itself |
 | `library.init` | A device's pre-tuned library initialization |
 | `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`; `best` from the pre-tuned query, split into `equality`, `jit` and `others` when JIT runs between them; `all` from the `getAllSolutions` fill; otherwise `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
@@ -610,6 +677,13 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 | `publish.start`, `publish.done` | Publication into the JIT solution library, with `fresh` and `reused` entries |
 | `load.done` | Solutions loaded without publication |
 | `failure` | A failed stage and its message |
+
+`knowledge` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `load` | Once per architecture, at its first request: the `arch`, the file's `path`, and `status`: `loaded` with the file's `content_hash` and number of `groups`, or `catalog` with the `reason` only the catalog applies |
+| `corrupt` | A group's block that cannot be read: the `arch`, `path` and `reason`. That group gives no seeds for the rest of the process |
 
 `query.start`, `query.end`, `lookup` and `query` lines share a budget of 50
 lines that refills at 10 per second. Lines over the budget are counted and

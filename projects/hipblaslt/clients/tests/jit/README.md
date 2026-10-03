@@ -37,7 +37,7 @@ injects the mock's fault, and `record` appends each request to the file that
 `HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug`, `jit-code-object`,
-  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
+  `jit-knowledge`, `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-source-bundle` and `jit-disabled`.
 - `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
   build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
@@ -50,7 +50,7 @@ injects the mock's fault, and `record` appends each request to the file that
   `jit-heuristic-jit-off`, and with `HIPBLASLT_ENABLE_CLIENT=ON`
   `jit-bench-smoke-jit-off`.
 
-A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-library`,
+A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-knowledge`, `jit-library`,
 `jit-library-concurrency` or `jit-bundle-freshness` and none of the tests that
 replay bundles, because the library entries are MsgPack.
 
@@ -60,6 +60,7 @@ replay bundles, because the library entries are MsgPack.
 | --- | --- |
 | `jit-source-bundle` | The source bundle reader: relative paths, symbolic links that escape the bundle, size limits and library formats |
 | `jit-component` | Jit over fake stages, without a GPU: missing components rejected, the generator's units reaching the builder, count limiting, excluded kernels, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, prediction only for backends that consume one and only candidates they transport, contract validation, the composed store version, and the catalog seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
+| `jit-knowledge` | The tuning knowledge files, without a GPU, on fixture files it writes: nearest-set order, ties, the cap and at most two sets per tile shape; the ProblemType with the fewest extra epilogue features; branch order by PCI chip ID, CU count, fallback chip and generic, falling through a branch without the ProblemType; only the requested group's block inflated, and a corrupt block disabling only its group; the lookup per architecture and in a flat directory, with one `knowledge` debug line for a loaded file, a wrong architecture or schema, a missing file and `HIPBLASLT_JIT_KNOWLEDGE=none`; and a version that changes with the content. Run by hand, `--decode <file>` reports the first-use time of a file's largest group, and `--nearest <file> <core key> <M> <N> <batch> <K> <CU count>` prints the sets the matcher picks for a plain GEMM |
 | `jit-debug` | The `HIPBLASLT_JIT_DEBUG` line writer, without a GPU: value parsing and its warning, JSON escaping and truncation, the line size cap, per-process file names, lines from several threads and processes intact in one file, and rate limiting with aggregate lines |
 | `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, the time of each comgr action without a change to the output, concurrent builds, and the status and log of each kind of failed build, without a GPU; with `--bundle`, the same for the committed split-K bundle |
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |

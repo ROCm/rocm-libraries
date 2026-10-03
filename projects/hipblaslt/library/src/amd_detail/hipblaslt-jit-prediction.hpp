@@ -75,6 +75,7 @@ namespace hipblaslt_jit
         size_t                               depthU = 0;
         std::vector<TuningParameter>         parameters; // forwarded verbatim
         std::string                          provenance; // JSON its candidates record
+        size_t rank = 0; // fixed seeds go best rank first; the predictor orders equal ranks
         // The policies to expand; a fixed seed has exactly one.
         std::vector<ExecutionPolicy> policies;
     };
@@ -115,4 +116,9 @@ namespace hipblaslt_jit
 
     std::shared_ptr<const Predictor>       makeOrigamiPredictor();
     std::shared_ptr<const TuningKnowledge> makeCatalogKnowledge();
+    // Tuned sets from the knowledge files in a Tensile library directory, then the
+    // catalog's seeds. perArchitecture: each file sits in a subdirectory named for
+    // its library architecture; otherwise the directory holds the files.
+    std::shared_ptr<const TuningKnowledge>
+        makeTuningLibraryKnowledge(std::filesystem::path directory, bool perArchitecture);
 }
