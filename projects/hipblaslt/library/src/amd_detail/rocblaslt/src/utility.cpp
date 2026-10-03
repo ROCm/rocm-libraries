@@ -93,6 +93,12 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
+    case HIP_R_32I:
+        return "R_32I";
+    case HIP_C_32F:
+        return "C_32F";
+    case HIP_C_64F:
+        return "C_64F";
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
     case static_cast<hipDataType>(HIP_R_6F_E3M2):

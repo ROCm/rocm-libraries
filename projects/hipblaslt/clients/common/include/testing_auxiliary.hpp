@@ -2672,6 +2672,9 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E4M3)} == "R_8F_E4M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E5M2)} == "R_8F_E5M2");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8I)} == "R_8I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_32I)} == "R_32I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_32F)} == "C_32F");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_64F)} == "C_64F");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
                 == "R_6F_E2M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2))}
