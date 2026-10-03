@@ -224,7 +224,17 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1200:
         return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5, 2, 64 * 1024};
       case architecture_t::gfx1201:
-        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 2, 64 * 1024};
+        // mem1/mem2/mem3, the per-WG bandwidth coefficient and l1_capacity are fitted for
+        // gfx1201 ranking (OCAMP), not a physical measurement. Microbenchmarked values they
+        // replace: 5.74, 1.21875121875121875122 * 2.41, 0.464, (0, 0.17, 0), 64 * 1024.
+        return {22.96,              // 5.74 * 4
+                4.407782945282945,  // 1.21875121875121875122 * 2.41 * 1.50068
+                0.90684624,         // 0.464 * 1.95441
+                2,
+                std::make_tuple(0, 0.0827165, 0),
+                1.5,
+                2,
+                28373};  // round(64 * 1024 * 0.432932)
       case architecture_t::gfx1100:
         return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1101:

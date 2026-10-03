@@ -449,6 +449,46 @@ void heuristics_database_t::initialize_defaults() {
     key.max_k       = 511;
     add_entry(key, reject_params);
   }
+
+  // ========================================================================
+  // HEURISTIC 4: gfx1201 TN fitted constants (fp16 and bf16)
+  // ========================================================================
+  // Fitted offline for gfx1201 (Radeon AI PRO R9700) HHS TN ranking (OCAMP), together with
+  // the gfx1201 architecture constants in hardware.hpp; fitted for ranking, not physical
+  // measurements. gfx1201 WMMA costs are identical for f16 and bf16, so the same values apply
+  // to both. Fields not set here keep their defaults.
+  {
+    heuristic_params_t g1201;
+    g1201.weight_tile_total                = 1.50721;
+    g1201.tail_loop_overhead               = 2800.0;
+    g1201.tile_fixed_overhead              = 1875.0;
+    g1201.main_memory_load_latency         = 100.0;
+    g1201.occupancy_decay_base             = 1.0;
+    g1201.mall_depth_sq                    = 3.70934;
+    g1201.mall_cold_floor                  = 1.0;
+    g1201.l2_depth_sq                      = 1.08032;
+    g1201.l2_cold_floor                    = 0.963585;
+    g1201.l2_amp_ceiling_batched           = 1.0;
+    g1201.l2_amp_ceiling_skinny            = 1.0;
+    g1201.l2_depth_penalty                 = 0.851098;
+    g1201.l1_hit_rate_ceiling_skinny       = 0.875;
+    g1201.epilogue_acc_read_parallelism    = 1.0;
+    g1201.epilogue_cycles_per_bounds_check = 11.3302;
+    g1201.epilogue_scalar_store_penalty    = 1.81855;
+    g1201.epilogue_l_barrier               = 103.444;
+    g1201.epilogue_l_smem                  = 1544.85;
+    g1201.postgsu_kernel_launch_overhead   = 6832.35;
+    g1201.main_loop_efficiency             = 0.968891;
+
+    for (const auto dt : {data_type_t::Half, data_type_t::BFloat16}) {
+      heuristic_key_t key;
+      key.arch        = hardware_t::architecture_t::gfx1201;
+      key.mi_dtype    = dt;
+      key.a_transpose = transpose_t::T;
+      key.b_transpose = transpose_t::N;
+      add_entry(key, g1201);
+    }
+  }
 }
 
 // ============================================================================
