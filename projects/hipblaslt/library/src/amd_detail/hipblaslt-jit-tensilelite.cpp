@@ -453,7 +453,9 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 , m_info{"tensilelite",
                          "TensileLite",
                          options.configPath.empty()
-                             ? std::set<std::string>{"origami.gemm.dp.v1", "tensilelite.tuned.v1"}
+                             ? std::set<std::string>{"origami.gemm.dp.v1",
+                                                     "origami.gemm.persistent.v1",
+                                                     "tensilelite.tuned.v1"}
                              : std::set<std::string>{},
                          generatorVersion(options)}
             {

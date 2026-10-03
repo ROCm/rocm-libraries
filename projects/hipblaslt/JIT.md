@@ -80,9 +80,9 @@ adaptation token, not a general owning executable object.
 | Component | Current input, output and connection |
 | --- | --- |
 | Jit | `hipblaslt-jit-component.{hpp,cpp}`. For one request and device target, `Jit::generate` runs the predictor when the backend consumes a prediction, asks the backend for solutions in a private scratch directory, builds each solution's code objects, checks support, and loads the supported ones as process-local bundles. With a solution store, it publishes them instead and loads them only when publishing fails; `getLibraryAlgos` configures the JIT solution library as the store. Each failure records its stage (configure, predict, generate, build, support, load or publish), and `getJitAlgo` reports the first one. The scratch directory is removed on success and kept after a failure that left files in it. |
-| Origami predictor | `hipblaslt-jit-origami-predictor.cpp` puts the tuning knowledge's fixed seeds first, each as one `tensilelite.tuned.v1` candidate. It then expands the other seeds across the target's matrix instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs). A backend that consumes these contracts receives the result as the request's prediction. Jit runs it only for such a backend. See [predictor and TuningKnowledge](#predictor-and-tuningknowledge). |
-| Catalog knowledge | `hipblaslt-jit-catalog-knowledge.cpp` (`makeCatalogKnowledge()`, id `catalog.v1`): 11 tile shapes, two DepthU rules, and cache hints that are only the defaults on gfx90a and gfx1250. It supplies no values for unmodeled knobs, which keep the generator's defaults. |
-| Tuning library knowledge | `hipblaslt-jit-tuning-knowledge.cpp` (`makeTuningLibraryKnowledge()`, id `tensilelite-logic.v1`) is the tuning knowledge of the TensileLite backend. It returns up to 8 tuned sets from the knowledge file of the device's architecture, then the catalog's seeds. `hipblaslt-jit-knowledge.cpp` reads the files and finds the nearest sets. |
+| Origami predictor | `hipblaslt-jit-origami-predictor.cpp` puts the tuning knowledge's fixed seeds first, each as one `tensilelite.tuned.v1` candidate. It then expands the other seeds across the target's matrix instructions and their execution policies, ranks them with Origami in one call, and emits the `origami.gemm.dp.v1` and `origami.gemm.persistent.v1` modeled contracts (workgroup mapping, stagger and launch outputs). A backend that consumes these contracts receives the result as the request's prediction. Jit runs it only for such a backend. See [predictor and TuningKnowledge](#predictor-and-tuningknowledge). |
+| Catalog knowledge | `hipblaslt-jit-catalog-knowledge.cpp` (`makeCatalogKnowledge()`, id `catalog.v1`): 11 tile shapes, two DepthU rules, and cache hints that are only the defaults on gfx90a and gfx1250. On gfx942, gfx950 and gfx1250 each shape is also a Hybrid Stream-K kernel. It supplies no values for unmodeled knobs, which keep the generator's defaults. |
+| Tuning library knowledge | `hipblaslt-jit-tuning-knowledge.cpp` (`makeTuningLibraryKnowledge()`, id `tensilelite-logic.v2`) is the tuning knowledge of the TensileLite backend. It returns up to 8 tuned sets from the knowledge file of the device's architecture, then the catalog's seeds. `hipblaslt-jit-knowledge.cpp` reads the files and finds the nearest sets. |
 | Code-object builder | `hipblaslt-jit-builder.cpp` over `hipblaslt-jit-code-object.cpp`. The comgr builder assembles the main kernels, compiles the helper source and links both into one raw executable code object for the device's target ID, then checks that the object targets that ID and defines the entry's kernel. See [code-object construction with comgr](#code-object-construction-with-comgr). |
 | Loader | `hipblaslt-jit-loader.cpp`. It reads source bundles by directory convention for the backends. The Tensile loader parses the entry, checks support and workspace with TensileLite's predicates, and loads the code object into a `TensileBundle`. |
 | JIT solution library | `hipblaslt-jit-library.cpp`, with `hipblaslt-jit-msgpack.cpp` writing the library files and `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic replacement. It publishes built solutions as a standard lazy TensileLite library on disk, looks them up by exact problem, and resolves their reserved solution indices for `tensile_host.cpp`. See [persistent solution library](#persistent-solution-library). |
@@ -114,6 +114,19 @@ occupancy 1 remain explicit model inputs, and the recipe keeps TensileLite's
 non-persistent `TileProcessingStrategy=None`. Every applicable prediction is transferred;
 defaults supply only settings that this model does not predict.
 
+On gfx942, gfx950 and gfx1250, when the request allows workspace and has no
+auxiliary output, the catalog also offers each configuration as a Hybrid
+Stream-K kernel under the `origami.gemm.persistent.v1` contract, with
+`stream_k=5`. One `rank_configs` call ranks both kinds, and a data-parallel
+candidate stays ahead of a Stream-K one of equal latency. The kernel is compiled with `TileProcessingStrategy=StreamK`,
+`WorkAssignment=Hybrid`, `StreamKAtomic=0`, `GlobalSplitU=0`,
+`WorkGroupMapping=0` and `WorkGroupMappingXCC=-1`, so the runtime chooses the
+grid, reduction, static or dynamic assignment, workgroup mapping and stagger at
+each launch, as for the pre-tuned Stream-K kernels. The candidate records
+Origami's prediction of each in `modeled.launch` (including `hybrid_mode`),
+`modeled.workgroup_mapping` and `modeled.stagger`, and the manifest marks them
+`runtime_resolved`. Origami's hybrid mode is static outside gfx950.
+
 The inventory below follows `shared/origami/include/origami/{origami,gemm,streamk,types}.hpp`
 and their implementations. A selected configuration is an output of ranking even
 though its fields originate in the caller's candidate catalog.
@@ -121,14 +134,14 @@ though its fields originate in the caller's candidate catalog.
 | Origami output | Generator input or use | Conditions |
 | --- | --- | --- |
 | `rank_configs` / `select_config`: ordered configuration and latency | Nine-value `MatrixInstruction` recipe (MI plus retained wave topology), macro tile, `DepthU`, `NonTemporalA/B`; latency and order in provenance | Estimation ranks the existing target instruction/tile/depth/cache-hint catalog. No kernel benchmarking. |
-| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. |
-| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. |
+| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. A persistent candidate records it and compiles `WorkGroupMapping=0`. |
+| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. A persistent candidate records it and compiles `WorkGroupMappingXCC=-1`. |
 | `select_workgroup_mapping`: `wgmxccchunk`, `wgmxccsplitk` | Retained in every candidate's `modeled.workgroup_mapping` | Nonzero values require the Stream-K mapping ABI and reject the current data-parallel candidate; neither is substituted with `WorkGroupMappingXCCGroup`. |
-| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. |
+| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. A persistent candidate's stagger is recorded; the runtime chooses it at each launch. |
 | `select_staggerU`: `staggerUStrideShift` | `StaggerUStride = DepthU × Tensile DataType bytes × 2^shift` | Check the derived `_staggerStrideShift`; zero stagger may normalize the byte stride without changing its meaning. |
 | `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `TileProcessingStrategy=None`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
-| `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
-| `streamk::select_hybrid_mode` | Static/dynamic schedule of a Stream-K kernel with `WorkAssignment=Hybrid` | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
+| `streamk::select_reduction`, `select_grid_size` | A persistent candidate's `modeled.launch` reduction (tree or parallel), grid and split factor | Recorded; the runtime calls the same APIs at each launch. |
+| `streamk::select_hybrid_mode` | A persistent candidate's `modeled.launch.hybrid_mode` | Recorded; the runtime decides at each launch of a Hybrid kernel. |
 | `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
 | Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The predictor uses the full instruction catalog plus ranking, preserving the selected MI. |
 | GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |

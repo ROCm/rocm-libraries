@@ -166,13 +166,15 @@ endif()
 
 # Compiles the JIT solution library directly; runs without a GPU.
 if(NOT HIPBLASLT_ENABLE_YAML)
-    # The tuning knowledge reader, matcher and library lookup, on fixture databases it writes.
+    # The tuning knowledge reader, matcher and library lookup, on fixture databases it
+    # writes, and the Origami ranking of the catalog on modeled devices.
     add_executable(hipblaslt-jit-knowledge-test
         jit_knowledge_test.cpp
         "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-knowledge.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-origami-predictor.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-tuning-knowledge.cpp")
     target_include_directories(hipblaslt-jit-knowledge-test PRIVATE "${hipblaslt_jit_source}"

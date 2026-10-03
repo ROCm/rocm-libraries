@@ -13,6 +13,7 @@
 #include <limits>
 #include <origami/gemm.hpp>
 #include <origami/origami.hpp>
+#include <origami/streamk.hpp>
 #include <stdexcept>
 
 namespace hipblaslt_jit
@@ -30,12 +31,14 @@ namespace hipblaslt_jit
         }
 
         constexpr const char* dataParallelContract = "origami.gemm.dp.v1";
+        constexpr const char* persistentContract   = "origami.gemm.persistent.v1";
         constexpr const char* tunedContract        = "tensilelite.tuned.v1";
 
         struct Recipe
         {
             std::array<size_t, 9> matrixInstruction;
             origami::config_t     config;
+            ExecutionPolicy       policy;
             int32_t               seed  = -1;
             bool                  fixed = false;
         };
@@ -81,7 +84,8 @@ namespace hipblaslt_jit
         std::vector<Recipe> candidates(const origami::hardware_t&        hardware,
                                        origami::data_type_t              dtype,
                                        const std::vector<CandidateSeed>& seeds,
-                                       size_t                            workspaceLimit)
+                                       size_t                            workspaceLimit,
+                                       bool                              persistent)
         {
             // Use the target's instruction catalog for every datatype. Tensile
             // subsequently validates the complete instruction and tile combination.
@@ -125,47 +129,58 @@ namespace hipblaslt_jit
                 candidate.seed         = static_cast<int32_t>(index);
                 result.push_back(candidate);
             }
-            for(const auto& mi : instructions)
-                for(size_t index = 0; index < seeds.size(); ++index)
-                {
-                    const auto& seed = seeds[index];
-                    if(seed.instruction)
-                        continue;
-                    for(const auto& rule : seed.depthRules)
-                        for(const auto& hint : seed.cacheHints)
+            // Data-parallel candidates come first: Origami's ranking is stable, so
+            // one stays ahead of a Stream-K candidate of equal latency, which needs workspace.
+            for(const bool streamK : {false, true})
+                for(const auto& mi : instructions)
+                    for(size_t index = 0; index < seeds.size(); ++index)
+                    {
+                        const auto& seed = seeds[index];
+                        if(seed.instruction)
+                            continue;
+                        for(const auto& policy : seed.policies)
                         {
-                            const auto&  shape = seed.tile;
-                            const size_t depth = std::max(rule[0], rule[1] * mi.k);
-                            if(!mi.m || !mi.n || !mi.k || shape[0] % (mi.m * shape[2])
-                               || shape[1] % (mi.n * shape[3]) || depth % mi.k)
+                            if((policy.strategy == ExecutionPolicy::Strategy::StreamK) != streamK
+                               || (streamK && (!workspaceLimit || !persistent)))
                                 continue;
-                            Recipe candidate;
-                            candidate.matrixInstruction = {mi.m,
-                                                           mi.n,
-                                                           mi.k,
-                                                           1,
-                                                           1,
-                                                           shape[0] / (mi.m * shape[2]),
-                                                           shape[1] / (mi.n * shape[3]),
-                                                           shape[2],
-                                                           shape[3]};
-                            candidate.config = config(shape[0], shape[1], depth, mi);
-                            candidate.config.cache_hints_a = hint[0];
-                            candidate.config.cache_hints_b = hint[1];
-                            candidate.config.index         = result.size();
-                            candidate.seed                 = static_cast<int32_t>(index);
-                            result.push_back(candidate);
+                            for(const auto& rule : seed.depthRules)
+                                for(const auto& hint : seed.cacheHints)
+                                {
+                                    const auto&  shape = seed.tile;
+                                    const size_t depth = std::max(rule[0], rule[1] * mi.k);
+                                    if(!mi.m || !mi.n || !mi.k || shape[0] % (mi.m * shape[2])
+                                       || shape[1] % (mi.n * shape[3]) || depth % mi.k)
+                                        continue;
+                                    Recipe candidate;
+                                    candidate.matrixInstruction = {mi.m,
+                                                                   mi.n,
+                                                                   mi.k,
+                                                                   1,
+                                                                   1,
+                                                                   shape[0] / (mi.m * shape[2]),
+                                                                   shape[1] / (mi.n * shape[3]),
+                                                                   shape[2],
+                                                                   shape[3]};
+                                    candidate.config = config(shape[0], shape[1], depth, mi);
+                                    candidate.config.stream_k      = streamK ? 5 : 0;
+                                    candidate.config.cache_hints_a = hint[0];
+                                    candidate.config.cache_hints_b = hint[1];
+                                    candidate.config.index         = result.size();
+                                    candidate.policy               = policy;
+                                    candidate.seed                 = static_cast<int32_t>(index);
+                                    result.push_back(candidate);
+                                }
                         }
-                }
+                    }
             return result;
         }
     }
 
-    static Prediction rank(const OperationRequest&                    operation,
-                           const TensileLite::ContractionProblemGemm& problem,
-                           const DeviceTarget&                        target,
-                           size_t                                     workspaceLimit,
-                           const TuningKnowledge&                     knowledge)
+    Prediction rankWithOrigami(const OperationRequest&                    operation,
+                               const TensileLite::ContractionProblemGemm& problem,
+                               const DeviceTarget&                        target,
+                               size_t                                     workspaceLimit,
+                               const TuningKnowledge&                     knowledge)
     {
         using Type         = rocisa::DataType;
         const auto* device = dynamic_cast<const TensileLite::hip::HipAMDGPU*>(target.hardware.get());
@@ -210,7 +225,9 @@ namespace hipblaslt_jit
                              && !problem.sparse();
         const auto seeds   = modeled ? knowledge.seeds(operation, target)
                                      : std::vector<CandidateSeed>{};
-        const auto recipes = candidates(analytical, request.mi_dtype, seeds, workspaceLimit);
+        // TensileLite does not generate a Stream-K kernel with an auxiliary output.
+        const auto recipes
+            = candidates(analytical, request.mi_dtype, seeds, workspaceLimit, !problem.useE());
         // Both mapping selectors require at least one CU per XCD. Do not let
         // an unsupported budget reach their integer divisions or replace it.
         require(origami::resolve_num_cus(request.num_cus, analytical.N_CU) >= analytical.NUM_XCD,
@@ -249,12 +266,15 @@ namespace hipblaslt_jit
         };
         prediction.assumptions = {
             {"occupancy", "1"},
-            {"stream_k", "0"},
+            {"stream_k", quote("0, or 5 for the persistent contract")},
             {"stream_k_origin",
-             quote("caller-selected data-parallel domain; Origami does not select enablement")},
+             quote("the knowledge's execution policies; Origami does not select enablement")},
             {"workgroup_mapping",
-             quote("select_workgroup_mapping; unsupported transport rejects the candidate")},
-            {"stagger", quote("select_staggerU; all three outputs including zeros are preserved")},
+             quote("select_workgroup_mapping; unsupported transport rejects the candidate; "
+                   "the runtime maps persistent kernels at each launch")},
+            {"stagger",
+             quote("select_staggerU; all three outputs including zeros are preserved; "
+                   "the runtime staggers persistent kernels at each launch")},
             {"vector_widths", quote("not predicted by estimation; Tensile derives actual widths")},
             {"epilogue",
              quote("bias, activation, auxiliary outputs and scaling overhead are not modeled")},
@@ -298,19 +318,40 @@ namespace hipblaslt_jit
                 addTuned(config.index, result.latency);
                 continue;
             }
+            const bool persistent = config.stream_k > 0;
             const auto [reduction, grid, activeCUs, timesteps, split]
                 = origami::gemm::compute_launch_parameters(request, analytical, config,
                                                           config.grid_selection);
-            require(config.stream_k == 0 && reduction == origami::reduction_t::none && split == 1,
-                    "Origami returned a launch outside the data-parallel candidate domain");
+            require(persistent ? reduction == origami::reduction_t::tree
+                                     || reduction == origami::reduction_t::parallel
+                               : reduction == origami::reduction_t::none && split == 1,
+                    "Origami returned a launch outside the candidate's contract");
             const auto mapping = origami::select_workgroup_mapping(request, analytical, config, grid);
-            require(mapping.wgm != 0, "Origami returned a zero workgroup mapping");
+            require(persistent || mapping.wgm != 0, "Origami returned a zero workgroup mapping");
             const auto stagger = origami::select_staggerU(request, analytical, config, grid, mapping.wgm);
-            Candidate candidate;
+            json::Members launch{{"stream_k", "0"},
+                                 {"reduction", quote("none")},
+                                 {"grid", literal(grid)},
+                                 {"active_cus", literal(activeCUs)},
+                                 {"timesteps", literal(timesteps)},
+                                 {"split_factor", literal(split)}};
+            Candidate     candidate;
             candidate.id              = static_cast<uint32_t>(config.index);
             candidate.predictedCycles = result.latency;
             candidate.contract        = dataParallelContract;
             candidate.seed            = recipe.seed;
+            // The runtime chooses these again at each launch of a persistent kernel.
+            if(persistent)
+            {
+                launch.erase(launch.begin());
+                launch.front().second
+                    = quote(reduction == origami::reduction_t::parallel ? "parallel" : "tree");
+                launch.push_back({"hybrid_mode",
+                                  quote(origami::hybrid_mode_to_string(
+                                      origami::streamk::select_hybrid_mode(
+                                          request, analytical, config, request.num_cus)))});
+                candidate.contract = persistentContract;
+            }
             candidate.parameters      = {
                 {"MatrixInstruction", json::array(recipe.matrixInstruction)},
                 {"DepthU", literal(config.mt.k)},
@@ -328,14 +369,14 @@ namespace hipblaslt_jit
                  json::object({{"staggerU", literal(stagger.staggerU)},
                                {"staggerUMapping", literal(stagger.staggerUMapping)},
                                {"staggerUStrideShift", literal(stagger.staggerUStrideShift)}})},
-                {"launch",
-                 json::object({{"stream_k", "0"},
-                               {"reduction", quote("none")},
-                               {"grid", literal(grid)},
-                               {"active_cus", literal(activeCUs)},
-                               {"timesteps", literal(timesteps)},
-                               {"split_factor", literal(split)}})},
+                {"launch", json::object(launch)},
             };
+            if(persistent)
+                candidate.modeled.insert(
+                    candidate.modeled.begin() + 1,
+                    {"execution",
+                     json::object({{"strategy", quote(toString(recipe.policy.strategy))},
+                                   {"assignment", quote(toString(recipe.policy.assignment))}})});
             for(auto& parameter : knowledge.defaults(operation, target, candidate))
                 candidate.parameters.push_back(std::move(parameter));
             prediction.ranked.push_back(std::move(candidate));
@@ -366,7 +407,7 @@ namespace hipblaslt_jit
             }
             std::set<std::string> modeledContracts() const override
             {
-                return {dataParallelContract, tunedContract};
+                return {dataParallelContract, persistentContract, tunedContract};
             }
             Status predict(const PredictionRequest& request,
                            const TuningKnowledge&   knowledge,
@@ -380,11 +421,11 @@ namespace hipblaslt_jit
                             "Origami does not model this operation"};
                 try
                 {
-                    prediction = rank(request.request,
-                                      lowerForJit(*gemm),
-                                      request.target,
-                                      request.workspaceLimit,
-                                      knowledge);
+                    prediction = rankWithOrigami(request.request,
+                                                 lowerForJit(*gemm),
+                                                 request.target,
+                                                 request.workspaceLimit,
+                                                 knowledge);
                     return {};
                 }
                 catch(const std::bad_alloc&)

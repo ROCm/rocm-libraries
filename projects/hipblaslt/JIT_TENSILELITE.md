@@ -78,8 +78,9 @@ the helper symbols before the first submission.
 
 With `createBackend`, an empty `Options::configPath` makes Jit run the Origami
 predictor before generation; the backend forwards the
-[`origami.gemm.dp.v1` modeled inputs](JIT.md#origami-modeled-inputs) to
-`Tensile.JitGemm`, which applies that contract's rejection rules. The selector
+[`origami.gemm.dp.v1` and `origami.gemm.persistent.v1` modeled inputs](JIT.md#origami-modeled-inputs)
+and the `tensilelite.tuned.v1` seeds to `Tensile.JitGemm`, which applies each
+candidate's contract's rejection rules. The selector
 validates ranked candidates in order and publishes the first supported recipe,
 or the first N when Jit asks for N solutions, skipping a ranked candidate that
 would repeat an accepted kernel. It does not benchmark candidates or invent a
@@ -242,8 +243,7 @@ through `tensilelite::createBackend` when `Options::configPath` is empty.
 create it through `tensilelite::createBackend`, which configures a Jit with the
 Origami predictor, the TensileLite defaults as tuning knowledge, the comgr
 builder and the Tensile loader. Without a recipe, the backend consumes the
-predictor's `origami.gemm.dp.v1` prediction and writes it as the
-`Tensile.JitGemm` request; with a recipe, Jit skips prediction and the backend
+predictor's prediction and writes it as the `Tensile.JitGemm` request; with a recipe, Jit skips prediction and the backend
 passes the recipe to `Tensile.SingleSolution`. Knobs the model does not predict
 keep TensileLite defaults and derivation. Both run with `--source-only` and the
 code-object version of the Jit request. When Jit asks for more than one

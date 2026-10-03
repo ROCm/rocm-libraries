@@ -16,7 +16,7 @@ namespace hipblaslt_jit
             }
             std::string version() const override
             {
-                return "1";
+                return "2";
             }
             std::vector<CandidateSeed> seeds(const OperationRequest&,
                                              const DeviceTarget& target) const override
@@ -44,11 +44,17 @@ namespace hipblaslt_jit
                     hints.push_back({4, 0});
                     hints.push_back({0, 4});
                 }
+                // Each shape is also a Hybrid Stream-K kernel where Origami models Stream-K;
+                // the runtime picks static or dynamic assignment at each launch.
+                std::vector<ExecutionPolicy> policies{ExecutionPolicy{}};
+                if(target.isa == "gfx942" || target.isa == "gfx950" || target.isa == "gfx1250")
+                    policies.push_back({ExecutionPolicy::Strategy::StreamK,
+                                        ExecutionPolicy::Assignment::Hybrid});
                 std::vector<CandidateSeed> seeds;
                 for(const auto& tile : tiles)
                 {
                     seeds.push_back({tile, {{32, 1}, {64, 2}}, hints});
-                    seeds.back().policies = {ExecutionPolicy{}};
+                    seeds.back().policies = policies;
                 }
                 return seeds;
             }

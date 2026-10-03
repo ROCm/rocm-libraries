@@ -103,7 +103,8 @@ generators must carry for a shared consumer.
 The Predictor produces ranked candidates for Jit. Its inputs are Origami and
 TuningKnowledge. The C++ Origami predictor behind the Predictor interface
 (`hipblaslt-jit-origami-predictor.cpp`) ranks synthetic candidates with Origami
-and emits the `origami.gemm.dp.v1` modeled contract. TuningKnowledge supplies
+and emits the `origami.gemm.dp.v1` and `origami.gemm.persistent.v1` modeled
+contracts. TuningKnowledge supplies
 the TensileLite defaults used today for unmodeled knobs. Replacing those
 defaults with stored tuning data is later work, listed under
 [future work](#roadmap).

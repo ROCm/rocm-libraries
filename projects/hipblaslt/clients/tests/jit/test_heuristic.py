@@ -34,7 +34,7 @@ EQUALITY_SIZES = ((1024, 4096, 20), (2048, 128, 16), (864, 512, 432), (128, 5120
 # "tensilelite" or "test"; main sets it.
 BACKEND = "tensilelite"
 # Routes that need the generator child process.
-TENSILELITE_ROUTES = ("debug-killed-child", "knowledge", "knowledge-install")
+TENSILELITE_ROUTES = ("debug-killed-child", "knowledge", "knowledge-install", "persistent")
 # The knowledge routes' inputs; main sets them.
 KNOWLEDGE = None
 BENCH = None
@@ -44,6 +44,9 @@ KNOWLEDGE_FILES = "hipblaslt-jit-knowledge-*.dat.zlib"
 SPLITK_SIZE = (256, 256, 4096)
 # Knowledge must beat the catalog by this factor in median latency.
 SPEED_MARGIN = 1.02
+PERSISTENT = "origami.gemm.persistent.v1"
+# Few output tiles and a long K: Origami ranks a Stream-K candidate first.
+PERSISTENT_SIZE = (256, 256, 8192)
 
 
 def require(condition, message):
@@ -1509,7 +1512,7 @@ def knowledge(run, output):
     speed = ""
     if BENCH:
         timings = []
-        for size in ((2048, 2048, 2048), (1024, 5120, 25600)):
+        for size in ((2048, 2048, 2048), (512, 4096, 16384)):
             label = "x".join(map(str, size))
             withKnowledge = bench_us(
                 run, output, f"bench-{label}", size, HIPBLASLT_TENSILE_LIBPATH=str(flat))
@@ -1527,6 +1530,42 @@ def knowledge(run, output):
         " one kept as derived;"
         f" split-K seeds {', '.join(splitK)} pass; no split-K seed without workspace;"
         f" mode 0 {'never opens the file' if strace else 'unchanged (no strace)'}{speed}"
+    )
+
+
+def persistent(run, output):
+    """The catalog's Hybrid Stream-K kernel, mapped by the runtime, passes on the
+    static and the forced dynamic path; without workspace none is ranked."""
+    prediction_python(output)
+    catalog = output / "empty-device-library"
+    args = ["--api", "both", "--requested", "1", *size_args(PERSISTENT_SIZE)]
+    for name, overrides in (
+        ("persistent", {}),
+        ("persistent-dynamic", {"TENSILE_PERSISTENT_HYBRID_FORCE_MODE": "1"}),
+    ):
+        stderr, records, prediction = predicted(run, output, name, args, catalog, **overrides)
+        check_jit_results(stderr, records, ("c", "cpp"), 1)
+        policy = [prediction["resolved_parameters"][key] for key in (
+            "TileProcessingStrategy", "WorkAssignment", "WorkGroupMapping", "WorkGroupMappingXCC")]
+        require(
+            prediction.get("modeled_contract") == PERSISTENT
+            and prediction.get("runtime_resolved") and policy == ["StreamK", "Hybrid", 0, -1],
+            f"{name} is not a Hybrid Stream-K kernel the runtime maps: {prediction['summary']}",
+        )
+    launch = prediction["modeled"]["launch"]
+    stderr, records, prediction = predicted(
+        run, output, "persistent-no-workspace",
+        ["--api", "c", "--requested", "1", "--workspace", "0", *size_args(PERSISTENT_SIZE)],
+        catalog,
+    )
+    check_jit_results(stderr, records, ("c",), 1)
+    require(
+        all(c["modeled"].get("contract") != PERSISTENT for c in prediction["ranked_candidates"]),
+        "A Stream-K candidate was ranked without workspace",
+    )
+    print(
+        f"PASS heuristic-persistent: a Hybrid Stream-K kernel ({launch['reduction']} reduction,"
+        f" split {launch['split_factor']}) passes, also forced dynamic; none without workspace"
     )
 
 
@@ -1826,6 +1865,7 @@ ROUTES = {
     "debug-killed-child": debug_killed_child,
     "knowledge": knowledge,
     "knowledge-install": knowledge_install,
+    "persistent": persistent,
     "jit-off": jit_off,
     "multi-both": multi_both,
     "multi-order": multi_order,

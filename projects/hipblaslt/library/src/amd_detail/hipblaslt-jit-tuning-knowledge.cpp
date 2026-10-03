@@ -128,7 +128,7 @@ namespace hipblaslt_jit
                     if(installed.database)
                         m_version += (m_version.empty() ? "" : ";") + arch + "="
                                      + installed.database->contentHash();
-                m_id = m_version.empty() ? std::string(m_catalog->id()) : "tensilelite-logic.v1";
+                m_id = m_version.empty() ? std::string(m_catalog->id()) : "tensilelite-logic.v2";
                 if(m_version.empty())
                     m_version = m_catalog->version();
             }

@@ -140,8 +140,10 @@ def check_provenance(invocation, stdout, case, architecture):
     selected = prediction["selected_parameters"]
     require(all(selected[key] == value for key, value in accepted["parameters"].items()),
             "Candidate changed")
-    require(prediction.get("modeled_contract") == "origami.gemm.dp.v1",
-            "Missing complete data-parallel modeled contract")
+    # A Stream-K candidate leaves its launch, mapping and stagger to the runtime.
+    persistent = prediction.get("modeled_contract") == "origami.gemm.persistent.v1"
+    require(persistent or prediction.get("modeled_contract") == "origami.gemm.dp.v1",
+            "Missing complete modeled contract")
     modeled = prediction["modeled"]
     require(modeled == accepted["modeled"], "Modeled outputs changed")
     mapping, stagger, launch = modeled["workgroup_mapping"], modeled["stagger"], modeled["launch"]
@@ -149,20 +151,27 @@ def check_provenance(invocation, stdout, case, architecture):
             "Incomplete modeled mapping")
     require(set(stagger) == {"staggerU", "staggerUMapping", "staggerUStrideShift"},
             "Incomplete modeled stagger")
-    require(mapping["wgmxccchunk"] == mapping["wgmxccsplitk"] == 0,
-            "Accepted an unrepresentable data-parallel mapping")
-    require(launch["stream_k"] == 0 and launch["reduction"] == "none" and launch["split_factor"] == 1,
-            "Unexpected launch mode")
     resolved = prediction["resolved_parameters"]
-    expected = {"WorkGroupMapping": mapping["wgm"],
-                "WorkGroupMappingXCC": max(1, mapping["wgmxcc"]),
-                "WorkGroupMappingXCCGroup": 0,
-                "StaggerU": stagger["staggerU"], "StaggerUMapping": stagger["staggerUMapping"],
-                "_staggerStrideShift": stagger["staggerUStrideShift"],
-                "MacroTile0": modeled["macro_tile"][0], "MacroTile1": modeled["macro_tile"][1],
-                "DepthU": modeled["macro_tile"][2], "TileProcessingStrategy": "None",
-                "GlobalSplitU": 1,
+    expected = {"MacroTile0": modeled["macro_tile"][0], "MacroTile1": modeled["macro_tile"][1],
+                "DepthU": modeled["macro_tile"][2],
                 "NonTemporalA": selected["NonTemporalA"], "NonTemporalB": selected["NonTemporalB"]}
+    if persistent:
+        require(launch["reduction"] in ("tree", "parallel") and prediction["runtime_resolved"],
+                "Unexpected Stream-K launch")
+        expected.update(TileProcessingStrategy="StreamK", WorkAssignment="Hybrid",
+                        WorkGroupMapping=0, WorkGroupMappingXCC=-1)
+    else:
+        require(mapping["wgmxccchunk"] == mapping["wgmxccsplitk"] == 0,
+                "Accepted an unrepresentable data-parallel mapping")
+        require(launch["stream_k"] == 0 and launch["reduction"] == "none"
+                and launch["split_factor"] == 1, "Unexpected launch mode")
+        expected.update({"WorkGroupMapping": mapping["wgm"],
+                         "WorkGroupMappingXCC": max(1, mapping["wgmxcc"]),
+                         "WorkGroupMappingXCCGroup": 0,
+                         "StaggerU": stagger["staggerU"],
+                         "StaggerUMapping": stagger["staggerUMapping"],
+                         "_staggerStrideShift": stagger["staggerUStrideShift"],
+                         "TileProcessingStrategy": "None", "GlobalSplitU": 1})
     require(all(resolved.get(key) == value for key, value in expected.items()),
             "Derived recipe changed a modeled output")
     require(not set(selected) & set(prediction["default_parameters"]),

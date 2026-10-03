@@ -33,6 +33,7 @@ HEURISTIC_ROUTES = (
     "debug-off",
     "debug-file",
     "debug-killed-child",
+    "persistent",
 )
 # test_heuristic.py routes on mock backends that replay the committed gfx950 bundles.
 MULTI_ROUTES = (
@@ -77,6 +78,8 @@ def main():
             "jit-gemm-gfx1250",
             "jit-gemm-knowledge-gfx942",
             "jit-gemm-knowledge-gfx1250",
+            "jit-gemm-persistent-gfx942",
+            "jit-gemm-persistent-gfx1250",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
@@ -269,6 +272,28 @@ def main():
                 ],
                 {},
                 1200,
+            )
+        )
+        # Compile-only: Origami's Stream-K candidates for a device of that CU count.
+        commands.append(
+            (
+                f"jit-gemm-persistent-{architecture}",
+                [
+                    sys.executable,
+                    str(
+                        source
+                        / "projects/hipblaslt/clients/tests/jit/test_persistent_jit_gemm.py"
+                    ),
+                    str(staging / "hipblaslt-jit-knowledge-test"),
+                    str(staging / "hipblaslt-jit-code-object-test"),
+                    str(fixtures / "jit_gemm_request_gfx1250.json"),
+                    compiler,
+                    architecture,
+                    cu_count,
+                    str(output / f"jit-gemm-persistent-{architecture}"),
+                ],
+                {},
+                600,
             )
         )
 
@@ -525,6 +550,8 @@ def main():
         )
 
     skipped = {}
+    if args.architecture == "gfx90a":
+        skipped["heuristic-persistent"] = "the catalog has no gfx90a Stream-K candidate"
     # HIPBLASLT_JIT_TESTING builds read the mock backends; the bundles hold gfx950 code.
     for route in MULTI_ROUTES:
         name = f"heuristic-multi-{route}"

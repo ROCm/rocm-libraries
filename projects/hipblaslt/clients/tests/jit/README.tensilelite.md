@@ -102,8 +102,10 @@ times, `heuristic-debug-progress` the relayed generator events, and
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
 | `jit-gemm-knowledge-gfx942`, `jit-gemm-knowledge-gfx1250` | Compile-only on any host: the C++ matcher's tuned seeds for a device of that architecture's CU count (304 and 192) travel as `tensilelite.tuned.v1` candidates. Every seed is generated, or shares an accepted seed's kernel, and comgr builds each kernel. The gfx942 route uses FP16 NT, whose seeds mostly have `GlobalSplitU=-1` |
-| `heuristic-knowledge` | `HIPBLASLT_JIT=2` with the build's knowledge file: near a tuned row, several tuned seeds rank first, and the selected one keeps its parameters through derivation. Fixture files with one `GlobalSplitU=-1` MultipleBufferSingleKernel or `GlobalSplitU=4` MultipleBuffer seed pass both APIs. Without workspace, no split-K seed is ranked. With `HIPBLASLT_JIT` unset or `0`, results match and, under `strace`, the file is never opened. On gfx950, `hipblaslt-bench` is faster with knowledge than with `HIPBLASLT_JIT_KNOWLEDGE=none` at 2048³ and (1024, 5120, 25600), by median of five runs with a 2% margin |
+| `heuristic-knowledge` | `HIPBLASLT_JIT=2` with the build's knowledge file: near a tuned row, several tuned seeds rank first, and the selected one keeps its parameters through derivation. Fixture files with one `GlobalSplitU=-1` MultipleBufferSingleKernel or `GlobalSplitU=4` MultipleBuffer seed pass both APIs. Without workspace, no split-K seed is ranked. With `HIPBLASLT_JIT` unset or `0`, results match and, under `strace`, the file is never opened. On gfx950, `hipblaslt-bench` is faster with knowledge than with `HIPBLASLT_JIT_KNOWLEDGE=none` at 2048³ and (512, 4096, 16384), by median of five runs with a 2% margin |
 | `heuristic-knowledge-install` | Each installed knowledge file is in its architecture's directory under `lib/hipblaslt/library`, and the installed library's default lookup loads it |
+| `jit-gemm-persistent-gfx942`, `jit-gemm-persistent-gfx1250` | Compile-only on any host: the catalog ranked by Origami for a device of that architecture's CU count (304 and 192) holds Hybrid Stream-K candidates under `origami.gemm.persistent.v1`. The two best are generated as Stream-K kernels with `WorkGroupMapping=0` and `WorkGroupMappingXCC=-1`, and comgr builds each |
+| `heuristic-persistent` | `HIPBLASLT_JIT=2` with the catalog only, at (256, 256, 8192) where a Stream-K candidate ranks first: both APIs run it with checked numerics, its manifest marks the launch, mapping and stagger as chosen by the runtime, and it passes again with `TENSILE_PERSISTENT_HYBRID_FORCE_MODE=1` forcing dynamic assignment. Without workspace, no Stream-K candidate is ranked. gfx90a has none to rank, so the driver skips it there |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
 | `generic-gemm` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
 | `generic-api` | Shared execution, ownership and failure assertions from the direct API test, selected through the generic interface |
@@ -201,6 +203,13 @@ file, or extracts one from the `asm_full` directory `<logic>` when the build
 has none; gfx942 takes about 2.5 minutes. `hipblaslt-jit-knowledge-test
 --nearest <file> <core-key> <m> <n> <batch> <k> <cu-count>` prints the seeds,
 one JSON line each.
+
+`test_persistent_jit_gemm.py <knowledge-test> <code-object-test> <request>
+<compiler> <architecture> <cu-count> <fresh-output>` runs the
+`jit-gemm-persistent-<architecture>` routes on the same request.
+`hipblaslt-jit-knowledge-test --predict <architecture> <cu-count> <m> <n> <k>`
+prints the catalog's Origami ranking of an FP16 NN problem with workspace, one
+request candidate per JSON line.
 
 ## Regenerate the committed bundles
 
