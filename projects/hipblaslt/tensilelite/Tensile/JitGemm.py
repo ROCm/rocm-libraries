@@ -26,8 +26,12 @@ from .ExecutionPolicy import UnsupportedExecutionPolicy
 
 
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
-_MAX_CANDIDATES = 192
+_MAX_CANDIDATES = 512
 _MODELED_CONTRACT = "origami.gemm.dp.v1"
+# Stream-K: the policy, tile and instruction are compiled; the launch, mapping
+# and stagger Origami predicts are chosen again by the runtime at each launch.
+_PERSISTENT_CONTRACT = "origami.gemm.persistent.v1"
+_ASSIGNMENTS = ("StaticGrid", "DynamicWorkQueue", "Hybrid")
 # A tuned parameter set travels as it is; derivation must keep these.
 _TUNED_CONTRACT = "tensilelite.tuned.v1"
 _TUNED_KEPT = ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB",
@@ -80,7 +84,8 @@ def _validateModeled(request, candidate):
     if contract == _TUNED_CONTRACT:
         _validateTuned(candidate)
         return
-    _require(contract == _MODELED_CONTRACT, f"Unsupported modeled contract: {contract}")
+    persistent = contract == _PERSISTENT_CONTRACT
+    _require(persistent or contract == _MODELED_CONTRACT, f"Unsupported modeled contract: {contract}")
     modeled = candidate.get("modeled")
     _require(isinstance(modeled, dict), "Missing Origami modeled outputs")
     mt = modeled.get("macro_tile")
@@ -89,22 +94,36 @@ def _validateModeled(request, candidate):
     for group, keys in (
             ("workgroup_mapping", ("wgm", "wgmxcc", "wgmxccchunk", "wgmxccsplitk")),
             ("stagger", ("staggerU", "staggerUMapping", "staggerUStrideShift")),
-            ("launch", ("stream_k", "grid", "active_cus", "timesteps", "split_factor"))):
+            ("launch", ("grid", "active_cus", "timesteps", "split_factor")
+                       + (() if persistent else ("stream_k",)))):
         values = modeled.get(group)
         _require(isinstance(values, dict), f"Missing modeled {group}")
         for key in keys:
             value = values.get(key)
-            _require(type(value) is int and (value != 0 if key == "wgm" else value >= 0),
+            # The runtime chooses a persistent kernel's mapping again; any value is a record.
+            _require(type(value) is int
+                     and (persistent and group == "workgroup_mapping"
+                          or (value != 0 if key == "wgm" else value >= 0)),
                      f"Missing/invalid modeled {group}.{key}")
     launch = modeled["launch"]
-    _require(modeled["stagger"]["staggerUStrideShift"] <= 31,
-             "Modeled staggerUStrideShift exceeds the runtime argument range")
     problem = request["problem"]
-    grid = ((problem["m"] + mt[0] - 1) // mt[0]
-            * ((problem["n"] + mt[1] - 1) // mt[1]) * problem["batch"])
-    _require(launch.get("reduction") == "none" and launch["stream_k"] == 0
-             and launch["split_factor"] == 1 and launch["grid"] == grid,
-             "Modeled launch conflicts with the data-parallel contract")
+    tiles = ((problem["m"] + mt[0] - 1) // mt[0]
+             * ((problem["n"] + mt[1] - 1) // mt[1]) * problem["batch"])
+    if persistent:
+        execution = modeled.get("execution")
+        _require(isinstance(execution, dict) and execution.get("strategy") == "StreamK"
+                 and execution.get("assignment") in _ASSIGNMENTS,
+                 "The persistent contract requires a StreamK execution policy")
+        _require(launch.get("reduction") in ("tree", "parallel")
+                 and launch.get("hybrid_mode") in ("static", "dynamic") and launch["grid"] >= 1
+                 and launch["split_factor"] == -(-launch["grid"] // max(tiles, 1)),
+                 "Modeled launch conflicts with the persistent contract")
+    else:
+        _require(modeled["stagger"]["staggerUStrideShift"] <= 31,
+                 "Modeled staggerUStrideShift exceeds the runtime argument range")
+        _require(launch.get("reduction") == "none" and launch["stream_k"] == 0
+                 and launch["split_factor"] == 1 and launch["grid"] == tiles,
+                 "Modeled launch conflicts with the data-parallel contract")
     parameters = candidate["parameters"]
     for name in ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB"):
         _require(name in parameters, f"Missing modeled parameter {name}; defaults are not predictions")
@@ -122,6 +141,14 @@ def _modeledParameters(request, candidate):
 
     modeled = candidate["modeled"]
     mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
+    if _contract(request, candidate) == _PERSISTENT_CONTRACT:
+        # WorkGroupMapping 0 with WorkGroupMappingXCC -1 lets the runtime map each
+        # launch; the compiled StaggerU only sizes the kernel's stagger registers.
+        return {"TileProcessingStrategy": "StreamK",
+                "WorkAssignment": modeled["execution"]["assignment"],
+                "StreamKAtomic": 0, "GlobalSplitU": 0,
+                "WorkGroupMapping": 0, "WorkGroupMappingXCC": -1,
+                "StaggerU": stagger["staggerU"], "StaggerUMapping": stagger["staggerUMapping"]}
     bpe = DataType(_problemType(request)["DataType"]).numBytes()
     stride = modeled["macro_tile"][2] * bpe * (2 ** stagger["staggerUStrideShift"])
     _require(float(stride).is_integer(), "Modeled stagger stride is not an integral byte count")
@@ -155,6 +182,8 @@ def _modeledTransportRejection(request, candidate):
         unknown = sorted(set(candidate["parameters"]) - set(validParameters))
         return (f"This TensileLite does not know the tuned parameters {', '.join(unknown)}"
                 if unknown else None)
+    if contract == _PERSISTENT_CONTRACT:
+        return None
     modeled = candidate["modeled"]
     mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
     if mapping["wgmxccchunk"] or mapping["wgmxccsplitk"]:
@@ -212,10 +241,17 @@ def _modeledRejection(solution, request, candidate):
     expected.update(MatrixInstruction=mi[:4], MIWaveTile=mi[5:7], MIWaveGroup=mi[7:9])
     mt = candidate["modeled"]["macro_tile"]
     expected.update(MacroTile0=mt[0], MacroTile1=mt[1])
-    # Byte stride is normalized when stagger is zero. Its semantic output is
-    # the loop-iteration shift, which must still equal Origami's prediction.
-    expected.pop("StaggerUStride")
-    expected["_staggerStrideShift"] = candidate["modeled"]["stagger"]["staggerUStrideShift"]
+    persistent = contract == _PERSISTENT_CONTRACT
+    if persistent:
+        for name in ("GlobalSplitU", "StaggerU", "StaggerUMapping"):
+            expected.pop(name)
+        if state(solution.get("_PersistentLoop")) is not True:
+            return "Tensile solution has no persistent loop for the StreamK policy"
+    else:
+        # Byte stride is normalized when stagger is zero. Its semantic output is
+        # the loop-iteration shift, which must still equal Origami's prediction.
+        expected.pop("StaggerUStride")
+        expected["_staggerStrideShift"] = candidate["modeled"]["stagger"]["staggerUStrideShift"]
     for name, value in expected.items():
         actual = state(solution.get(name))
         if actual != value:
@@ -558,6 +594,8 @@ def _select(request, configPath, derive, ranking=None, _debug=JitDebug.NULL):
         if _contract(request, candidate):
             metadata["modeled_contract"] = _contract(request, candidate)
             metadata["modeled"] = copy.deepcopy(candidate["modeled"])
+        if _contract(request, candidate) == _PERSISTENT_CONTRACT:
+            metadata["runtime_resolved"] = ["launch", "workgroup_mapping", "stagger"]
         if "knowledge" in candidate:
             metadata["knowledge"] = copy.deepcopy(candidate["knowledge"])
         ranking.kernels[kernel] = candidate["id"]

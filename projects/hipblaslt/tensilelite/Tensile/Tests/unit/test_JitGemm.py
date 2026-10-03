@@ -252,6 +252,101 @@ def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
     assert "StreamK" not in prediction["resolved_parameters"]
 
 
+def persistent_candidate(candidate, tiles=4, assignment="Hybrid"):
+    candidate["modeled"].update(
+        contract="origami.gemm.persistent.v1",
+        execution={"strategy": "StreamK", "assignment": assignment},
+        launch={"reduction": "tree", "hybrid_mode": "static", "grid": 2 * tiles,
+                "active_cus": 2 * tiles, "timesteps": 1, "split_factor": 2})
+    candidate["modeled"]["workgroup_mapping"]["wgm"] = 0
+    return candidate
+
+
+def persistent_solution(request, candidate):
+    result = modeled_solution(request, candidate)
+    result.update(_PersistentLoop=True, GlobalSplitU=0)
+    return result
+
+
+def test_persistent_prediction_compiles_the_policy_for_runtime_mapping(modeled_request, tmp_path):
+    persistent_candidate(modeled_request["candidates"][0])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(modeled_request))
+    request = JG._readRequest(source)
+    persistent, data_parallel = request["candidates"]
+    assert JG._modeledTransportRejection(request, persistent) is None
+    parameters = JG._candidateParameters(request, persistent)
+    assert {name: parameters[name] for name in (
+        "TileProcessingStrategy", "WorkAssignment", "StreamKAtomic", "GlobalSplitU",
+        "WorkGroupMapping", "WorkGroupMappingXCC", "StaggerU", "StaggerUMapping")} == {
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid", "StreamKAtomic": 0,
+        "GlobalSplitU": 0, "WorkGroupMapping": 0, "WorkGroupMappingXCC": -1,
+        "StaggerU": 4, "StaggerUMapping": 1}
+    assert "StaggerUStride" not in parameters
+    assert JG._candidateParameters(request, data_parallel)["WorkGroupMapping"] == -2
+
+    _, _, metadata = JG._select(request, tmp_path / "selected.yaml",
+                                lambda *_: persistent_solution(request, persistent))
+    assert metadata["modeled_contract"] == "origami.gemm.persistent.v1"
+    assert metadata["runtime_resolved"] == ["launch", "workgroup_mapping", "stagger"]
+
+
+@pytest.mark.parametrize("change,message", [
+    (lambda m: m["execution"].update(strategy="DataParallel"), "StreamK execution policy"),
+    (lambda m: m["execution"].update(assignment="Unknown"), "StreamK execution policy"),
+    (lambda m: m.pop("execution"), "StreamK execution policy"),
+    (lambda m: m["launch"].update(reduction="none"), "persistent contract"),
+    (lambda m: m["launch"].pop("hybrid_mode"), "persistent contract"),
+    (lambda m: m["launch"].update(split_factor=1), "persistent contract"),
+    (lambda m: m["launch"].pop("timesteps"), "Missing/invalid modeled launch.timesteps"),
+])
+def test_malformed_persistent_prediction_fails_the_request(modeled_request, tmp_path, change, message):
+    change(persistent_candidate(modeled_request["candidates"][0])["modeled"])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(modeled_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match=message):
+        JG._readRequest(source)
+
+
+@pytest.mark.parametrize("name,value,message", [
+    ("_PersistentLoop", False, "no persistent loop"),
+    ("WorkAssignment", "StaticGrid", "changed modeled WorkAssignment"),
+    ("TileProcessingStrategy", "None", "changed modeled TileProcessingStrategy"),
+    ("WorkGroupMapping", 8, "changed modeled WorkGroupMapping"),
+    ("WorkGroupMappingXCC", 1, "changed modeled WorkGroupMappingXCC"),
+    ("StreamKAtomic", 1, "changed modeled StreamKAtomic"),
+    ("MacroTile0", 128, "changed modeled MacroTile0"),
+])
+def test_changed_persistent_output_rejects_candidate(modeled_request, name, value, message):
+    candidate = persistent_candidate(modeled_request["candidates"][0])
+    result = persistent_solution(modeled_request, candidate)
+    assert JG._modeledRejection(result, modeled_request, candidate) is None
+    result[name] = value
+    assert message in JG._modeledRejection(result, modeled_request, candidate)
+    result = persistent_solution(modeled_request, candidate)
+    result["InternalSupportParams"]["SupportCustomWGM"] = False
+    assert "cannot carry the modeled workgroup mapping" in JG._modeledRejection(
+        result, modeled_request, candidate)
+
+
+@pytest.mark.parametrize("architecture,depth", [
+    ("gfx942:sramecc+:xnack-", 16), ("gfx950:sramecc+:xnack-", 32), ("gfx1250", 32)])
+def test_persistent_prediction_derives_a_stream_k_kernel(tmp_path, architecture, depth):
+    request = json.loads((Path(__file__).parent / "test_data/jit_gemm_request_gfx1250.json").read_text())
+    candidate = persistent_candidate(request["candidates"][0], tiles=32)
+    candidate["parameters"]["MatrixInstruction"][2] = depth
+    request.update(architecture=architecture, candidates=[candidate], requested_solutions=1)
+    manifest = compile_request(
+        request, tmp_path, "--source-only", "--offload-bundler", str(tmp_path / "missing"))
+    prediction = manifest["jit_prediction"]
+    assert prediction["modeled_contract"] == "origami.gemm.persistent.v1"
+    assert prediction["rejections"] == []
+    resolved = prediction["resolved_parameters"]
+    assert resolved["TileProcessingStrategy"] == "StreamK"
+    assert resolved["WorkAssignment"] == "Hybrid"
+    assert resolved["WorkGroupMapping"] == 0 and resolved["WorkGroupMappingXCC"] == -1
+
+
 def tuned_candidate(identifier, gsu=1, algorithm="MultipleBuffer", strategy="None",
                     assignment="StaticGrid"):
     return {
