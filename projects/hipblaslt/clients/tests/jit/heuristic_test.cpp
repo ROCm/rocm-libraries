@@ -3,11 +3,12 @@
 
 // Queries hipblasLtMatmulAlgoGetHeuristic and GemmInstance::algoGetHeuristic for
 // one FP16 GEMM, prints each query as a JSON line, and runs and checks every
-// returned algorithm. --from-index resolves algorithm indices instead, and
-// --threads with --barrier issues the same queries from several threads that
-// start together, also across processes. Uses only the public API, so it builds
-// with and without HIPBLASLT_ENABLE_JIT; test_heuristic.py checks what
-// HIPBLASLT_JIT should return.
+// returned algorithm. --from-index resolves algorithm indices instead, --tuned
+// reports hipblaslt_ext::matmulIsTuned, --git-revision reports
+// hipblasLtGetGitRevision, and --threads with --barrier issues the same queries
+// from several threads that start together, also across processes. Uses only the
+// public API, so it builds with and without HIPBLASLT_ENABLE_JIT;
+// test_heuristic.py checks what HIPBLASLT_JIT should return.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -50,6 +51,8 @@ namespace
         int         handles = 1, queries = 1;
         size_t           workspace = 32 << 20;
         bool             run       = true;
+        bool             tuned     = false;
+        bool             revision  = false;
         std::vector<int> fromIndex;
         int              threads = 1;
         std::string      barrier;
@@ -336,6 +339,10 @@ namespace
                 s.workspace = std::stoull(value());
             else if(arg == "--no-run")
                 s.run = false;
+            else if(arg == "--tuned")
+                s.tuned = true;
+            else if(arg == "--git-revision")
+                s.revision = true;
             else if(arg == "--from-index")
                 s.fromIndex = parseIndices(value());
             else if(arg == "--threads")
@@ -357,6 +364,15 @@ namespace
         for(int handle = 0; handle < s.handles; ++handle)
         {
             Problem problem(s, thread);
+            if(s.revision && thread == 0 && handle == 0)
+            {
+                char revision[128] = {};
+                check(hipblasLtGetGitRevision(problem.handle, revision),
+                      "hipblasLtGetGitRevision");
+                std::lock_guard<std::mutex> lock(outputMutex);
+                std::cout << "{\"api\":\"revision\",\"revision\":\"" << revision << "\"}"
+                          << std::endl;
+            }
             if(handle == 0 && !s.barrier.empty())
                 waitAtBarrier(s.barrier);
             for(int query = 0; query < s.queries; ++query)
@@ -368,6 +384,18 @@ namespace
             }
             if(!s.fromIndex.empty())
                 queryIndices(problem, handle);
+            if(s.tuned)
+            {
+                const auto tuned = hipblaslt_ext::matmulIsTuned(problem.handle,
+                                                                problem.desc,
+                                                                problem.aLayout,
+                                                                problem.bLayout,
+                                                                problem.cLayout,
+                                                                problem.dLayout);
+                std::lock_guard<std::mutex> lock(outputMutex);
+                std::cout << "{\"api\":\"tuned\",\"thread\":" << thread << ",\"handle\":" << handle
+                          << ",\"tuned\":" << tuned << "}" << std::endl;
+            }
         }
     }
 }

@@ -24,6 +24,8 @@ on:
       - "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp"
       - "projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py"
       - ".github/workflows/hipblaslt-jit-ci.yml"
+  schedule:
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -77,6 +79,7 @@ jobs:
   cpu:
     name: JIT (cpu)
     needs: setup
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 90
     container:
@@ -178,6 +181,7 @@ jobs:
   gfx950:
     name: JIT (gfx950)
     needs: setup
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ${{ needs.setup.outputs.gfx950_runs_on }}
     timeout-minutes: 90
     container:
@@ -285,6 +289,126 @@ jobs:
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
           name: hipblaslt-jit-gfx950
+          path: jit-test-logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  nightly:
+    name: JIT (gfx950, device library)
+    needs: setup
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ${{ needs.setup.outputs.gfx950_runs_on }}
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES
+        -e KUBE_CPU_REQUEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout source under test
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Checkout shared SDK installer and GPU cleanup
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ needs.setup.outputs.therock_ref }}
+          path: TheRock
+          sparse-checkout: build_tools
+      - name: Clean stale GPU processes
+        timeout-minutes: 5
+        run: bash TheRock/build_tools/github_actions/cleanup_processes.sh
+      - name: Set paths inside the container
+        run: |
+          printf '%s\n' \
+            "JIT_DEPS_DIR=$GITHUB_WORKSPACE/build/jit-deps" \
+            "VENV_DIR=$GITHUB_WORKSPACE/.venv" \
+            "ROCM_PATH=$GITHUB_WORKSPACE/build/rocm-deps" >> "$GITHUB_ENV"
+      - name: Install build dependencies
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build git g++ gfortran python3-dev python3-venv \
+            libgtest-dev libmsgpack-cxx-dev libopenblas-dev libomp-dev zlib1g-dev
+          python3 -m venv "$VENV_DIR"
+          "$VENV_DIR/bin/python" -m pip install -r TheRock/requirements.txt \
+            -r projects/hipblaslt/tensilelite/requirements.txt
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+      - name: Install only SDK dependency artifacts
+        timeout-minutes: 30
+        env:
+          AMDGPU_FAMILY: ${{ needs.setup.outputs.family }}
+          SDK_RUN_ID: ${{ needs.setup.outputs.baseline_run_id }}
+        run: |
+          mkdir -p jit-test-logs
+          # A complete release tarball or blas artifact contains prebuilt hipBLASLt.
+          # Fetch only these compiler/runtime/development dependency components.
+          python TheRock/build_tools/fetch_artifacts.py \
+            --run-id "$SDK_RUN_ID" --run-github-repo ROCm/TheRock \
+            --artifact-group "$AMDGPU_FAMILY" --amdgpu-targets gfx950 \
+            --output-dir "$ROCM_PATH" --flatten \
+            '^(amd-llvm|base|sysdeps|core-(runtime|hip|kpack|ocl|amdsmi)|rocjitsu-hotswap|rocprofiler-sdk|host-suite-sparse)_(run|lib|dev)_' \
+            2>&1 | tee jit-test-logs/sdk-dependencies.log
+          echo "$ROCM_PATH/bin" >> "$GITHUB_PATH"
+          echo "$ROCM_PATH/llvm/bin" >> "$GITHUB_PATH"
+      - name: Stage header-only hipblas-common from this checkout
+        timeout-minutes: 5
+        run: |
+          cmake -S projects/hipblas-common -B build/hipblas-common -G Ninja \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH" -DCMAKE_INSTALL_PREFIX="$JIT_DEPS_DIR"
+          cmake --install build/hipblas-common
+      - name: Build with a device library and run the provider-order tests
+        timeout-minutes: 120
+        run: |
+          jobs=$(nproc)
+          (( jobs > 16 )) && jobs=16
+          build="$GITHUB_WORKSPACE/build/jit"
+          # One FP16 NN logic file suffices: it tunes one of the tests' Equality sizes and
+          # answers the default size from its other rows.
+          cmake -S projects/hipblaslt -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$ROCM_PATH/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_PREFIX_PATH="$JIT_DEPS_DIR;$ROCM_PATH" \
+            -DPython_EXECUTABLE="$VENV_DIR/bin/python" \
+            -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
+            -DGPU_TARGETS=gfx950 \
+            -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON \
+            -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=ON \
+            "-DTENSILELITE_LOGIC_FILTER=*/gfx950/gfx950/*/gfx950_Cijk_Ailk_Bljk_HHS_BH_BiasSH_HAS_SAV_UserArgs" \
+            -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON \
+            -DHIPBLASLT_ENABLE_BLIS=OFF -DHIPBLASLT_ENABLE_SAMPLES=OFF \
+            -DHIPBLASLT_ENABLE_ROCROLLER=OFF -DHIPBLASLT_ENABLE_MARKER=OFF \
+            -DHIPBLASLT_ENABLE_MXDATAGENERATOR=ON -DHIPBLASLT_ENABLE_AMD_SMI=OFF \
+            -DHIPBLASLT_ENABLE_EXTOPS=OFF -DHIPBLASLT_ENABLE_MATRIX_TRANSFORM=OFF \
+            -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
+            2>&1 | tee jit-test-logs/configure.log
+          cmake --build "$build" --parallel "$jobs" 2>&1 | tee jit-test-logs/build.log
+          ctest --test-dir "$build/clients/tests/jit" -R 'jit-heuristic-(partial-fill|provider-order)$' \
+            --no-tests=error -V 2>&1 | tee jit-test-logs/ctest.log
+          # Both tests print SKIP and pass when the device library cannot exercise them.
+          if grep -q 'SKIP heuristic-' jit-test-logs/ctest.log; then
+            echo "A provider-order test skipped" >&2
+            exit 1
+          fi
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: hipblaslt-jit-nightly
           path: jit-test-logs
           if-no-files-found: warn
           retention-days: 7

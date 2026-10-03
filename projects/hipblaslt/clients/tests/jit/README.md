@@ -80,6 +80,9 @@ replay bundles, because the library entries are MsgPack.
 | `jit-heuristic-unsupported` | A problem the predictor cannot rank (K=0) in modes 1 and 2: exactly one `hipblaslt error: JIT predict failed` line naming the reason across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and nothing is published |
 | `jit-heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `jit-heuristic-report` | In modes 1 and 2, a backend that fails to configure and one that fails to generate each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the log named in the report is kept |
+| `jit-heuristic-partial-fill` | With the build's device library and one solution published in mode 2, a request for one more than the pre-tuned count in mode 1 whose backend fails if it generates returns that JIT solution once and every pre-tuned solution whose kernel differs from it, and reports the shortfall as a warning. It first queries 4096 solutions without JIT, and prints SKIP when that query fails or returns none (the build has no device library for the problem) or when it returns all 4096 (the device library leaves no shortfall) |
+| `jit-heuristic-override` | With two solutions published in mode 2, a `HIPBLASLT_TUNING_OVERRIDE_FILE` whose first line names the library's git revision and whose entry names one of them: requests for three in mode 1 return that solution first and the other JIT solution second through both queries, with checked numerics and no kernel repeated, for either solution named. It prints SKIP when the build has no git revision, because such a build ignores override entries without a kernel name |
+| `jit-heuristic-provider-order` | With the build's device library in mode 1, for a size with an Equality match and for the default size, which has none: a request the Equality results fill returns the mode 0 result without consulting JIT; larger requests return the Equality results followed by JIT solutions, or only JIT solutions for the default size; a second process whose backend fails if it generates returns the same results; with generation failing, a request for two more returns those results followed by the next pre-tuned results whose kernels JIT does not use. It prints SKIP when no candidate size has an Equality match, the default size has one, or either returns fewer than eight pre-tuned results |
 | `jit-heuristic-debug-timing` | `HIPBLASLT_JIT_DEBUG=timing` in mode 1: one `process` and one `setup` line, no progress lines, a `generation` line whose stage times add up, one `solution` line per published solution with its HIP compile times, and `query` lines whose `from` counts add up to the returned count; the results equal a run without the variable. A second process gets cache hits and no `generation` line, mode 2 queries take every result from JIT, and of two threads that start together the one that waits names the generation it waited for |
 | `jit-heuristic-debug-progress` | `HIPBLASLT_JIT_DEBUG=progress` in mode 1: query, lookup, generation, build and publish events in order, with no timing lines or durations |
 | `jit-heuristic-debug-off` | `HIPBLASLT_JIT_DEBUG` unset, empty or `0`: no lines and the same results; `0` and an unknown name each print one warning and leave the names they accompany in effect; with `HIPBLASLT_JIT=0`, any value leaves the output unchanged |
@@ -136,7 +139,9 @@ and then runs every returned algorithm and compares the output with a CPU
 reference. `--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`,
 `--handles`, `--queries` and `--workspace` shape the queries,
 `--from-index i,j,...` resolves indices through
-`hipblaslt_ext::getAlgosFromIndex` and runs them, and `--no-run` skips
+`hipblaslt_ext::getAlgosFromIndex` and runs them, `--tuned` prints whether
+`hipblaslt_ext::matmulIsTuned` finds an Equality solution for the problem,
+`--git-revision` prints `hipblasLtGetGitRevision`, and `--no-run` skips
 execution. `--threads N` runs the whole sequence in N threads, each with its
 own handles; with `--barrier DIR` each thread claims a `ready-<n>` file in
 `DIR` after creating its first handle and waits for `DIR/go` before its first
@@ -149,7 +154,8 @@ empty `HIPBLASLT_TENSILE_LIBPATH` unless the route uses the build's device
 library. `--replay` is repeated once per bundle; the `jit-off` route takes
 none. The build's JIT backend must be the test backend: the routes replay
 those bundles, and its record fault stands in for a backend that fails if it
-generates.
+generates. In a build without a device library, `partial-fill` and
+`provider-order` print SKIP.
 
 `test_bench_smoke.py <hipblaslt-bench> <fresh-output> --replay BUNDLE` runs
 `hipblaslt-bench` the same way, and `--jit-off` instead checks a build without

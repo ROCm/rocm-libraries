@@ -105,7 +105,8 @@ and prints one warning when it is set to a nonzero value.
         | Each JIT solution is published to the JIT solution library and returned by solution index,
           so later processes run it without generating it again.
       - | 0 or unset: Off (default)
-        | 1: Pre-tuned solutions first; JIT solutions fill any shortfall
+        | 1: Equality results of the pre-tuned libraries first, then JIT solutions, then the
+          other pre-tuned results, each only for what is still missing
         | 2: JIT solutions only
         | Any other value leaves JIT off with one warning.
 

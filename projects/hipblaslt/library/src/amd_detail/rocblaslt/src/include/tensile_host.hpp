@@ -197,7 +197,9 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
 
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
- * rocblaslt_matmul_heuristic_result                                           *
+ * rocblaslt_matmul_heuristic_result. When jitAfterEquality() holds, it        *
+ * returns the Equality results, then JIT solutions, then the results of the   *
+ * other pre-tuned providers.                                                  *
  *******************************************************************************/
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
@@ -215,6 +217,32 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
 #ifdef HIPBLASLT_ENABLE_JIT
+/*******************************************************************************
+ * jitAfterEquality() is true when getBestSolutions() consults JIT: in mode 1, *
+ * except for grouped GEMM and problems that an earlier hipBLASLt route        *
+ * answers, where a caller lets JIT fill what is still missing at the end.     *
+ *******************************************************************************/
+bool jitAfterEquality(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
+bool jitAfterEquality(rocblaslt::RocGemmType gemmType);
+
+/*******************************************************************************
+ * dropJitKernels() removes the candidates whose kernel a JIT result among the *
+ * first count results already uses.                                           *
+ *******************************************************************************/
+void dropJitKernels(rocblaslt_handle                                handle,
+                    const rocblaslt_matmul_heuristic_result         results[],
+                    int                                             count,
+                    std::vector<rocblaslt_matmul_heuristic_result>& candidates);
+
+/*******************************************************************************
+ * dropRepeatedJitKernels() removes the JIT results among the first count      *
+ * whose kernel an earlier result uses, such as a tuning-override entry put    *
+ * ahead of the getBestSolutions() results, and returns the new count.         *
+ *******************************************************************************/
+int dropRepeatedJitKernels(rocblaslt_handle                  handle,
+                           rocblaslt_matmul_heuristic_result results[],
+                           int                               count);
+
 /*******************************************************************************
  * jitHeuristicFill() appends JIT solutions until there are requestedAlgoCount *
  * results, skipping kernels the existing results already use, and reports     *

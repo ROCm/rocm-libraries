@@ -69,6 +69,7 @@ namespace jit = hipblaslt_ext::experimental::jit::detail;
 #endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
+#include <Tensile/ProviderRows.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
@@ -4983,6 +4984,8 @@ inline auto getSolutions(
 #ifdef HIPBLASLT_ENABLE_JIT
 namespace
 {
+    using GemmSolutions = std::vector<std::shared_ptr<TensileLite::ContractionSolution>>;
+
     template <typename Results>
     std::vector<std::string>
         usedKernels(rocblaslt_handle handle, const Results& results, size_t count)
@@ -4992,6 +4995,232 @@ namespace
             if(auto name = getKernelNameFromAlgoIndex(handle, results[i].algo); !name.empty())
                 kernels.push_back(std::move(name));
         return kernels;
+    }
+
+    // The pre-tuned solutions of mode 1, which consults JIT between the Equality rows
+    // and the other providers.
+    struct ProviderSolutions
+    {
+        GemmSolutions equality;
+        GemmSolutions others;
+
+        bool empty() const
+        {
+            return equality.empty() && others.empty();
+        }
+    };
+
+    ProviderSolutions getProviderSolutions(
+        const std::shared_ptr<
+            TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
+        const std::shared_ptr<TensileLite::Hardware>&                                 hardware,
+        TensileLite::ContractionProblemGemm& tensile_prob,
+        size_t                               requestedAlgoCount)
+    {
+        const bool reportEmpty
+            = TensileLite::Debug::Instance().printNoSolutionUniformSummationOrder();
+        if(reportEmpty)
+            TensileLite::uniformSummationOrderSelectionTallyReset();
+
+        auto find = [&](TensileLite::ProviderRows rows, size_t count) {
+            TensileLite::ProviderRowsScope scope(rows);
+            auto solutions = library->findTopSolutions(tensile_prob, *hardware, count);
+            // A cached result can be longer than requested.
+            if(solutions.size() > count)
+                solutions.resize(count);
+            return solutions;
+        };
+        ProviderSolutions   found;
+        hipblaslt_jit::debug::Phase equality("equality");
+        found.equality = find(TensileLite::ProviderRows::EqualityOnly, requestedAlgoCount);
+        equality.stop();
+        hipblaslt_jit::debug::Phase others("others");
+        if(found.equality.size() < requestedAlgoCount)
+            found.others = find(TensileLite::ProviderRows::ExceptEquality,
+                                requestedAlgoCount - found.equality.size());
+        others.stop();
+
+        if(reportEmpty && found.empty())
+            reportNoSolutionFound(tensile_prob);
+        return found;
+    }
+
+    void logBestSolutions(const GemmSolutions& solutions)
+    {
+        if(solutions.empty() || !(get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+            return;
+        std::ostringstream msg;
+        for(const auto& solution : solutions)
+            msg << "getBestSolutions(): sol-idx = " << solution->index
+                << ", (require TENSILE_DB set 0x2|0x4) sol-tag = " << solution->matchingTag()
+                << std::endl;
+        log_info("getBestSolutions", msg.str());
+    }
+
+    // Drops the solutions whose kernel the JIT results already use, then keeps
+    // at most count.
+    void keepOthers(rocblaslt_handle                         handle,
+                    const rocblaslt_matmul_heuristic_result* jitResults,
+                    size_t                                   jitCount,
+                    size_t                                   count,
+                    GemmSolutions&                           others)
+    {
+        const auto kernels = usedKernels(handle, jitResults, jitCount);
+        others.erase(std::remove_if(others.begin(),
+                                    others.end(),
+                                    [&](const auto& solution) {
+                                        return std::find(kernels.begin(),
+                                                         kernels.end(),
+                                                         solution->kernelName)
+                                               != kernels.end();
+                                    }),
+                     others.end());
+        if(others.size() > count)
+            others.resize(count);
+    }
+
+    rocblaslt_status getBestSolutionsAroundJit(
+        RocblasltContractionProblem const& prob,
+        rocblaslt_handle                   handle,
+        std::shared_ptr<void>              gemmData,
+        const std::shared_ptr<
+            TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
+        const std::shared_ptr<TensileLite::Hardware>&                                 hardware,
+        int                               requestedAlgoCount,
+        rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+        int*                              returnAlgoCount,
+        size_t                            maxWorkSpaceBytes)
+    {
+        std::shared_ptr<TensileDataGemm> data;
+        ProviderSolutions                found;
+        if(library)
+        {
+            data = getTensileData(gemmData);
+            updateTensileProblem(prob, data->problem);
+            found = getProviderSolutions(library, hardware, data->problem, requestedAlgoCount);
+            // when there is no solution for xfloat32, fallback comput_type to fp32
+            if(found.empty() && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
+            {
+                log_api(__func__, "no xf32 solutions found, try to fallback fp32");
+                data->problem.setF32XdlMathOp(rocisa::DataType::Float);
+                found = getProviderSolutions(library, hardware, data->problem, requestedAlgoCount);
+            }
+        }
+
+        auto append = [&](GemmSolutions& solutions) {
+            if(solutions.empty())
+                return;
+            logBestSolutions(solutions);
+            auto* results = heuristicResultsArray + *returnAlgoCount;
+            int   added   = 0;
+            memset(results, 0, sizeof(*results) * solutions.size());
+            _convertToHeuristicResultArray(solutions,
+                                           solutions.size(),
+                                           results,
+                                           &added,
+                                           maxWorkSpaceBytes,
+                                           data->problem,
+                                           *hardware);
+            *returnAlgoCount += added;
+        };
+        append(found.equality);
+        HIPBLASLT_JIT_DEBUG_NOTE("from.equality", *returnAlgoCount);
+        const int jitFirst = *returnAlgoCount;
+        auto      jitProb  = prob;
+        hipblaslt_jit::debug::Phase jit("jit");
+        jitHeuristicFill(handle,
+                         jitProb,
+                         gemmData,
+                         requestedAlgoCount,
+                         maxWorkSpaceBytes,
+                         heuristicResultsArray,
+                         returnAlgoCount);
+        jit.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.jit", *returnAlgoCount - jitFirst);
+        const int                   othersFirst = *returnAlgoCount;
+        hipblaslt_jit::debug::Phase others("others");
+        keepOthers(handle,
+                   heuristicResultsArray + jitFirst,
+                   *returnAlgoCount - jitFirst,
+                   requestedAlgoCount - *returnAlgoCount,
+                   found.others);
+        append(found.others);
+        others.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.others", *returnAlgoCount - othersFirst);
+        for(int i = *returnAlgoCount; i < requestedAlgoCount; ++i)
+            heuristicResultsArray[i].state = rocblaslt_status_invalid_value;
+
+        return library || *returnAlgoCount ? rocblaslt_status_success
+                                           : rocblaslt_status_invalid_pointer;
+    }
+
+    rocblaslt_status getBestSolutionsAroundJit(
+        rocblaslt_handle      handle,
+        std::shared_ptr<void> gemmData,
+        const std::shared_ptr<
+            TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
+        const std::shared_ptr<TensileLite::Hardware>&                                 hardware,
+        const size_t                                    workspaceBytes,
+        const int                                       requestedAlgoCount,
+        std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+    {
+        heuristicResults.clear();
+        std::shared_ptr<TensileDataGemm> data;
+        ProviderSolutions                found;
+        if(library)
+        {
+            data = getTensileData(gemmData);
+            data->problem.setWorkspaceSize(workspaceBytes);
+            found = getProviderSolutions(library, hardware, data->problem, requestedAlgoCount);
+            // when there is no solution for xfloat32, fallback comput_type to fp32
+            if(found.empty() && data->problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+            {
+                data->problem.setF32XdlMathOp(rocisa::DataType::Float);
+                found = getProviderSolutions(library, hardware, data->problem, requestedAlgoCount);
+            }
+        }
+
+        auto append = [&](GemmSolutions& solutions) {
+            if(solutions.empty())
+                return;
+            logBestSolutions(solutions);
+            const auto first = heuristicResults.size();
+            int        added = 0;
+            heuristicResults.resize(first + solutions.size());
+            _convertToHeuristicResultArray(solutions,
+                                           solutions.size(),
+                                           heuristicResults.data() + first,
+                                           &added,
+                                           workspaceBytes,
+                                           data->problem,
+                                           *hardware);
+        };
+        append(found.equality);
+        const auto jitFirst = heuristicResults.size();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.equality", static_cast<int64_t>(jitFirst));
+        hipblaslt_jit::debug::Phase jit("jit");
+        jitHeuristicFill(handle,
+                         rocblaslt::RocGemmType::ROCBLASLT_GEMM,
+                         gemmData,
+                         requestedAlgoCount,
+                         workspaceBytes,
+                         heuristicResults);
+        jit.stop();
+        const auto othersFirst = heuristicResults.size();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.jit", static_cast<int64_t>(othersFirst - jitFirst));
+        hipblaslt_jit::debug::Phase others("others");
+        keepOthers(handle,
+                   heuristicResults.data() + jitFirst,
+                   heuristicResults.size() - jitFirst,
+                   requestedAlgoCount - heuristicResults.size(),
+                   found.others);
+        append(found.others);
+        others.stop();
+        HIPBLASLT_JIT_DEBUG_NOTE("from.others",
+                                 static_cast<int64_t>(heuristicResults.size() - othersFirst));
+
+        return library || !heuristicResults.empty() ? rocblaslt_status_success
+                                                    : rocblaslt_status_invalid_pointer;
     }
 }
 #endif
@@ -5060,6 +5289,19 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     // auto &adapter =
     static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
+
+#ifdef HIPBLASLT_ENABLE_JIT
+    if(jitAfterEquality(handle, prob))
+        return getBestSolutionsAroundJit(prob,
+                                         handle,
+                                         gemmData,
+                                         library,
+                                         hardware,
+                                         requestedAlgoCount,
+                                         heuristicResultsArray,
+                                         returnAlgoCount,
+                                         maxWorkSpaceBytes);
+#endif
 
     if(!library)
     {
@@ -5783,6 +6025,17 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     // auto &adapter =
     static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
 
+#ifdef HIPBLASLT_ENABLE_JIT
+    if(jitAfterEquality(gemmType))
+        return getBestSolutionsAroundJit(handle,
+                                         gemmData,
+                                         library,
+                                         hardware,
+                                         workspaceBytes,
+                                         requestedAlgoCount,
+                                         heuristicResults);
+#endif
+
     if(!library)
     {
         return rocblaslt_status_invalid_pointer;
@@ -6013,6 +6266,63 @@ catch(const std::exception& e)
 {
     hipblaslt_jit::report(hipblaslt_jit::Severity::Error,
                           std::string("heuristic query failed: ") + e.what());
+}
+
+bool jitAfterEquality(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+        return false;
+#endif
+    return hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback;
+}
+
+bool jitAfterEquality(rocblaslt::RocGemmType gemmType)
+{
+    return hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
+           && gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM;
+}
+
+void dropJitKernels(rocblaslt_handle                                handle,
+                    const rocblaslt_matmul_heuristic_result         results[],
+                    int                                             count,
+                    std::vector<rocblaslt_matmul_heuristic_result>& candidates)
+{
+    std::vector<std::string> kernels;
+    for(int i = 0; i < count; ++i)
+        if(isJitSolution(&results[i].algo))
+            kernels.push_back(getKernelNameFromAlgoIndex(handle, results[i].algo));
+    if(kernels.empty())
+        return;
+    candidates.erase(std::remove_if(candidates.begin(),
+                                    candidates.end(),
+                                    [&](const rocblaslt_matmul_heuristic_result& candidate) {
+                                        return std::find(kernels.begin(),
+                                                         kernels.end(),
+                                                         getKernelNameFromAlgoIndex(
+                                                             handle, candidate.algo))
+                                               != kernels.end();
+                                    }),
+                     candidates.end());
+}
+
+int dropRepeatedJitKernels(rocblaslt_handle                  handle,
+                           rocblaslt_matmul_heuristic_result results[],
+                           int                               count)
+{
+    std::vector<std::string> kernels;
+    int                      kept = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        auto       name     = getKernelNameFromAlgoIndex(handle, results[i].algo);
+        const bool repeated = isJitSolution(&results[i].algo) && !name.empty()
+                              && std::find(kernels.begin(), kernels.end(), name) != kernels.end();
+        if(repeated)
+            continue;
+        kernels.push_back(std::move(name));
+        results[kept++] = results[i];
+    }
+    return kept;
 }
 #endif
 

@@ -4,8 +4,9 @@
 
 Each route runs the test binary in fresh processes with its own JIT library,
 temporary and cache directories under the output directory, and an empty
-HIPBLASLT_TENSILE_LIBPATH. The build's JIT backend is the test backend, which
-replays the --replay bundles.
+HIPBLASLT_TENSILE_LIBPATH unless the route needs the build's device library.
+The build's JIT backend is the test backend, which replays the --replay
+bundles.
 """
 
 import argparse
@@ -23,6 +24,9 @@ import msgpack
 JIT_INDEX = 1 << 30
 INVALID_VALUE = 3
 IGNORED = "is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT"
+DEFAULT_SIZE = (256, 128, 512)
+# Sizes the FP16 NN Equality logic tunes; the default size has no Equality hit.
+EQUALITY_SIZES = ((1024, 4096, 20), (2048, 128, 16), (864, 512, 432), (128, 5120, 1024))
 
 
 def require(condition, message):
@@ -89,6 +93,11 @@ def allocated(library):
 
 def queries(records, api):
     return [record for record in records if record["api"] == api]
+
+
+def size_args(size):
+    m, n, k = size
+    return ["--m", str(m), "--n", str(n), "--k", str(k)]
 
 
 def recording(path):
@@ -353,6 +362,252 @@ def report(run, output):
     print("PASS heuristic-report: one visible error per cause, empty results")
 
 
+def partial_fill(run, output):
+    drop = ("HIPBLASLT_TENSILE_LIBPATH",)
+    probe = 4096
+    stderr, records = run(
+        "pre-tuned", ["--api", "both", "--requested", str(probe), "--no-run"], drop
+    )
+    pretuned = {api: queries(records, api)[0] for api in ("c", "cpp")}
+    if any(record["status"] != 0 or not record["count"] for record in pretuned.values()):
+        print("SKIP heuristic-partial-fill: the build has no device library for the problem")
+        return
+    if any(record["count"] >= probe for record in pretuned.values()):
+        print(f"SKIP heuristic-partial-fill: the device library fills {probe} requests")
+        return
+    trap = output / "trap.txt"
+    stderr, records = run(
+        "publish", ["--api", "c", "--requested", "1", "--no-run"], HIPBLASLT_JIT="2"
+    )
+    (published,) = queries(records, "c")
+    require(published["count"] == 1, f"The JIT library was not seeded: {published}")
+    (jit_index,), (jit_kernel,) = published["indices"], published["kernels"]
+    for api, record in pretuned.items():
+        stderr, records = run(
+            f"fill-{api}",
+            ["--api", api, "--requested", str(record["count"] + 1), "--no-run"],
+            drop,
+            HIPBLASLT_JIT="1",
+            **recording(trap),
+        )
+        (filled,) = queries(records, api)
+        require(filled["status"] == 0, f"{api} fill failed: {filled}")
+        require(trap.exists(), f"{api} fill did not try to generate what was missing")
+        trap.unlink()
+        require(
+            reports(stderr, "warning") and not reports(stderr, "error"),
+            f"{api} shortfall was not reported as a warning",
+        )
+        require(
+            filled["indices"].count(jit_index) == 1
+            and filled["kernels"].count(jit_kernel) == 1,
+            f"{api} fill did not return the JIT solution once",
+        )
+        rest = [index for index in filled["indices"] if index != jit_index]
+        others = [
+            index
+            for index, kernel in zip(record["indices"], record["kernels"])
+            if kernel != jit_kernel
+        ]
+        # The pre-tuned library can order tied solutions differently in each process.
+        require(
+            sorted(rest) == sorted(others),
+            f"{api} fill did not complete with the other pre-tuned solutions",
+        )
+    print(
+        "PASS heuristic-partial-fill: the pre-tuned results complete what JIT leaves,"
+        " without repeating its kernel"
+    )
+
+
+def tuning_override(run, output):
+    stderr, records = run(
+        "publish", ["--api", "cpp", "--requested", "2", "--no-run"], HIPBLASLT_JIT="2"
+    )
+    (published,) = queries(records, "cpp")
+    require(published["count"] == 2, f"The JIT library was not seeded: {published}")
+    stderr, records = run("revision", ["--api", "none", "--git-revision"])
+    (revision,) = queries(records, "revision")
+    if not revision["revision"]:
+        print(
+            "SKIP heuristic-override: the build has no git revision, so it ignores"
+            " override entries without a kernel name"
+        )
+        return
+    m, n, k = DEFAULT_SIZE
+    for first, second in (published["indices"], published["indices"][::-1]):
+        # The C query ignores the file unless its first line names this
+        # library's revision.
+        tuning = output / f"override-{first}.csv"
+        tuning.write_text(
+            f"Git Version: {revision['revision']}\n"
+            "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
+            "solution_index\n"
+            f"N,N,1,{m},{n},{k},f16_r,f16_r,f16_r,f32_r,{first}\n"
+        )
+        stderr, records = run(
+            f"override-{first}",
+            ["--api", "both", "--requested", "3"],
+            HIPBLASLT_JIT="1",
+            HIPBLASLT_TUNING_OVERRIDE_FILE=str(tuning),
+        )
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            require(record["status"] == 0, f"{api} query failed: {record}")
+            require(
+                record["indices"][:2] == [first, second],
+                f"{api} query did not return the override, then the other JIT solution:"
+                f" {record['indices']}",
+            )
+            require(
+                len(set(record["kernels"])) == len(record["kernels"]),
+                f"{api} query repeated a kernel: {record['indices']}",
+            )
+        require(not reports(stderr, "error"), "A JIT error was reported")
+    print(
+        "PASS heuristic-override: a tuning override that names a JIT solution comes"
+        " first, and JIT does not return its kernel again"
+    )
+
+
+def provider_order(run, output):
+    drop = ("HIPBLASLT_TENSILE_LIBPATH",)
+
+    def baseline(size):
+        name = "mode-0-" + "x".join(map(str, size))
+        args = ["--api", "both", "--requested", "8", "--no-run", "--tuned"]
+        _, records = run(name, args + size_args(size), drop)
+        (tuned,) = queries(records, "tuned")
+        found = {api: queries(records, api)[0] for api in ("c", "cpp")}
+        complete = all(
+            record["status"] == 0 and record["count"] == 8 for record in found.values()
+        )
+        return tuned["tuned"] == 1, complete, found
+
+    equality = None
+    for size in EQUALITY_SIZES:
+        tuned, complete, base_equality = baseline(size)
+        if tuned and complete:
+            equality = size
+            break
+    tuned, complete, base_other = baseline(DEFAULT_SIZE)
+    if equality is None or tuned or not complete:
+        print(
+            "SKIP heuristic-provider-order: the device library lacks an Equality size"
+            " or a size without one"
+        )
+        return
+    trap = output / "trap.txt"
+    trapped = dict(HIPBLASLT_JIT="1", **recording(trap))
+    library = output / "lib"
+    cases = (
+        ("equality", size_args(equality), 3, base_equality),
+        ("other", size_args(DEFAULT_SIZE), 2, base_other),
+    )
+
+    stderr, records = run(
+        "equality-fills",
+        ["--api", "both", "--requested", "1", "--no-run"] + size_args(equality),
+        drop,
+        **trapped,
+    )
+    for api in ("c", "cpp"):
+        (record,) = queries(records, api)
+        require(
+            record["indices"] == base_equality[api]["indices"][:1],
+            f"{api} did not return the mode 0 result: {record['indices']}",
+        )
+    require(
+        not trap.exists() and not entries(library) and not reports(stderr),
+        "JIT was consulted although the Equality results fill the request",
+    )
+
+    first = {}
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"publish-{name}",
+            ["--api", "both", "--requested", str(requested)] + args,
+            drop,
+            HIPBLASLT_JIT="1",
+        )
+        require(not reports(stderr), f"{name}: a JIT problem was reported")
+        first[name] = {api: queries(records, api)[0] for api in ("c", "cpp")}
+        for api, record in first[name].items():
+            label = {"c": "C", "cpp": "C++"}[api]
+            require(
+                record["status"] == 0 and record["count"] == requested,
+                f"{name}: {api} returned {record}",
+            )
+            require(
+                all(f"{label} result {i} PASS" in stderr for i in range(requested)),
+                f"{name}: {label} results were not checked",
+            )
+            indices = record["indices"]
+            pretuned = sum(index < JIT_INDEX for index in indices)
+            require(
+                all(index >= JIT_INDEX for index in indices[pretuned:])
+                and indices[:pretuned] == base[api]["indices"][:pretuned]
+                and (pretuned > 0) == (name == "equality")
+                and pretuned < requested,
+                f"{name}: {api} did not return the Equality results, then JIT: {indices}",
+            )
+        require(
+            first[name]["c"]["indices"] == first[name]["cpp"]["indices"],
+            f"{name}: the C and C++ queries disagree",
+        )
+
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"reuse-{name}",
+            ["--api", "both", "--requested", str(requested), "--no-run"] + args,
+            drop,
+            **trapped,
+        )
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            require(
+                record["indices"] == first[name][api]["indices"]
+                and record["kernels"] == first[name][api]["kernels"],
+                f"{name}: {api} differs in a second process: {record['indices']}",
+            )
+        require(
+            not trap.exists() and not reports(stderr),
+            f"{name}: the second process generated or reported a JIT problem",
+        )
+
+    for name, args, requested, base in cases:
+        stderr, records = run(
+            f"short-{name}",
+            ["--api", "both", "--requested", str(requested + 2), "--no-run"] + args,
+            drop,
+            **trapped,
+        )
+        require(trap.exists(), f"{name}: JIT did not try to generate what was missing")
+        trap.unlink()
+        require(
+            reports(stderr, "warning") and not reports(stderr, "error"),
+            f"{name}: the shortfall was not reported as a warning",
+        )
+        for api in ("c", "cpp"):
+            (record,) = queries(records, api)
+            known = first[name][api]
+            kernels = set(known["kernels"])
+            others = [
+                index
+                for index, kernel in zip(base[api]["indices"], base[api]["kernels"])
+                if index not in known["indices"] and kernel not in kernels
+            ]
+            expected = known["indices"] + others[:2]
+            require(
+                record["indices"] == expected,
+                f"{name}: {api} returned {record['indices']}, expected {expected}",
+            )
+    print(
+        "PASS heuristic-provider-order: Equality results, then JIT, then the other"
+        " providers"
+    )
+
+
 DEBUG_PREFIX = "hipblaslt jit-debug "
 DEBUG_KEYS = ("v", "cat", "ev", "pid", "tid", "t_ms", "q")
 
@@ -387,7 +642,14 @@ def results(records):
 def check_sources(query):
     """The query's from counts add up to what it returned."""
     found = query.get("from", {})
-    total = found.get("best", 0) + found.get("jit", 0)
+    if "equality" in found:
+        require(
+            found["equality"] + found["jit"] + found["others"] == found["best"],
+            f"from does not split best: {query}",
+        )
+        total = found["best"]
+    else:
+        total = found.get("best", 0) + found.get("jit", 0)
     total += found.get("all", 0) + found.get("override", 0)
     require(total == query["returned"], f"from does not add up to returned: {query}")
 
@@ -681,6 +943,9 @@ ROUTES = {
     "unsupported": unsupported,
     "concurrent": concurrent,
     "report": report,
+    "partial-fill": partial_fill,
+    "override": tuning_override,
+    "provider-order": provider_order,
     "debug-timing": debug_timing,
     "debug-progress": debug_progress,
     "debug-off": debug_off,

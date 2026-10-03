@@ -228,6 +228,36 @@ with reasons and emits no selected recipe. A CU budget smaller than the device's
 XCD count is rejected before calling the mapping selectors. Diagnostic manifests
 retain raw outputs, translated parameters, defaults, and rejections.
 
+### Pre-tuned heuristic selection
+
+The installed library answers `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` from pre-tuned TensileLite libraries. Default
+construction orders the Equality, Range, Prediction, GridBased and FreeSize
+selection libraries, followed by TruePred rows, beneath hardware, operation and
+problem predicates. Modes and available branches affect traversal. Equality is
+matching with equality distance.
+
+The Prediction library type (C++ `ProblemPredictionLibrary`), also called the
+**OrigamiLibrary**, is not a new type. It ships 507 pre-tuned solution YAML
+files in per-architecture `Origami` directories under
+`library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/`: 489 for gfx950,
+7 each for gfx1250 and gfx1250-strict, and 4 for navi32. At runtime it ranks
+those existing solutions with `origami::rank_configs`. Origami does not
+construct kernels at package time. This existing-solution ranking is distinct
+from the JIT predictor, which ranks candidate recipes that may not exist in any
+library.
+
+When a problem that requests xf32 math (`rocblaslt_compute_f32_fast_xf32`)
+finds no solution, `getBestSolutions` in `tensile_host.cpp` repeats the lookup
+with FP32 math. When `getBestSolutions` returns fewer results than
+`requestedAlgoCount`, the existing heuristic code in `rocblaslt_auxiliary.cpp`
+calls `getAllSolutions`, excluding the GridBased and Prediction libraries that
+were already consulted, and appends supported, non-duplicate solutions until the
+count is reached. For some eligible problems, another hipBLASLt route answers
+`getBestSolutions` and `getAllSolutions` before the Tensile lookup. With
+`HIPBLASLT_JIT` set, the [heuristic integration](#heuristic-integration)
+extends or replaces this lookup.
+
 ### Build
 
 `HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
@@ -387,7 +417,7 @@ the first handle is created.
 | `HIPBLASLT_JIT` | Mode | Behavior |
 | --- | --- | --- |
 | unset, empty or `0` | Off | Heuristic queries behave as in a build without JIT. |
-| `1` | Fallback | The existing lookup runs to completion first. JIT fills a result that is still shorter than `requestedAlgoCount`. |
+| `1` | Fallback | JIT comes after the Equality results: a query takes the Equality results, then JIT solutions, then the results of the other pre-tuned libraries and the `getAllSolutions` fill, each only for what is still missing. |
 | `2` | Forced | JIT is the only source. The query skips the override file, every pre-tuned library, every other hipBLASLt source and the `getAllSolutions` fill. |
 
 Any other value leaves JIT off and prints
@@ -396,24 +426,44 @@ A build without JIT ignores a nonzero value and prints
 `hipblaslt warning: HIPBLASLT_JIT=<value> is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT`
 once. Privileged processes ignore the variable.
 
-**Order.** In fallback mode, a query first runs the override file,
-`getBestSolutions` (with any hipBLASLt route that answers the problem before
-the Tensile lookup, and the xf32 retry) and the `getAllSolutions` fill. If the
-result is still short, JIT continues:
+**Order.** In fallback mode, `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` take results from these sources in turn, each
+only for what is still missing from `requestedAlgoCount`:
 
-1. It looks the problem up in the JIT solution library under the process's
-   cache key.
-2. If that is still short, `Jit` generates the rest: the predictor ranks
-   candidates when the backend consumes a prediction, the backend generates
-   solutions, comgr builds them, and the library publishes them. Every kernel
-   that the query has already returned is excluded by name, and the backend
-   returns only kernels it has not already returned for the request, so each
-   new result is a different kernel.
+1. The override file.
+2. The Equality rows of the pre-tuned libraries.
+3. JIT. It looks the problem up in the JIT solution library under the process's
+   cache key. If that is still short, `Jit` generates the rest: the predictor
+   ranks candidates when the backend consumes a prediction, the backend
+   generates solutions, comgr builds them, and the library publishes them.
+   Every kernel that the query has already returned is excluded by name, and
+   the backend returns only kernels it has not already returned for the
+   request, so each new result is a different kernel.
+4. The other pre-tuned libraries: the Range, Prediction (Origami), GridBased and
+   FreeSize rows and the MLP rows.
+5. The `getAllSolutions` fill.
 
-In forced mode, these two steps are the whole query. Each JIT result passes the
-same support and workspace checks as a `getAllSolutions` result and is appended
-after the results already found. Its solution index is in the reserved JIT
-range.
+JIT results count toward the request, so a query that the Equality results
+fill does not consult JIT. Its results can still differ from those with JIT
+off. The pre-tuned library walks its hardware branches in order, a branch that
+names a device or CU count before the generic one. With JIT off, a single walk
+takes each branch's Equality rows and then its other rows, and stops when the
+request is full. The fallback-mode Equality pass takes the Equality rows of
+every branch first, so when the first matching branch's Equality rows do not
+fill the request, an Equality result of the generic branch can take a place
+that, with JIT off, goes to a result of the specific branch's other rows. The
+results are those of JIT off when only one branch matches or when the first
+matching branch's Equality rows fill the request. The sources after JIT skip
+the kernels its results use. When the override entry names a JIT solution, the
+JIT results do not repeat its kernel. When neither pre-tuned pass finds a
+solution for an xf32 problem, both repeat with FP32 math; JIT runs once for the
+query. When another hipBLASLt route answers the problem before the Tensile
+lookup, its results come first and JIT fills only what is still missing after
+the `getAllSolutions` fill.
+
+In forced mode, the JIT lookup and generation are the whole query. Each JIT
+result passes the same support and workspace checks as a `getAllSolutions`
+result. Its solution index is in the reserved JIT range.
 
 **Return count.** Returning fewer results than requested, including none, is
 success, as it already was for the pre-tuned lookup. In fallback mode, a query
@@ -509,7 +559,7 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 | `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. It is a `progress` line when only `progress` is on |
 | `setup` | The first JIT use in the process: its `status`, and the time to open the JIT solution library (`store`) and create the components. A backend can add its own fields and steps, such as creating itself |
 | `library.init` | A device's pre-tuned library initialization |
-| `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`, `best` from the pre-tuned query, `all` from the `getAllSolutions` fill and `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
+| `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`; `best` from the pre-tuned query, split into `equality`, `jit` and `others` when JIT runs between them; `all` from the `getAllSolutions` fill; otherwise `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
 | `matmul` | `hipblasLtMatmul` with a JIT solution: the first call for each problem and algorithm, and every call that loaded a code object (`loaded` is `now`), with the library lookup, preparation, code-object load and launch durations |
 | `generation` | Each generation: the requested and candidate counts, failures, the problem, the generated, `fresh`, `reused` and published counts, and the durations of prediction, scratch, the backend, building, support checks, publication (lock wait, time holding the lock, refresh) and loading, with `other` the rest. A backend can add its own fields and the durations of its own steps within `backend` |
 | `solution` | One per generated solution: rank, kernel, `outcome` (`built`, `build_failed`, `unsupported`, `published`, `publish_failed`, `loaded` or `load_failed`), index, message, assembly and HIP unit counts with each HIP unit's compile time as `hip_units`, and the metadata, assembly, HIP compile, link, build and support durations |
@@ -538,7 +588,7 @@ written, and a dropped `query` line is added to `query.aggregate`. Repeated
 A cache hit with `HIPBLASLT_JIT_DEBUG=timing`:
 
 ```text
-hipblaslt jit-debug {"v":1,"cat":"timing","ev":"query","pid":4242,"tid":1,"t_ms":165.138,"q":"4242.5","api":"cpp","mode":1,"requested":3,"returned":3,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT","from":{"best":0,"jit":3},"jit":{"needed":3,"hits":3,"kept":3,"dropped":0},"ns":{"total":55209,"get_best":1690,"get_all":2540,"jit_target":3130,"lookup_attach":14720,"lookup_refresh":7870,"lookup_scan":11959,"jit_lookup":38069,"jit_support":5070,"jit_after":50709}}
+hipblaslt jit-debug {"v":1,"cat":"timing","ev":"query","pid":4242,"tid":1,"t_ms":160.737,"q":"4242.5","api":"cpp","mode":1,"requested":3,"returned":3,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT","from":{"equality":0,"jit":3,"others":0,"best":3},"jit":{"needed":3,"hits":3,"kept":3,"dropped":0},"ns":{"total":55459,"jit_target":3580,"lookup_attach":14910,"lookup_refresh":7870,"lookup_scan":12040,"jit_lookup":38570,"jit_support":3880,"jit":49950,"others":1670,"get_best":54129}}
 ```
 
 The start of a generation with `HIPBLASLT_JIT_DEBUG=progress`:

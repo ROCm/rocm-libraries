@@ -2454,6 +2454,11 @@ rocblaslt_status
             }
 
             requestedAlgoCount++;
+#ifdef HIPBLASLT_ENABLE_JIT
+            if(jitAfterEquality(handle, prob))
+                *returnAlgoCount
+                    = dropRepeatedJitKernels(handle, heuristicResultsArray, *returnAlgoCount);
+#endif
         }
 
         if(dummy_bias_address)
@@ -2476,6 +2481,10 @@ rocblaslt_status
             if(rocblaslt_status_success
                == getAllSolutions(prob, handle, allSolutionsResults, pref->max_workspace_bytes))
             {
+#ifdef HIPBLASLT_ENABLE_JIT
+                dropJitKernels(
+                    handle, heuristicResultsArray, *returnAlgoCount, allSolutionsResults);
+#endif
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = *returnAlgoCount;
                 for(int i = 0;
@@ -2514,7 +2523,7 @@ rocblaslt_status
 
 #ifdef HIPBLASLT_ENABLE_JIT
         if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
-           && *returnAlgoCount < requestedAlgoCount)
+           && !jitAfterEquality(handle, prob) && *returnAlgoCount < requestedAlgoCount)
         {
             const int found = *returnAlgoCount;
             jitHeuristicFill(handle,
@@ -2762,6 +2771,10 @@ rocblaslt_status
         {
 
             results.insert(results.begin(), override_result[0]);
+#ifdef HIPBLASLT_ENABLE_JIT
+            if(jitAfterEquality(gemmType))
+                results.resize(dropRepeatedJitKernels(handle, results.data(), results.size()));
+#endif
         }
 
         log_api(__func__, "returnAlgoCount", results.size());
@@ -2785,6 +2798,9 @@ rocblaslt_status
                == getAllSolutions(
                    gemmData, handle, gemmType, allSolutionsResults, maxWorkspaceBytes))
             {
+#ifdef HIPBLASLT_ENABLE_JIT
+                dropJitKernels(handle, results.data(), results.size(), allSolutionsResults);
+#endif
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();
                 for(int i = 0;
@@ -2825,7 +2841,7 @@ rocblaslt_status
         }
 
 #ifdef HIPBLASLT_ENABLE_JIT
-        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback
+        if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Fallback && !jitAfterEquality(gemmType)
            && results.size() < static_cast<size_t>(requestedAlgoCount))
         {
             const size_t found = results.size();
