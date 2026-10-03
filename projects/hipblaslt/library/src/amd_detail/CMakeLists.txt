@@ -40,6 +40,7 @@ if(HIPBLASLT_ENABLE_JIT)
         target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp")
         set(hipblaslt_jit_process_backend hipblaslt-jit-test-backend.cpp)
     endif()
+    include("${PROJECT_SOURCE_DIR}/cmake/hipblaslt-jit-hipkittens.cmake")
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/${hipblaslt_jit_process_backend}")
 endif()

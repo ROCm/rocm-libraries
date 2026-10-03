@@ -9,6 +9,8 @@ on:
     paths:
       - "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-*"
       - "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt"
+      - "projects/hipblaslt/library/src/amd_detail/hipkittens/**"
+      - "projects/hipblaslt/cmake/hipblaslt-jit-hipkittens.cmake"
       - "projects/hipblaslt/clients/tests/jit/**"
       - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/tensile_host.cpp"
       - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/tensile_host.hpp"
@@ -261,7 +263,8 @@ jobs:
           jobs=$(nproc)
           (( jobs > 16 )) && jobs=16
           build="$GITHUB_WORKSPACE/build/jit"
-          # Host library and clients, without the device library.
+          # Host library and clients, without the device library, with the
+          # HipKittens backend as in the jit preset.
           cmake -S projects/hipblaslt -B "$build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$ROCM_PATH/bin/amdclang" \
@@ -271,6 +274,7 @@ jobs:
             -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
             -DGPU_TARGETS=gfx950 \
             -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON \
+            -DHIPBLASLT_JIT_ENABLE_HIPKITTENS=ON \
             -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
             -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON \
             -DHIPBLASLT_ENABLE_BLIS=OFF -DHIPBLASLT_ENABLE_SAMPLES=OFF \

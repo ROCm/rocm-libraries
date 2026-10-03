@@ -30,6 +30,19 @@ namespace hipblaslt_jit::msgpack_io
     };
     Status readEntry(const std::vector<uint8_t>& entry, EntryFields& fields);
 
+    // A predicate with an index and an integer value, such as StrideAEqual.
+    struct IndexedPredicate
+    {
+        std::string type;
+        uint64_t    index = 0;
+        uint64_t    value = 0;
+    };
+    // Adds predicates to the And of a one-solution entry's solution
+    // problemPredicate and of its only library row.
+    Status appendEntryPredicates(const std::vector<uint8_t>&          entry,
+                                 const std::vector<IndexedPredicate>& predicates,
+                                 std::vector<uint8_t>&                appended);
+
     // One master row: And(SizeEqual(i, sizes[i]) for every i, predicate)
     // selecting Placeholder(prefix).
     struct MasterRow

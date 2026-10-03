@@ -246,4 +246,23 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         $<TARGET_FILE:hipblaslt-jit-bundle-freshness-test>
         "${hipblaslt_jit_data}" "${hipblaslt_jit_scratch}/bundle-freshness")
     hipblaslt_jit_stage(hipblaslt-jit-library-test hipblaslt-jit-bundle-freshness-test)
+
+    # The HipKittens backend, built with HIPBLASLT_JIT_ENABLE_HIPKITTENS for gfx950;
+    # every mode needs a gfx950 device.
+    if(TARGET hipblaslt-jit-hipkittens-test)
+        set(hipkittens $<TARGET_FILE:hipblaslt-jit-hipkittens-test>)
+        hipblaslt_jit_test(jit-hipkittens-backend jit-gpu
+            ${hipkittens} host "${hipblaslt_jit_scratch}/hipkittens-backend")
+        hipblaslt_jit_test(jit-hipkittens-gemm jit-gpu ${hipkittens} gpu)
+        set_tests_properties(jit-hipkittens-gemm PROPERTIES ENVIRONMENT
+            HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/hipkittens-library)
+        if(NOT CMAKE_SKIP_INSTALL_RULES)
+            hipblaslt_jit_python_test(jit-hipkittens-install jit-gpu test_hipkittens_install.py
+                "${PROJECT_BINARY_DIR}" ${hipkittens} "${hipblaslt_jit_scratch}/hipkittens-install")
+        endif()
+        if(HIPBLASLT_ENABLE_CLIENT)
+            hipblaslt_jit_python_test(jit-hipkittens-bench jit-gpu test_hipkittens_bench.py
+                ${hipkittens} $<TARGET_FILE:hipblaslt-bench> "${hipblaslt_jit_scratch}/hipkittens-bench")
+        endif()
+    endif()
 endif()

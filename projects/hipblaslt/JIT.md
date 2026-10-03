@@ -32,10 +32,11 @@ predictor first ranks candidate configurations. In a build with
 `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and
 `hipblasLtMatmul` without an algorithm return solutions from that library and
 generate the ones it lacks; see
-[heuristic integration](#heuristic-integration). The only backend is a test
-mock that replays pre-generated source bundles. No generator backend is
-implemented yet, so outside the tests those queries report that hipBLASLt was
-built without one.
+[heuristic integration](#heuristic-integration). The backends are a test mock
+that replays pre-generated source bundles and, in developer builds, the
+[HipKittens backend](JIT_HIPKITTENS.md), which only the JIT tests create.
+Heuristic queries use no generator backend yet, so outside the tests those
+queries report that hipBLASLt was built without one.
 
 ## Current behavior
 
@@ -90,7 +91,7 @@ interface, so that each implementation can be replaced and tested on its own.
 | Stage | Interface | Contract |
 | --- | --- | --- |
 | Predict | `Predictor::predict(PredictionRequest, TuningKnowledge, Prediction&)` | Only for a backend that consumes a prediction. Ranks candidates built from the tuning knowledge's seeds, best first, each naming its modeled contract. |
-| Generate | `Backend::generate(GenerationRequest, std::vector<GeneratedSolution>&)` | Returns up to `GenerationRequest::count` solutions, best first, and builds and loads nothing. Each `GeneratedSolution` holds a one-solution TensileLite library entry, its main kernel name, and the source units to build. `NotSupported` means the request is outside the backend's domain. |
+| Generate | `Backend::generate(GenerationRequest, std::vector<GeneratedSolution>&)` | Returns up to `GenerationRequest::count` solutions, best first, and builds and loads nothing. Each `GeneratedSolution` holds a one-solution TensileLite library entry, its main kernel name, the source units to build, and the HIP flags they need. `NotSupported` means the request is outside the backend's domain. |
 | Build | `CodeObjectBuilder::build(GeneratedSolution, GenerationRequest, BuiltSolution&)` | Builds a solution's units into code objects. `GeneratedSolution` has no code-object field; only `BuiltSolution` adds the main code object and its helpers. |
 | Support | `SolutionLoader::support` | Evaluates the entry's predicates and workspace for the request, and loads no code. |
 | Publish | `SolutionStore::publish` | Stores built solutions and returns one library index per solution, in order. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
@@ -176,6 +177,12 @@ The implementations are:
   consumes the predictions of the Origami predictor and the catalog knowledge.
   Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`. Only builds with
   `HIPBLASLT_JIT_TESTING=ON` compile it; it is not a production backend.
+- HipKittens backend: `hipblaslt-jit-hipkittens.cpp` returns the HIP source of
+  a hipBLASLt-owned HipKittens kernel template for gfx950, the HipKittens
+  headers it includes, and its library entry. Only builds with
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` compile it, and tests reach it through
+  `jit::hipkittens::createBackend`; see the
+  [HipKittens JIT backend](JIT_HIPKITTENS.md).
 - Heuristic integration: `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`.
   `hipblaslt-jit-process-backend.cpp` configures one `Jit` per process from the
   backend, predictor and tuning knowledge that `makeDefaultProcessBackend`
@@ -343,7 +350,9 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
 cmake --build "$project_build" --parallel
 ```
 
-The `jit` CMake preset enables this feature for a new configuration.
+The `jit` CMake preset enables this feature for a new configuration, together
+with the [HipKittens backend](JIT_HIPKITTENS.md#build)
+(`HIPBLASLT_JIT_ENABLE_HIPKITTENS`, off by default).
 `HIPBLASLT_JIT_TESTING`, off by default, also compiles the mock backend into
 the library and adds the tests that use it. The
 [JIT test guide](clients/tests/jit/README.md) lists the test targets and the
@@ -721,10 +730,11 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   `.amdgcn_target` directive must name the device's processor and only
   features the device has; it is then rewritten to the device's full target
   ID. Assembly units that declare different wavefront sizes are rejected.
-- HIP helper source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
+- HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
   `--rocm-path` and a content-derived `-cuid`, so helper objects link together.
   The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
-  runtime.
+  runtime. A solution's `GeneratedSolution::hipFlags` follow the builder's own
+  flags for each of its HIP units.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the main kernel
   and helper relocatables into one code object per solution, with
   `-Xlinker --build-id=sha1`.

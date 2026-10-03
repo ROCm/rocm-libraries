@@ -49,6 +49,9 @@ injects the mock's fault, and `record` appends each request to the file that
   `jit-bench-smoke`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-heuristic-jit-off`, and with `HIPBLASLT_ENABLE_CLIENT=ON`
   `jit-bench-smoke-jit-off`.
+- `jit-gpu`, in a build for gfx950 with `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON`:
+  the `jit-hipkittens-*` tests of the
+  [HipKittens JIT test guide](README.hipkittens.md).
 
 A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-knowledge`, `jit-library`,
 `jit-library-concurrency` or `jit-bundle-freshness` and none of the tests that
