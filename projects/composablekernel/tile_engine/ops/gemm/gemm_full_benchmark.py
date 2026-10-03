@@ -52,7 +52,7 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
 sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
-from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
+from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep, _resolve_arch  # noqa: E402
 from smi_utils import detect_gpu_ids  # noqa: E402
 
 # Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
@@ -147,7 +147,10 @@ def resolve_configs(args):
     """Resolve positional configs -> concrete list of config paths."""
     if args.configs:
         return args.configs
-    cfg = _THIS_DIR / VARIANT_CONFIGS[args.variant] / CI_CONFIG_NAME
+    name = CI_CONFIG_NAME
+    if args.variant == "gemm_preshuffle" and (args.arch or "").split(":", 1)[0] == "gfx1250":
+        name = "default_config_gfx1250.json"
+    cfg = _THIS_DIR / VARIANT_CONFIGS[args.variant] / name
     return [str(cfg)]
 
 
@@ -266,7 +269,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             for idx in sorted(missing):
                 _, cfg, _ = batch[idx]
                 lines.append(f"  [gpu{device_id}] {cfg.name:<58} MISSING (crash)")
-            n_fail += len(missing)
+            n_fail += len(missing) or int(proc.returncode != 0)
 
     except subprocess.TimeoutExpired:
         lines.append(f"  [gpu{device_id}] batch timeout ({len(batch)} kernels)")
@@ -295,7 +298,7 @@ def main():
     parser.add_argument(
         "configs",
         nargs="*",
-        help="TE sweep config JSON files (default: variant's default_ci_config.json)",
+        help="TE sweep config JSON files (gfx1250 preshuffle defaults to default_config_gfx1250.json; other variants use default_ci_config.json)",
     )
     parser.add_argument(
         "--variant",
@@ -374,6 +377,8 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.variant == "gemm_preshuffle":
+        args.arch = _resolve_arch(args.arch)
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)
 
@@ -464,6 +469,13 @@ def main():
         all_configs, verbose=True, max_workers=args.workers
     )
     build_time = time.perf_counter() - t0
+
+    build_failures = sum(lib is None for lib in lib_paths)
+    if len(lib_paths) != len(all_configs):
+        print("  ERROR: Incomplete kernel build results")
+        return 1
+    if build_failures:
+        print(f"  ERROR: {build_failures}/{len(all_configs)} kernel builds failed")
 
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
@@ -599,7 +611,7 @@ def main():
     print(f"  Successful measurements: {stats['measurements']}")
     print(f"  Failed measurements: {stats['failures']}")
     print(f"  Output: {csv_path}")
-    return 0
+    return int(bool(build_failures or stats["failures"]))
 
 
 if __name__ == "__main__":
