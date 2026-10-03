@@ -1,0 +1,17 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block config_constructor -%}
+rocprim::search_n_config<{{ config.block_size_x }}, {{ config.ipt }}, {{ config.threshold }}>
+{%- endblock %}
+
+{% block benchmark_type %}
+using benchmark_type = device_search_n_benchmark<data_type, size_t, {{ config.count_func }}<{{ config.count }}>, config>;
+{% endblock %}
+
+{% block type_definitions %}
+using data_type = {{ data_type }};
+{% endblock %}
+
+{% block primbench_executor %}
+auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+{% endblock %}
