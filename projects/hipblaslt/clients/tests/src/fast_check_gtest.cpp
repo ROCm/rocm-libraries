@@ -925,6 +925,53 @@ namespace
         refused(fractional.problem(), "non-integer value in A, B or C");
     }
 
+    // A type fast_check does not support is never scanned as clean, the fills leave it alone,
+    // and the device pass returns the refusal from fast_check_expected.
+    TEST(FastCheckDevice_pre_checkin, unsupported_types_are_never_clean)
+    {
+        DeviceMatrix       m;
+        std::vector<float> h(DeviceMatrix::total, 1.f);
+        m.write(h);
+        FastCheckMatrix complex = m.matrix();
+        complex.type            = HIP_C_32F;
+        fast_check_fill_sentinel_device(m.d, HIP_C_32F, DeviceMatrix::total, 0);
+        fast_check_poison_padding_device(complex, DeviceMatrix::batch, DeviceMatrix::total, 0);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(m.read(), h);
+        auto res = fast_check_scan_padding_device(
+            complex, DeviceMatrix::batch, DeviceMatrix::total, true, 0);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scan failed"), std::string::npos) << res.message;
+
+        HostProblem      hp = default_problem();
+        FastCheckProblem p  = hp.problem();
+        p.D.type            = HIP_C_32F;
+        res                 = fast_check_result_device(p, fast_check_expected(p), 0);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("does not support data type"), std::string::npos) << res.message;
+    }
+
+    // An exact result beyond the range the compute type holds exactly is reported as such (or
+    // refused up front, once fast_check bounds the results): its GPU value depends on the
+    // summation order, so it is neither right nor wrong.
+    TEST(FastCheck_pre_checkin, results_beyond_the_compute_range_are_reported)
+    {
+        // 100 * 100 + 100 * 100 = 20000, which f16 stores exactly but f16 arithmetic does not
+        // hold exactly (above 2^11).
+        std::vector<hipblasLtHalf> A(2, hipblasLtHalf(100.f)), B(2, hipblasLtHalf(100.f)),
+            D(1, hipblasLtHalf(20000.f));
+        FastCheckProblem p;
+        p.M = 1, p.N = 1, p.K = 2;
+        p.A            = {A.data(), HIP_R_16F, 1, 2, 1, 2};
+        p.B            = {B.data(), HIP_R_16F, 2, 1, 2, 2};
+        p.C            = {D.data(), HIP_R_16F, 1, 1, 1, 1};
+        p.D            = {D.data(), HIP_R_16F, 1, 1, 1, 1};
+        p.compute_type = HIP_R_16F;
+        auto res       = fast_check_gemm(p);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("compute type holds"), std::string::npos) << res.message;
+    }
+
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
     {
         DeviceMatrix       m;

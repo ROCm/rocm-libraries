@@ -1429,7 +1429,9 @@ FastCheckResult fast_check_scan_padding_device(const FastCheckMatrix& m,
             m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
         break;
     default:
-        break;
+        // An unsupported type would otherwise scan nothing and look clean.
+        return {false,
+                std::string("fast_check scan failed: ") + hipGetErrorString(hipErrorInvalidValue)};
     }
     unsigned long long counters[4];
     hipError_t         err
