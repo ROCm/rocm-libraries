@@ -385,6 +385,13 @@ namespace
         FastCheckSolutionLog clean;
         clean.record(0, 1, "", 0, true);
         EXPECT_EQ(clean.summary(1), "");
+
+        // With one iteration the summary does not list iterations.
+        FastCheckSolutionLog once;
+        once.record(0, 9, "Cijk_MT32x32", 0, false);
+        EXPECT_EQ(once.summary(1),
+                  "fast_check: 1 of 1 solutions failed:\n"
+                  "  solution 0 (library index 9, kernel Cijk_MT32x32)");
     }
 
     // ------------------------------------------------------------------------------------------
@@ -635,6 +642,11 @@ namespace
 
         ASSERT_EQ(fast_check_corrupt_element_device(m.matrix(), batch, row, col, 0), hipSuccess);
         EXPECT_EQ(m.read()[idx], kFastCheckPoisonValue);
+
+        FastCheckMatrix unsupported = m.matrix();
+        unsupported.type            = HIP_C_32F;
+        EXPECT_EQ(fast_check_corrupt_element_device(unsupported, batch, row, col, 0),
+                  hipErrorInvalidValue);
     }
 
     // A write into padding must be reported with its offset, in the poisoned (c_equal_d) mode and
@@ -1019,6 +1031,35 @@ namespace
         EXPECT_FALSE(res.passed);
         EXPECT_NE(res.message.find("scan failed"), std::string::npos) << res.message;
         EXPECT_FALSE(fast_check_count_changed_device(m.d, HIP_C_32F, 8, 0).ok);
+    }
+
+    // The same in every supported type: the element becomes the sentinel, then the poison.
+    TEST(FastCheckDevice_pre_checkin, corrupt_element_works_in_every_type)
+    {
+        using DM = DeviceMatrix;
+        for(const auto& tc : kTypes)
+        {
+            std::vector<char> one(tc.size), h(DM::total * tc.size);
+            store_as(tc.type, 1, one.data());
+            for(size_t idx = 0; idx < DM::total; idx++)
+                std::memcpy(h.data() + idx * tc.size, one.data(), tc.size);
+            char* d = nullptr;
+            ASSERT_EQ(hipMalloc(&d, h.size()), hipSuccess);
+            ASSERT_EQ(hipMemcpy(d, h.data(), h.size(), hipMemcpyHostToDevice), hipSuccess);
+            FastCheckMatrix m{d, tc.type, DM::rows, DM::cols, DM::ld, DM::stride};
+            const size_t    idx      = size_t(1 * DM::stride + 2 * DM::ld + 3);
+            const uint64_t  sentinel = fast_check_sentinel_bits(tc.type);
+            const uint64_t  poison   = fast_check_poison_bits(tc.type);
+            for(uint64_t expected : {sentinel, poison})
+            {
+                ASSERT_EQ(fast_check_corrupt_element_device(m, 1, 3, 2, 0), hipSuccess);
+                uint64_t got = 0;
+                ASSERT_EQ(hipMemcpy(&got, d + idx * tc.size, tc.size, hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(std::memcmp(&got, &expected, tc.size), 0) << tc.name;
+            }
+            (void)hipFree(d);
+        }
     }
 
     // Configurations fast_check cannot check exactly are refused with a reason, before any sums.
