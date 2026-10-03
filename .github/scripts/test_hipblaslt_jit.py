@@ -63,6 +63,8 @@ def main():
             "code-object",
             "code-object-gfx1250",
             "jit-gemm-gfx1250",
+            "jit-gemm-knowledge-gfx942",
+            "jit-gemm-knowledge-gfx1250",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
@@ -72,11 +74,21 @@ def main():
             "bundle-failures",
             "helper-failures",
             *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
+            "heuristic-knowledge",
+            "heuristic-knowledge-install",
             "disabled-api",
         ),
         help="Run only the selected regression routes (default: all)",
     )
+    parser.add_argument(
+        "--installed",
+        type=Path,
+        help="Prefix of a JIT-on, device-off runtime install of this checkout;"
+        " heuristic-knowledge-install runs only with it",
+    )
     args = parser.parse_args()
+    if args.case and "heuristic-knowledge-install" in args.case and not args.installed:
+        parser.error("heuristic-knowledge-install needs --installed")
     source = Path(__file__).resolve().parents[2]
     build = args.build.resolve(strict=True)
     output = args.output.resolve()
@@ -208,6 +220,39 @@ def main():
             600,
         ),
     ]
+    # Compile-only: the C++ matcher's tuned seeds for a device of that CU count,
+    # generated and built with comgr. gfx942 uses FP16 NT, whose seeds split K.
+    for architecture, cu_count, options in (
+        ("gfx942", "304", ["--transpose-b"]),
+        ("gfx1250", "192", []),
+    ):
+        commands.append(
+            (
+                f"jit-gemm-knowledge-{architecture}",
+                [
+                    sys.executable,
+                    str(
+                        source
+                        / "projects/hipblaslt/clients/tests/jit/test_knowledge_jit_gemm.py"
+                    ),
+                    str(staging / "hipblaslt-jit-knowledge-test"),
+                    str(staging / "hipblaslt-jit-code-object-test"),
+                    str(fixtures / "jit_gemm_request_gfx1250.json"),
+                    compiler,
+                    architecture,
+                    cu_count,
+                    str(build),
+                    str(
+                        source
+                        / "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
+                    ),
+                    str(output / f"jit-gemm-knowledge-{architecture}"),
+                    *options,
+                ],
+                {},
+                1200,
+            )
+        )
 
     fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
     for name in ("direct-gemm", "generic-gemm"):
@@ -419,6 +464,45 @@ def main():
                 ],
                 {},
                 900,
+            )
+        )
+    # The speed comparison with the catalog runs on gfx950 only.
+    commands.append(
+        (
+            "heuristic-knowledge",
+            [
+                sys.executable,
+                str(heuristic_script),
+                str(heuristic_test),
+                "knowledge",
+                str(output / "heuristic-knowledge"),
+                "--knowledge",
+                str(build / "Tensile/library" / args.architecture),
+                *(
+                    ["--bench", str(build / "clients/hipblaslt-bench")]
+                    if args.architecture == "gfx950"
+                    else []
+                ),
+            ],
+            {},
+            1800,
+        )
+    )
+    if args.installed:
+        commands.append(
+            (
+                "heuristic-knowledge-install",
+                [
+                    sys.executable,
+                    str(heuristic_script),
+                    str(heuristic_test),
+                    "knowledge-install",
+                    str(output / "heuristic-knowledge-install"),
+                    "--installed",
+                    str(args.installed.resolve(strict=True)),
+                ],
+                {},
+                600,
             )
         )
 

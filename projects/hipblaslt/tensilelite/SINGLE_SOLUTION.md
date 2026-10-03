@@ -221,6 +221,20 @@ defines this data-parallel contract, its unit translations and explicit unsuppor
 Selection rejects missing or changed modeled outputs; ordinary caller recipes without
 this marker retain the existing sentinel/default behavior. Explicit YAML bypasses this selector.
 
+A candidate can name its own contract in `modeled.contract`. A
+`tensilelite.tuned.v1` candidate is a tuned set from the logic files (see
+[predictor and TuningKnowledge](../JIT.md#predictor-and-tuningknowledge)). Its
+parameters travel as they are, and `modeled` holds `macro_tile` (MT0, MT1,
+DepthU) and `execution` (`strategy`, `assignment`). The parameters must
+include the nine-value `MatrixInstruction`, `DepthU`, `NonTemporalA/B`,
+`TileProcessingStrategy`, `WorkAssignment`, `GlobalSplitU` and
+`GlobalSplitUAlgorithm`, consistent with `modeled`. A malformed candidate fails
+the request. A parameter this Tensile does not know rejects only that candidate.
+So does a derivation that changes a supplied parameter, the macro tile, the
+persistent loop, or the GSU accumulation. Split-K helpers are built as for any
+other solution. An optional `knowledge` object on a candidate is copied
+unchanged into the selected candidate's `jit_prediction`.
+
 The request uses `schema_version: 1`. `model` identifies the caller's prediction
 method, such as `origami.gemm.estimation`. Candidates are tried in the supplied
 order; `predicted_cycles` records a positive estimate or null when none is available.
@@ -296,7 +310,8 @@ r as `<output>.<r>.yaml`. Generation never benchmarks candidates.
 ## hipBLASLt provider integration
 
 The library's TensileLite backend creates the ranked request internally
-from a generic operation request. Its data-parallel GEMM contract supplies
+from a generic operation request. Tuned sets from the knowledge file come first,
+as `tensilelite.tuned.v1` candidates. Its data-parallel GEMM contract supplies
 `MatrixInstruction`, macro tile/`DepthU`, `NonTemporalA/B`, workgroup mapping,
 stagger and launch outputs. This module retains the supplied order, translates
 model units, and rejects unsupported or changed predictions before compilation. Descriptor

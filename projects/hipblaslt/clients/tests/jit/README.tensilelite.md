@@ -30,9 +30,22 @@ cmake --build "$project_build" --parallel 8 --target \
   hipblaslt-jit-component-test hipblaslt-jit-debug-test hipblaslt-jit-debug-child-test \
   hipblaslt-jit-process-test \
   hipblaslt-jit-source-bundle-test hipblaslt-jit-code-object-test hipblaslt-jit-library-test \
-  hipblaslt-jit-bundle-freshness-test hipblaslt-jit-heuristic-test
+  hipblaslt-jit-bundle-freshness-test hipblaslt-jit-heuristic-test hipblaslt-jit-knowledge-test \
+  hipblaslt_jit_knowledge
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
+```
+
+`hipblaslt_jit_knowledge` writes the knowledge files of `GPU_TARGETS`.
+`heuristic-knowledge-install` runs only with `--installed <prefix>`, the prefix
+of a runtime-component install from a separate JIT-on build tree without a
+device library:
+
+```bash
+cmake --install "$install_build" --prefix "$install_prefix" --component runtime
+"$project_python" .github/scripts/test_hipblaslt_jit.py \
+  --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-install" \
+  --installed "$install_prefix" --case heuristic-knowledge-install
 ```
 
 Choose a fresh output directory. When other work shares the host, set
@@ -88,6 +101,9 @@ times, `heuristic-debug-progress` the relayed generator events, and
 | `jit-debug-child` | The generator child's side of `HIPBLASLT_JIT_DEBUG`, without a GPU: the `--debug` value a child gets, its `timing.json` read or reported missing or invalid, and its event file relayed while it runs as `child.*` lines, with malformed, out-of-order, oversized and partial lines dropped, rejected candidates coalesced, the per-child cap, a child killed mid-line, and a heartbeat after 10 s of silence |
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `jit-gemm-gfx1250` | Compile-only on any host: `Tensile.JitGemm` generates two ranked gfx1250 solutions from a heuristic request with the arguments hipBLASLt passes, skipping a ranked candidate that repeats an accepted kernel, and comgr assembles, compiles and links each one into a wave32 code object that uses the gfx1250 WMMA instruction |
+| `jit-gemm-knowledge-gfx942`, `jit-gemm-knowledge-gfx1250` | Compile-only on any host: the C++ matcher's tuned seeds for a device of that architecture's CU count (304 and 192) travel as `tensilelite.tuned.v1` candidates. Every seed is generated, or shares an accepted seed's kernel, and comgr builds each kernel. The gfx942 route uses FP16 NT, whose seeds mostly have `GlobalSplitU=-1` |
+| `heuristic-knowledge` | `HIPBLASLT_JIT=2` with the build's knowledge file: near a tuned row, several tuned seeds rank first, and the selected one keeps its parameters through derivation. Fixture files with one `GlobalSplitU=-1` MultipleBufferSingleKernel or `GlobalSplitU=4` MultipleBuffer seed pass both APIs. Without workspace, no split-K seed is ranked. With `HIPBLASLT_JIT` unset or `0`, results match and, under `strace`, the file is never opened. On gfx950, `hipblaslt-bench` is faster with knowledge than with `HIPBLASLT_JIT_KNOWLEDGE=none` at 2048³ and (1024, 5120, 25600), by median of five runs with a 2% margin |
+| `heuristic-knowledge-install` | Each installed knowledge file is in its architecture's directory under `lib/hipblaslt/library`, and the installed library's default lookup loads it |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
 | `generic-gemm` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
 | `generic-api` | Shared execution, ownership and failure assertions from the direct API test, selected through the generic interface |
@@ -162,8 +178,11 @@ the damaged copies of the bundle. `test_bundle_failures.py` also takes
 `test_heuristic.py` without `--backend` runs a route with the TensileLite
 generator of the build. `debug-killed-child` runs only that way: its Python
 wrapper kills the generator, then itself, once kernel source generation starts.
+So do `knowledge`, which takes `--knowledge <dir>` with the device's knowledge
+file and optionally `--bench <hipblaslt-bench>`, and `knowledge-install`, which
+takes `--installed <prefix>`.
 
-## gfx1250 routes
+## Compile-only routes
 
 `test_gfx1250_jit_gemm.py <code-object-test> <request> <compiler> <fresh-output>`
 runs the `jit-gemm-gfx1250` route. The driver passes
@@ -173,6 +192,15 @@ ranking of the six best gfx950 candidates retargeted to gfx1250.
 `hipblaslt-jit-code-object-test --bundle` also accepts a full-build bundle kept
 with `--keep-build-tmp`, whose code objects are then compared with the
 comgr-built ones.
+
+`test_knowledge_jit_gemm.py <knowledge-test> <code-object-test> <request>
+<compiler> <architecture> <cu-count> <build> <logic> <fresh-output>
+[--transpose-b]` runs the `jit-gemm-knowledge-<architecture>` routes on the
+same request. It uses `<build>/Tensile/library/<architecture>`'s knowledge
+file, or extracts one from the `asm_full` directory `<logic>` when the build
+has none; gfx942 takes about 2.5 minutes. `hipblaslt-jit-knowledge-test
+--nearest <file> <core-key> <m> <n> <batch> <k> <cu-count>` prints the seeds,
+one JSON line each.
 
 ## Regenerate the committed bundles
 

@@ -15,6 +15,8 @@ import subprocess
 import sys
 
 TESTS = ("a_tensile_assemble", "c_tensile_helper_compile", "g_tensile_mixed_link")
+# The wave size and an instruction each architecture's FP16 kernels use.
+NATIVE = {"gfx942": (64, "v_mfma_f32_"), "gfx1250": (32, "v_wmma_f32_16x16x32_f16")}
 
 
 def require(condition, message):
@@ -22,16 +24,11 @@ def require(condition, message):
         raise AssertionError(message)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("code_object_test", type=Path)
-    parser.add_argument("request", type=Path)
-    parser.add_argument("cxx_compiler")
-    parser.add_argument("fresh_output", type=Path)
-    args = parser.parse_args()
-    args.fresh_output.mkdir(parents=True, exist_ok=False)
-    output = args.fresh_output.resolve()
-    request = args.request.resolve(strict=True)
+def generate_and_build(code_object_test, request, cxx_compiler, output, architecture):
+    """Generate the request's ranked bundles and build each with comgr; their manifests.
+
+    JitGemm writes fewer bundles than requested when it rejects candidates.
+    """
     generated = output / "generated"
     with (output / "generate.log").open("w") as log:
         status = subprocess.run(
@@ -42,9 +39,9 @@ def main():
                 str(request),
                 str(generated),
                 "--architecture",
-                "gfx1250",
+                architecture,
                 "--cxx-compiler",
-                args.cxx_compiler,
+                cxx_compiler,
                 "--source-only",
                 "--code-object-version",
                 "4",
@@ -58,30 +55,32 @@ def main():
         ).returncode
     require(status == 0, f"Tensile.JitGemm exited with {status}; see {log.name}")
 
-    requested = json.loads(request.read_text())["requested_solutions"]
+    built = len(list(generated.glob("bundle-*")))
+    wavefront, instruction = NATIVE[architecture]
     command = [
-        str(args.code_object_test),
+        str(code_object_test),
         "--target",
-        "gfx1250",
+        architecture,
         "--out",
         str(output / "code-object"),
     ]
-    kernels = set()
-    for rank in range(requested):
+    kernels, manifests = set(), []
+    for rank in range(built):
         bundle = generated / f"bundle-{rank}"
         manifest = json.loads((bundle / "manifest.json").read_text())
         resolved = manifest["jit_prediction"]["resolved_parameters"]
         require(
-            manifest["architecture"]["resolved"] == "gfx1250"
-            and resolved["WavefrontSize"] == 32,
-            f"bundle-{rank} is not a gfx1250 wave32 solution",
+            manifest["architecture"]["resolved"] == architecture
+            and resolved["WavefrontSize"] == wavefront,
+            f"bundle-{rank} is not an {architecture} wave{wavefront} solution",
         )
         (assembly,) = (bundle / "sources").glob("*.s")
         require(
-            "v_wmma_f32_16x16x32_f16" in assembly.read_text(),
-            f"bundle-{rank} does not use the gfx1250 WMMA instruction",
+            instruction in assembly.read_text(),
+            f"bundle-{rank} does not use {instruction}",
         )
         kernels.add(manifest["main_kernel"]["name"])
+        manifests.append(manifest)
         # The code-object test names each bundle after its parent directory.
         named = output / "bundles" / f"rank-{rank}"
         named.mkdir(parents=True)
@@ -89,8 +88,8 @@ def main():
         command += ["--bundle", str(named / "bundle")]
         command += [arg for test in TESTS for arg in ("--only", f"{test}[rank-{rank}]")]
     require(
-        len(kernels) == requested,
-        f"The {requested} bundles do not hold distinct kernels",
+        len(kernels) == built,
+        f"The {built} bundles do not hold distinct kernels",
     )
 
     with (output / "code-object.log").open("w") as log:
@@ -100,11 +99,28 @@ def main():
     require(status == 0, f"The comgr build exited with {status}; see {log.name}")
     passed = (output / "code-object.log").read_text().count("\nPASS ")
     require(
-        passed == len(TESTS) * requested,
-        f"Expected {len(TESTS) * requested} comgr builds to pass, got {passed}",
+        passed == len(TESTS) * built,
+        f"Expected {len(TESTS) * built} comgr builds to pass, got {passed}",
     )
+    return manifests
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("code_object_test", type=Path)
+    parser.add_argument("request", type=Path)
+    parser.add_argument("cxx_compiler")
+    parser.add_argument("fresh_output", type=Path)
+    args = parser.parse_args()
+    args.fresh_output.mkdir(parents=True, exist_ok=False)
+    output = args.fresh_output.resolve()
+    request = args.request.resolve(strict=True)
+    manifests = generate_and_build(
+        args.code_object_test, request, args.cxx_compiler, output, "gfx1250")
+    requested = json.loads(request.read_text())["requested_solutions"]
+    require(len(manifests) == requested, f"{len(manifests)} of {requested} solutions generated")
     print(
-        f"PASS jit-gemm-gfx1250: {requested} ranked solutions generated and built for gfx1250"
+        f"PASS jit-gemm-gfx1250: {len(manifests)} ranked solutions generated and built for gfx1250"
     )
 
 

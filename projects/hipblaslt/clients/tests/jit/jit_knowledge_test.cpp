@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-gemm-internal.hpp"
+#include "hipblaslt-jit-json.hpp"
 #include "hipblaslt-jit-knowledge.hpp"
 #include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
@@ -538,6 +539,57 @@ namespace
                   << " seeds" << std::endl;
         return match.seeds.empty();
     }
+
+    std::string policyName(hipblaslt_jit::ExecutionPolicy::Strategy strategy)
+    {
+        using Strategy = hipblaslt_jit::ExecutionPolicy::Strategy;
+        return strategy == Strategy::StreamK        ? "StreamK"
+               : strategy == Strategy::DataParallel ? "DataParallel"
+                                                    : "None";
+    }
+
+    std::string policyName(hipblaslt_jit::ExecutionPolicy::Assignment assignment)
+    {
+        using Assignment = hipblaslt_jit::ExecutionPolicy::Assignment;
+        return assignment == Assignment::Hybrid             ? "Hybrid"
+               : assignment == Assignment::DynamicWorkQueue ? "DynamicWorkQueue"
+                                                            : "StaticGrid";
+    }
+
+    // Prints the seeds of a plain GEMM on a device without a PCI chip ID, one JSON
+    // line each, for the compile-only routes of architectures this host lacks.
+    int nearest(const fs::path& path, const std::string& core, char** sizes, int cuCount)
+    {
+        namespace json = hipblaslt_jit::json;
+        knowledge::Database database(path);
+        knowledge::Problem  query{core, {}, {}};
+        for(size_t i = 0; i < 4; ++i)
+            query.size[i] = std::stoull(sizes[i]);
+        const auto match = database.nearest(query, {cuCount, std::nullopt, {}}, 8);
+        for(const auto& seed : match.seeds)
+        {
+            json::Members parameters, asserts;
+            for(const auto& parameter : seed.parameters)
+                parameters.emplace_back(parameter.name, parameter.json);
+            for(const auto& [name, value] : seed.asserts)
+                asserts.emplace_back(name, json::literal(value));
+            std::cout << json::object({
+                {"group", json::quote(match.group)},
+                {"macro_tile", json::array(seed.macroTile)},
+                {"depth_u", json::literal(seed.depthU)},
+                {"strategy", json::quote(policyName(seed.policy.strategy))},
+                {"assignment", json::quote(policyName(seed.policy.assignment))},
+                {"gsu", json::literal(seed.globalSplitU)},
+                {"parameters", json::object(parameters)},
+                {"asserts", json::object(asserts)},
+                {"branch", json::literal(seed.branch)},
+                {"source", json::quote(seed.source)},
+                {"row", json::array(seed.row)},
+                {"distance", json::literal(seed.distance)},
+            }) << '\n';
+        }
+        return match.seeds.empty();
+    }
 }
 
 int main(int argc, char** argv)
@@ -546,10 +598,14 @@ int main(int argc, char** argv)
     {
         if(argc == 3 && std::string(argv[1]) == "--decode")
             return decode(argv[2]);
+        if(argc == 9 && std::string(argv[1]) == "--nearest")
+            return nearest(argv[2], argv[3], argv + 4, std::stoi(argv[8]));
         if(argc != 2)
         {
             std::cerr << "Usage: " << argv[0] << " FRESH_OUTPUT_DIRECTORY\n"
-                      << "       " << argv[0] << " --decode KNOWLEDGE_FILE\n";
+                      << "       " << argv[0] << " --decode KNOWLEDGE_FILE\n"
+                      << "       " << argv[0]
+                      << " --nearest KNOWLEDGE_FILE CORE_KEY M N BATCH K CU_COUNT\n";
             return 2;
         }
         const fs::path dir = argv[1];

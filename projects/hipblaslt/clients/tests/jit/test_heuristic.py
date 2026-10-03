@@ -16,9 +16,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import statistics
 import subprocess
 import sys
 import time
+import zlib
 
 import msgpack
 
@@ -31,7 +34,16 @@ EQUALITY_SIZES = ((1024, 4096, 20), (2048, 128, 16), (864, 512, 432), (128, 5120
 # "tensilelite" or "test"; main sets it.
 BACKEND = "tensilelite"
 # Routes that need the generator child process.
-TENSILELITE_ROUTES = ("debug-killed-child",)
+TENSILELITE_ROUTES = ("debug-killed-child", "knowledge", "knowledge-install")
+# The knowledge routes' inputs; main sets them.
+KNOWLEDGE = None
+BENCH = None
+INSTALLED = None
+TUNED = "tensilelite.tuned.v1"
+KNOWLEDGE_FILES = "hipblaslt-jit-knowledge-*.dat.zlib"
+SPLITK_SIZE = (256, 256, 4096)
+# Knowledge must beat the catalog by this factor in median latency.
+SPEED_MARGIN = 1.02
 
 
 def require(condition, message):
@@ -60,10 +72,10 @@ class Runner:
         if replay:
             self.env["HIPBLASLT_JIT_TEST_REPLAY"] = replay
 
-    def __call__(self, name, args, drop=(), **overrides):
+    def __call__(self, name, args, drop=(), prefix=(), **overrides):
         env = {key: value for key, value in self.env.items() if key not in drop}
         env.update(overrides)
-        command = [str(self.executable), *args]
+        command = [*prefix, str(self.executable), *args]
         result = subprocess.run(
             command, env=env, text=True, capture_output=True, timeout=900
         )
@@ -587,6 +599,7 @@ def report(run, output):
 
 
 def partial_fill(run, output):
+    # Every run drops it: the knowledge found beside the device library keys the JIT library.
     drop = ("HIPBLASLT_TENSILE_LIBPATH",)
     probe = 4096
     stderr, records = run(
@@ -604,6 +617,7 @@ def partial_fill(run, output):
     stderr, records = run(
         "publish",
         ["--api", "c", "--requested", "1", "--no-run"],
+        drop,
         HIPBLASLT_JIT="2",
         **generating,
     )
@@ -1303,6 +1317,249 @@ def debug_killed_child(run, output):
     )
 
 
+def prediction_python(output):
+    """A Python wrapper that copies each Tensile.JitGemm prediction into
+    $HIPBLASLT_JIT_TEST_PREDICTIONS before hipBLASLt removes the scratch."""
+    python = output / "prediction-python"
+    python.write_text(
+        "#!/bin/sh\n"
+        f'"{sys.executable}" "$@"\n'
+        "status=$?\n"
+        'if [ "$2" = Tensile.JitGemm ] && [ -f "$4.prediction.json" ]; then\n'
+        '    cp "$4.prediction.json" "$HIPBLASLT_JIT_TEST_PREDICTIONS/$$.json"\n'
+        "fi\n"
+        "exit $status\n"
+    )
+    python.chmod(0o700)
+    return python
+
+
+def predicted(run, output, name, args, knowledge, **overrides):
+    """Runs a HIPBLASLT_JIT=2 query with the knowledge directory in a fresh JIT
+    library; returns its stderr, records and the one generation's prediction."""
+    predictions = output / f"{name}.predictions"
+    predictions.mkdir()
+    stderr, records = run(
+        name,
+        args,
+        HIPBLASLT_JIT="2",
+        HIPBLASLT_TENSILE_LIBPATH=str(knowledge),
+        HIPBLASLT_JIT_LIBRARY_PATH=str(output / f"{name}.lib"),
+        HIPBLASLT_JIT_PYTHON=str(output / "prediction-python"),
+        HIPBLASLT_JIT_TEST_PREDICTIONS=str(predictions),
+        **overrides,
+    )
+    found = [json.loads(path.read_text()) for path in predictions.iterdir()]
+    require(len(found) == 1, f"{name} ran {len(found)} generations, not 1")
+    return stderr, records, found[0]
+
+
+def check_tuned(prediction):
+    """The generator selected a tuned seed and derived its parameters unchanged."""
+    seed = next(c for c in prediction["ranked_candidates"] if c["id"] == prediction["candidate_id"])
+    require(
+        prediction.get("modeled_contract") == TUNED and seed["modeled"]["contract"] == TUNED,
+        f"A tuned seed was not selected: {prediction['summary']}",
+    )
+    resolved = prediction["resolved_parameters"]
+    changed = {
+        name: (value, resolved[name])
+        for name, value in seed["parameters"].items()
+        if name != "MatrixInstruction" and name in resolved and resolved[name] != value
+    }
+    require(not changed, f"Derivation changed the seed's parameters: {changed}")
+    require(
+        [resolved["MacroTile0"], resolved["MacroTile1"]] == seed["modeled"]["macro_tile"][:2],
+        "Derivation changed the seed's macro tile",
+    )
+    return seed
+
+
+def splitk_knowledge(directory, source, entry, gsu, algorithm):
+    """A copy of source holding one generic set for entry's ProblemType: a 64x64
+    FP16 split-K seed at SPLITK_SIZE."""
+    from Tensile import JitKnowledge
+
+    header, _ = JitKnowledge.readHeader(source)
+    params = {
+        "MatrixInstruction": [16, 16, 16, 1, 1, 2, 2, 2, 2],
+        "DepthU": 64,
+        "NonTemporalA": 0,
+        "NonTemporalB": 0,
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
+        "GlobalSplitU": gsu,
+        "GlobalSplitUAlgorithm": algorithm,
+        "WorkGroupMapping": 8,
+    }
+    seed = {
+        "macro_tile": [64, 64], "waves": [2, 2], "instruction": [16, 16, 16, 1], "depth_u": 64,
+        "nt": [0, 0], "policy": {"strategy": "None", "assignment": "StaticGrid"}, "gsu": gsu,
+        "gsu_algorithm": algorithm, "params": list(range(len(params))), "asserts": {},
+        "source": {"file": "split-k", "index": 0},
+    }
+    m, n, k = SPLITK_SIZE
+    block = zlib.compress(msgpack.packb({
+        "param_dictionary": [list(item) for item in params.items()],
+        "sets": [seed],
+        "rows": [[m, n, 1, k, 0, 0]],
+    }))
+    JitKnowledge.write(
+        directory / source.name, header["arch"], header["library_arch"],
+        [{"kind": "generic", "cu_count": None, "pci_ids": []}],
+        [({"branch": 0, "problem_type": entry["problem_type"], "core_key": entry["core_key"],
+           "rows": 1, "sets": 1}, block)],
+    )
+
+
+def bench_us(run, output, name, size, **overrides):
+    """The median hipblaslt-bench latency in microseconds over five processes
+    that share one JIT library."""
+    m, n, k = size
+    times = []
+    for repeat in range(5):
+        result = subprocess.run(
+            [str(BENCH), "-m", str(m), "-n", str(n), "-k", str(k), "--iters", "50",
+             "--cold_iters", "10", "--use_gpu_timer"],
+            env=dict(run.env, HIPBLASLT_JIT="2",
+                     HIPBLASLT_JIT_LIBRARY_PATH=str(output / f"{name}.lib"), **overrides),
+            text=True, capture_output=True, timeout=900,
+        )
+        (output / f"{name}-{repeat}.stdout").write_text(result.stdout + result.stderr)
+        require(result.returncode == 0, f"{name} exited with {result.returncode}; see {output}")
+        lines = result.stdout.splitlines()
+        row = next(i for i, line in enumerate(lines) if "hipblaslt-Gflops" in line)
+        fields = re.sub(r"^\s*\[\d+\]:", "", lines[row]).strip().split(",")
+        times.append(float(lines[row + 1].strip().split(",")[fields.index("us")]))
+    return statistics.median(times)
+
+
+def knowledge(run, output):
+    require(KNOWLEDGE, "The knowledge route needs --knowledge")
+    (source,) = KNOWLEDGE.glob(KNOWLEDGE_FILES)
+    flat = output / "knowledge"
+    flat.mkdir()
+    (flat / source.name).symlink_to(source)
+    prediction_python(output)
+    stderr, records, tuned = predicted(
+        run, output, "tuned", ["--api", "c", "--requested", "1", *size_args(EQUALITY_SIZES[2])],
+        flat,
+    )
+    check_jit_results(stderr, records, ("c",), 1)
+    first = tuned["ranked_candidates"][0]
+    require(
+        first.get("modeled", {}).get("contract") == TUNED and first.get("knowledge", {}).get("row"),
+        f"The first candidate is not a tuned row: {first}",
+    )
+    seeds = sum(c.get("modeled", {}).get("contract") == TUNED for c in tuned["ranked_candidates"])
+    require(seeds > 1, f"Only {seeds} tuned seed was ranked")
+    check_tuned(tuned)
+
+    from Tensile import JitKnowledge
+
+    header, _ = JitKnowledge.readHeader(source)
+    group = first["knowledge"]["group"]
+    (entry,) = [
+        e for e in header["index"]
+        if f"{e['problem_type']['name']} (branch {e['branch']})" == group
+    ]
+    splitK = []
+    for gsu, algorithm in ((-1, "MultipleBufferSingleKernel"), (4, "MultipleBuffer")):
+        name = f"split-k-gsu{gsu}"
+        directory = output / name
+        directory.mkdir()
+        splitk_knowledge(directory, source, entry, gsu, algorithm)
+        stderr, records, prediction = predicted(
+            run, output, name, ["--api", "both", "--requested", "1", *size_args(SPLITK_SIZE)],
+            directory,
+        )
+        check_jit_results(stderr, records, ("c", "cpp"), 1)
+        check_tuned(prediction)
+        require(prediction["knowledge"]["source"] == "split-k#0", f"{name} did not use its seed")
+        splitK.append(f"GSU={gsu} {algorithm}")
+        if gsu > 1:
+            # Without workspace the predictor skips the fixed split-K seed.
+            stderr, records, prediction = predicted(
+                run, output, f"{name}-no-workspace",
+                ["--api", "c", "--requested", "1", "--workspace", "0", *size_args(SPLITK_SIZE)],
+                directory,
+            )
+            check_jit_results(stderr, records, ("c",), 1)
+            require(
+                all(c.get("modeled", {}).get("contract") != TUNED
+                    for c in prediction["ranked_candidates"]),
+                "A split-K seed was ranked without workspace",
+            )
+
+    # Without HIPBLASLT_JIT the knowledge file is never opened.
+    strace = shutil.which("strace")
+    seen = {}
+    for name, overrides in (("unset", {}), ("jit-0", {"HIPBLASLT_JIT": "0"})):
+        trace = output / f"{name}.strace"
+        prefix = [strace, "-f", "-qq", "-e", "trace=open,openat,openat2", "-o", str(trace)]
+        _, records = run(
+            name, ["--api", "both", "--no-run"], prefix=prefix if strace else (),
+            HIPBLASLT_TENSILE_LIBPATH=str(flat), **overrides,
+        )
+        seen[name] = results(records)
+        if strace:
+            require(source.name not in trace.read_text(), f"{name} opened {source.name}")
+    require(seen["unset"] == seen["jit-0"], "HIPBLASLT_JIT=0 changed the results")
+
+    speed = ""
+    if BENCH:
+        timings = []
+        for size in ((2048, 2048, 2048), (1024, 5120, 25600)):
+            label = "x".join(map(str, size))
+            withKnowledge = bench_us(
+                run, output, f"bench-{label}", size, HIPBLASLT_TENSILE_LIBPATH=str(flat))
+            catalog = bench_us(
+                run, output, f"bench-{label}-none", size, HIPBLASLT_TENSILE_LIBPATH=str(flat),
+                HIPBLASLT_JIT_KNOWLEDGE="none")
+            require(
+                withKnowledge * SPEED_MARGIN < catalog,
+                f"{label}: {withKnowledge} us with knowledge, {catalog} us without",
+            )
+            timings.append(f"{label} {withKnowledge:.1f} vs {catalog:.1f} us")
+        speed = "; faster than HIPBLASLT_JIT_KNOWLEDGE=none: " + ", ".join(timings)
+    print(
+        f"PASS heuristic-knowledge: {seeds} tuned seeds from {group} ranked first, the selected"
+        " one kept as derived;"
+        f" split-K seeds {', '.join(splitK)} pass; no split-K seed without workspace;"
+        f" mode 0 {'never opens the file' if strace else 'unchanged (no strace)'}{speed}"
+    )
+
+
+def knowledge_install(run, output):
+    require(INSTALLED, "The knowledge-install route needs --installed")
+    library = INSTALLED / "lib/hipblaslt/library"
+    files = sorted(library.glob(f"*/{KNOWLEDGE_FILES}"))
+    require(files, f"No knowledge file under {library}")
+    for path in files:
+        require(
+            path.name == f"hipblaslt-jit-knowledge-{path.parent.name}.dat.zlib",
+            f"{path} is not in its architecture's directory",
+        )
+    stderr, _ = run(
+        "installed",
+        ["--api", "c", "--requested", "1", "--no-run"],
+        drop=("HIPBLASLT_TENSILE_LIBPATH",),
+        HIPBLASLT_JIT="2",
+        HIPBLASLT_JIT_DEBUG="knowledge",
+        LD_LIBRARY_PATH=os.pathsep.join(
+            filter(None, (str(INSTALLED / "lib"), os.environ.get("LD_LIBRARY_PATH")))),
+    )
+    loads = [line for line in events(debug_lines(stderr), "load") if line["cat"] == "knowledge"]
+    require(len(loads) == 1, f"Expected one knowledge load record: {loads}")
+    require(
+        loads[0]["status"] == "loaded"
+        and Path(loads[0]["path"]).resolve().parent.parent == library.resolve(),
+        f"The installed knowledge was not found next to libhipblaslt: {loads[0]}",
+    )
+    sizes = ", ".join(f"{p.parent.name} {p.stat().st_size / 2**20:.1f} MiB" for p in files)
+    print(f"PASS heuristic-knowledge-install: {sizes}; lookup loads {loads[0]['arch']}")
+
+
 def jit_off(run, output):
     args = ["--api", "both", "--handles", "2", "--queries", "3", "--no-run"]
     stderr, ignored = run("jit-1", args, HIPBLASLT_JIT="1")
@@ -1337,12 +1594,14 @@ ROUTES = {
     "debug-off": debug_off,
     "debug-file": debug_file,
     "debug-killed-child": debug_killed_child,
+    "knowledge": knowledge,
+    "knowledge-install": knowledge_install,
     "jit-off": jit_off,
 }
 
 
 def main():
-    global BACKEND
+    global BACKEND, KNOWLEDGE, BENCH, INSTALLED
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("route", choices=ROUTES)
@@ -1351,7 +1610,19 @@ def main():
     parser.add_argument(
         "--replay", action="append", type=Path, help="a bundle for the test backend to replay"
     )
+    parser.add_argument(
+        "--knowledge", type=Path, help="knowledge: the directory holding the device's knowledge file"
+    )
+    parser.add_argument(
+        "--bench", type=Path, help="knowledge: hipblaslt-bench, to compare speed with the catalog"
+    )
+    parser.add_argument(
+        "--installed", type=Path, help="knowledge-install: the prefix of a JIT-on runtime install"
+    )
     args = parser.parse_args()
+    KNOWLEDGE = args.knowledge and args.knowledge.resolve(strict=True)
+    BENCH = args.bench and args.bench.resolve(strict=True)
+    INSTALLED = args.installed and args.installed.resolve(strict=True)
     if (args.backend == "test") != bool(args.replay):
         parser.error("--replay is required with --backend test, and only then")
     if args.backend == "test" and args.route in TENSILELITE_ROUTES:

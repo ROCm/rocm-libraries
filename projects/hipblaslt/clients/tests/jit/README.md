@@ -41,8 +41,8 @@ separated by `:` (`;` on Windows). `HIPBLASLT_JIT_TEST_FAULT` set to `generate`,
 request to the file `HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug` and
-  `jit-code-object`, and with `HIPBLASLT_ENABLE_YAML=OFF` also `jit-library`,
-  `jit-library-concurrency` and `jit-bundle-freshness`. The last fails when
+  `jit-code-object`, and with `HIPBLASLT_ENABLE_YAML=OFF` also `jit-knowledge`,
+  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. The last fails when
   the committed bundles no longer match the generator;
   [their README](data/README.md) says how to regenerate them. A build with
   `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and `jit-disabled`.
@@ -60,6 +60,7 @@ request to the file `HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
 | --- | --- |
 | `jit-source-bundle` | Source bundles read by directory convention: file ordering and roles, a missing `sources` or `library` directory, duplicate or corrupt library entries, missing main assembly, nested entries, empty or oversized files, the file-count cap, native Unicode paths, compressed library bytes, and path and symbolic-link containment |
 | `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the catalog knowledge seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
+| `jit-knowledge` | The tuning knowledge files, without a GPU, on fixture files it writes: nearest-set order, ties, the cap and at most two sets per tile shape; the ProblemType with the fewest extra epilogue features; branch order by PCI chip ID, CU count, fallback chip and generic, falling through a branch without the ProblemType; only the requested group's block inflated, and a corrupt block disabling only its group; the lookup per architecture and in a flat directory, with one `knowledge` debug line for a loaded file, a wrong architecture or schema, a missing file and `HIPBLASLT_JIT_KNOWLEDGE=none`; and a version that changes with the content. `--decode <file>` reports the first-use time of a file's largest group |
 | `jit-debug` | The `HIPBLASLT_JIT_DEBUG` line writer, without a GPU: value parsing and its warning, JSON escaping and truncation, the line size cap, per-process file names, lines from several threads and processes intact in one file, and rate limiting with aggregate lines |
 | `jit-code-object`, `jit-code-object-gpu` | comgr builds, compile-only for gfx950 or loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, and on the GPU loaded and resolved |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, a replay after an Origami prediction, rejected mock options, and bundle lifetime |

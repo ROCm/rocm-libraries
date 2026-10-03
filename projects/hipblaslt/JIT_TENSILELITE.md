@@ -350,10 +350,14 @@ describes the shared driver, `.github/scripts/test_hipblaslt_jit.py`, which
 runs the tests that generate with this backend on a GPU of the requested
 architecture. Its heuristic routes cover what the
 [JIT guide's validation](JIT.md#validation) lists, through the generator, and a
-generator killed during generation. The `code-object-gfx1250` and
-`jit-gemm-gfx1250` routes run compile-only for gfx1250 on any host; the second
-generates heuristic solutions with `Tensile.JitGemm` and builds them with
-comgr. The [benchmark guide](clients/bench/README.jit.md) describes the
+generator killed during generation. `heuristic-knowledge` checks the tuned
+seeds of the device's knowledge file, split-K seeds, and the speed against the
+catalog on gfx950. `heuristic-knowledge-install` checks an installed file's
+lookup. The `code-object-gfx1250` and `jit-gemm-gfx1250` routes run compile-only
+for gfx1250 on any host; the second generates heuristic solutions with
+`Tensile.JitGemm` and builds them with comgr. `jit-gemm-knowledge-gfx942` and
+`jit-gemm-knowledge-gfx1250` do the same for the tuned seeds of those
+architectures' knowledge. The [benchmark guide](clients/bench/README.jit.md) describes the
 prediction and benchmark checks.
 
 The shared `hipblaslt-jit-gemm-ci.yml` workflow configures gfx90a, gfx942,
