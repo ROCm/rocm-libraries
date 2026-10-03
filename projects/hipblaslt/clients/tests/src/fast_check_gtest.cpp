@@ -17,6 +17,9 @@
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+#include "mxDataGen.hpp"
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -545,6 +548,47 @@ namespace
         EXPECT_EQ(e.max_result, max_result);
         EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
     }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    // integer_exact MX data: every dequantized value is an element in {0, 1, 2} (A) or
+    // {-2, ..., 2} (B) times a scale of 1, 2 or 4, and more than one scale is used, in both the
+    // layout the generator aligns itself and the one this change recomputes.
+    TEST(FastCheck_pre_checkin, integer_exact_mx_values_are_exact_with_varied_scales)
+    {
+        const uint64_t rows = 64, cols = 128;
+        for(bool isMatrixA : {true, false})
+            for(bool transpose : {false, true})
+            {
+                std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
+                std::vector<float>   ref = generateMXInput(HIP_R_8F_E4M3,
+                                                         HIP_R_8U,
+                                                         data.data(),
+                                                         scale.data(),
+                                                         rows,
+                                                         cols,
+                                                         rows,
+                                                         transpose,
+                                                         32,
+                                                         1,
+                                                         isMatrixA,
+                                                         MXScaleLayout::None,
+                                                         "integer_exact");
+                ASSERT_EQ(ref.size(), rows * cols);
+                bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
+                for(float v : ref)
+                {
+                    const float a = std::fabs(v);
+                    ASSERT_TRUE(a == 0 || a == 1 || a == 2 || a == 4 || a == 8)
+                        << v << " isMatrixA=" << isMatrixA << " transpose=" << transpose;
+                    sawLargeScale |= a == 8 || a == 4;
+                    sawUnitScale |= a == 1;
+                    sawNegative |= v < 0;
+                }
+                EXPECT_TRUE(sawLargeScale && sawUnitScale);
+                EXPECT_EQ(sawNegative, !isMatrixA);
+            }
+    }
+#endif
 
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
