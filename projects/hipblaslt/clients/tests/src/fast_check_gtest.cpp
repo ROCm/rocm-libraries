@@ -740,6 +740,23 @@ namespace
         EXPECT_GT(counts[2], 0);
     }
 
+    // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
+    // name is rejected.
+    TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
+    {
+        IntegerExactPattern p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("standard", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        EXPECT_TRUE(parse_integer_exact_pattern("ternary", p));
+        EXPECT_EQ(p, IntegerExactPattern::ternary);
+        EXPECT_TRUE(parse_integer_exact_pattern("sparse_k", p));
+        EXPECT_EQ(p, IntegerExactPattern::sparse_k);
+        EXPECT_FALSE(parse_integer_exact_pattern("sparse", p));
+    }
+
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
     // the value it had: a correct value becomes the sentinel, and the sentinel becomes poison.
     TEST(FastCheckDevice_pre_checkin, corrupt_element_changes_exactly_one_element)
