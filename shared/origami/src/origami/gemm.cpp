@@ -82,6 +82,16 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   num_wgs            = wgs;
   num_timesteps      = timesteps;
   splitting_factor   = split;
+  // Opt-in (heuristic entry): count the WGs resident on a CU at the same time
+  // (Tensile CUOccupancy) when converting work into WG waves.
+  if (heuristic.occupancy_aware_timesteps) {
+    const size_t work = (wgs > num_output_tiles) ? wgs : num_output_tiles;
+    num_timesteps     = compute_occupancy_aware_timesteps(work,
+                                                      N_CU,
+                                                      config.occupancy,
+                                                      heuristic.occ_timesteps_scale,
+                                                      heuristic.occ_timesteps_cap);
+  }
   k_per_split        = math::safe_ceil_div(problem.size.k, splitting_factor);
   k_iters            = (config.mt.k > 0) ? math::safe_ceil_div(k_per_split, config.mt.k) : 1;
 
@@ -427,6 +437,17 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
 
   return std::make_tuple(
       reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
+}
+
+// Number of WG waves when `occupancy` WGs (scaled, clamped to [1, cap]) are resident
+// on each of `num_cus` CUs at the same time.
+size_t compute_occupancy_aware_timesteps(
+    size_t work, size_t num_cus, int occupancy, double scale, double cap) {
+  const double conc = std::clamp(static_cast<double>(occupancy) * scale, 1.0, std::max(cap, 1.0));
+  return std::max<size_t>(
+      1,
+      static_cast<size_t>(std::ceil(static_cast<double>(work)
+                                    / (static_cast<double>(num_cus) * conc))));
 }
 
 // Check if MT fits in LDS
@@ -2099,7 +2120,7 @@ double compute_tile_latency(const problem_t& problem,
   const double waves_per_simd =
       wgs_per_cu * static_cast<double>(waves_per_wg) / static_cast<double>(hardware.simds_per_cu());
   const double occupancy_score = std::clamp(
-      waves_per_simd / heuristic_defaults_t::TARGET_OCCUPANCY, 0.0, 1.0);
+      waves_per_simd / heuristic.target_occupancy, 0.0, 1.0);
 
   // Occupancy only hides *exposed* memory stalls; for compute-bound tiles
   // (L_compute >= L_mem) memory is fully hidden, so the penalty must fade.
@@ -2112,7 +2133,7 @@ double compute_tile_latency(const problem_t& problem,
   // boundaries. config.occupancy is used directly so register-starved kernels
   // are penalised (unlike a max-occupancy wave-slot ceiling).
   const double wg_score = std::clamp(
-      wgs_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
+      wgs_per_cu / heuristic.target_wg_slots_per_cu, 0.0, 1.0);
 
   // Combined throughput score: occupancy * wg.
   double per_wave_score = occupancy_score_eff * wg_score;
@@ -2323,7 +2344,7 @@ double compute_tile_latency(const problem_t& problem,
       ? std::max(0.0, phys_cl / std::max(mt_k_dd * b_bytes_du, 1.0) - 1.0) : 0.0;
   const double narrow_load_factor = a_underfill + b_underfill;
   const double L_narrow_load = narrow_load_factor * static_cast<double>(k_iters)
-                             * heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY;
+                             * heuristic.narrow_load_iter_penalty;
 
   // DepthU load waste: an MT_K that doesn't divide K loads ceil(K/MT_K)*MT_K deep
   // but uses only K; the extra depth is wasted, measured the same whether it's an

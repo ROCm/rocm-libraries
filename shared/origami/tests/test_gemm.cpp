@@ -1329,6 +1329,124 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   REQUIRE(base.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
 }
 
+TEST_CASE("Heuristics: per-tile constants and occupancy-aware timesteps defaults",
+          "[heuristics]") {
+  origami::heuristic_params_t defaults;
+
+  // The per-arch overridable per-tile constants default to the former hard-coded values.
+  REQUIRE(defaults.narrow_load_iter_penalty ==
+          origami::heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY);
+  REQUIRE(defaults.target_occupancy == origami::heuristic_defaults_t::TARGET_OCCUPANCY);
+  REQUIRE(defaults.target_wg_slots_per_cu ==
+          origami::heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU);
+  REQUIRE(defaults.narrow_load_iter_penalty == 500.0);
+  REQUIRE(defaults.target_occupancy == 4.0);
+  REQUIRE(defaults.target_wg_slots_per_cu == 2.0);
+
+  // Occupancy-aware timesteps are off by default.
+  REQUIRE(defaults.occupancy_aware_timesteps == false);
+  REQUIRE(defaults.occ_timesteps_scale == 1.0);
+  REQUIRE(defaults.occ_timesteps_cap == 4.0);
+
+  // merge_with copies the new fields too.
+  origami::heuristic_params_t base;
+  origami::heuristic_params_t other;
+  other.narrow_load_iter_penalty  = 125.0;
+  other.target_occupancy          = 8.0;
+  other.target_wg_slots_per_cu    = 1.0;
+  other.occupancy_aware_timesteps = true;
+  other.occ_timesteps_scale       = 0.5;
+  other.occ_timesteps_cap         = 2.0;
+  base.merge_with(other);
+  REQUIRE(base.narrow_load_iter_penalty == 125.0);
+  REQUIRE(base.target_occupancy == 8.0);
+  REQUIRE(base.target_wg_slots_per_cu == 1.0);
+  REQUIRE(base.occupancy_aware_timesteps == true);
+  REQUIRE(base.occ_timesteps_scale == 0.5);
+  REQUIRE(base.occ_timesteps_cap == 2.0);
+}
+
+TEST_CASE("GEMM: compute_occupancy_aware_timesteps", "[gemm][heuristics]") {
+  using origami::gemm::compute_occupancy_aware_timesteps;
+  // ceil(work / (num_cus * clamp(occupancy * scale, 1, cap)))
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, 1, 1.0, 4.0) == 9);   // conc 1
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, 2, 1.0, 4.0) == 5);   // conc 2
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, 8, 1.0, 4.0) == 3);   // conc capped at 4
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, 2, 0.25, 4.0) == 9);  // conc floored at 1
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, -1, 1.0, 4.0) == 9);  // unknown occupancy
+  REQUIRE(compute_occupancy_aware_timesteps(2550, 304, 4, 0.5, 1.5) == 6);   // conc 1.5
+  REQUIRE(compute_occupancy_aware_timesteps(2500, 304, 2, 1.0, 0.5) == 9);   // cap < 1 acts as 1
+  REQUIRE(compute_occupancy_aware_timesteps(0, 304, 2, 1.0, 4.0) == 1);      // at least one wave
+  REQUIRE(compute_occupancy_aware_timesteps(608, 304, 2, 1.0, 4.0) == 1);    // exact fit
+  REQUIRE(compute_occupancy_aware_timesteps(609, 304, 2, 1.0, 4.0) == 2);
+}
+
+TEST_CASE("GEMM: occupancy_aware_timesteps changes context_t::num_timesteps",
+          "[gemm][heuristics]") {
+  // gfx942 test hardware: 304 CUs. MT96x80x48 data-parallel on 4800x4000 -> 50x50 = 2500 WGs.
+  auto hardware = make_hardware(942);
+  auto problem  = make_problem(4800, 4000, 1024);
+  auto config2  = make_config(96, 80, 48, 16, 16, 16, false, 1, /*occupancy=*/2, 0, 0, /*sk=*/0);
+  auto config8  = make_config(96, 80, 48, 16, 16, 16, false, 1, /*occupancy=*/8, 0, 0, /*sk=*/0);
+
+  // Default (no entry): one resident WG per CU.
+  origami::gemm::context_t ctx_default(problem, hardware, config2);
+  REQUIRE(ctx_default.heuristic.occupancy_aware_timesteps == false);
+  REQUIRE(ctx_default.num_wgs == 2500);
+  REQUIRE(ctx_default.num_timesteps == 9);  // ceil(2500 / 304)
+  auto [red, wgs, cus, timesteps, split] = origami::gemm::compute_launch_parameters(
+      problem, hardware, config2, config2.grid_selection);
+  REQUIRE(ctx_default.num_timesteps == timesteps);
+
+  // Opt in through a heuristic entry scoped to exactly this test problem.
+  {
+    origami::heuristic_key_t key;
+    key.arch  = origami::hardware_t::architecture_t::gfx942;
+    key.mt_m  = 96;
+    key.mt_n  = 80;
+    key.mt_k  = 48;
+    key.min_m = 4800;
+    key.max_m = 4800;
+    origami::heuristic_params_t params;
+    params.occupancy_aware_timesteps = true;
+    origami::heuristics_database_t::get_instance().add_entry(key, params);
+  }
+  origami::gemm::context_t ctx_occ2(problem, hardware, config2);
+  REQUIRE(ctx_occ2.heuristic.occupancy_aware_timesteps == true);
+  REQUIRE(ctx_occ2.num_wgs == 2500);
+  REQUIRE(ctx_occ2.num_timesteps == 5);  // ceil(2500 / (304 * 2))
+  origami::gemm::context_t ctx_occ8(problem, hardware, config8);
+  REQUIRE(ctx_occ8.num_timesteps == 3);  // ceil(2500 / (304 * 4)), occupancy capped at 4
+
+  // Scale and cap come from the entry: 4801 rows -> 51x50 = 2550 WGs.
+  auto problem_sc = make_problem(4801, 4000, 1024);
+  {
+    origami::heuristic_key_t key;
+    key.arch  = origami::hardware_t::architecture_t::gfx942;
+    key.mt_m  = 96;
+    key.mt_n  = 80;
+    key.mt_k  = 48;
+    key.min_m = 4801;
+    key.max_m = 4801;
+    origami::heuristic_params_t params;
+    params.occupancy_aware_timesteps = true;
+    params.occ_timesteps_scale       = 0.5;
+    params.occ_timesteps_cap         = 1.5;
+    origami::heuristics_database_t::get_instance().add_entry(key, params);
+  }
+  auto config4 = make_config(96, 80, 48, 16, 16, 16, false, 1, /*occupancy=*/4, 0, 0, /*sk=*/0);
+  origami::gemm::context_t ctx_sc2(problem_sc, hardware, config2);
+  REQUIRE(ctx_sc2.num_timesteps == 9);  // conc = clamp(2 * 0.5, 1, 1.5) = 1
+  origami::gemm::context_t ctx_sc4(problem_sc, hardware, config4);
+  REQUIRE(ctx_sc4.num_timesteps == 6);  // conc = clamp(4 * 0.5, 1, 1.5) = 1.5
+
+  // Other problems keep the default wave count.
+  auto problem_other = make_problem(4802, 4000, 1024);
+  origami::gemm::context_t ctx_other(problem_other, hardware, config8);
+  REQUIRE(ctx_other.heuristic.occupancy_aware_timesteps == false);
+  REQUIRE(ctx_other.num_timesteps == 9);  // ceil(2550 / 304)
+}
+
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
   auto hardware = make_hardware(950);
   auto problem  = make_problem(1024, 1024, 1024);

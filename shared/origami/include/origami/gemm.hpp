@@ -174,6 +174,21 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     grid_selection_t grid_selection);
 
 /**
+ * @brief Number of WG waves (timesteps) when several WGs are resident per CU.
+ *
+ * Used by context_t when heuristic_params_t::occupancy_aware_timesteps is set.
+ *
+ * @param work Number of WGs to schedule (max(num_wgs, num_output_tiles)).
+ * @param num_cus Usable CU count.
+ * @param occupancy Resident WGs per CU (Tensile CUOccupancy, config_t::occupancy).
+ * @param scale Multiplier on @p occupancy.
+ * @param cap Upper bound on the resident WGs per CU (values below 1 act as 1).
+ * @return size_t max(1, ceil(work / (num_cus * clamp(occupancy * scale, 1, cap))))
+ */
+ORIGAMI_EXPORT size_t compute_occupancy_aware_timesteps(
+    size_t work, size_t num_cus, int occupancy, double scale, double cap);
+
+/**
  * @brief Check if MT fits in LDS
  *
  * @param hardware Hardware characteristics (@see origami::hardware_t)

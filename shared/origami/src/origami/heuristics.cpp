@@ -187,6 +187,16 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
 
+  // Per-tile model constants
+  narrow_load_iter_penalty = other.narrow_load_iter_penalty;
+  target_occupancy         = other.target_occupancy;
+  target_wg_slots_per_cu   = other.target_wg_slots_per_cu;
+
+  // Occupancy-aware timesteps
+  occupancy_aware_timesteps = other.occupancy_aware_timesteps;
+  occ_timesteps_scale       = other.occ_timesteps_scale;
+  occ_timesteps_cap         = other.occ_timesteps_cap;
+
   // Kernel rejection
   reject = other.reject;
 }

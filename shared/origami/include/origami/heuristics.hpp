@@ -123,6 +123,10 @@ struct heuristic_defaults_t {
   static constexpr size_t K_SPLIT_LSU_MTK_MAX           = 128;
   static constexpr double EPILOGUE_OCC_SATURATION         = 2.0;
   static constexpr double SCALAR_STORE_EXPOSED_PENALTY    = 4.0;
+  // Occupancy-aware timesteps (heuristic_params_t::occupancy_aware_timesteps, off by
+  // default): resident WGs per CU = clamp(CUOccupancy * SCALE, 1, CAP).
+  static constexpr double OCC_TIMESTEPS_SCALE             = 1.0;
+  static constexpr double OCC_TIMESTEPS_CAP               = 4.0;
 };
 
 /**
@@ -182,6 +186,25 @@ struct ORIGAMI_EXPORT heuristic_params_t {
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
+
+  // === Per-tile model constants (defaults = the heuristic_defaults_t values) ===
+  /// Cycles per K-iteration per unit of sub-cache-line DepthU load underfill.
+  double narrow_load_iter_penalty = heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY;
+  /// Resident waves per SIMD at which the per-wave occupancy score saturates.
+  double target_occupancy = heuristic_defaults_t::TARGET_OCCUPANCY;
+  /// Resident WGs per CU at which the per-wave WG co-residency score saturates.
+  double target_wg_slots_per_cu = heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU;
+
+  // === Occupancy-aware timesteps (default off) ===
+  /// When true, the number of WG waves counts the WGs that are resident on a CU at the
+  /// same time (Tensile CUOccupancy):
+  ///   num_timesteps = max(1, ceil(work / (num_cus * conc))),
+  ///   work = max(num_wgs, num_output_tiles),
+  ///   conc = clamp(config.occupancy * occ_timesteps_scale, 1, occ_timesteps_cap).
+  /// When false, num_timesteps = ceil(work / num_cus) (one resident WG per CU).
+  bool occupancy_aware_timesteps = false;
+  double occ_timesteps_scale     = heuristic_defaults_t::OCC_TIMESTEPS_SCALE;
+  double occ_timesteps_cap       = heuristic_defaults_t::OCC_TIMESTEPS_CAP;
 
   // === Kernel Rejection ===
   /// When true, the kernel is rejected: its predicted latency is forced to the
