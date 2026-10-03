@@ -25,16 +25,16 @@
 #ifndef ROCSPARSE_DNMAT_TRANSPOSE_H
 #define ROCSPARSE_DNMAT_TRANSPOSE_H
 
-#include "rocsparse-types.h"
-#include "rocsparse-version.h"
+#include "../../rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 /*! \ingroup aux_module
  *  \brief Transpose data between two dense matrices.
  *  \details
- *  \p rocsparse_dnmat_transpoae transposes the data from a \p X dense matrix to a \p Y dense matrix.
+ *  \p rocsparse_dnmat_transpose transposes the data from a \p X dense matrix to a \p Y dense matrix.
  *  \f[
  *    Y =  \alpha \cdot X^T,
  *  \f]
