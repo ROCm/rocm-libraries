@@ -154,6 +154,8 @@ namespace
         {
             std::ostringstream out;
             out << m << 'x' << n << 'x' << k;
+            if(lda || ldb || ldc || ldd)
+                out << " ld " << leadA() << ' ' << leadB() << ' ' << leadC() << ' ' << leadD();
             if(batch != 1)
                 out << " batch " << batch;
             if(gap)
@@ -420,7 +422,16 @@ namespace
                              Case{"alpha 1.5", with([](Config& c) { c.alpha = 1.5f; })},
                              Case{"batch 2", with([](Config& c) { c.batch = 2; })},
                              Case{"batch 3 with gaps",
-                                  with([](Config& c) { c.batch = 3, c.gap = 100; })}})
+                                  with([](Config& c) { c.batch = 3, c.gap = 100; })},
+                             Case{"ldA != K", with([](Config& c) { c.lda = c.k + 64; })},
+                             Case{"ldB != K", with([](Config& c) { c.ldb = c.k + 64; })},
+                             Case{"ldC != M", with([](Config& c) { c.ldc = c.m + 256; })},
+                             Case{"ldC != M, beta 1",
+                                  with([](Config& c) { c.ldc = c.m + 256, c.beta = 1; })},
+                             Case{"ldD != M", with([](Config& c) { c.ldd = c.m + 256; })},
+                             Case{"odd leading dimensions", with([](Config& c) {
+                                      c.lda = c.k + 1, c.ldb = c.k + 3, c.ldc = c.ldd = c.m + 1;
+                                  })}})
         {
             status = generate(provider, r.make(c.config), target, solutions);
             require(status.ok() && solutions.size() == 1,
@@ -445,16 +456,12 @@ namespace
             {"N = 384", with([](Config& c) { c.n = 384; })},
             {"K = 192", with([](Config& c) { c.k = 192; })},
             {"K = 64", with([](Config& c) { c.k = 64; })},
-            {"ldA != K", with([](Config& c) { c.lda = c.k + 64; })},
-            {"ldB != K", with([](Config& c) { c.ldb = c.k + 64; })},
-            {"ldC != M", with([](Config& c) { c.ldc = c.m + 256; })},
-            {"ldC != M, beta 1", with([](Config& c) { c.ldc = c.m + 256, c.beta = 1; })},
-            {"ldD != M", with([](Config& c) { c.ldd = c.m + 256; })},
             {"bias", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_BIAS; })},
             {"ReLU", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_RELU; })},
             {"8 GiB D", with([](Config& c) { c.m = c.n = 65536, c.k = 128; })},
             {"4 GiB of D in batches",
              with([](Config& c) { c.m = c.n = 4096, c.k = 128, c.batch = 128; })},
+            {"ldA * M spanning 4 GiB", with([](Config& c) { c.lda = int64_t(1) << 21; })},
         };
         for(const auto& c : cases)
         {
@@ -483,8 +490,9 @@ namespace
         std::vector<hj::GeneratedSolution> solutions;
         Config                             c;
         c.m = 512, c.n = 768, c.k = 384;
+        c.lda = 392, c.ldb = 448, c.ldc = 513, c.ldd = 768;
         const auto status = generate(backend(), r.make(c), gfx950(), solutions);
-        require(status.ok() && solutions.size() == 1, "512x768x384: " + status.message);
+        require(status.ok() && solutions.size() == 1, c.name() + ": " + status.message);
         using Problem = TensileLite::ContractionProblemGemm;
         const auto library
             = std::dynamic_pointer_cast<TensileLite::MasterSolutionLibrary<Problem>>(
@@ -504,27 +512,35 @@ namespace
         require(!types.count("BetaZero"), "The entry still requires beta 0");
         require(!types.count("AlphaValue"), "The entry still requires alpha 1");
         require(!types.count("BatchSizeEqual"), "The entry still requires one batch");
-        for(const char* type : {"Free0SizeMultiple",
+        for(const char* type : {"SizeGreaterThan",
+                                "Free0SizeMultiple",
                                 "Free1SizeMultiple",
                                 "BoundSizeMultiple",
                                 "TypesEqual",
                                 "OperationIdentifierEqual"})
             require(types.count(type), std::string("The entry has no ") + type);
+        for(const char* type : {"StrideAEqual", "StrideBEqual", "StrideCEqual", "StrideDEqual"})
+            require(!types.count(type), std::string("The entry pins a stride with ") + type);
         namespace P = TensileLite::Predicates::Contraction;
-        const auto stride = [&](auto* tag) {
+        const auto find = [&](auto* tag) {
             using T = std::remove_pointer_t<decltype(tag)>;
             for(const auto& term : all->value)
                 if(const auto found = std::dynamic_pointer_cast<T>(term))
-                    return std::make_pair(found->index, found->value);
+                    return found;
             throw std::runtime_error("The entry has no " + T::Type());
         };
-        using Pin = std::pair<size_t, size_t>;
-        require(stride(static_cast<P::StrideAEqual*>(nullptr)) == Pin(1, 384)
-                    && stride(static_cast<P::StrideBEqual*>(nullptr)) == Pin(1, 384)
-                    && stride(static_cast<P::StrideCEqual*>(nullptr)) == Pin(1, 512)
-                    && stride(static_cast<P::StrideDEqual*>(nullptr)) == Pin(1, 512),
-                "The entry does not pin packed strides");
-        std::cout << "PASS entry: handwritten custom kernel, static and stride predicates\n";
+        constexpr size_t columns = 0xffffffff; // every column of a matrix
+        const auto       load = find(static_cast<P::BufferLoadOffsetLimitCheck*>(nullptr))->value;
+        require(load.depthUorMT0 == columns && load.depthUorMT1 == columns
+                    && find(static_cast<P::BufferLoadOffsetLimitCheck_Beta*>(nullptr))->value
+                           == columns
+                    && find(static_cast<P::BufferStoreOffsetLimitCheck*>(nullptr))->value
+                           == columns,
+                "The entry's buffer limit checks do not span whole matrices");
+        const auto k = find(static_cast<P::SizeGreaterThan*>(nullptr));
+        require(k->index == 3 && k->value == 0, "The entry does not require K > 0");
+        std::cout << "PASS entry: handwritten custom kernel, static predicates, whole-matrix "
+                     "buffer limits and no stride pins\n";
     }
 
     void build()
@@ -564,10 +580,10 @@ namespace
         std::cout << "PASS build matches the variant's resources\n";
     }
 
-    // One GEMM with packed leading dimensions on the device, with canaries
-    // around D and in the gaps between its batches. C holds random values, or
-    // NaN for beta 0, which must not read it; with cIsD it is D's initial
-    // content.
+    // One GEMM on the device, with canaries around D and in its gaps: the
+    // padding of its leading dimension and the space between its batches. C
+    // holds random values, or NaN for beta 0, which must not read it, and NaN
+    // in its gaps; with cIsD it is D's initial content.
     struct Gemm
     {
         static constexpr size_t guard = 4096; // elements on each side of D
@@ -595,7 +611,7 @@ namespace
             for(auto* host : {&hostA, &hostB, &hostC})
                 for(size_t i = 0; i < host->size(); ++i)
                 {
-                    if(host == &hostC && (!c.beta || !inMatrix(i)))
+                    if(host == &hostC && (!c.beta || !inMatrix(i, c.leadC(), c.strideC())))
                         continue;
                     seed = seed * 1664525u + 1013904223u;
                     (*host)[i] = toBf16(static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
@@ -609,10 +625,12 @@ namespace
         {
             static_cast<void>(hipStreamDestroy(stream));
         }
-        // Whether element i of C or D belongs to a batch's matrix, not a gap.
-        bool inMatrix(size_t i) const
+        // Whether element i of C or D, with this leading dimension and batch
+        // stride, belongs to a batch's matrix, not a gap.
+        bool inMatrix(size_t i, int64_t lead, int64_t stride) const
         {
-            return i % size_t(c.strideD()) < size_t(c.m) * c.n;
+            const auto j = i % size_t(stride);
+            return j < size_t(lead) * c.n && j % size_t(lead) < size_t(c.m);
         }
         void* a() const
         {
@@ -693,9 +711,11 @@ namespace
                         label + ": wrote outside D");
             std::vector<uint16_t> out(all.begin() + guard, all.end() - guard);
             for(size_t i = 0; i < out.size(); ++i)
-                require((out[i] == canary) != inMatrix(i),
-                        label + (inMatrix(i) ? ": left part of D unwritten"
-                                             : ": wrote between batches of D"));
+            {
+                const bool inside = inMatrix(i, c.leadD(), c.strideD());
+                require((out[i] == canary) != inside,
+                        label + (inside ? ": left part of D unwritten" : ": wrote in a gap of D"));
+            }
             const auto matrix  = size_t(c.m) * c.n;
             const bool full    = double(matrix) * c.k * c.batch <= double(1 << 30);
             const auto samples = full ? matrix * c.batch : size_t(8192);
@@ -717,12 +737,13 @@ namespace
                 const auto* b   = &hostB[batch * c.strideB()];
                 double      sum = 0;
                 for(int64_t k = 0; k < c.k; ++k)
-                    sum += double(fromBf16(a[k + row * c.k])) * double(fromBf16(b[k + col * c.k]));
+                    sum += double(fromBf16(a[k + row * c.leadA()]))
+                           * double(fromBf16(b[k + col * c.leadB()]));
                 sum *= c.alpha;
                 if(c.beta)
                     sum += double(c.beta)
-                           * fromBf16(hostC[batch * c.strideC() + row + col * c.m]);
-                const double got = fromBf16(out[batch * c.strideD() + row + col * c.m]);
+                           * fromBf16(hostC[batch * c.strideC() + row + col * c.leadC()]);
+                const double got = fromBf16(out[batch * c.strideD() + row + col * c.leadD()]);
                 require(std::abs(got - sum) <= bound + 0.01 * std::abs(sum),
                         label + ": D(" + std::to_string(row) + ", " + std::to_string(col) + ", "
                             + std::to_string(batch) + ") = " + std::to_string(got)
@@ -784,6 +805,20 @@ namespace
             c.m = shape[0], c.n = shape[1], c.k = shape[2];
             c.batch = batch, c.gap = gap, c.beta = beta, c.cIsD = cIsD;
         }
+        const auto add = [&](const int64_t* shape, auto change) {
+            configs.emplace_back();
+            auto& c = configs.back();
+            c.m = shape[0], c.n = shape[1], c.k = shape[2];
+            change(c);
+        };
+        add(shapes[1], [](Config& c) { c.lda = c.k + 8, c.ldb = c.k + 1, c.ldd = c.m + 256; });
+        add(shapes[2], [](Config& c) {
+            c.ldc = c.m + 1, c.ldd = c.m + 8, c.alpha = 1.5f, c.beta = 1;
+        });
+        add(shapes[1], [](Config& c) {
+            c.lda = c.k + 64, c.ldc = c.ldd = c.m + 1, c.beta = -0.5f, c.cIsD = true;
+            c.batch = 2, c.gap = 64;
+        });
         for(const auto& c : configs)
         {
             Gemm       g(c);
@@ -919,16 +954,26 @@ namespace
 
         auto strided = libraryShape();
         strided.lda  = strided.k + 64;
-        Gemm                 other(strided);
-        int                  device = -1;
-        std::vector<int32_t> indices;
-        jit::Diagnostics     diagnostics;
-        HIP(hipGetDevice(&device));
-        const auto status
-            = jit::getLibraryAlgos(device, other.request(), provider, 1, 0, indices, diagnostics);
-        require(status != HIPBLAS_STATUS_SUCCESS && indices.empty(),
-                "The packed entry served a problem with ldA != K");
-        std::cout << "PASS the published entry does not serve ldA != K\n";
+        {
+            Gemm other(strided);
+            require(libraryAlgos(other, provider)[0] == index,
+                    "ldA != K got another index than ldA = K");
+            runIndex(other, index, "published index with ldA != K");
+        }
+        std::cout << "PASS the published index serves and runs ldA != K\n";
+        strided.lda = int64_t(1) << 21; // A spans 4 GiB
+        {
+            Requests             r;
+            int                  device = -1;
+            std::vector<int32_t> indices;
+            jit::Diagnostics     diagnostics;
+            HIP(hipGetDevice(&device));
+            const auto status = jit::getLibraryAlgos(
+                device, r.make(strided), provider, 1, 0, indices, diagnostics);
+            require(status != HIPBLAS_STATUS_SUCCESS && indices.empty(),
+                    "The published entry served an A that spans 4 GiB");
+        }
+        std::cout << "PASS the published entry does not serve an A that spans 4 GiB\n";
 
         std::cout.flush();
         const auto text  = std::to_string(index);

@@ -114,7 +114,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         struct Candidate
         {
             const detail::Variant* variant;
-            std::vector<uint8_t>   entry; // with the packed strides pinned
+            std::vector<uint8_t>   entry; // requiring K > 0
         };
 
         // The target's variants whose entry solves the request, or why none can.
@@ -136,10 +136,9 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                         Stage::Configure,
                         "HipKittens has no kernel for " + target.isa};
             const auto problem = hipblaslt_jit::lowerForJit(*gemm);
-            hipblaslt_jit::CanonicalGemm shape;
             try
             {
-                shape = hipblaslt_jit::canonicalGemm(problem);
+                hipblaslt_jit::canonicalGemm(problem);
             }
             catch(const std::runtime_error& e)
             {
@@ -155,21 +154,17 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     return {Status::Code::NotSupported,
                             Stage::Generate,
                             "HipKittens kernels need tensors smaller than 4 GiB"};
-            // The kernels read packed A, B and C and write packed D; JIT library
-            // rows match only sizes, so the entry also pins the strides, C's even
-            // for beta 0 because the entry serves every beta.
-            const std::vector<hipblaslt_jit::msgpack_io::IndexedPredicate> packed{
-                {"StrideAEqual", 1, shape.k},
-                {"StrideBEqual", 1, shape.k},
-                {"StrideCEqual", 1, shape.m},
-                {"StrideDEqual", 1, shape.m}};
+            // K = 0, which hipBLASLt makes of alpha 0, is a multiple of 128 that
+            // the kernels do not serve.
+            const std::vector<hipblaslt_jit::msgpack_io::IndexedPredicate> positiveK{
+                {"SizeGreaterThan", 3, 0}};
             for(const auto& variant : variants)
             {
                 if(variant.isa != target.isa)
                     continue;
                 Candidate candidate{&variant, {}};
                 if(auto status = hipblaslt_jit::msgpack_io::appendEntryPredicates(
-                       bytes(variant.entry), packed, candidate.entry);
+                       bytes(variant.entry), positiveK, candidate.entry);
                    !status.ok())
                     return status;
                 const auto library = std::dynamic_pointer_cast<Master>(

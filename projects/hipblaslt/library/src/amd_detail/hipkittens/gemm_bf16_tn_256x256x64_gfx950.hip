@@ -362,26 +362,29 @@ __device__ __forceinline__ GL make_gl(const void* p, size_t b, size_t d, size_t 
 }
 }
 
-// Wrapper ABI 4: the entry's customKernel args are AddressA, AddressB, AddressC,
-// AddressD, SizeFree0, SizeFree1, SizeSum, Alpha, Beta, StrideA1, StrideB1,
-// StrideC1 and StrideD1. HK's C is row-major [M,N], which is column-major D
-// (m x n) transposed, so hipBLASLt (m, n) = HK (N, M), A = HK b and B = HK a;
-// hipBLASLt's C has D's layout. The grid is one work-group per 256x256 tile of
-// D in x and y, and one batch per z; gl<> derives its batch stride from its
-// sizes, so each layout starts at its batch's matrix instead.
+// Wrapper ABI 5: the entry's customKernel args are AddressA, AddressB, AddressC,
+// AddressD, SizeFree0, SizeFree1, SizeSum, Alpha, Beta, StrideA0, StrideB0,
+// StrideC0, StrideD0, StrideA1, StrideB1, StrideC1 and StrideD1. HK's C is
+// row-major [M,N], which is column-major D (m x n) transposed, so hipBLASLt
+// (m, n) = HK (N, M), A = HK b and B = HK a; hipBLASLt's C has D's layout. The
+// grid is one work-group per 256x256 tile of D in x and y, and one batch per z.
+// gl<> derives its strides from its sizes, so each layout starts at its batch's
+// matrix and has the leading dimension as its column count; the kernel body
+// takes its sizes from M, N and K.
 extern "C" __global__ __launch_bounds__(512, 2)
-void HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi4(const void* A, const void* B, const void* C,
+void HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5(const void* A, const void* B, const void* C,
                                                    void* D, uint32_t m, uint32_t n, uint32_t k,
-                                                   float alpha, float beta, uint32_t strideA,
-                                                   uint32_t strideB, uint32_t strideC,
-                                                   uint32_t strideD)
+                                                   float alpha, float beta, uint32_t lda,
+                                                   uint32_t ldb, uint32_t ldc, uint32_t ldd,
+                                                   uint32_t strideA, uint32_t strideB,
+                                                   uint32_t strideC, uint32_t strideD)
 {
     __shared__ alignment_dummy lds[MAX_SHARED_MEMORY / sizeof(alignment_dummy)];
     const int    M = int(n), N = int(m), K = int(k);
     const size_t batch = blockIdx.z;
-    micro_globals g{hk_flat::make_gl<_gl_A>(static_cast<const bf16*>(B) + batch * strideB, 1, 1, M, K),
-                    hk_flat::make_gl<_gl_B>(static_cast<const bf16*>(A) + batch * strideA, 1, 1, N, K),
-                    hk_flat::make_gl<_gl_C>(static_cast<bf16*>(D) + batch * strideD, 1, 1, M, N),
-                    hk_flat::make_gl<_gl_C>(static_cast<const bf16*>(C) + batch * strideC, 1, 1, M, N)};
+    micro_globals g{hk_flat::make_gl<_gl_A>(static_cast<const bf16*>(B) + batch * strideB, 1, 1, M, ldb),
+                    hk_flat::make_gl<_gl_B>(static_cast<const bf16*>(A) + batch * strideA, 1, 1, N, lda),
+                    hk_flat::make_gl<_gl_C>(static_cast<bf16*>(D) + batch * strideD, 1, 1, M, ldd),
+                    hk_flat::make_gl<_gl_C>(static_cast<const bf16*>(C) + batch * strideC, 1, 1, M, ldc)};
     micro_tk_body(g, M, N, K, alpha, beta, lds);
 }

@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bench"))
 from test_jit_gemm import check_numerics, require  # noqa: E402
 
-KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi4"
+KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5"
 MISSING = "JIT backend HipKittens not available"
 
 

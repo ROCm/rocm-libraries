@@ -59,14 +59,15 @@ extension, as the TensileLite backend does.
 ## Kernel
 
 `library/src/amd_detail/hipkittens/` holds one variant,
-`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi4`: the kernel of the HipKittens
+`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5`: the kernel of the HipKittens
 256x256x64 BF16 GEMM, behind a wrapper that takes
-`A, B, C, D, m, n, k, alpha, beta` and the batch strides of A, B, C and D
-(68 bytes of kernel arguments) and passes B and A to the kernel in that order:
+`A, B, C, D, m, n, k, alpha, beta` and the leading dimensions and batch strides
+of A, B, C and D (84 bytes of kernel arguments) and passes B and A to the
+kernel in that order:
 the kernel's row-major `C = a·bᵀ` is then hipBLASLt's column-major
 `D = Aᵀ·B`. Its epilogue computes `alpha·Aᵀ·B + beta·C` in FP32 before
 rounding to BF16; with beta 0 it does not read C, and C may be D. It uses
-160,000 bytes of LDS and 238 VGPRs, and launches 512 threads per 256x256
+160,000 bytes of LDS and 237 VGPRs, and launches 512 threads per 256x256
 output tile of each batch, with the batch in the grid's z dimension. It serves
 gfx950 problems with:
 
@@ -76,8 +77,9 @@ gfx950 problems with:
 - strided batches with any batch strides (not pointer arrays), M and N
   multiples of 256, and K a multiple of 128 (the kernel computes wrong results
   when K is an odd multiple of 64);
-- packed leading dimensions (`lda = ldb = K`, `ldc = ldd = M`), and each
-  tensor, all its batches included, under 4 GiB.
+- any leading dimensions, each tensor, all its batches included, under
+  4 GiB, and each matrix's leading dimension times its column count under
+  4 GiB.
 
 Other problems get `NotSupported`, and other devices `TargetMismatch`.
 
@@ -85,10 +87,12 @@ Other problems get `NotSupported`, and other devices `TargetMismatch`.
 
 At build time `make_entries.py` runs TensileLite to write each variant's
 one-solution library entry, a custom kernel with the variant's ProblemType and
-size predicates, and compiles it into the library. For each request the backend
-adds predicates that pin the packed strides, because JIT library rows match
-only sizes, and checks the request against the entry before returning the
-solution. The comgr builder compiles the source with the variant's flags
+size predicates, and compiles it into the library. The kernel addresses each
+matrix through one buffer descriptor, so the entry's buffer limit checks span
+the whole matrix, not one macro tile. For each request the backend adds a
+predicate requiring K > 0 and checks the request against the entry before
+returning the solution. The entry depends on nothing else in the request,
+because JIT library rows match only sizes. The comgr builder compiles the source with the variant's flags
 (`-std=c++20 -DKITTENS_CDNA4 -w`) after its own.
 
 ## Cache key

@@ -9,9 +9,9 @@ Architecture: gfx950
 HipFlags: [-std=c++20, -DKITTENS_CDNA4, -w]
 # What the built kernel uses; hipblaslt-jit-hipkittens-test checks it.
 Resources:
-  KernargBytes: 68
+  KernargBytes: 84
   LdsBytes: 160000
-  Vgprs: 238
+  Vgprs: 237
   VgprSpills: 0
 Solution:
   ProblemType:
@@ -28,7 +28,7 @@ Solution:
     Activation: False
     UseScaleAlphaVec: 0
   CustomKernel:
-    name: HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi4
+    name: HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5
     args: [ { type: address, semantic: AddressA },
             { type: address, semantic: AddressB },
             { type: address, semantic: AddressC },
@@ -38,6 +38,10 @@ Solution:
             { type: uint32, semantic: SizeSum },
             { type: float32, semantic: Alpha },
             { type: float32, semantic: Beta },
+            { type: uint32, semantic: StrideA0 },
+            { type: uint32, semantic: StrideB0 },
+            { type: uint32, semantic: StrideC0 },
+            { type: uint32, semantic: StrideD0 },
             { type: uint32, semantic: StrideA1 },
             { type: uint32, semantic: StrideB1 },
             { type: uint32, semantic: StrideC1 },

@@ -34,6 +34,29 @@ def view(name):
     return f"{{reinterpret_cast<const char*>({name}), sizeof({name})}}"
 
 
+# More columns than any matrix has.
+ALL_COLUMNS = 2**32 - 1
+
+
+def wholeMatrixLimits(entry):
+    """The kernels address each matrix from one buffer descriptor, not one per
+    macro tile, so TensileLite's buffer limit checks must span every column."""
+    terms = list(entry["solutions"][0]["problemPredicate"]["value"])
+    for row in entry["library"]["rows"]:
+        terms += row["predicate"]["value"]
+    found = set()
+    for term in terms:
+        if term["type"] == "BufferLoadOffsetLimitCheck":
+            term["value"].update(DUorMT0=ALL_COLUMNS, DUorMT1=ALL_COLUMNS)
+        elif term["type"] in ("BufferLoadOffsetLimitCheck_Beta", "BufferStoreOffsetLimitCheck"):
+            term["value"] = ALL_COLUMNS
+        else:
+            continue
+        found.add(term["type"])
+    if len(found) != 3:
+        raise RuntimeError(f"TensileLite wrote only the buffer limit checks {sorted(found)}")
+
+
 class TensileLite:
     """The TensileLite state make_entries needs to describe a custom kernel."""
 
@@ -76,6 +99,7 @@ class TensileLite:
         entry = state(library)
         if entry["solutions"][0]["kernelName"] != config["CustomKernelName"]:
             raise RuntimeError(f"TensileLite renamed {config['CustomKernelName']}")
+        wholeMatrixLimits(entry)
         return msgpack.packb(entry)
 
 
