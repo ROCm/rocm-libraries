@@ -959,6 +959,18 @@ namespace
         }
     }
 
+    // A type the scans do not support is an error, never a clean scan.
+    TEST(FastCheckDevice_pre_checkin, scans_refuse_an_unsupported_type)
+    {
+        DeviceMatrix    m;
+        FastCheckMatrix complex = m.matrix();
+        complex.type            = HIP_C_32F;
+        auto res = fast_check_scan_padding_device(complex, DeviceMatrix::batch, 8, true, 0);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scan failed"), std::string::npos) << res.message;
+        EXPECT_FALSE(fast_check_count_changed_device(m.d, HIP_C_32F, 8, 0).ok);
+    }
+
     // Configurations fast_check cannot check exactly are refused with a reason, before any sums.
     TEST(FastCheck_pre_checkin, unsupported_configurations_are_refused)
     {

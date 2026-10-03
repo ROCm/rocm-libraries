@@ -1478,7 +1478,8 @@ namespace
                 m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
             break;
         default:
-            break;
+            // An unsupported type would otherwise scan nothing and look clean.
+            return hipErrorInvalidValue;
         }
         if(err != hipSuccess)
             return err;
