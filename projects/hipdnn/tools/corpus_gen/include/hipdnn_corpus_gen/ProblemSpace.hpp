@@ -108,6 +108,13 @@ struct CombinationResult
     /// Growth stopped at @ref ExplorationRequest::budgetGrowthLimit while still finding new
     /// points; more exist.
     bool searchCapped = false;
+
+    /// Per numeric parameter (in @ref ProblemCorpus::numericParameters order), the served point
+    /// with its smallest and largest value over every point the engine accepted here, selected
+    /// or not. Empty when nothing was served. Ties go to the lexicographically first shape, so a
+    /// seed reproduces them.
+    std::vector<ProblemPoint> lowest;
+    std::vector<ProblemPoint> highest;
 };
 
 /// The problem corpus and an account of how it was produced.
@@ -750,6 +757,73 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         {
             // No combination added a point: each is now saturated or capped.
             break;
+        }
+    }
+
+    // The served edges, from every answer the engine gave: the memo holds all each walk reached,
+    // and anchored draws were asked outside it.
+    for(size_t index = 0; index < corpus.combinations.size() && !numericWindow.empty(); ++index)
+    {
+        auto& result = corpus.combinations[index];
+        const auto dimensions = corpus.numericParameters.size();
+        std::vector<const Shape*> low(dimensions, nullptr);
+        std::vector<const Shape*> high(dimensions, nullptr);
+        std::vector<Shape> anchoredShapes;
+        anchoredShapes.reserve(result.problems.size());
+        for(const auto& point : result.problems)
+        {
+            Shape shape;
+            shape.reserve(dimensions);
+            for(const auto& name : corpus.numericParameters)
+            {
+                shape.push_back(detail::integerAt(point, name).value_or(1));
+            }
+            anchoredShapes.push_back(std::move(shape));
+        }
+        const auto consider = [&](const Shape& shape) {
+            for(size_t d = 0; d < dimensions; ++d)
+            {
+                if(low[d] == nullptr || shape[d] < (*low[d])[d]
+                   || (shape[d] == (*low[d])[d] && shape < *low[d]))
+                {
+                    low[d] = &shape;
+                }
+                if(high[d] == nullptr || shape[d] > (*high[d])[d]
+                   || (shape[d] == (*high[d])[d] && shape < *high[d]))
+                {
+                    high[d] = &shape;
+                }
+            }
+        };
+        for(const auto& [shape, verdict] : answered[index])
+        {
+            if(verdict)
+            {
+                consider(shape);
+            }
+        }
+        for(const auto& shape : anchoredShapes)
+        {
+            consider(shape);
+        }
+        if(dimensions == 0 || low.front() == nullptr)
+        {
+            continue;
+        }
+        const auto pointOf = [&](const Shape& shape) {
+            auto point = result.categorical;
+            for(size_t d = 0; d < dimensions; ++d)
+            {
+                point[corpus.numericParameters[d]] = shape[d];
+            }
+            return point;
+        };
+        result.lowest.reserve(dimensions);
+        result.highest.reserve(dimensions);
+        for(size_t d = 0; d < dimensions; ++d)
+        {
+            result.lowest.push_back(pointOf(*low[d]));
+            result.highest.push_back(pointOf(*high[d]));
         }
     }
 
