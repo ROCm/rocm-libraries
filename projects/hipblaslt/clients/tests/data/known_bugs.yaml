@@ -47,6 +47,16 @@ Known bugs:
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
   - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
+  # ROCM-32152 (gfx950 direct-to-LDS kernels write wrong values into large outputs)
+  # fails these size-threshold cases on gfx950. ROCM-31826 (MT16x16 Stream-K kernels
+  # leave 256 elements of D unwritten at 65,536 x 65,552) fails the Stream-K tile case
+  # on gfx942 and gfx950. REMOVE each entry in the PR that fixes the last defect it
+  # lists. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_d_bytes, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_d_bytes_all_solutions, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_tiles, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_threshold_tiles_streamk, function: matmul, known_bug_platforms: "gfx942, gfx950" }
+  - { name: matmul_fast_check_threshold_custom_kernel_ROCM31258, function: matmul, known_bug_platforms: gfx950 }
   # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
   # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
   # unit_check fails a correct GPU result. Host-side, so every platform is affected
