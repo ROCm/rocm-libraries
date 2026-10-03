@@ -58,20 +58,28 @@ extension, as the TensileLite backend does.
 
 ## Kernel
 
-`library/src/amd_detail/hipkittens/` holds one variant,
-`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5`: the kernel of the HipKittens
-256x256x64 BF16 GEMM, behind a wrapper that takes
+`library/src/amd_detail/hipkittens/` holds two variants of one template,
+`gemm_tn_256x256x64_gfx950.hip`: the kernel of the HipKittens 256x256x64 BF16
+GEMM, written over its element type, behind a wrapper that takes
 `A, B, C, D, m, n, k, alpha, beta` and the leading dimensions and batch strides
 of A, B, C and D (84 bytes of kernel arguments) and passes B and A to the
 kernel in that order:
 the kernel's row-major `C = a·bᵀ` is then hipBLASLt's column-major
 `D = Aᵀ·B`. Its epilogue computes `alpha·Aᵀ·B + beta·C` in FP32 before
-rounding to BF16; with beta 0 it does not read C, and C may be D. It uses
-160,000 bytes of LDS and 237 VGPRs, and launches 512 threads per 256x256
-output tile of each batch, with the batch in the grid's z dimension. It serves
-gfx950 problems with:
+rounding to the element type; with beta 0 it does not read C, and C may be D.
+It uses 160,000 bytes of LDS and launches 512 threads per 256x256 output tile
+of each batch, with the batch in the grid's z dimension.
 
-- `opA = T` and `opB = N`, BF16 A, B, C and D, and FP32 compute;
+| Variant | Kernel | A, B, C and D | VGPRs |
+| --- | --- | --- | --- |
+| `gemm_bf16_tn_256x256x64_gfx950` | `HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5` | BF16 | 237 |
+| `gemm_f16_tn_256x256x64_gfx950` | `HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5`, built with `-DHK_FP16` | FP16 | 238 |
+
+HipKittens' `mma_ABt` accumulates only BF16 in FP32, so the template repeats
+its loop over HipKittens' base MFMA operation, which accumulates FP16 in FP32
+too. Each variant serves gfx950 problems with:
+
+- `opA = T` and `opB = N`, its type for A, B, C and D, and FP32 compute;
 - alpha and beta on the host, alpha not 0 (hipBLASLt turns alpha 0 into
   K = 0), and no bias, activation or alpha vector;
 - strided batches with any batch strides (not pointer arrays), M and N
@@ -92,8 +100,9 @@ matrix through one buffer descriptor, so the entry's buffer limit checks span
 the whole matrix, not one macro tile. For each request the backend adds a
 predicate requiring K > 0 and checks the request against the entry before
 returning the solution. The entry depends on nothing else in the request,
-because JIT library rows match only sizes. The comgr builder compiles the source with the variant's flags
-(`-std=c++20 -DKITTENS_CDNA4 -w`) after its own.
+because JIT library rows match only sizes. The comgr builder compiles the
+source with the variant's flags (`-std=c++20 -DKITTENS_CDNA4 -w`, and
+`-DHK_FP16` for FP16) after its own.
 
 ## Cache key
 

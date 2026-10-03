@@ -22,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <tuple>
 #include <unistd.h>
@@ -53,7 +54,7 @@ namespace
 #define HIP(expression) hip((expression), #expression)
 #define BLAS(expression) blas((expression), #expression)
 
-    // A BF16 NaN that no GEMM of finite inputs writes.
+    // A BF16 and FP16 NaN that no GEMM of finite inputs writes.
     constexpr uint16_t canary = 0x7fc1;
 
     uint16_t toBf16(float value)
@@ -70,12 +71,35 @@ namespace
         std::memcpy(&result, &bits, sizeof(result));
         return result;
     }
+    // The bits of a BF16 or FP16 element.
+    uint16_t toBits(hipDataType type, float value)
+    {
+        if(type == HIP_R_16BF)
+            return toBf16(value);
+        const _Float16 half = static_cast<_Float16>(value);
+        uint16_t       bits;
+        std::memcpy(&bits, &half, sizeof(bits));
+        return bits;
+    }
+    float fromBits(hipDataType type, uint16_t bits)
+    {
+        if(type == HIP_R_16BF)
+            return fromBf16(bits);
+        _Float16 half;
+        std::memcpy(&half, &bits, sizeof(half));
+        return static_cast<float>(half);
+    }
 
-    const hk::detail::Variant& variant()
+    // The variant for BF16 or FP16 A, B, C and D.
+    const hk::detail::Variant& variant(hipDataType type = HIP_R_16BF)
     {
         const auto& variants = hk::detail::resources().variants;
-        require(variants.size() == 1, "Expected one HipKittens variant");
-        return variants.front();
+        require(variants.size() == 2, "Expected two HipKittens variants");
+        const std::string prefix = type == HIP_R_16BF ? "HK_gemm_bf16_" : "HK_gemm_f16_";
+        for(const auto& v : variants)
+            if(std::string_view(v.kernelName).rfind(prefix, 0) == 0)
+                return v;
+        throw std::runtime_error("No HipKittens variant for " + prefix);
     }
 
     template <class T>
@@ -154,6 +178,8 @@ namespace
         {
             std::ostringstream out;
             out << m << 'x' << n << 'x' << k;
+            if(typeAB == HIP_R_16F)
+                out << " fp16";
             if(lda || ldb || ldc || ldd)
                 out << " ld " << leadA() << ' ' << leadB() << ' ' << leadC() << ' ' << leadD();
             if(batch != 1)
@@ -431,18 +457,33 @@ namespace
                              Case{"ldD != M", with([](Config& c) { c.ldd = c.m + 256; })},
                              Case{"odd leading dimensions", with([](Config& c) {
                                       c.lda = c.k + 1, c.ldb = c.k + 3, c.ldc = c.ldd = c.m + 1;
+                                  })},
+                             Case{"fp16", with([](Config& c) { c.typeAB = c.typeCD = HIP_R_16F; })},
+                             Case{"fp16, beta 1, batch 2, odd leading dimensions",
+                                  with([](Config& c) {
+                                      c.typeAB = c.typeCD = HIP_R_16F;
+                                      c.beta = 1, c.batch = 2;
+                                      c.lda = c.k + 1, c.ldc = c.ldd = c.m + 1;
                                   })}})
         {
             status = generate(provider, r.make(c.config), target, solutions);
             require(status.ok() && solutions.size() == 1,
                     std::string(c.label) + ": " + status.message);
-            std::cout << "PASS one solution for " << c.label << '\n';
+            require(solutions[0].kernelName == variant(c.config.typeAB).kernelName
+                        && solutions[0].hipFlags == variant(c.config.typeAB).hipFlags,
+                    std::string(c.label) + ": wrong variant " + solutions[0].kernelName);
+            std::cout << "PASS one solution for " << c.label << ": " << solutions[0].kernelName
+                      << '\n';
         }
         const std::vector<Case> cases{
             {"NN", with([](Config& c) { c.opA = HIPBLAS_OP_N; })},
             {"NT", with([](Config& c) { c.opA = HIPBLAS_OP_N, c.opB = HIPBLAS_OP_T; })},
-            {"fp16 in and out", with([](Config& c) { c.typeAB = c.typeCD = HIP_R_16F; })},
             {"fp32 out", with([](Config& c) { c.typeCD = HIP_R_32F; })},
+            {"fp16 in, fp32 out",
+             with([](Config& c) { c.typeAB = HIP_R_16F, c.typeCD = HIP_R_32F; })},
+            {"fp16 NN",
+             with([](Config& c) { c.typeAB = c.typeCD = HIP_R_16F, c.opA = HIPBLAS_OP_N; })},
+            {"fp16 K = 192", with([](Config& c) { c.typeAB = c.typeCD = HIP_R_16F, c.k = 192; })},
             {"alpha 0 (K = 0 in hipBLASLt)", with([](Config& c) { c.alpha = 0; })},
             {"device alpha",
              with([](Config& c) { c.pointerMode = HIPBLASLT_POINTER_MODE_DEVICE; })},
@@ -545,39 +586,46 @@ namespace
 
     void build()
     {
-        Requests                           r;
-        std::vector<hj::GeneratedSolution> solutions;
-        const auto                         provider = backend();
-        const auto                         target   = gfx950();
-        const auto                         request  = r.make({});
-        auto status = generate(provider, request, target, solutions);
-        require(status.ok() && solutions.size() == 1, "1024^3: " + status.message);
-        hj::GenerationRequest generation{*abi::RequestAccess::get(request), target};
-        hj::BuiltSolution     built;
-        status = abi::BackendAccess::get(provider)->components().builder->build(
-            solutions[0], generation, built);
-        require(status.ok(), "Build: " + status.message);
-        const auto metadata = co::readMetadata(built.object.bytes.data(), built.object.bytes.size());
-        require(metadata.ok(), "readMetadata: " + metadata.log);
-        const auto& kernels = metadata.metadata.kernels;
-        const auto  kernel  = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
-            return k.name == variant().kernelName;
-        });
-        require(kernel != kernels.end(), "The code object has no " + std::string(variant().kernelName));
-        const auto& expected = variant().resources;
-        std::cout << "built: kernarg " << kernel->kernargSegmentSize << " B, LDS "
-                  << kernel->groupSegmentFixedSize << " B, VGPR " << kernel->vgprCount
-                  << ", spills " << kernel->vgprSpillCount << '\n';
-        require(kernel->kernargSegmentSize == expected.kernargBytes
-                    && kernel->groupSegmentFixedSize == expected.ldsBytes
-                    && kernel->vgprCount == expected.vgprs
-                    && kernel->vgprSpillCount == expected.vgprSpills,
-                "The built kernel's resources differ from its manifest");
-        require(std::none_of(kernel->arguments.begin(),
-                             kernel->arguments.end(),
-                             [](const auto& a) { return a.valueKind.rfind("hidden", 0) == 0; }),
-                "The kernel has hidden arguments");
-        std::cout << "PASS build matches the variant's resources\n";
+        Requests   r;
+        const auto provider = backend();
+        const auto target   = gfx950();
+        for(const auto type : {HIP_R_16BF, HIP_R_16F})
+        {
+            Config c;
+            c.typeAB = c.typeCD = type;
+            const auto&                        v       = variant(type);
+            const auto                         request = r.make(c);
+            std::vector<hj::GeneratedSolution> solutions;
+            auto status = generate(provider, request, target, solutions);
+            require(status.ok() && solutions.size() == 1, c.name() + ": " + status.message);
+            hj::GenerationRequest generation{*abi::RequestAccess::get(request), target};
+            hj::BuiltSolution     built;
+            status = abi::BackendAccess::get(provider)->components().builder->build(
+                solutions[0], generation, built);
+            require(status.ok(), "Build: " + status.message);
+            const auto metadata
+                = co::readMetadata(built.object.bytes.data(), built.object.bytes.size());
+            require(metadata.ok(), "readMetadata: " + metadata.log);
+            const auto& kernels = metadata.metadata.kernels;
+            const auto  kernel  = std::find_if(kernels.begin(), kernels.end(), [&](const auto& k) {
+                return k.name == v.kernelName;
+            });
+            require(kernel != kernels.end(), "The code object has no " + std::string(v.kernelName));
+            const auto& expected = v.resources;
+            std::cout << "built " << v.kernelName << ": kernarg " << kernel->kernargSegmentSize
+                      << " B, LDS " << kernel->groupSegmentFixedSize << " B, VGPR "
+                      << kernel->vgprCount << ", spills " << kernel->vgprSpillCount << '\n';
+            require(kernel->kernargSegmentSize == expected.kernargBytes
+                        && kernel->groupSegmentFixedSize == expected.ldsBytes
+                        && kernel->vgprCount == expected.vgprs
+                        && kernel->vgprSpillCount == expected.vgprSpills,
+                    "The built kernel's resources differ from its manifest");
+            require(std::none_of(kernel->arguments.begin(),
+                                 kernel->arguments.end(),
+                                 [](const auto& a) { return a.valueKind.rfind("hidden", 0) == 0; }),
+                    "The kernel has hidden arguments");
+        }
+        std::cout << "PASS build matches each variant's resources\n";
     }
 
     // One GEMM on the device, with canaries around D and in its gaps: the
@@ -614,7 +662,8 @@ namespace
                     if(host == &hostC && (!c.beta || !inMatrix(i, c.leadC(), c.strideC())))
                         continue;
                     seed = seed * 1664525u + 1013904223u;
-                    (*host)[i] = toBf16(static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
+                    (*host)[i] = toBits(host == &hostC ? c.typeCD : c.typeAB,
+                                        static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
                 }
             HIP(hipMemcpy(a(), hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
             HIP(hipMemcpy(b(), hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
@@ -737,13 +786,15 @@ namespace
                 const auto* b   = &hostB[batch * c.strideB()];
                 double      sum = 0;
                 for(int64_t k = 0; k < c.k; ++k)
-                    sum += double(fromBf16(a[k + row * c.leadA()]))
-                           * double(fromBf16(b[k + col * c.leadB()]));
+                    sum += double(fromBits(c.typeAB, a[k + row * c.leadA()]))
+                           * double(fromBits(c.typeAB, b[k + col * c.leadB()]));
                 sum *= c.alpha;
                 if(c.beta)
                     sum += double(c.beta)
-                           * fromBf16(hostC[batch * c.strideC() + row + col * c.leadC()]);
-                const double got = fromBf16(out[batch * c.strideD() + row + col * c.leadD()]);
+                           * fromBits(c.typeCD,
+                                      hostC[batch * c.strideC() + row + col * c.leadC()]);
+                const double got
+                    = fromBits(c.typeCD, out[batch * c.strideD() + row + col * c.leadD()]);
                 require(std::abs(got - sum) <= bound + 0.01 * std::abs(sum),
                         label + ": D(" + std::to_string(row) + ", " + std::to_string(col) + ", "
                             + std::to_string(batch) + ") = " + std::to_string(got)
@@ -819,6 +870,15 @@ namespace
             c.lda = c.k + 64, c.ldc = c.ldd = c.m + 1, c.beta = -0.5f, c.cIsD = true;
             c.batch = 2, c.gap = 64;
         });
+        const auto fp16 = [](Config& c) { c.typeAB = c.typeCD = HIP_R_16F; };
+        add(shapes[2], fp16);
+        add(shapes[5], fp16);
+        add(shapes[1], [&](Config& c) {
+            fp16(c);
+            c.alpha = 1.5f, c.beta = 1, c.batch = 3, c.gap = 64;
+            c.lda = c.k + 8, c.ldb = c.k + 1, c.ldc = c.m + 1, c.ldd = c.m + 256;
+        });
+        add(shapes[2], [&](Config& c) { fp16(c), c.alpha = -0.25f, c.beta = 2, c.cIsD = true; });
         for(const auto& c : configs)
         {
             Gemm       g(c);

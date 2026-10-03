@@ -91,7 +91,8 @@ rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
 # The compiled-in resources: header manifest, kernel templates and their entries.
 set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(_hk_variant_dir "${_hk_source}/hipkittens")
-set(_hk_variants "${_hk_variant_dir}/gemm_bf16_tn_256x256x64_gfx950.yaml")
+set(_hk_variants "${_hk_variant_dir}/gemm_bf16_tn_256x256x64_gfx950.yaml"
+                 "${_hk_variant_dir}/gemm_f16_tn_256x256x64_gfx950.yaml")
 set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resources.cpp")
 if(WIN32)
     set(_hk_pythonpath "$<TARGET_FILE_DIR:_rocisa>/..;${PROJECT_SOURCE_DIR}/tensilelite")
@@ -106,7 +107,7 @@ add_custom_command(
             --headers "${_hk_stage}/manifest.json"
             --output "${_hk_resources}"
             ${_hk_variants}
-    DEPENDS "${_hk_variant_dir}/make_entries.py" "${_hk_variant_dir}/gemm_bf16_tn_256x256x64_gfx950.hip"
+    DEPENDS "${_hk_variant_dir}/make_entries.py" "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
             ${_hk_variants} "${_hk_stage}/manifest.json" _rocisa
     COMMENT "Generating the JIT HipKittens entries"
     VERBATIM)

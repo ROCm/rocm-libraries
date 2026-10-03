@@ -7,9 +7,18 @@
 // kernels/cdna4/gemm/bf16fp32/256_256_64_32_with16x32.cpp
 // (MIT License, Copyright (c) 2024 HazyResearch), made a device function that
 // takes its LDS from the wrapper below and stores alpha times the product plus
-// beta times C; the host dispatch and bindings are removed.
+// beta times C; the host dispatch and bindings are removed. Its element type is
+// data_t: FP16 with HK_FP16 defined, BF16 otherwise, accumulated in FP32.
 #include "kittens.cuh"
 using namespace kittens;
+
+#ifdef HK_FP16
+using data_t = half;
+#define HK_KERNEL HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5
+#else
+using data_t = bf16;
+#define HK_KERNEL HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5
+#endif
 
 constexpr int BLOCK_SIZE       = 256;
 constexpr int HALF_BLOCK_SIZE  = BLOCK_SIZE / 2;
@@ -25,11 +34,27 @@ constexpr int DOT_SLICE        = 32;
 #define NUM_WARPS (WARPS_M * WARPS_N)
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
 
-using _gl_A = gl<bf16, -1, -1, -1, -1>;
-using _gl_B = gl<bf16, -1, -1, -1, -1>;
-using _gl_C = gl<bf16, -1, -1, -1, -1>;
+using _gl_A = gl<data_t, -1, -1, -1, -1>;
+using _gl_B = gl<data_t, -1, -1, -1, -1>;
+using _gl_C = gl<data_t, -1, -1, -1, -1>;
 
 using G = kittens::group<NUM_WARPS>;
+
+// mma_ABt accumulates only BF16 in FP32; this is its loop over the tiles, whose
+// base operation accumulates FP16 in FP32 too.
+template <class D, class A, class B>
+__device__ __forceinline__ void mma_ABt_f32(D& d, const A& a, const B& b, const D& c) {
+    #pragma unroll
+    for (int n = 0; n < D::height; n++) {
+        #pragma unroll
+        for (int m = 0; m < D::width; m++) {
+            mma_ABt_base(d.tiles[n][m], a.tiles[n][0], b.tiles[m][0], c.tiles[n][m]);
+            #pragma unroll
+            for (int k = 1; k < A::width; k++)
+                mma_ABt_base(d.tiles[n][m], a.tiles[n][k], b.tiles[m][k], d.tiles[n][m]);
+        }
+    }
+}
 
 struct micro_globals {
     _gl_A a;
@@ -58,14 +83,14 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
                                               float alpha, float beta,
                                               alignment_dummy* __shm) {
     shared_allocator al((int*)&__shm[0]);
-    using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
-    using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
+    using ST_A = st<data_t, HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
+    using ST_B = st<data_t, HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
     ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();
     ST_B (&Bs)[2][2] = al.allocate<ST_B, 2, 2>();
 
-    rt_bf<HALF_REG_BLOCK_M, K_STEP, row_l, rt_16x32_s> A_tile;
-    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_0;
-    rt_bf<HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_1;
+    rt<data_t, HALF_REG_BLOCK_M, K_STEP, row_l, rt_16x32_s> A_tile;
+    rt<data_t, HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_0;
+    rt<data_t, HALF_REG_BLOCK_N, K_STEP, row_l, rt_16x32_s> B_tile_1;
     rt_fl<HALF_REG_BLOCK_M, HALF_REG_BLOCK_N, col_l, rt_16x16_s> C_accum[2][2];
     zero(C_accum[0][0]);
     zero(C_accum[0][1]);
@@ -100,24 +125,24 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
     int condition = (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) ;
 
     /********** Readfirstlane hoisting **********/
-    const bf16* a_base = (bf16*)&g.a[{0, 0, 0, 0}];
-    const bf16* b_base = (bf16*)&g.b[{0, 0, 0, 0}];
-    const int a_row_stride = g.a.template stride<2>() * sizeof(bf16);
-    const int b_row_stride = g.b.template stride<2>() * sizeof(bf16);
+    const data_t* a_base = (data_t*)&g.a[{0, 0, 0, 0}];
+    const data_t* b_base = (data_t*)&g.b[{0, 0, 0, 0}];
+    const int a_row_stride = g.a.template stride<2>() * sizeof(data_t);
+    const int b_row_stride = g.b.template stride<2>() * sizeof(data_t);
     i32x4 a_srsrc_base = make_srsrc(a_base, M * a_row_stride, a_row_stride);
     i32x4 b_srsrc_base = make_srsrc(b_base, N * b_row_stride, b_row_stride);
 
     const int wid = warpid() % NUM_WARPS;
-    constexpr int elem_per_warp = (16 / sizeof(bf16)) * kittens::WARP_THREADS;
-    uint32_t a_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
+    constexpr int elem_per_warp = (16 / sizeof(data_t)) * kittens::WARP_THREADS;
+    uint32_t a_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t a_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t a_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t a_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp * sizeof(data_t)));
 
-    uint32_t b_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
+    uint32_t b_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t b_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t b_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(data_t)));
+    uint32_t b_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(data_t)));
     /*****************************************/
 
     int tic = 0;
@@ -164,7 +189,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
+        mma_ABt_f32(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -176,7 +201,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
+        mma_ABt_f32(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -187,7 +212,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
+        mma_ABt_f32(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -199,7 +224,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
         __builtin_amdgcn_s_barrier();
 
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
+        mma_ABt_f32(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -212,7 +237,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
+        mma_ABt_f32(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -224,7 +249,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
+        mma_ABt_f32(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -235,7 +260,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
+        mma_ABt_f32(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -245,7 +270,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
         __builtin_amdgcn_s_barrier();
 
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
+        mma_ABt_f32(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
     }
@@ -262,7 +287,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
         asm volatile("s_waitcnt lgkmcnt(0)");
 
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
+        mma_ABt_f32(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -272,7 +297,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
+        mma_ABt_f32(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -283,8 +308,8 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
-        mma_ABt(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
+        mma_ABt_f32(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
+        mma_ABt_f32(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
         tic^=1, toc^=1;
@@ -300,7 +325,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
+        mma_ABt_f32(C_accum[0][0], A_tile, B_tile_0, C_accum[0][0]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -311,7 +336,7 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
+        mma_ABt_f32(C_accum[0][1], A_tile, B_tile_1, C_accum[0][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
@@ -321,8 +346,8 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
 
         asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
-        mma_ABt(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
-        mma_ABt(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
+        mma_ABt_f32(C_accum[1][0], A_tile, B_tile_0, C_accum[1][0]);
+        mma_ABt_f32(C_accum[1][1], A_tile, B_tile_1, C_accum[1][1]);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
     }
@@ -372,19 +397,17 @@ __device__ __forceinline__ GL make_gl(const void* p, size_t b, size_t d, size_t 
 // matrix and has the leading dimension as its column count; the kernel body
 // takes its sizes from M, N and K.
 extern "C" __global__ __launch_bounds__(512, 2)
-void HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5(const void* A, const void* B, const void* C,
-                                                   void* D, uint32_t m, uint32_t n, uint32_t k,
-                                                   float alpha, float beta, uint32_t lda,
-                                                   uint32_t ldb, uint32_t ldc, uint32_t ldd,
-                                                   uint32_t strideA, uint32_t strideB,
-                                                   uint32_t strideC, uint32_t strideD)
+void HK_KERNEL(const void* A, const void* B, const void* C, void* D, uint32_t m, uint32_t n,
+               uint32_t k, float alpha, float beta, uint32_t lda, uint32_t ldb, uint32_t ldc,
+               uint32_t ldd, uint32_t strideA, uint32_t strideB, uint32_t strideC,
+               uint32_t strideD)
 {
     __shared__ alignment_dummy lds[MAX_SHARED_MEMORY / sizeof(alignment_dummy)];
     const int    M = int(n), N = int(m), K = int(k);
     const size_t batch = blockIdx.z;
-    micro_globals g{hk_flat::make_gl<_gl_A>(static_cast<const bf16*>(B) + batch * strideB, 1, 1, M, ldb),
-                    hk_flat::make_gl<_gl_B>(static_cast<const bf16*>(A) + batch * strideA, 1, 1, N, lda),
-                    hk_flat::make_gl<_gl_C>(static_cast<bf16*>(D) + batch * strideD, 1, 1, M, ldd),
-                    hk_flat::make_gl<_gl_C>(static_cast<const bf16*>(C) + batch * strideC, 1, 1, M, ldc)};
+    micro_globals g{hk_flat::make_gl<_gl_A>(static_cast<const data_t*>(B) + batch * strideB, 1, 1, M, ldb),
+                    hk_flat::make_gl<_gl_B>(static_cast<const data_t*>(A) + batch * strideA, 1, 1, N, lda),
+                    hk_flat::make_gl<_gl_C>(static_cast<data_t*>(D) + batch * strideD, 1, 1, M, ldd),
+                    hk_flat::make_gl<_gl_C>(static_cast<const data_t*>(C) + batch * strideC, 1, 1, M, ldc)};
     micro_tk_body(g, M, N, K, alpha, beta, lds);
 }

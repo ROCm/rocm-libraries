@@ -6,18 +6,18 @@
 # for each request; the backend compiles Template with HipFlags.
 Template: gemm_tn_256x256x64_gfx950.hip
 Architecture: gfx950
-HipFlags: [-std=c++20, -DKITTENS_CDNA4, -w]
+HipFlags: [-std=c++20, -DKITTENS_CDNA4, -DHK_FP16, -w]
 # What the built kernel uses; hipblaslt-jit-hipkittens-test checks it.
 Resources:
   KernargBytes: 84
   LdsBytes: 160000
-  Vgprs: 237
+  Vgprs: 238
   VgprSpills: 0
 Solution:
   ProblemType:
     OperationType: GEMM
-    DataType: b
-    DestDataType: b
+    DataType: h
+    DestDataType: h
     ComputeDataType: s
     HighPrecisionAccumulate: True
     TransposeA: True
@@ -28,7 +28,7 @@ Solution:
     Activation: False
     UseScaleAlphaVec: 0
   CustomKernel:
-    name: HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5
+    name: HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5
     args: [ { type: address, semantic: AddressA },
             { type: address, semantic: AddressB },
             { type: address, semantic: AddressC },
