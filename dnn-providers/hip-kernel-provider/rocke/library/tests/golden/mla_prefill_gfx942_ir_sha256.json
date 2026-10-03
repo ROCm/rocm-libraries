@@ -3,20 +3,20 @@
     "llvm20": {
       "cases": {
         "mla_prefill_gfx942/dispatch_fwd_h128": {
-          "bytes": 544308,
-          "sha256": "4b9e47d2582c3582b1ba078fa06bcf7f9bd46347ec2775ec9c465da5c13397d2"
+          "bytes": 839802,
+          "sha256": "74e38471fa822299b03c5ca59ca9cf746a250b10e24097dfaec4889932d6372f"
         },
         "mla_prefill_gfx942/dispatch_fwd_h64": {
-          "bytes": 543787,
-          "sha256": "eb3d815109e76f967cc2ffc058d625be4880601e7b36341193be853ad876fbc6"
+          "bytes": 839263,
+          "sha256": "64c7dd2836367cfd8dd72c3d947b17b3085cfcac513cc509980066be1e21071b"
         },
         "mla_prefill_gfx942/fwd_h128": {
-          "bytes": 544308,
-          "sha256": "4b9e47d2582c3582b1ba078fa06bcf7f9bd46347ec2775ec9c465da5c13397d2"
+          "bytes": 678211,
+          "sha256": "69f60d6e11d7712949cd510955104b88c1103799bb1be61c60f2884d7b327a63"
         },
         "mla_prefill_gfx942/fwd_h64": {
-          "bytes": 543787,
-          "sha256": "eb3d815109e76f967cc2ffc058d625be4880601e7b36341193be853ad876fbc6"
+          "bytes": 677867,
+          "sha256": "6d7fd10ca2e16d932739e6620c66cb1a3b88cca6137296fe6438cdcf361950a7"
         },
         "mla_prefill_gfx942/probe_h128": {
           "bytes": 166284,
@@ -31,20 +31,20 @@
     "llvm22": {
       "cases": {
         "mla_prefill_gfx942/dispatch_fwd_h128": {
-          "bytes": 544408,
-          "sha256": "6ab5a6acf66d5966b20553bfb5836278d92ea9accaf9d2053bf8caf2f2021a92"
+          "bytes": 839902,
+          "sha256": "00798ff7909f9779820651afbdf31d79b56a841c7f70c45db131bca0a90e9cb3"
         },
         "mla_prefill_gfx942/dispatch_fwd_h64": {
-          "bytes": 543887,
-          "sha256": "abc90e622957d7f2cab967e8226daa94b707d4a9cc3ce85b4479fdce6004db2d"
+          "bytes": 839363,
+          "sha256": "f13b998fcc9e2bd10f1aefde97e0322aa13a3ef8941a6e8a7f48c4591432fe73"
         },
         "mla_prefill_gfx942/fwd_h128": {
-          "bytes": 544408,
-          "sha256": "6ab5a6acf66d5966b20553bfb5836278d92ea9accaf9d2053bf8caf2f2021a92"
+          "bytes": 678311,
+          "sha256": "bd6095558bc0bca6f450065eb52b9eeb3a80f6b09b99cb48863d97feeb6264d6"
         },
         "mla_prefill_gfx942/fwd_h64": {
-          "bytes": 543887,
-          "sha256": "abc90e622957d7f2cab967e8226daa94b707d4a9cc3ce85b4479fdce6004db2d"
+          "bytes": 677967,
+          "sha256": "b0a7e237aab1b4f3758db9415af001e86c67f354c23d55d44490389a12513161"
         },
         "mla_prefill_gfx942/probe_h128": {
           "bytes": 166291,
