@@ -4,9 +4,24 @@ A minimal but **real** authored source root for `hkp_pack`. Both producers are
 exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
-This tree drives the production packaging path, which the presets and CI lanes
-otherwise leave dormant: without a source root set, the pack step ships nothing
-and says nothing.
+This tree drives the production packaging path with fixtures. Without a source root
+pointed here, the pack step uses the provider's shipped descriptor root instead, and
+skips when nothing there declares an architecture the build packs for.
+
+## Disposition
+
+| Set | Verdict |
+|---|---|
+| `hip/pointwise_add/` | not shipped — CI production-path exercise, and layout fixture |
+| `rocKE/gfx942_tiled_attention/` | not shipped — CI production-path exercise, and layout fixture |
+
+Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` defaults to
+the provider's shipped descriptor root, so nothing points at this tree unless a build
+overrides it, and no install rule copies it. Two things do use it.
+`hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which
+runs the production packaging path end to end on these fixtures. `test_hkp_pack_layout.py` packs
+the tree directly, which is what makes its layout assertion strict: changing anything here
+changes what those tests pin.
 
 ## Layout
 
@@ -95,7 +110,7 @@ runtime dispatch; that needs a native pack nobody has written yet. Writing one i
 next step toward a true rocKE end-to-end.
 
 The descriptors here are authored against the schema the C++ loader enforces,
-modelled on `src/integration_tests/kernel_ingestor_engine/fixtures/packaged/`.
+modelled on `src/engines/kernel_ingestor_engine/test_descriptors/`.
 Do not model them on `descriptor-packaging/tests/fixtures/`: that is packer-only
 test data which never passes through `DescriptorLoader.hpp`, so a tree copied
 from it can pack cleanly and still fail to load.

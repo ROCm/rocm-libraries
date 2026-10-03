@@ -67,6 +67,7 @@ DEF_BATCH(.format = MUBUF_STORE,
         .operand_fields = { {S0, .size=128} },
     BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8", .logical = "BufferStoreD16HIU8",
     BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16", .logical = "BufferStoreD16HIB16",
+    BufferAtomicPkAddBf16Inst, "buffer_atomic_pk_add_bf16", .logical = "BufferAtomicPkAddBF16",
 )
 // Control Flow — Branches (inherit {S, simm16, label, 16} from SOPP_BRANCH)
 DEF_BATCH(.format = SOPP_BRANCH,
@@ -475,6 +476,12 @@ DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {G
     .logical = "GlobalPrefetchB8",
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
+// FLAT-addressed form of the same prefetch: identical operands and semantics, including
+// both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
+// Only the spelling of a null saddr differs: GLOBAL writes "off", FLAT omits it.
+DEF_T(FlatPrefetchB8Inst, "flat_prefetch_b8", .format = FLAT, .flags = {FLATPrefetch},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
 // S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
@@ -774,6 +781,15 @@ DEF_T(VCndmaskB32Inst, "v_cndmask_b32", .format = VOP2, .logical = "VCndMaskB32"
         {D0, vdst, vgpr, 32},
         {S0, src0, src, 32},
         {S1, src1, src, 32},
+        {S2, src2, sreg, M64},
+    },
+)
+// true16 16-bit select (VOP3-only); half-word (.l/.h) rides on the operands.
+DEF_T(VCndmaskB16Inst, "v_cndmask_b16", .format = VOP3, .logical = "VCndMaskB16",
+    .operand_fields = {
+        {D0, vdst, vgpr, 16},
+        {S0, src0, src, 16},
+        {S1, src1, src, 16},
         {S2, src2, sreg, M64},
     },
 )

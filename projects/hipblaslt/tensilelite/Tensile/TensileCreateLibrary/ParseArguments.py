@@ -27,9 +27,9 @@ import re
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import coVersionMap, printExit
-from Tensile.Common.Architectures import architectureMap
-from Tensile.Toolchain.Validators import ToolchainDefaults
+from ..Common import coVersionMap, printExit
+from ..Common.Architectures import architectureMap
+from ..Toolchain.Validators import ToolchainDefaults
 
 
 def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -76,7 +76,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument(
         "--code-object-version",
         dest="CodeObjectVersion",
-        choices=["4", "5", "V4", "V5", "default"],
+        choices=["4", "5", "V4", "V5", "6", "V6", "default"],
         default="4",
         action="store",
     )
@@ -122,10 +122,11 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument(
         "--library-format",
         dest="LibraryFormat",
-        choices=["yaml", "msgpack"],
+        choices=["yaml", "msgpack", "msgpack-indexed"],
         action="store",
         default="msgpack",
-        help="select which library format to use",
+        help="select which library format to use; msgpack-indexed defers "
+             "per-solution deserialization to query time",
     )
     argParser.add_argument(
         "--jobs",
@@ -180,6 +181,14 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Enable ASAN build.",
     )
     argParser.add_argument(
+        "--gfx1250v0",
+        dest="BuildGfx1250v0",
+        action="store_true",
+        default=False,
+        help="With gfx1250 requested, also build library/gfx1250v0/: gfx1250-strict's "
+        "kernels built for gfx1250, for A0 parts the runtime reports as gfx1250.",
+    )
+    argParser.add_argument(
         "--keep-build-tmp",
         dest="KeepBuildTmp",
         action="store_true",
@@ -230,6 +239,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["AsmDebug"] = args.AsmDebug
     arguments["BuildIdKind"] = args.BuildIdKind
     arguments["KeepBuildTmp"] = args.KeepBuildTmp
+    arguments["BuildGfx1250v0"] = args.BuildGfx1250v0
     arguments["AsanBuild"] = args.AsanBuild
     arguments["UseCompression"] = not args.NoCompress
     arguments["CxxCompiler"] = args.CxxCompiler

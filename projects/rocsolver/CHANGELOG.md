@@ -36,6 +36,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * GEHD2
     * GEHRD
 
+* Support added for the gfx1250-strict architecture.
+
 ### Changed
 ### Removed
 ### Optimized
@@ -43,8 +45,13 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved the performance of GEHRD for large matrices (LAHR2).
 * Improved the performance of LARFT with forward direction and column-wise storage for tall
   matrices, and of ORGQR/UNGQR and ORGQL/UNGQL for large matrices.
+* Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
+  matrix is scaled by a small number.
+
 ### Known issues
 
 * HSEQR (for n > 75) and GEEV synchronize the stream, so they cannot be captured in a HIP
