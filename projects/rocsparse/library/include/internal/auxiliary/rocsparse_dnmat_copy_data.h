@@ -25,8 +25,7 @@
 #ifndef ROCSPARSE_DNMAT_COPY_DATA_H
 #define ROCSPARSE_DNMAT_COPY_DATA_H
 
-#include "rocsparse-types.h"
-#include "rocsparse-version.h"
+#include "../../rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus

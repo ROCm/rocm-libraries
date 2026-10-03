@@ -44,7 +44,7 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-#TO DELETE 
+#TO DELETE
 #if(BUILD_WITH_TRSM_REFACTORING)
 #  add_compile_options(-DROCSPARSE_WITH_TRSM_REFACTORING)
 #endif()
@@ -194,7 +194,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_spsm_csr.cpp
   test_spsm_csc.cpp
   test_spsm_coo.cpp
-  test_sptrsm.cpp
   test_sptrsm_csr.cpp
   test_sptrsm_csc.cpp
   test_sptrsm_coo.cpp

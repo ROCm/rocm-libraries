@@ -218,9 +218,7 @@ namespace rocsparse_clients
 
         rocsparse_status set(rocsparse_handle handle)
         {
-            rocsparse_create_sptrsm_descr(&this->m_descr);
-            rocsparse_error p_error[1] = {nullptr};
-
+            rocsparse_error  p_error[1] = {nullptr};
             rocsparse_status status{};
 
             status = rocsparse_sptrsm_set_input(handle,
@@ -294,7 +292,11 @@ namespace rocsparse_clients
             {
                 throw(status);
             }
-            this->set(handle);
+            status = this->set(handle);
+            if(status != rocsparse_status_success)
+            {
+                throw(status);
+            }
         }
 
         ~sptrsm_descr()
