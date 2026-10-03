@@ -1065,6 +1065,9 @@ namespace
     void launch_poison(
         const FastCheckMatrix& m, int64_t batch, size_t total, uint64_t value, hipStream_t stream)
     {
+        // HIP rejects a launch with an empty grid.
+        if(total == 0)
+            return;
         hipLaunchKernelGGL(poison_kernel<U>,
                            dim3(grid_for(total)),
                            dim3(256),
@@ -1112,6 +1115,8 @@ namespace
     {
         U sentinel      = U(sentinel_bits(m.type));
         U padding_value = expect_poison ? U(poison_bits(m.type)) : sentinel;
+        if(total == 0)
+            return;
         hipLaunchKernelGGL(scan_kernel<U>,
                            dim3(grid_for(total)),
                            dim3(256),

@@ -951,6 +951,20 @@ namespace
         EXPECT_NE(res.message.find("does not support data type"), std::string::npos) << res.message;
     }
 
+    // An empty operand (K = 0 leaves A and B empty) launches nothing and scans clean.
+    TEST(FastCheckDevice_pre_checkin, empty_buffers_launch_nothing)
+    {
+        DeviceMatrix m;
+        (void)hipGetLastError();
+        fast_check_fill_sentinel_device(m.d, HIP_R_32F, 0, 0);
+        fast_check_poison_padding_device(m.matrix(), 1, 0, 0);
+        auto res = fast_check_scan_padding_device(m.matrix(), 1, 0, true, 0);
+        EXPECT_TRUE(res.passed) << res.message;
+        res = fast_check_scan_padding_device(m.matrix(), 1, 0, false, 0);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
+    }
+
     // An exact result beyond the range the compute type holds exactly is reported as such (or
     // refused up front, once fast_check bounds the results): its GPU value depends on the
     // summation order, so it is neither right nor wrong.
