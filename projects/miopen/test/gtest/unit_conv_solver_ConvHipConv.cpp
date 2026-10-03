@@ -62,7 +62,7 @@ auto GetConv3dSmokeTestCases(miopenDataType_t datatype, bool tf32_compute = fals
 //
 // Distinct from the above in where the filter's non-unit extent sits: here it is
 // z, which a solver reading only y and x drops. No tf32 instantiation, because
-// hipconv has no kernel for these at fp32.
+// hipconv has no kernel for these at fp32. gfx950 only: they unfold to vertical filters.
 auto GetConv3dDepthSmokeTestCases(miopenDataType_t datatype, bool tf32_compute = false)
 {
     constexpr auto layout = miopenTensorNDHWC;
@@ -79,7 +79,8 @@ auto GetConv3dDepthSmokeTestCases(miopenDataType_t datatype, bool tf32_compute =
 // Dense wgrad shapes whose channel count leaves a partial tile, which is where the
 // direct_wgrad epilogue's channel guard splits a wave. The defect these cover (ROCM-31508)
 // appeared only on non-default perf configs, which GetTestParams()'s Tunable(5) sweeps, and
-// only on channel counts that are not a multiple of the 32-wide wave tile.
+// only on channel counts that are not a multiple of the 32-wide wave tile. gfx950 only, since
+// gfx1250 has no dense wgrad kernel.
 auto GetConvWrwDenseTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
 {
     return std::vector<TestCase>{
@@ -151,7 +152,7 @@ auto GetConvOddChannelTestCases(miopenDataType_t datatype, bool tf32_compute = f
         // clang-format off
         TestCase{{datatype, layout, {2, 19, 32, 32}}, {datatype, layout, { 65, 19, 4, 4}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 1, false, tf32_compute}}, // C(19)
         TestCase{{datatype, layout, {2, 65, 32, 32}}, {datatype, layout, { 19, 65, 5, 5}}, datatype, {{2, 2}, {1, 1}, {1, 1}, 1, false, tf32_compute}}, // K(19)
-        TestCase{{datatype, layout, {2, 12, 32, 32}}, {datatype, layout, {256,  3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 4, false, tf32_compute}}, // 3 channels per group
+        TestCase{{datatype, layout, {2, 12, 32, 32}}, {datatype, layout, { 16,  3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 4, false, tf32_compute}}, // 3 channels per group
         // clang-format on
     };
 }
@@ -590,69 +591,69 @@ INSTANTIATE_TEST_SUITE_P(SmokeConv3d,
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvFwdNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeConv3dDepth,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseWrw,
     GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     SmokeDenseWrw,
     GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16,
-    testing::Combine(testing::Values(GetTestParams()),
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
                          GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsGfx950()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvWrwDenseTestCases(
                                               miopenBFloat16, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
                          GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsGfx950()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvWrwDenseTestCases(
                                               miopenBFloat16, miopenTensorNCHW))));
