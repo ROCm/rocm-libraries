@@ -29,7 +29,9 @@ jobs:
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       baseline_run_id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       test_matrix: ${{ steps.matrix.outputs.test_matrix }}
+      gfx942_family: ${{ steps.matrix.outputs.gfx942_family }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -70,8 +72,114 @@ jobs:
               matrix.append(dict(architecture=architecture, family=config["family"], runs_on=runner))
           with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
               stream.write("test_matrix=" + json.dumps({"include": matrix}) + "\n")
+              stream.write(f"gfx942_family={families['gfx94x']['linux']['family']}\n")
           print(json.dumps(matrix, indent=2))
           PY
+
+  compile-gfx942:
+    name: JIT compile only (gfx942)
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.build_runs_on }}
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout source under test
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Checkout shared SDK installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ needs.setup.outputs.therock_ref }}
+          path: TheRock
+          sparse-checkout: build_tools
+      - name: Set paths inside the container
+        run: |
+          printf '%s\n' \
+            "JIT_BUILD_DIR=$GITHUB_WORKSPACE/build/jit-gfx942" \
+            "JIT_DEPS_DIR=$GITHUB_WORKSPACE/build/jit-deps" \
+            "VENV_DIR=$GITHUB_WORKSPACE/.venv" \
+            "ROCM_PATH=$GITHUB_WORKSPACE/build/rocm-deps" >> "$GITHUB_ENV"
+      - name: Install build dependencies
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build git g++ python3-dev python3-venv \
+            libmsgpack-cxx-dev libomp-dev zlib1g-dev
+          python3 -m venv "$VENV_DIR"
+          "$VENV_DIR/bin/python" -m pip install -r TheRock/requirements.txt \
+            -r projects/hipblaslt/tensilelite/requirements.txt
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+      - name: Install only SDK dependency artifacts
+        timeout-minutes: 30
+        env:
+          AMDGPU_FAMILY: ${{ needs.setup.outputs.gfx942_family }}
+          SDK_RUN_ID: ${{ needs.setup.outputs.baseline_run_id }}
+        run: |
+          mkdir -p jit-test-logs
+          python TheRock/build_tools/fetch_artifacts.py \
+            --run-id "$SDK_RUN_ID" --run-github-repo ROCm/TheRock \
+            --artifact-group "$AMDGPU_FAMILY" --amdgpu-targets gfx942 \
+            --output-dir "$ROCM_PATH" --flatten \
+            '^(amd-llvm|base|sysdeps|core-(runtime|hip|kpack|ocl|amdsmi)|rocjitsu-hotswap|rocprofiler-sdk|host-suite-sparse)_(run|lib|dev)_' \
+            2>&1 | tee jit-test-logs/sdk-dependencies.log
+          echo "$ROCM_PATH/bin" >> "$GITHUB_PATH"
+          echo "$ROCM_PATH/llvm/bin" >> "$GITHUB_PATH"
+      - name: Stage header-only hipblas-common from this checkout
+        timeout-minutes: 5
+        run: |
+          cmake -S projects/hipblas-common -B build/hipblas-common -G Ninja \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH" -DCMAKE_INSTALL_PREFIX="$JIT_DEPS_DIR"
+          cmake --install build/hipblas-common
+      - name: Build for gfx942 and run the JIT tests that need no GPU
+        timeout-minutes: 75
+        run: |
+          jobs=$(nproc)
+          (( jobs > 16 )) && jobs=16
+          # Host library with the gfx942 tuning knowledge; no GPU on this runner.
+          cmake -S projects/hipblaslt -B "$JIT_BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$ROCM_PATH/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_PREFIX_PATH="$JIT_DEPS_DIR;$ROCM_PATH" \
+            -DPython_EXECUTABLE="$VENV_DIR/bin/python" \
+            -DPython3_EXECUTABLE="$VENV_DIR/bin/python" \
+            -DGPU_TARGETS=gfx942 \
+            -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_JIT_TESTING=ON \
+            -DHIPBLASLT_ENABLE_HOST=ON -DHIPBLASLT_ENABLE_DEVICE=OFF \
+            -DHIPBLASLT_ENABLE_CLIENT=OFF -DHIPBLASLT_BUILD_TESTING=ON \
+            -DHIPBLASLT_ENABLE_ROCROLLER=OFF -DHIPBLASLT_ENABLE_MARKER=OFF \
+            -DHIPBLASLT_ENABLE_EXTOPS=OFF -DHIPBLASLT_ENABLE_MATRIX_TRANSFORM=OFF \
+            -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
+            2>&1 | tee jit-test-logs/configure.log
+          cmake --build "$JIT_BUILD_DIR" --parallel "$jobs" 2>&1 | tee jit-test-logs/build.log
+          # Reading a library entry queries the current device for its WorkgroupMappingXCC
+          # predicate, so the tests that read the gfx950 bundles' entries need a GPU.
+          ctest --test-dir "$JIT_BUILD_DIR/clients/tests/jit" -L jit-cpu --no-tests=error \
+            -E '^jit-(library|library-concurrency|bundle-freshness)$' \
+            --output-on-failure 2>&1 | tee jit-test-logs/ctest.log
+          "$JIT_BUILD_DIR/clients/staging/hipblaslt-jit-knowledge-test" --decode \
+            "$JIT_BUILD_DIR/Tensile/library/gfx942/hipblaslt-jit-knowledge-gfx942.dat.zlib" \
+            2>&1 | tee jit-test-logs/knowledge-decode.log
+          python .github/scripts/test_hipblaslt_jit.py \
+            --build "$JIT_BUILD_DIR" --architecture gfx942 --output jit-test-logs/results \
+            --case jit-gemm-knowledge-gfx942 --case jit-gemm-persistent-gfx942 \
+            2>&1 | tee jit-test-logs/test.log
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: hipblaslt-jit-gfx942-compile
+          path: jit-test-logs
+          if-no-files-found: warn
+          retention-days: 7
 
   test:
     name: JIT API and GEMM (${{ matrix.architecture }})

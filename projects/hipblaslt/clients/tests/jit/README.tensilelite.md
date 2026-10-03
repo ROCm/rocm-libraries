@@ -236,7 +236,10 @@ layer. It then builds without the TensileLite backend, once without and once
 with the test backend, and runs their CTest tests. The workflow obtains native
 runner labels from the shared GPU map for gfx90a, gfx942, gfx950 and gfx1250.
 Missing native runners fail setup instead of silently substituting another GPU.
-The SDK supplies build dependencies; project libraries are built from the source
+A compile-only job on a build runner without a GPU builds for gfx942 with its
+tuning knowledge, runs the `jit-cpu` tests that read no library entry, decodes
+the knowledge file and runs the `jit-gemm-knowledge-gfx942` and
+`jit-gemm-persistent-gfx942` routes. The SDK supplies build dependencies; project libraries are built from the source
 under review.
 
 A configured workflow is a coverage request; its run results show which GPU
