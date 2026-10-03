@@ -268,7 +268,10 @@ void printHelp(const char* program)
               << "                         manifest.json's served_extent is reported either way.\n"
               << "  --budget <n>           First-pass oracle calls per combination (default\n"
               << "                         20000); growth toward --count may reach 64x this\n"
-              << "  --ceiling <n>          Largest extent to propose (default 4096)\n"
+              << "  --ceiling <n>          Largest extent to propose (default 4096). A served\n"
+              << "                         maximum within a tenth of it is marked\n"
+              << "                         at_search_ceiling in served_extent: the search's\n"
+              << "                         edge, not the engine's\n"
               << "  --probe <k=v,...>      Report what happens to one point, and stop\n"
               << "  --max-bytes <n>        Ceiling on a searched problem's tensors (default\n"
               << "                         256 MiB). Pack and model shapes are exempt: they\n"
@@ -445,12 +448,18 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
 /// The manifest's `served_extent` for one operation, and with @p takeEdges the edge points added
 /// to the sweep pool (where no pool holds them) and named in @p reserved, so the cut keeps them.
 /// @p admit stamps a new pool entry and returns its graph id, or empty when it is held out.
+///
+/// A parameter whose served maximum comes within a tenth of @p searchCeiling is marked
+/// `at_search_ceiling`: the walk proposes nothing above the ceiling and its steps rarely land on
+/// it exactly, so that edge is the search's, not the engine's -- unless the declaration itself
+/// bounds the parameter there.
 nlohmann::json
     reportServedExtent(const hipdnn_corpus_gen::OperationMetadata& metadata,
                        const hipdnn_corpus_gen::ProblemCorpus& corpus,
                        hipdnn_corpus_gen::SourcePools& pools,
                        bool takeEdges,
                        bool searched,
+                       int64_t searchCeiling,
                        std::set<std::string>& reserved,
                        const std::function<std::string(hipdnn_corpus_gen::PoolEntry&)>& admit)
 {
@@ -470,7 +479,14 @@ nlohmann::json
     nlohmann::json parameters = nlohmann::json::object();
     for(const auto& [name, range] : extent.ranges)
     {
-        parameters[name] = {{"min", range.first}, {"max", range.second}};
+        const auto* declared = metadata.find(name);
+        const bool boundedBelowCeiling = declared != nullptr && declared->range.has_value()
+                                         && declared->range->second <= searchCeiling;
+        parameters[name]
+            = {{"min", range.first},
+               {"max", range.second},
+               {"at_search_ceiling",
+                searched && range.second * 10 >= searchCeiling * 9 && !boundedBelowCeiling}};
     }
     nlohmann::json taken = nlohmann::json::array();
     for(const auto& edge : takeEdges ? extent.edges : std::vector<hipdnn_corpus_gen::ServedEdge>{})
@@ -506,6 +522,7 @@ nlohmann::json
     // `search_capped`: some search stopped while still finding new points, so the edge is known
     // to lie further out.
     return {{"parameters", parameters},
+            {"search_ceiling", searchCeiling},
             {"served_points", extent.servedPoints},
             {"searched", searched},
             {"search_capped", capped},
@@ -1428,6 +1445,7 @@ int runGenerator(const std::vector<std::string>& args)
             pools,
             options.includeExtremes,
             searched,
+            options.exploration.numericCeiling,
             reserved,
             [&](hipdnn_corpus_gen::PoolEntry& entry) {
                 if(!admit(entry, true))
