@@ -182,7 +182,8 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
 | Anything, before pushing | `pre-commit run --all-files` | No |
 
-The four client test tiers (`quick`, `standard`, `comprehensive`, `full`) are defined in
+The five client test tiers (`quick`, `standard`, `comprehensive`, `full`, and `stress`, which
+holds only the large-memory size-threshold cases) are defined in
 [`clients/tests/test_categories.yaml`](clients/tests/test_categories.yaml). When hipBLASLt is built
 inside rocm-libraries, those tiers are registered as CTest labels and a relocatable
 `CTestTestfile.cmake` is installed to `bin/hipblaslt/`, so the tiers can be run with `ctest` from
