@@ -27,6 +27,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD (SYEVJ/HEEVJ, GESVDJ): the plane rotations were slightly biased, which reduced the accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large matrices.
 * Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
   matrix is scaled by a small number.
+* Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ and HEEVDJ, when two nearly equal
+  eigenvalues of the merged blocks were not deflated: the deflation criterion is now that of LAPACK.
 
 ### Known issues
 ### Upcoming changes

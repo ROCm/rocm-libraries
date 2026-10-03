@@ -107,14 +107,52 @@ void stedcj_initData(const rocblas_handle handle,
                      Sh& hD,
                      Sh& hE,
                      Th& hC,
-                     Uh& hInfo)
+                     Uh& hInfo,
+                     const rocblas_int glued = 0,
+                     const rocblas_int pair = 0)
 {
     if(CPU)
     {
         using S = decltype(std::real(T{}));
 
+        // glued Wilkinson matrices: copies of W21+ (D = |10 - i|, E = 1) joined by off-diagonal
+        // entries 10^-glued. Their clusters of nearly equal eigenvalues, with eigenvectors that
+        // are tiny at the joins, test the deflation of close eigenvalues in the merges
+        if(glued > 0)
+        {
+            const S gamma = std::pow(S(10), -S(glued));
+            for(rocblas_int i = 0; i < n; ++i)
+            {
+                hD[0][i] = std::abs(S(10 - i % 21));
+                hE[0][i] = (i % 21 == 20) ? gamma : S(1);
+            }
+        }
+
+        // a pair of eigenvalues lambda and lambda + delta (delta = (pair % 100) 1e-15), isolated by
+        // off-diagonal entries 10^-(pair / 100) at the last row above the first split (n / 2) and
+        // two rows below it, in a chain with eigenvalues in [0, 6]: the two poles of the top merge
+        // are a few ulps apart, and the component of z of the second one is tiny, so that the pair
+        // must be deflated (as in LAPACK xLAED2) for the secular equation to be well posed
+        else if(pair > 0)
+        {
+            const S c = std::pow(S(10), -S(pair / 100));
+            const S lambda = -3;
+            const rocblas_int m = n / 2;
+            for(rocblas_int i = 0; i < n; ++i)
+            {
+                hD[0][i] = 3 + std::sin(S(i));
+                hE[0][i] = 1;
+            }
+            // (the split at m subtracts E[m - 1] = 1 from D[m - 1] and D[m])
+            hD[0][m - 1] = lambda + 1;
+            hE[0][m - 2] = c;
+            hD[0][m + 1] = lambda + S(pair % 100) * S(1e-15);
+            hE[0][m] = c;
+            hE[0][m + 1] = c;
+        }
+
         // if the matrix is too small (n < 4), simply initialize D and E
-        if(n < 4)
+        else if(n < 4)
         {
             rocblas_init<S>(hD, true);
             rocblas_init<S>(hE, true);
@@ -259,7 +297,9 @@ void stedcj_getError(const rocblas_handle handle,
                      Uh& hInfo,
                      Uh& hInfoRes,
                      double* max_err,
-                     double* max_errv)
+                     double* max_errv,
+                     const rocblas_int glued = 0,
+                     const rocblas_int pair = 0)
 {
     constexpr bool COMPLEX = rocblas_is_complex<T>;
     using S = decltype(std::real(T{}));
@@ -273,7 +313,8 @@ void stedcj_getError(const rocblas_handle handle,
     std::vector<rocblas_int> iwork(liwork);
 
     // input data initialization
-    stedcj_initData<true, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+    stedcj_initData<true, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                   glued, pair);
 
     // execute computations
     // GPU lapack
@@ -368,7 +409,9 @@ void stedcj_getPerfData(const rocblas_handle handle,
                         const rocblas_int hot_calls,
                         const int profile,
                         const bool profile_kernels,
-                        const bool perf)
+                        const bool perf,
+                        const rocblas_int glued = 0,
+                        const rocblas_int pair = 0)
 {
     constexpr bool COMPLEX = rocblas_is_complex<T>;
     using S = decltype(std::real(T{}));
@@ -387,12 +430,14 @@ void stedcj_getPerfData(const rocblas_handle handle,
         *cpu_time_used = nan("");
     }
 
-    stedcj_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+    stedcj_initData<true, false, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                    glued, pair);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        stedcj_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+        stedcj_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                        glued, pair);
 
         CHECK_ROCBLAS_ERROR(
             rocsolver_stedcj(handle, evect, n, dD.data(), dE.data(), dC.data(), ldc, dInfo.data()));
@@ -415,7 +460,8 @@ void stedcj_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        stedcj_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+        stedcj_initData<false, true, T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
+                                        glued, pair);
 
         timer.start(stream);
         rocsolver_stedcj(handle, evect, n, dD.data(), dE.data(), dC.data(), ldc, dInfo.data());
@@ -434,6 +480,10 @@ void testing_stedcj(Arguments& argus)
     char evectC = argus.get<char>("evect");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int ldc = argus.get<rocblas_int>("ldc", n);
+    // (glued > 0: glued Wilkinson matrices, see stedcj_initData)
+    rocblas_int glued = argus.get<rocblas_int>("glued", 0);
+    // (pair > 0: a close pair of eigenvalues at the top merge, see stedcj_initData)
+    rocblas_int pair = argus.get<rocblas_int>("pair", 0);
 
     rocblas_evect evect = char2rocblas_evect(evectC);
     rocblas_int hot_calls = argus.iters;
@@ -515,13 +565,13 @@ void testing_stedcj(Arguments& argus)
     // check computations
     if(argus.unit_check || argus.norm_check)
         stedcj_getError<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hDRes, hE, hERes, hC,
-                           hCRes, hInfo, hInfoRes, &max_err, &max_errv);
+                           hCRes, hInfo, hInfoRes, &max_err, &max_errv, glued, pair);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
         stedcj_getPerfData<T>(handle, evect, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo,
                               &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
-                              argus.profile_kernels, argus.perf);
+                              argus.profile_kernels, argus.perf, glued, pair);
 
     // validate results for rocsolver-test
     // using n * machine_precision as tolerance
