@@ -3,7 +3,15 @@
 
 """API tests for Graph configuration (mostly no GPU required)."""
 
+import math
+
+import numpy as np
+import pytest
+
 import hipdnn_frontend as hipdnn
+
+from .graph_builders import build_pointwise_add_graph
+from .helpers import build_all_plans
 
 
 class TestGraphConfiguration:
@@ -122,3 +130,75 @@ class TestGraphValidation:
 
         result = graph.validate()
         assert not result.is_good()
+
+
+def _device_buffer(data):
+    buf = hipdnn.DeviceBuffer(data.nbytes)
+    buf.copy_from_host(data.tobytes())
+    return buf
+
+
+def _workspace_ptr(graph):
+    size = graph.get_workspace_size()
+    if size <= 0:
+        return None, 0
+    buf = hipdnn.DeviceBuffer(size)
+    return buf, buf.ptr()
+
+
+class _NullHandle:
+    """Stand-in for a Handle whose get() yields a null pointer.
+
+    execute_timed_ext() must reject a graph with no compiled plan before it ever
+    dereferences the handle, so this path needs no real device or backend.
+    """
+
+    def get(self):
+        return 0
+
+
+def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
+    """No compiled plan -> the same failure execute() would report; timing stays empty."""
+    graph = hipdnn.Graph()
+
+    err, timing = graph.execute_timed_ext(_NullHandle(), {}, 0)
+    assert err.is_bad()
+    assert not timing.timed_out
+    assert timing.elapsed_ms is None
+    assert timing.quality == hipdnn.TimingQuality.INVALID
+
+
+@pytest.mark.gpu
+class TestGraphExecuteTimedExt:
+    """Tests for Graph.execute_timed_ext(): exactly-once, device-only-timed execution."""
+
+    def test_uid_keyed_reports_valid_timing(self):
+        """A real HIP event measurement through the test plugin reports its method."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = build_all_plans(graph)
+
+        a_data = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32).reshape(a.get_dim())
+        b_data = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32).reshape(
+            b.get_dim()
+        )
+        sentinel = np.full(out.get_dim(), -1.0, dtype=np.float32)
+
+        a_buf, b_buf = _device_buffer(a_data), _device_buffer(b_data)
+        out_buf = _device_buffer(sentinel)
+        ws_buf, ws_ptr = _workspace_ptr(graph)
+        variant_pack = {
+            a.get_uid(): a_buf.ptr(),
+            b.get_uid(): b_buf.ptr(),
+            out.get_uid(): out_buf.ptr(),
+        }
+
+        err, timing = graph.execute_timed_ext(handle, variant_pack, ws_ptr)
+        assert err.is_good(), err.get_message()
+        assert not timing.timed_out
+        assert timing.elapsed_ms is not None
+        assert math.isfinite(timing.elapsed_ms)
+        assert timing.elapsed_ms >= 0.0
+        assert timing.quality in (
+            hipdnn.TimingQuality.DEVICE_ONLY,
+            hipdnn.TimingQuality.UNSTALLED,
+        )

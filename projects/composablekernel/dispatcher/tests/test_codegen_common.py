@@ -38,6 +38,12 @@ from codegen_common import (  # noqa: E402
     gemm_aquant_effective_epilogue,
     make_bquant_kernel_name,
     make_gemm_rowcolquant_kernel_name,
+    normalize_gfx_arch,
+    rowcol_tensor_quant_default_tile,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250,
+    ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES,
+    validate_rowcol_tensor_quant_gfx_arch,
     make_aquant_kernel_name,
     # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
     fp8_warp_tile_k_for_arch,
@@ -388,6 +394,48 @@ class TestQuantKernelNames(unittest.TestCase):
             "_preshuffleb_preshufflebq",
         )
 
+    def test_gemm_abquant_default_name_is_distinct(self):
+        name = make_gemm_abquant_kernel_name(
+            "fp8", "rcr", "compv3", "default", "intrawave", **_TILE,
+            aquant_group_k=128, bquant_group_n=128, bquant_group_k=128,
+            preshuffle_bquant=True,
+        )
+        self.assertEqual(
+            name,
+            "gemm_abquant_fp8_rcr_compv3_default_intrawave"
+            "_128x128x128_1x4x1_16x16x32_aqg1x1x128_bqg1x128x128_preshufflebq",
+        )
+
+    def test_bquant_default_name_is_scoped_to_non_grouped(self):
+        args = ("fp8", "rcr", "compv3", "default", "intrawave")
+        group = dict(quant_group_m=1, quant_group_n=1, quant_group_k=128)
+        self.assertEqual(
+            make_bquant_kernel_name(*args, **_TILE, **group, name_prefix="gemm_bquant"),
+            "gemm_bquant_fp8_rcr_compv3_default_intrawave"
+            "_128x128x128_1x4x1_16x16x32_qg1x1x128",
+        )
+        self.assertIn("_cshuffle_", make_bquant_kernel_name(*args, **_TILE, **group))
+
+    def test_requested_default_reaches_non_grouped_header(self):
+        from unified_gemm_abquant_codegen import ABQuantKernelSpec, ABQuantKernelHeaderGenerator
+        from unified_gemm_bquant_codegen import BQuantKernelSpec, BQuantKernelHeaderGenerator
+
+        tile = TileConfig(**_TILE)
+        for spec_class, generator_class in (
+            (ABQuantKernelSpec, ABQuantKernelHeaderGenerator),
+            (BQuantKernelSpec, BQuantKernelHeaderGenerator),
+        ):
+            with self.subTest(family=spec_class.__name__):
+                spec = spec_class(
+                    variant_key="fp8", layout="rcr", pipeline="compv3",
+                    epilogue="default", scheduler="intrawave", tile=tile,
+                )
+                header = generator_class().generate(spec)
+                self.assertIn('_compv3_default_', spec.name)
+                self.assertIn('using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<', header)
+                self.assertIn('kPadM, kPadN,', header)
+                self.assertNotIn('using GemmEpilogue = ck_tile::CShuffleEpilogue<', header)
+
     def test_gemm_abquant_never_emits_permute_n(self):
         # Pins a surprise. make_gemm_abquant_kernel_name has an
         # `if preshuffle_b and not eight_waves` branch that calls
@@ -617,7 +665,22 @@ class TestQuantSpecSweepHelpers(unittest.TestCase):
 
 
 class TestArchWarpTileK(unittest.TestCase):
-    """The gfx942/gfx950 WarpTileK rule -- a silent-wrong-answer trap."""
+    """The gfx942/gfx950/gfx1250 WarpTileK rule -- a silent-wrong-answer trap."""
+
+    def test_gfx1250_is_128_regardless_of_preshuffle(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250"), 128)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250", preshuffle_quant=True), 128)
+
+    def test_gfx1250_match_is_exact_and_suffix_tolerant(self):
+        # Real agents report a feature suffix, which must not defeat the match...
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250:xnack-"), 128)
+        # ...but the match is EXACT, never a "gfx12" family test: gfx1200/gfx1201
+        # expose only a 16x16x16 8-bit WMMA fragment, so K=128 would compile and
+        # then silently mis-execute there.
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1200"), 32)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1201"), 32)
+        # A prefix test would wrongly accept this.
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx12500"), 32)
 
     def test_gfx950_is_128_regardless_of_preshuffle(self):
         self.assertEqual(fp8_warp_tile_k_for_arch("gfx950"), 128)
@@ -631,6 +694,173 @@ class TestArchWarpTileK(unittest.TestCase):
         # 128 on a non-gfx950 target compiles and then emits all zeros, so an
         # unrecognised arch must never fall through to it.
         self.assertEqual(fp8_warp_tile_k_for_arch("gfx90a"), 32)
+
+
+class TestNormalizeGfxArch(unittest.TestCase):
+    """Feature suffixes must be stripped exactly once, here."""
+
+    def test_bare_target_is_unchanged(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250"), "gfx1250")
+        self.assertEqual(normalize_gfx_arch("gfx942"), "gfx942")
+
+    def test_single_suffix_is_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250:xnack-"), "gfx1250")
+
+    def test_multiple_suffixes_are_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx942:sramecc+:xnack-"), "gfx942")
+
+    def test_unknown_or_malformed_input_is_passed_through(self):
+        # Not a validator: an unrecognised or empty string must come back
+        # unchanged (minus any suffix) so the caller's own arch test decides.
+        self.assertEqual(normalize_gfx_arch(""), "")
+        self.assertEqual(normalize_gfx_arch("notagfx:weird"), "notagfx")
+        self.assertEqual(normalize_gfx_arch(":xnack-"), "")
+
+    def test_agrees_with_the_tile_engine_copy(self):
+        """The deliberate duplicate in tile_engine must not drift from this one.
+
+        tile_engine cannot import codegen_common (dependency direction is
+        dispatcher -> tile_engine, and tile_engine is on the deprecation path),
+        so the rule exists twice on purpose. This test is what keeps the two
+        honest, and the docstrings on both sides point at it. Skipped rather than
+        failed if the tile_engine tree is absent, so the dispatcher tests stay
+        runnable on their own.
+        """
+        te_path = (
+            DISPATCHER_DIR.parent
+            / "tile_engine"
+            / "ops"
+            / "gemm"
+            / "gemm_validation_utils.py"
+        )
+        if not te_path.exists():
+            self.skipTest("tile_engine tree not present")
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_te_gemm_validation_utils_for_test", te_path
+        )
+        te = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(te)
+
+        for arch in (
+            "",
+            "gfx942",
+            "gfx950",
+            "gfx1250",
+            "gfx1250:xnack-",
+            "gfx942:sramecc+:xnack-",
+            "notagfx:weird",
+            ":xnack-",
+        ):
+            with self.subTest(arch=arch):
+                self.assertEqual(te._base_gfx_arch(arch), normalize_gfx_arch(arch))
+
+
+class TestRowColTensorQuantDefaultTile(unittest.TestCase):
+    """gfx1250 tile selection is EXACT, not a gfx12 family match.
+
+    gfx1200/gfx1201 are WMMA parts too, but their 8-bit warp fragment is
+    16x16x16, not gfx1250's 16x16x64/16x16x128. Handing them the gfx1250 tile
+    compiles cleanly and returns garbage, so a family match here is a
+    silent-wrong-answer bug.
+    """
+
+    def test_gfx1250_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_gfx1250_with_feature_suffix_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250:xnack-"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_other_gfx12_parts_do_not_inherit_the_gfx1250_tile(self):
+        for arch in ("gfx1200", "gfx1201", "gfx1201:xnack-"):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_gfx9_parts_take_the_mfma_tile(self):
+        for arch in ("gfx942", "gfx950", "gfx942:sramecc+:xnack-", ""):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_returns_a_copy_not_the_shared_dict(self):
+        t = rowcol_tensor_quant_default_tile("gfx1250")
+        t["tile_m"] = -1
+        self.assertNotEqual(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250["tile_m"], -1)
+
+
+class TestValidateRowColTensorQuantGfxArch(unittest.TestCase):
+    """--gfx-arch has to be checked, because nothing downstream checks it.
+
+    The flag only selects a default tile; it never reaches --offload-arch, so an
+    unrecognized value is not rejected by hipcc the way a bad compile target is. It
+    just falls through to the gfx9 MFMA tile -- which on gfx1250 compiles and returns
+    garbage. That is the failure this operator's gfx1250 work exists to prevent,
+    reachable by a single typo on the command line.
+    """
+
+    def test_supported_arches_pass_through_bare(self):
+        for arch in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+            with self.subTest(arch=arch):
+                self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(arch), arch)
+
+    def test_feature_suffixes_are_accepted_and_stripped(self):
+        # A real device reports the suffixed form; refusing it would make the flag
+        # unusable with the name the hardware gives.
+        for given, expected in [
+            ("gfx1250:xnack-", "gfx1250"),
+            ("gfx950:sramecc+:xnack-", "gfx950"),
+            ("gfx942:xnack+", "gfx942"),
+        ]:
+            with self.subTest(arch=given):
+                self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(given), expected)
+
+    def test_empty_means_unspecified(self):
+        self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(""), "")
+
+    def test_a_typo_is_rejected_rather_than_silently_gfx9(self):
+        for arch in ("gfx1205", "gfx12500", "gfx942x", "gfx", "1250", "GFX1250"):
+            with self.subTest(arch=arch):
+                with self.assertRaises(ValueError):
+                    validate_rowcol_tensor_quant_gfx_arch(arch)
+
+    def test_architectures_without_a_defensible_tile_are_rejected(self):
+        # These are real targets and some are listed in arch_specs.json, but neither
+        # default tile is correct for them: gfx1200/gfx1201 are WMMA parts with a
+        # 16x16x16 8-bit fragment, and gfx908 has no fp8 MFMA at all. Accepting them
+        # would hand back a tile this operator has never validated.
+        for arch in ("gfx908", "gfx1100", "gfx1200", "gfx1201", "gfx1201:xnack-"):
+            with self.subTest(arch=arch):
+                with self.assertRaises(ValueError):
+                    validate_rowcol_tensor_quant_gfx_arch(arch)
+
+    def test_the_error_names_the_value_and_the_alternatives(self):
+        with self.assertRaises(ValueError) as ctx:
+            validate_rowcol_tensor_quant_gfx_arch("gfx1205")
+        message = str(ctx.exception)
+        self.assertIn("gfx1205", message)
+        for arch in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+            self.assertIn(arch, message)
+
+    def test_the_set_matches_the_bridge_runtime(self):
+        self.assertEqual(
+            ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES, ("gfx942", "gfx950", "gfx1250")
+        )
+        for arch in ("gfx90a", "gfx90a:xnack-"):
+            with self.assertRaises(ValueError):
+                validate_rowcol_tensor_quant_gfx_arch(arch)
+
 
 
 if __name__ == "__main__":

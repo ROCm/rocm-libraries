@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1459,11 +1459,15 @@
     'NumLoadsCoalescedA',
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
+    'PersistentXCCMapping',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
+    'PrefetchGlobalReadA',
+    'PrefetchGlobalReadB',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -1488,6 +1492,7 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
     'TDMLoadWaveSync',
@@ -1506,6 +1511,7 @@
     'TemporalHintMetadata',
     'TemporalHintWS',
     'ThreadTile',
+    'TileProcessingStrategy',
     'TransposeLDS',
     'TransposeLDSMetadata',
     'UnrollLoopSwapGlobalReadOrder',
@@ -1524,11 +1530,13 @@
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
     'WavefrontSize',
+    'WorkAssignment',
     'WorkGroup',
     'WorkGroupMapping',
     'WorkGroupMappingXCC',
     'WorkGroupMappingXCCGroup',
     'WorkGroupReduction',
+    'WorkQueueStealing',
   ])
 # ---
 # name: test_valid_parameters_structure
@@ -1603,7 +1611,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1612,7 +1620,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1682,7 +1690,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1854,7 +1862,7 @@
         'MultipleBuffer',
         'MultipleBufferSingleKernel',
       ]),
-      'len': 3,
+      'len': 4,
       'type': 'list',
     }),
     'GlobalSplitUCoalesced': dict({
@@ -2412,6 +2420,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'PersistentXCCMapping': dict({
+      'head': list([
+        0,
+        2,
+        3,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2438,6 +2455,24 @@
       'len': 17,
       'type': 'list',
     }),
+    'PrefetchGlobalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
+    'PrefetchGlobalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
     'PrefetchLocalRead': dict({
       'head': list([
         0,
@@ -2451,6 +2486,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2651,6 +2694,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'TDMFuse': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
     'TDMInst': dict({
       'head': list([
         0,
@@ -2819,6 +2871,15 @@
       'len': 5625,
       'type': 'list',
     }),
+    'TileProcessingStrategy': dict({
+      'head': list([
+        'None',
+        'DataParallel',
+        'StreamK',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'TransposeLDS': dict({
       'head': list([
         -1,
@@ -2974,6 +3035,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'WorkAssignment': dict({
+      'head': list([
+        'StaticGrid',
+        'DynamicWorkQueue',
+        'Hybrid',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'WorkGroup': dict({
       'head': list([
         list([
@@ -3027,6 +3097,14 @@
         False,
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'WorkQueueStealing': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
   })
