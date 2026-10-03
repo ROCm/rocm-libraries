@@ -16,6 +16,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+
+* BDSQR (and GESVD) and STEQR (and SYEV/HEEV, SYGV/HEGV) in hybrid mode: the rotations of the QR iteration are applied to the singular vectors or eigenvectors in accumulated blocks with matrix multiplications, instead of one sequence at a time, and GESVD runs the iteration on the host while the vectors are generated on the device (about 7 times faster for GESVD and 10 times for SYEV for matrices of order 4000).
+
 ### Resolved issues
 
 * Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD (SYEVJ/HEEVJ, GESVDJ): the plane rotations were slightly biased, which reduced the accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large matrices.

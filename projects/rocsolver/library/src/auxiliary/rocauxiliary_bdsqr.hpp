@@ -355,6 +355,18 @@ __device__ static void bdsqr_permute_swap(const I n,
         and 2 means the input is invalid. */
 /***************************************************************/
 
+/** BDSQR_MARK_BAD marks the instances with info = n (bad input) as bdsqr_init does, so that
+    bdsqr_finalize skips them **/
+ROCSOLVER_KERNEL void bdsqr_mark_bad(const rocblas_int n,
+                                     const rocblas_int batch_count,
+                                     const rocblas_int* info,
+                                     rocblas_int* completed)
+{
+    const rocblas_int bid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if(bid < batch_count && info[bid] == n)
+        completed[bid + 2] = 2;
+}
+
 /** BDSQR_INIT kernel checks if there are any NaNs or Infs in the input, calculates the
     convergence threshold and initial estimate for the smallest singular value, and splits
     the matrix into diagonal blocks. **/
@@ -1213,8 +1225,12 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                                         const rocblas_int batch_count,
                                         rocblas_int* splits_map,
                                         S* work,
-                                        rocblas_int* completed)
+                                        rocblas_int* completed,
+                                        hipEvent_t ready = nullptr)
 {
+    // (ready, if given, is recorded on the stream once D and E are computed: in hybrid mode, the
+    // host iteration then starts without waiting for the work enqueued after it, such as the
+    // generation of the vectors that the rotations are applied to)
     ROCSOLVER_ENTER("bdsqr", "uplo:", uplo, "n:", n, "nv:", nv, "nu:", nu, "nc:", nc,
                     "shiftV:", shiftV, "ldv:", ldv, "shiftU:", shiftU, "ldu:", ldu,
                     "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
@@ -1267,17 +1283,37 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, completed,
                             batch_count + 2, 0);
 
-    // check for NaNs and Infs in input
-    ROCSOLVER_LAUNCH_KERNEL((bdsqr_init<T>), gridBasic, threadsBasic, 0, stream, n, D, strideD, E,
-                            strideE, info, maxiter, sfm, tol, splits_map, work, strideW, completed);
+    // in hybrid mode with ready, the input is checked and read on a side stream
+    hipStream_t side = nullptr;
+    if(alg_mode == rocsolver_alg_mode_hybrid && ready && n > 1)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&side, hipStreamNonBlocking));
+        HIP_CHECK(hipStreamWaitEvent(side, ready, 0));
+    }
+
+    // check for NaNs and Infs in input (on the host with side, as bdsqr_init uses workspace that
+    // the work enqueued after ready may be using)
+    if(!side)
+        ROCSOLVER_LAUNCH_KERNEL((bdsqr_init<T>), gridBasic, threadsBasic, 0, stream, n, D, strideD,
+                                E, strideE, info, maxiter, sfm, tol, splits_map, work, strideW,
+                                completed);
 
     if(n > 1)
     {
         if(alg_mode == rocsolver_alg_mode_hybrid)
         {
-            ROCBLAS_CHECK(rocsolver_bdsqr_host_batch_template<T, S, W1, W2, W3, rocblas_int>(
+            rocblas_status st = rocsolver_bdsqr_host_batch_template<T, S, W1, W2, W3, rocblas_int>(
                 handle, uplo, n, nv, nu, nc, D, strideD, E, strideE, V, shiftV, ldv, strideV, U,
-                shiftU, ldu, strideU, C, shiftC, ldc, strideC, info, batch_count, splits_map, work));
+                shiftU, ldu, strideU, C, shiftC, ldc, strideC, info, batch_count, splits_map, work,
+                side);
+            if(side)
+                HIP_CHECK(hipStreamDestroy(side));
+            ROCBLAS_CHECK(st);
+            // (with side, bdsqr_init did not run: mark the instances with bad input, for which
+            // the host iteration set info = n, as it would have)
+            if(side)
+                ROCSOLVER_LAUNCH_KERNEL(bdsqr_mark_bad, dim3((batch_count - 1) / 256 + 1),
+                                        dim3(256), 0, stream, n, batch_count, info, completed);
         }
         else
         {

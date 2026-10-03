@@ -35,6 +35,7 @@
 #include <type_traits>
 
 #include "lapack_device_functions.hpp"
+#include "rocauxiliary_bdsqr_rotlog.hpp"
 #include "rocauxiliary_lasr.hpp"
 #include "rocauxiliary_sterf.hpp"
 #include "rocblas.hpp"
@@ -91,6 +92,9 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
     I blocks = (n - 1) / BS1 + 1;
 
+    // the rotations of the eigenvectors (columns of C) are recorded and applied in blocks
+    bdsqr_rotlog<S, T, I> rlog(handle, stream, n);
+
     for(I b = 0; b < batch_count; b++)
     {
         S* D = hD[b];
@@ -98,6 +102,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
         I* info = hInfo[b];
         S* work = hWork[0];
         T* C = hC[b] + shiftC;
+        rlog.set_matrices(n, nullptr, 0, 0, C, ldc, n, nullptr, 0, 0);
 
         l1 = 0;
         iters = 0;
@@ -221,11 +226,8 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                     // Apply saved rotations
                     if(m != el)
                     {
-                        ROCBLAS_CHECK(hWork.write_to_device_async(stream));
-                        ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
-                            handle, rocblas_side_right, rocblas_pivot_variable,
-                            rocblas_backward_direction, n, m - lsv + 1, dWork + lsv, strideW,
-                            dWork + n - 1 + lsv, strideW, C, lsv * ldc, ldc, strideC, (I)1));
+                        rlog.lasr(rocblas_side_right, rocblas_backward_direction, n, m - lsv + 1,
+                                  work + lsv, work + n - 1 + lsv, C[idx2D(0, lsv, ldc)]);
                     }
                 }
             }
@@ -308,11 +310,8 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                     // Apply saved rotations
                     if(m != el)
                     {
-                        ROCBLAS_CHECK(hWork.write_to_device_async(stream));
-                        ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
-                            handle, rocblas_side_right, rocblas_pivot_variable,
-                            rocblas_forward_direction, n, lsv - m + 1, dWork + m, strideW,
-                            dWork + n - 1 + m, strideW, C, m * ldc, ldc, strideC, (I)1));
+                        rlog.lasr(rocblas_side_right, rocblas_forward_direction, n, lsv - m + 1,
+                                  work + m, work + n - 1 + m, C[idx2D(0, m, ldc)]);
                     }
                 }
             }
@@ -353,11 +352,11 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
                 if(m != el)
                 {
-                    ROCSOLVER_LAUNCH_KERNEL(swap_kernel<T>, dim3(blocks), dim3(BS1), (I)0, stream,
-                                            n, C + el * ldc, (I)1, C + m * ldc, (I)1);
+                    rlog.swap(C[idx2D(0, el, ldc)], C[idx2D(0, m, ldc)], I(1));
                 }
             }
         }
+        rlog.finish();
     }
 
     ROCBLAS_CHECK(hD.write_to_device_async(stream));

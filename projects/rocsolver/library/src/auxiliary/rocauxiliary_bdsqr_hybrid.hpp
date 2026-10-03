@@ -35,6 +35,7 @@
 
 #include "common_host_helpers.hpp"
 #include "lapack_host_functions.hpp"
+#include "rocauxiliary_bdsqr_rotlog.hpp"
 #include "rocauxiliary_lasr.hpp"
 #include "rocsolver_hybrid_storage.hpp"
 
@@ -134,20 +135,29 @@ static void bdsqr_single_template(rocblas_handle handle,
                                   S* work_,
                                   I& info,
                                   S* dwork_ = nullptr,
-                                  hipStream_t stream = 0)
+                                  hipStream_t stream = 0,
+                                  bdsqr_rotlog<S, T, I>* rlog = nullptr)
 {
     // -------------------------------------
     // Lambda expressions used as helpers
     // -------------------------------------
+    // (with rlog, the operations on the singular vectors are recorded and applied in blocks)
     auto call_swap_gpu = [=](I n, T& x, I incx, T& y, I incy) {
+        if(rlog)
+            return rlog->swap(x, y, incx);
         swap_template<T, I>(handle, n, &x, incx, &y, incy, stream);
     };
 
     auto call_rot_gpu = [=](I n, T& x, I incx, T& y, I incy, S cosl, S sinl) {
+        if(rlog)
+            return rlog->rot(x, incx, cosl, sinl);
         rot_template<S, T, I>(handle, n, &x, incx, &y, incy, cosl, sinl, stream);
     };
 
     auto call_scal_gpu = [=](I n, auto da, T& x, I incx) {
+        // (only used to change signs)
+        if(rlog)
+            return rlog->negate(x, incx);
         scal_template<S, T, I>(handle, n, da, &x, incx, stream);
     };
 
@@ -165,6 +175,8 @@ static void bdsqr_single_template(rocblas_handle handle,
     auto call_lasr_gpu = [=](rocblas_side const side, rocblas_pivot const pivot,
                              rocblas_direct const direct, I const m, I const n, S& c, S& s, T& A,
                              I const lda, S* const dwork_, hipStream_t stream) {
+        if(rlog)
+            return rlog->lasr(side, direct, m, n, &c, &s, A);
         bool const is_left_side = (side == rocblas_side_left);
         auto const mn = (is_left_side) ? m : n;
         auto const mn_m1 = (mn - 1);
@@ -1377,10 +1389,13 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
                                                    I* info_array,
                                                    const I batch_count,
                                                    I* splits_map,
-                                                   S* work)
+                                                   S* work,
+                                                   hipStream_t in_stream = nullptr)
 {
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+    // (the input is read on in_stream, if given; see rocsolver_bdsqr_template)
+    hipStream_t const istream = in_stream ? in_stream : stream;
 
     // -----------------------------------
     // transfer arrays from device to host
@@ -1392,21 +1407,43 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
     rocsolver_hybrid_storage<T, I, W3> hC;
     rocsolver_hybrid_storage<I, I, I*> hInfo;
 
-    ROCBLAS_CHECK(hD.init_async(n, D, 0, strideD, batch_count, stream));
-    ROCBLAS_CHECK(hE.init_async(n - 1, E, 0, strideE, batch_count, stream));
+    ROCBLAS_CHECK(hD.init_async(n, D, 0, strideD, batch_count, istream));
+    ROCBLAS_CHECK(hE.init_async(n - 1, E, 0, strideE, batch_count, istream));
     if(nv > 0)
-        ROCBLAS_CHECK(hV.init_pointers_only(V, shiftV, strideV, batch_count, stream));
+        ROCBLAS_CHECK(hV.init_pointers_only(V, shiftV, strideV, batch_count, istream));
     if(nu > 0)
-        ROCBLAS_CHECK(hU.init_pointers_only(U, shiftU, strideU, batch_count, stream));
+        ROCBLAS_CHECK(hU.init_pointers_only(U, shiftU, strideU, batch_count, istream));
     if(nc > 0)
-        ROCBLAS_CHECK(hC.init_pointers_only(C, shiftC, strideC, batch_count, stream));
-    ROCBLAS_CHECK(hInfo.init_async(1, info_array, 0, 1, batch_count, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+        ROCBLAS_CHECK(hC.init_pointers_only(C, shiftC, strideC, batch_count, istream));
+    ROCBLAS_CHECK(hInfo.init_async(1, info_array, 0, 1, batch_count, istream));
+    HIP_CHECK(hipStreamSynchronize(istream));
+
+    // with in_stream, the input was not checked on the device (see bdsqr_init): NaN or Inf in D or
+    // E give NaN singular values and info = n
+    if(in_stream)
+    {
+        for(I bid = 0; bid < batch_count; bid++)
+        {
+            bool bad = false;
+            for(I i = 0; i < n && !bad; i++)
+                bad = !std::isfinite(hD[bid][i]) || (i < n - 1 && !std::isfinite(hE[bid][i]));
+            hInfo[bid][0] = bad ? n : 0;
+            if(bad)
+            {
+                for(I i = 0; i < n; i++)
+                    hD[bid][i] = std::numeric_limits<S>::quiet_NaN();
+                for(I i = 0; i < n - 1; i++)
+                    hE[bid][i] = std::numeric_limits<S>::quiet_NaN();
+            }
+        }
+    }
 
     S* hwork = nullptr;
     HIP_CHECK(hipHostMalloc(&hwork, sizeof(S) * (4 * n)));
     S* dwork = nullptr;
     HIP_CHECK(hipMalloc(&dwork, sizeof(S) * (4 * n)));
+    // the operations on the singular vectors are applied in blocks (see bdsqr_rotlog)
+    bdsqr_rotlog<S, T, I> rlog(handle, stream, n);
 
     // --------------------------------------
     // Execute for each instance in the batch
@@ -1419,8 +1456,10 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
         char uplo = (uplo_in == rocblas_fill_lower) ? 'L' : 'U';
         I info = 0;
 
+        rlog.set_matrices(n, hV[bid], ldv, nv, hU[bid], ldu, nu, hC[bid], ldc, nc);
         bdsqr_single_template<S, T, I>(handle, uplo, n, nv, nu, nc, hD[bid], hE[bid], hV[bid], ldv,
-                                       hU[bid], ldu, hC[bid], ldc, hwork, info, dwork, stream);
+                                       hU[bid], ldu, hC[bid], ldc, hwork, info, dwork, stream, &rlog);
+        rlog.finish();
 
         if(info == 0)
         {
