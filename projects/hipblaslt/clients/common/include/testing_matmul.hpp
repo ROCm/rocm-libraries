@@ -5122,8 +5122,13 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         std::string why;
         bool        unsupported = false;
+        // Whether any solution needs a workspace depends on the library and GPU, so a run with
+        // none has nothing to place: a skip, not a failure.
         if(workspace_size == 0)
-            why = "placing the workspace requires a nonzero workspace size";
+        {
+            why         = "no solution here uses a workspace, so there is nothing to place";
+            unsupported = true;
+        }
         else
             placedWorkspace = PlacedRegion::create(
                 workspace_size, size_t(arg.placement_offset), HIP_R_8I, &why, &unsupported);
