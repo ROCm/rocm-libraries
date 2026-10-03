@@ -1125,9 +1125,11 @@ namespace
         uint32_t out[2];
         ASSERT_EQ(hipMemcpy(out, d_out, sizeof(out), hipMemcpyDeviceToHost), hipSuccess);
         (void)hipFree(d_out);
-        float poison = kFastCheckPoisonValue;
+        const float poison = kFastCheckPoisonValue;
+        uint32_t    poison_bits;
+        std::memcpy(&poison_bits, &poison, sizeof(poison_bits));
         EXPECT_EQ(out[0], uint32_t(word));
-        EXPECT_EQ(out[1], *reinterpret_cast<uint32_t*>(&poison));
+        EXPECT_EQ(out[1], poison_bits);
 
         auto clean = region->verify_poison("A", 0);
         EXPECT_TRUE(clean.passed) << clean.message;
