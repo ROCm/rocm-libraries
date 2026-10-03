@@ -131,7 +131,8 @@ class TestEveryShapeDispatches(unittest.TestCase):
             with self.subTest(shape=shape.signature):
                 result = dispatch_mla(shape.to_request(arch="gfx942"))
                 expected = shape.total_q // result.spec.block_q + shape.batch
-                self.assertEqual(result.grid, (expected, shape.num_query_heads, 1))
+                heads = shape.num_query_heads // result.spec.heads_per_wg
+                self.assertEqual(result.grid, (expected, heads, 1))
 
 
 class TestDriver(unittest.TestCase):

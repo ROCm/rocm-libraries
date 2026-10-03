@@ -254,15 +254,20 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual((spec.d_nope, spec.d_rope, spec.d_v), (128, 64, 128))
         self.assertEqual(spec.r_kv, 512)
 
-    def test_levers_stay_at_their_defaults(self):
-        # Dispatch must not pick codegen levers per request: there is no
-        # resource model behind such a choice yet, and a silent per-shape pick
-        # would make the shipped configuration shape-dependent.
+    def test_layout_selection(self):
+        # Dispatch makes exactly one choice: four heads per workgroup at
+        # block_q 16 when the head count divides by four, else the single-head
+        # spec defaults. Every other lever stays at its default.
         spec = dispatch_mla(_req()).spec
+        self.assertEqual(spec.heads_per_wg, 4)
+        self.assertEqual(spec.num_warps, 4)
         self.assertEqual(spec.block_q, 16)
         self.assertEqual(spec.block_k, 16)
         self.assertEqual(spec.r_kv_tile, 32)
-        self.assertEqual(spec.num_warps, 4)
+        fallback = dispatch_mla(_req(num_heads=6)).spec
+        self.assertEqual(fallback.heads_per_wg, 1)
+        self.assertEqual(fallback.block_q, 32)
+        self.assertEqual(fallback.num_warps, 4)
 
     def test_block_is_the_workgroup_the_spec_declares(self):
         result = dispatch_mla(_req())
@@ -273,10 +278,14 @@ class TestDispatchResult(unittest.TestCase):
 
     def test_grid_uses_the_aiter_block_numbering(self):
         # total_q // block_q + num_seqs, NOT sum(ceil(S_q / block_q)). For
-        # q_lens=[32, 32] the two disagree: the kernel puts seq 1's first block
-        # at 32//16 + 1 = 3 and needs blocks 3 and 4, so 5 blocks, not 4.
+        # q_lens=[32, 32] the two disagree: at block_q=16 the kernel puts seq
+        # 1's first block at 32//16 + 1 = 3 and needs blocks 3 and 4, so 5
+        # blocks, not 4.
         result = dispatch_mla(_req(total_q=64, num_seqs=2))
-        self.assertEqual(result.grid, (64 // 16 + 2, 128, 1))
+        self.assertEqual(
+            result.grid,
+            (64 // result.spec.block_q + 2, 128 // result.spec.heads_per_wg, 1),
+        )
         self.assertEqual(num_q_blocks_for(_req(total_q=64, num_seqs=2), 16), 6)
 
     def test_grid_never_under_launches_against_sum_of_ceils(self):
