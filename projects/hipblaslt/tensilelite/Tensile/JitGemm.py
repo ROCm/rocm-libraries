@@ -28,6 +28,10 @@ from .ExecutionPolicy import UnsupportedExecutionPolicy
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
 _MAX_CANDIDATES = 192
 _MODELED_CONTRACT = "origami.gemm.dp.v1"
+# A tuned parameter set travels as it is; derivation must keep these.
+_TUNED_CONTRACT = "tensilelite.tuned.v1"
+_TUNED_KEPT = ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB",
+               "TileProcessingStrategy", "WorkAssignment", "GlobalSplitU", "GlobalSplitUAlgorithm")
 
 
 def _require(condition, message):
@@ -39,10 +43,42 @@ def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
 
 
+def _contract(request, candidate):
+    """A candidate's own modeled.contract, else the request's."""
+    modeled = candidate.get("modeled")
+    if isinstance(modeled, dict) and "contract" in modeled:
+        return modeled["contract"]
+    return request.get("modeled_contract")
+
+
+def _validateTuned(candidate):
+    modeled = candidate["modeled"]
+    mt = modeled.get("macro_tile")
+    _require(isinstance(mt, list) and len(mt) == 3 and all(_integer(v, 1) for v in mt),
+             "Invalid tuned macro_tile")
+    execution = modeled.get("execution")
+    _require(isinstance(execution, dict)
+             and all(isinstance(execution.get(key), str) for key in ("strategy", "assignment")),
+             "Missing tuned execution policy")
+    parameters = candidate["parameters"]
+    for name in _TUNED_KEPT:
+        _require(name in parameters, f"Missing tuned parameter {name}")
+    mi = parameters["MatrixInstruction"]
+    _require(isinstance(mi, list) and len(mi) == 9 and all(_integer(v, 1) for v in mi),
+             "Tuned MatrixInstruction must retain the nine-value recipe")
+    _require(parameters["DepthU"] == mt[2], "Tuned DepthU differs from macro_tile")
+    _require(parameters["TileProcessingStrategy"] == execution["strategy"]
+             and parameters["WorkAssignment"] == execution["assignment"],
+             "Tuned parameters differ from the modeled execution policy")
+
+
 def _validateModeled(request, candidate):
-    contract = request.get("modeled_contract")
+    contract = _contract(request, candidate)
     if contract is None:
         _require("modeled" not in candidate, "Modeled outputs require a modeled_contract")
+        return
+    if contract == _TUNED_CONTRACT:
+        _validateTuned(candidate)
         return
     _require(contract == _MODELED_CONTRACT, f"Unsupported modeled contract: {contract}")
     modeled = candidate.get("modeled")
@@ -80,7 +116,7 @@ def _validateModeled(request, candidate):
 
 def _modeledParameters(request, candidate):
     """Translate model outputs into Tensile units without changing their meaning."""
-    if request.get("modeled_contract") is None:
+    if _contract(request, candidate) in (None, _TUNED_CONTRACT):
         return {}
     from .Common.DataType import DataType
 
@@ -110,8 +146,15 @@ def _candidateParameters(request, candidate):
 
 
 def _modeledTransportRejection(request, candidate):
-    if request.get("modeled_contract") is None:
+    contract = _contract(request, candidate)
+    if contract is None:
         return None
+    if contract == _TUNED_CONTRACT:
+        from .Common.ValidParameters import validParameters
+
+        unknown = sorted(set(candidate["parameters"]) - set(validParameters))
+        return (f"This TensileLite does not know the tuned parameters {', '.join(unknown)}"
+                if unknown else None)
     modeled = candidate["modeled"]
     mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
     if mapping["wgmxccchunk"] or mapping["wgmxccsplitk"]:
@@ -129,9 +172,36 @@ def _modeledTransportRejection(request, candidate):
     return None
 
 
+def _tunedRejection(solution, candidate):
+    from .Common import state
+
+    parameters = candidate["parameters"]
+    expected = {name: parameters[name] for name in _TUNED_KEPT if name != "MatrixInstruction"}
+    mi = parameters["MatrixInstruction"]
+    mt = candidate["modeled"]["macro_tile"]
+    expected.update(MatrixInstruction=mi[:4], MIWaveTile=mi[5:7], MIWaveGroup=mi[7:9],
+                    MacroTile0=mt[0], MacroTile1=mt[1])
+    for name, value in expected.items():
+        actual = state(solution.get(name))
+        if actual != value:
+            return f"Tensile changed tuned {name}={value} to {actual}"
+    persistent = parameters["TileProcessingStrategy"] != "None"
+    if state(solution.get("_PersistentLoop", persistent)) != persistent:
+        return f"Tensile solution's persistent loop disagrees with {parameters['TileProcessingStrategy']}"
+    algorithm, accumulation = parameters["GlobalSplitUAlgorithm"], solution.get("_GlobalAccumulation")
+    if (parameters["GlobalSplitU"] != 1 and not persistent
+            and algorithm in ("MultipleBuffer", "MultipleBufferSingleKernel")
+            and accumulation != algorithm):
+        return f"Tensile accumulates GlobalSplitUAlgorithm={algorithm} as {accumulation}"
+    return None
+
+
 def _modeledRejection(solution, request, candidate):
-    if request.get("modeled_contract") is None:
+    contract = _contract(request, candidate)
+    if contract is None:
         return None
+    if contract == _TUNED_CONTRACT:
+        return _tunedRejection(solution, candidate)
     from .Common import state
 
     expected = {name: value for name, value in candidate["parameters"].items()
@@ -485,9 +555,11 @@ def _select(request, configPath, derive, ranking=None, _debug=JitDebug.NULL):
                        (f"{request['model']} candidate {candidate['id']}; no latency prediction; "
                         f"{len(rejections)} earlier candidates rejected by Tensile"),
         }
-        if request.get("modeled_contract"):
-            metadata["modeled_contract"] = request["modeled_contract"]
+        if _contract(request, candidate):
+            metadata["modeled_contract"] = _contract(request, candidate)
             metadata["modeled"] = copy.deepcopy(candidate["modeled"])
+        if "knowledge" in candidate:
+            metadata["knowledge"] = copy.deepcopy(candidate["knowledge"])
         ranking.kernels[kernel] = candidate["id"]
         ranking.accepted += 1
         tried(candidate, "selected", span=span)

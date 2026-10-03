@@ -252,6 +252,116 @@ def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
     assert "StreamK" not in prediction["resolved_parameters"]
 
 
+def tuned_candidate(identifier, gsu=1, algorithm="MultipleBuffer", strategy="None",
+                    assignment="StaticGrid"):
+    return {
+        "id": identifier, "predicted_cycles": 90.0,
+        "parameters": {"MatrixInstruction": [16, 16, 32, 1, 1, 2, 2, 2, 2], "DepthU": 64,
+                       "NonTemporalA": 0, "NonTemporalB": 0, "TileProcessingStrategy": strategy,
+                       "WorkAssignment": assignment, "GlobalSplitU": gsu,
+                       "GlobalSplitUAlgorithm": algorithm, "WorkGroupMapping": 8},
+        "modeled": {"contract": "tensilelite.tuned.v1", "macro_tile": [64, 64, 64],
+                    "execution": {"strategy": strategy, "assignment": assignment}},
+        "knowledge": {"branch": 3, "group": "Cijk_Alik_Bljk_HHS_BH (branch 3)",
+                      "source": "logic.yaml#4", "row": [128, 128, 1, 512], "distance": 0},
+    }
+
+
+@pytest.fixture
+def tuned_request(modeled_request):
+    modeled_request["candidates"].insert(0, tuned_candidate(11))
+    return modeled_request
+
+
+def tuned_solution(candidate):
+    result = solution(candidate["parameters"]["DepthU"])
+    result.update(candidate["parameters"])
+    result["MatrixInstruction"] = result["MatrixInstruction"][:4]
+    result["_PersistentLoop"] = False
+    return result
+
+
+def test_tuned_seed_travels_verbatim_beside_modeled_candidates(tuned_request, tmp_path):
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(tuned_request))
+    request = JG._readRequest(source)
+    tuned, modeled = request["candidates"][:2]
+    assert JG._modeledParameters(request, tuned) == {}
+    assert JG._candidateParameters(request, tuned) == tuned["parameters"]
+    assert JG._modeledTransportRejection(request, tuned) is None
+    assert JG._candidateParameters(request, modeled)["WorkGroupMapping"] == -2
+
+    _, _, metadata = JG._select(request, tmp_path / "selected.yaml",
+                                lambda *_: tuned_solution(tuned))
+    assert metadata["candidate_id"] == 11
+    assert metadata["modeled_contract"] == "tensilelite.tuned.v1"
+    assert metadata["knowledge"] == tuned["knowledge"]
+    assert metadata["selected_parameters"] == tuned["parameters"]
+
+
+@pytest.mark.parametrize("change,message", [
+    (lambda c: c["parameters"].pop("GlobalSplitU"), "Missing tuned parameter GlobalSplitU"),
+    (lambda c: c["parameters"].update(DepthU=32), "Tuned DepthU differs"),
+    (lambda c: c["modeled"]["execution"].update(strategy="StreamK"), "modeled execution policy"),
+    (lambda c: c["modeled"].pop("execution"), "Missing tuned execution policy"),
+])
+def test_malformed_tuned_seed_fails_the_request(tuned_request, tmp_path, change, message):
+    change(tuned_request["candidates"][0])
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(tuned_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match=message):
+        JG._readRequest(source)
+
+
+def test_unknown_tuned_parameter_rejects_only_that_seed(tuned_request, tmp_path):
+    tuned_request["candidates"][0]["parameters"]["FutureTensileKnob"] = 3
+
+    def derive(config, label):
+        assert "candidate 11" not in label
+        return modeled_solution(tuned_request, tuned_request["candidates"][1])
+
+    _, _, metadata = JG._select(tuned_request, tmp_path / "selected.yaml", derive)
+    assert metadata["candidate_id"] == 7
+    assert "does not know the tuned parameters FutureTensileKnob" in metadata["rejections"][0]["reason"]
+
+
+@pytest.mark.parametrize("name,value,message", [
+    ("GlobalSplitU", 1, "changed tuned GlobalSplitU=-1"),
+    ("GlobalSplitUAlgorithm", "MultipleBuffer", "changed tuned GlobalSplitUAlgorithm"),
+    ("TileProcessingStrategy", "StreamK", "changed tuned TileProcessingStrategy"),
+    ("MacroTile0", 128, "changed tuned MacroTile0"),
+    ("NonTemporalA", 4, "changed tuned NonTemporalA"),
+    ("_PersistentLoop", True, "persistent loop"),
+    ("_GlobalAccumulation", "MultipleBuffer", "accumulates GlobalSplitUAlgorithm"),
+])
+def test_changed_tuned_output_rejects_candidate(tuned_request, name, value, message):
+    candidate = tuned_request["candidates"][0] = tuned_candidate(
+        11, gsu=-1, algorithm="MultipleBufferSingleKernel")
+    result = tuned_solution(candidate)
+    result["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
+    assert JG._modeledRejection(result, tuned_request, candidate) is None
+    result[name] = value
+    assert message in JG._modeledRejection(result, tuned_request, candidate)
+
+
+@pytest.mark.parametrize("gsu,algorithm", [(-1, "MultipleBufferSingleKernel"), (4, "MultipleBuffer")])
+def test_tuned_split_k_seed_generates_with_its_helpers(tuned_request, tmp_path, gsu, algorithm):
+    tuned_request["candidates"][0] = tuned_candidate(11, gsu=gsu, algorithm=algorithm)
+    manifest = compile_request(
+        tuned_request, tmp_path, "--source-only", "--offload-bundler", str(tmp_path / "missing"))
+    prediction = manifest["jit_prediction"]
+    assert prediction["candidate_id"] == 11 and prediction["rejections"] == []
+    assert prediction["modeled_contract"] == "tensilelite.tuned.v1"
+    assert prediction["knowledge"]["source"] == "logic.yaml#4"
+    resolved = prediction["resolved_parameters"]
+    assert resolved["GlobalSplitU"] == gsu and resolved["GlobalSplitUAlgorithm"] == algorithm
+    assert resolved["_GlobalAccumulation"] == algorithm
+    assert resolved["WorkGroupMapping"] == 8
+    generators = {helper["generator"] for helper in manifest["helpers"]}
+    assert "KernelWriterBetaOnly" in generators
+    assert ("KernelWriterConversion" in generators) == (algorithm == "MultipleBuffer")
+
+
 def test_source_only_generation_builds_ranked_bundles(modeled_request, tmp_path):
     modeled_request["requested_solutions"] = 2
     manifest = compile_request(
