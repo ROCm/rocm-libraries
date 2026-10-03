@@ -303,7 +303,7 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
                 // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
                 instructions
                     = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
@@ -3564,7 +3564,7 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
                 auto vcc = std::make_shared<VCC>();
                 instructions
                     = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),

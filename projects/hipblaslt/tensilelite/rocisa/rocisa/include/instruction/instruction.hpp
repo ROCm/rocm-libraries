@@ -27,9 +27,12 @@
 #include "format.hpp"
 #include "helper.hpp"
 
+#include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -110,6 +113,53 @@ namespace rocisa
                     {
                         srcs1.push_back(arg);
                         srcs2.push_back(arg);
+                    }
+                },
+                s);
+        }
+    }
+
+    // Splits the sources of a 64-bit integer add into its low and high 32-bit halves. A register
+    // pair splits into its two registers. An immediate splits into its low 32 bits and its high
+    // 32 bits, the sign extension for a 32-bit value; copying the immediate into both halves, as
+    // splitSrcs does for packed operations, would also add it times 2^32. An immediate above 2^31
+    // reaches here as a double holding an integer. A symbol cannot be split and is rejected.
+    inline void splitSrcs64(const std::vector<InstructionInput>& srcs,
+                            std::vector<InstructionInput>&       srcs1,
+                            std::vector<InstructionInput>&       srcs2)
+    {
+        for(const auto& s : srcs)
+        {
+            std::visit(
+                [&srcs1, &srcs2](auto&& arg) -> void {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr(std::is_same_v<T, std::shared_ptr<rocisa::Container>>)
+                    {
+                        auto regContainer = std::dynamic_pointer_cast<RegisterContainer>(arg);
+
+                        auto [r1, r2] = regContainer->splitRegContainer();
+                        srcs1.push_back(r1);
+                        srcs2.push_back(r2);
+                    }
+                    else if constexpr(std::is_same_v<T, int>)
+                    {
+                        srcs1.push_back(arg);
+                        srcs2.push_back(arg < 0 ? -1 : 0);
+                    }
+                    else if constexpr(std::is_same_v<T, double>)
+                    {
+                        if(arg != std::trunc(arg) || std::fabs(arg) >= 0x1p63)
+                            throw std::invalid_argument(
+                                "64-bit add: cannot split non-integer immediate "
+                                + std::to_string(arg) + " into 32-bit halves");
+                        const uint64_t v = static_cast<uint64_t>(static_cast<int64_t>(arg));
+                        srcs1.push_back(static_cast<int>(static_cast<uint32_t>(v)));
+                        srcs2.push_back(static_cast<int>(static_cast<uint32_t>(v >> 32)));
+                    }
+                    else
+                    {
+                        throw std::invalid_argument("64-bit add: cannot split immediate '" + arg
+                                                    + "' into 32-bit halves");
                     }
                 },
                 s);
