@@ -2446,13 +2446,15 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
-    if(arg.fast_check_repeat != 1 || arg.fast_check_inject >= 0)
+    if(arg.fast_check_repeat != 1 || arg.fast_check_inject != -1)
     {
         std::string why;
         if(!arg.fast_check)
             why = "fast_check_repeat and fast_check_inject require fast_check";
         else if(arg.fast_check_repeat < 1)
             why = "fast_check_repeat must be at least 1";
+        else if(arg.fast_check_inject < -1)
+            why = "fast_check_inject must be -1 (no injection) or an iteration number";
         else if(arg.fast_check_inject >= arg.fast_check_repeat)
             why = "fast_check_inject must name an iteration below fast_check_repeat";
         if(!why.empty())
