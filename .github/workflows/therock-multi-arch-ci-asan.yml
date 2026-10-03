@@ -1,5 +1,5 @@
-name: Host-ASan comprehensive component tests
-run-name: Host-ASan comprehensive tests from build 37104386895
+name: Hipfile host-ASan validation
+run-name: Hipfile host-ASan runtime fix — build 37104386895
 on:
   workflow_dispatch:
 permissions:
@@ -17,9 +17,9 @@ jobs:
       test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
       sanity_check_only_for_family: false
       test_type: comprehensive
-      test_labels: ''
+      test_labels: '["test:hipfile"]'
       changed_projects: ''
       release_type: ci
       repository: ROCm/TheRock
-      ref: 498444ae814a961ace81aed8717054208e41a7d8
+      ref: ec20d5805a56438cffce008d1a4bc12e40ec31a1
       build_variant: host-asan
