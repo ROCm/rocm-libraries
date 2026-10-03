@@ -622,7 +622,7 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
     name += lse ? "_lse" : "_nlse";
     name += "_ndropout_nskip_nqscale_ntrload";
     if(!c.scheduled)
-        name += "_kvldsprefetch_progressivedsk";
+        name += "_kvlp_plk";
     return name + "_nsink";
 }
 
