@@ -21,7 +21,7 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 ```
 
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
-load and launch code on device 0, which must be a gfx950. Each test writes under
+need device 0, which must be a gfx950. Each test writes under
 `clients/tests/jit/scratch` in the build directory, which CTest empties before
 the tests run.
 
@@ -29,12 +29,14 @@ the tests run.
 `hipblaslt-jit-mock-backend-test` and `hipblaslt-jit-api-test` replay bundles
 through. The CTest tests are:
 
-- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object`,
-  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
-  `jit-source-bundle` and `jit-disabled`.
-- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
-  build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
-  `jit-bundle-failures`,
+- `jit-cpu`: `jit-source-bundle`, `jit-component` and `jit-code-object`. A
+  build with `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and
+  `jit-disabled`.
+- `jit-gpu`: `jit-code-object-gpu`, `jit-library`, `jit-library-concurrency`
+  and `jit-bundle-freshness`, which read library entries; TensileLite queries
+  the current device when it reads one.
+  With `HIPBLASLT_JIT_TESTING=ON` in a build for gfx950 it also has
+  `jit-mock-backend`, `jit-mock-backend-library`, `jit-bundle-failures`,
   `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
   and `jit-api-alpha-zero`.
 
@@ -53,7 +55,7 @@ replay bundles, because the library entries are MsgPack.
 | `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, a replay after an Origami prediction, rejected mock options, and bundle lifetime |
 | `jit-mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A query for two solutions generates only for the shortfall and skips the published kernel. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
-| `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
+| `jit-library` | The JIT solution library: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
 | `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name |
 | `jit-api-alpha-zero` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
@@ -89,8 +91,9 @@ the bundle and replay them.
 
 ## JIT solution library tests
 
-`hipblaslt-jit-library-test` compiles the JIT solution library directly and
-needs no GPU. It takes a split-K source bundle, `data/gfx950/splitk` in CTest,
+`hipblaslt-jit-library-test` compiles the JIT solution library directly. It
+needs a GPU, because TensileLite queries the current device when it reads a
+library entry. It takes a split-K source bundle, `data/gfx950/splitk` in CTest,
 whose library entry it publishes under several kernel names, and a scratch
 directory for the libraries it creates; it ignores
 `HIPBLASLT_JIT_LIBRARY_PATH`. Adding `--writers N --per-writer M` runs the
