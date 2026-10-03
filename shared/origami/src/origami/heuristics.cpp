@@ -459,6 +459,30 @@ void heuristics_database_t::initialize_defaults() {
     key.max_k       = 511;
     add_entry(key, reject_params);
   }
+
+  // ========================================================================
+  // HEURISTIC 4: gfx1201 TN occupancy-aware model (fp16 and bf16)
+  // ========================================================================
+  // Fitted offline for gfx1201 (Radeon AI PRO R9700) HHS TN ranking (OCAMP V3, variant S):
+  // count resident WGs (CUOccupancy, up to 4 per CU) in the WG wave count, saturate the
+  // per-wave occupancy score at 8 waves/SIMD, and charge a smaller sub-cache-line DepthU
+  // penalty. gfx1201 WMMA costs are identical for f16 and bf16, so the same values apply to
+  // both. Fields not set here keep their defaults.
+  {
+    heuristic_params_t g1201;
+    g1201.occupancy_aware_timesteps = true;
+    g1201.narrow_load_iter_penalty  = 125.0;
+    g1201.target_occupancy          = 8.0;
+
+    for (const auto dt : {data_type_t::Half, data_type_t::BFloat16}) {
+      heuristic_key_t key;
+      key.arch        = hardware_t::architecture_t::gfx1201;
+      key.mi_dtype    = dt;
+      key.a_transpose = transpose_t::T;
+      key.b_transpose = transpose_t::N;
+      add_entry(key, g1201);
+    }
+  }
 }
 
 // ============================================================================
