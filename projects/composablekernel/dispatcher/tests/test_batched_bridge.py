@@ -19,6 +19,7 @@ Run: python3 -m pytest tests/test_batched_bridge.py -v
 """
 
 import ctypes
+import importlib.util
 import json
 import sys
 import unittest
@@ -38,6 +39,9 @@ from batched_gemm_utils import (  # noqa: E402
     BatchedGemmDispatcherLib,
     BatchedGemmKernelConfig,
     BatchedGemmProblem,
+    BATCHED_SUPPORTED_DTYPES,
+    BATCHED_SUPPORTED_LAYOUTS,
+    BATCHED_VERIFY_TOL,
     _C_SIZEOF,
     _get_arch,
     _repeat_ok,
@@ -46,6 +50,7 @@ from batched_gemm_utils import (  # noqa: E402
 )
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
+    _C_NP,
     _output_dtype,
     _dtype_from_kernel_name,
 )
@@ -268,22 +273,59 @@ class TestBatchedAbiMarshalling(unittest.TestCase):
 
 
 class TestBatchedDtypeLayoutGate(unittest.TestCase):
-    """`expand_sweep` must reject anything outside Old-TE's fp16/rcr set.
+    """`expand_sweep` must accept exactly Old-TE's batched dtype/layout set.
 
-    Old-TE ``batched_gemm_instance_builder`` declares ``--datatype
-    choices=['fp16']`` / ``--layout choices=['rcr']``; the bridge must match that
-    EXACTLY rather than silently building a signature Old-TE never validated. An
-    explicit (supported) arch is passed so the gate fires before rocminfo/config
-    I/O is touched.
+    The bridge must match the Old-TE ``batched_gemm_instance_builder``
+    ``--datatype``/``--layout`` choices EXACTLY rather than silently building a
+    signature Old-TE never validated. An explicit (supported) arch is passed so
+    the gate fires before rocminfo/config I/O is touched.
     """
 
-    def test_rejects_non_fp16_dtype(self):
-        with self.assertRaises(ValueError):
-            expand_sweep("/nonexistent/config.json", arch="gfx942", dtype="bf16")
+    def test_supported_set(self):
+        self.assertEqual(BATCHED_SUPPORTED_DTYPES, ("fp16", "bf16", "fp32", "fp8", "bf8"))
+        self.assertEqual(BATCHED_SUPPORTED_LAYOUTS, ("rcr", "rrr", "crr", "ccr"))
 
-    def test_rejects_non_rcr_layout(self):
-        with self.assertRaises(ValueError):
-            expand_sweep("/nonexistent/config.json", arch="gfx942", layout="rrr")
+    def test_matches_old_te_builder_choices(self):
+        path = (
+            REPO_ROOT / "tile_engine" / "ops" / "gemm" / "batched_gemm"
+            / "batched_gemm_instance_builder.py"
+        )
+        spec = importlib.util.spec_from_file_location("batched_builder", path)
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        self.assertEqual(builder.BATCHED_GEMM_SUPPORTED_DTYPES, BATCHED_SUPPORTED_DTYPES)
+        self.assertEqual(
+            builder.BATCHED_GEMM_SUPPORTED_LAYOUTS, BATCHED_SUPPORTED_LAYOUTS
+        )
+
+    def test_verify_tol_covers_every_dtype(self):
+        self.assertEqual(set(BATCHED_VERIFY_TOL), set(BATCHED_SUPPORTED_DTYPES))
+
+    def test_rejects_unsupported_dtype(self):
+        for dtype in ("int8", "fp64"):
+            with self.assertRaises(ValueError, msg=dtype):
+                expand_sweep("/nonexistent/config.json", arch="gfx942", dtype=dtype)
+
+    def test_rejects_arch_without_fp32_rows(self):
+        # gfx1201 has no fp32 warp tiles in arch_specs; the bridge does not
+        # accept the arch at all, so fp32 can never be generated for it.
+        with self.assertRaisesRegex(ValueError, "Unsupported GPU architecture"):
+            expand_sweep("/nonexistent/config.json", arch="gfx1201", dtype="fp32")
+
+    def test_rejects_unsupported_layout(self):
+        for layout in ("rc", "rcrr", "xyz"):
+            with self.assertRaises(ValueError, msg=layout):
+                expand_sweep("/nonexistent/config.json", arch="gfx942", layout=layout)
+
+    def test_accepts_supported_set(self):
+        # Past the gate the missing config file is the first failure.
+        for dtype in BATCHED_SUPPORTED_DTYPES:
+            for layout in BATCHED_SUPPORTED_LAYOUTS:
+                with self.assertRaises((FileNotFoundError, OSError)):
+                    expand_sweep(
+                        "/nonexistent/config.json", arch="gfx942",
+                        dtype=dtype, layout=layout,
+                    )
 
 
 class TestBatchedSplitKContract(unittest.TestCase):
@@ -345,13 +387,45 @@ class TestBatchedCDtypeSizeMap(unittest.TestCase):
     """F6: the host numpy C dtype size must equal sizeof(CDataType)."""
 
     def test_c_sizeof_matches_numpy_itemsize(self):
-        _C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
         for out_dtype, nbytes in _C_SIZEOF.items():
             self.assertIn(out_dtype, _C_NP)
             self.assertEqual(
                 np.dtype(_C_NP[out_dtype]).itemsize, nbytes,
                 f"{out_dtype}: numpy itemsize != declared sizeof(CDataType)",
             )
+
+
+class TestBatchedCompileJobOutputDir(unittest.TestCase):
+    """The batched lib needs no CMake build, so the job must create build/examples."""
+
+    def test_creates_missing_examples_dir(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            batched_gemm_utils._cu, "get_build_dir", return_value=Path(tmp)
+        ):
+            config = BatchedGemmKernelConfig(dtype_a="fp16", gfx_arch="gfx942")
+            job, lib_path = batched_gemm_utils._build_batched_compile_jobs(
+                config, Path(tmp) / "k.hpp"
+            )
+            self.assertEqual(lib_path.parent, Path(tmp) / "examples")
+            self.assertTrue(lib_path.parent.is_dir())
+            self.assertEqual(job["lib_path"], str(lib_path))
+
+    def test_compile_cmd_has_arch_feature_defines(self):
+        import tempfile
+
+        for arch in ("gfx942", "gfx950", "gfx1250"):
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+                batched_gemm_utils._cu, "get_build_dir", return_value=Path(tmp)
+            ):
+                config = BatchedGemmKernelConfig(dtype_a="fp8", gfx_arch=arch)
+                job, _ = batched_gemm_utils._build_batched_compile_jobs(
+                    config, Path(tmp) / "k.hpp"
+                )
+                cmd = job["compile_cmd"]
+                for flag in batched_gemm_utils.arch_feature_defines(arch):
+                    self.assertIn(flag, cmd, f"{arch}: missing {flag}")
 
 
 class TestBatchedRepeatGate(unittest.TestCase):
@@ -432,10 +506,46 @@ class TestGfx1250Enablement(unittest.TestCase):
         cfg_path = _CONFIG_DIR / "default_ci_config_gfx1250.json"
         self.assertTrue(cfg_path.is_file(), cfg_path)
         tc = json.loads(cfg_path.read_text())["tile_config"]
-        # WMMA warp tile for fp16/bf16 on gfx1250 is 16x16x32.
+        # WMMA warp tiles on gfx1250: 16x16x32 for fp16/bf16, 16x16x4 for fp32, 16x16x64 for fp8/bf8.
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
-        self.assertEqual(tc["warp_tile_k"]["values"], [32])
+        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32, 64])
+
+    def test_gfx1250_sweep_keeps_only_the_dtype_wmma_tile(self):
+        cfg_path = str(_CONFIG_DIR / "default_ci_config_gfx1250.json")
+        for dtype, wmma in (("fp16", 32), ("bf16", 32), ("fp32", 4)):
+            configs = expand_sweep(cfg_path, arch="gfx1250", dtype=dtype)
+            self.assertTrue(configs, dtype)
+            tiles = {(c.warp_tile_m, c.warp_tile_n, c.warp_tile_k) for c in configs}
+            self.assertEqual(tiles, {(16, 16, wmma)}, dtype)
+
+    def test_codegen_arch_filter_uses_the_dtype_warp_tiles(self):
+        # fp32 must map to its own arch_specs row, not fall back to fp16's.
+        import tempfile
+
+        from codegen_common import TileConfig
+        from unified_gemm_codegen import UnifiedGemmCodegen
+
+        for dtype, wmma, other in (
+            ("fp16", 32, 4),
+            ("bf16", 32, 4),
+            ("fp32", 4, 32),
+            ("fp8", 64, 32),
+            ("bf8", 64, 32),
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                gen = UnifiedGemmCodegen(tmp, dtype, "rcr", "gfx1250")
+                if gen.arch_filter is None:
+                    self.skipTest("arch filter unavailable")
+                ok, bad = (
+                    gen._is_tile_arch_valid(
+                        TileConfig(64, 64, 64, 2, 2, 1, 16, 16, wk),
+                        pipeline="compv3",
+                        epilogue="cshuffle",
+                    )
+                    for wk in (wmma, other)
+                )
+            self.assertEqual((ok, bad), (True, False), dtype)
 
 
 if __name__ == "__main__":

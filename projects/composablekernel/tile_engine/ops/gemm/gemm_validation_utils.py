@@ -718,6 +718,43 @@ def validate_lds_capacity(
     return True, ""
 
 
+# Op-opt-in warp-tile rows the shared table above does not cover: it has no
+# gfx1250 entry and no fp32 key, so validate_gemm_warp_tile_combination accepts
+# any warp tile there. Ops that generate those signatures filter through
+# op_warp_tile_allowed() from their own _validate_tile_config; nothing else
+# consults these rows. Both mirror the dispatcher arch_specs.json rows.
+GFX1250_WARP_TILES = {
+    "fp16": ([16, 16, 32],),
+    "bf16": ([16, 16, 32],),
+    "fp32": ([16, 16, 4],),
+    "fp8": ([16, 16, 64], [16, 16, 128]),
+    "bf8": ([16, 16, 64], [16, 16, 128]),
+    "int8": ([16, 16, 64],),
+}
+GFX9_FP32_WARP_TILES = ([16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8])
+
+
+def op_warp_tile_allowed(gpu_target, datatype, warp_tile):
+    """False if ``warp_tile`` [m, n, k] is missing from the op-opt-in rows above.
+
+    Covers only the gaps of the shared table: gfx1250, and fp32, which has MFMA
+    rows on gfx9 only, so no fp32 tile is allowed on any other arch (e.g.
+    gfx1201). ``gpu_target`` may be a ';'-separated list (CMake builds one kernel
+    for all of them); these rows are then checked against every target. Every
+    other (arch, dtype) returns True and is left to the shared checks.
+    """
+    warp_tile = list(warp_tile)
+    for target in str(gpu_target).split(";"):
+        arch = _base_gfx_arch(target.strip())
+        if arch == "gfx1250":
+            if warp_tile not in GFX1250_WARP_TILES.get(datatype, ()):
+                return False
+        elif datatype == "fp32":
+            if not arch.startswith("gfx9") or warp_tile not in GFX9_FP32_WARP_TILES:
+                return False
+    return True
+
+
 def validate_gemm_warp_tile_combination(
     warp_tile_m: int,
     warp_tile_n: int,

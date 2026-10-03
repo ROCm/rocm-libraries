@@ -2122,6 +2122,7 @@ class UnifiedGemmCodegen:
         # WMMA instructions on gfx942 always use fp32 accumulator for fp16 inputs
         dtype_map = {
             "fp16": ("fp16", "fp16", "fp32"),  # A=fp16, B=fp16, Acc=fp32
+            "fp32": ("fp32", "fp32", "fp32"),  # A=fp32, B=fp32, Acc=fp32
             "bf16": ("bf16", "bf16", "fp32"),  # A=bf16, B=bf16, Acc=fp32
             "fp8": ("fp8", "fp8", "fp32"),  # A=fp8, B=fp8, Acc=fp32
             "bf8": ("bf8", "bf8", "fp32"),  # A=bf8, B=bf8, Acc=fp32
@@ -2335,6 +2336,7 @@ def _show_arch_info(gpu_target: str, datatype: str):
         # Warp tile configurations for data type
         dtype_map = {
             "fp16": "fp16_fp16_fp16",
+            "fp32": "fp32_fp32_fp32",
             "bf16": "bf16_bf16_bf16",
             "fp8": "fp8_fp8_fp16",
             "bf8": "bf8_bf8_fp16",
