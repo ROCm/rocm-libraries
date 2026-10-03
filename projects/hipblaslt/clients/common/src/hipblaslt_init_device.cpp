@@ -1047,24 +1047,26 @@ void hipblaslt_init_device(ABC_dims                 abc,
             }
             else if(abc == ABC_dims::A && pat.pattern == IntegerExactPattern::sparse_k)
             {
-                size_t       effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                const size_t K                = pat.K;
-                const bool   k_is_row         = pat.a_k_is_row;
-                fill_batch(
-                    A,
-                    M,
-                    N,
-                    lda,
-                    effective_stride,
-                    batch_count,
-                    [effective_stride, lda, K, k_is_row] __host__ __device__(size_t idx) -> T {
-                        auto in_batch = idx % effective_stride;
-                        auto j        = in_batch / lda;
-                        auto i        = in_batch - j * lda;
-                        return integer_exact_sparse_k_kept(k_is_row ? i : j, K)
-                                   ? small_int_positive<T>(idx)
-                                   : T(0);
-                    });
+                // A stride of 0 means packed batches. Any other stride is the allocation's layout,
+                // which must not be widened: overlapping batches would be written past the end.
+                const size_t fill_stride  = stride ? stride : lda * N;
+                const size_t index_stride = std::max(fill_stride, lda * N);
+                const size_t K            = pat.K;
+                const bool   k_is_row     = pat.a_k_is_row;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           fill_stride,
+                           batch_count,
+                           [index_stride, lda, K, k_is_row] __host__ __device__(size_t idx) -> T {
+                               auto in_batch = idx % index_stride;
+                               auto j        = in_batch / lda;
+                               auto i        = in_batch - j * lda;
+                               return integer_exact_sparse_k_kept(k_is_row ? i : j, K)
+                                          ? small_int_positive<T>(idx)
+                                          : T(0);
+                           });
             }
             else if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
