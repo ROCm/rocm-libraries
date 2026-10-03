@@ -21,7 +21,7 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 ```
 
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
-load and launch code on device 0, which must be a gfx950. Each test writes under
+need device 0, which must be a gfx950. Each test writes under
 `clients/tests/jit/scratch` in the build directory, which CTest empties before
 the tests run.
 
@@ -29,13 +29,14 @@ the tests run.
 `hipblaslt-jit-mock-backend-test` and `hipblaslt-jit-api-test` replay bundles
 through. The CTest tests are:
 
-- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
-  `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
-  `jit-source-bundle` and `jit-disabled`.
-- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
-  build for gfx950 also `jit-mock-backend`, `jit-bundle-failures`,
-  `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
-  and `jit-api-alpha-zero`.
+- `jit-cpu`: `jit-source-bundle`, `jit-component` and `jit-code-object`. A
+  build with `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and
+  `jit-disabled`.
+- `jit-gpu`: `jit-code-object-gpu` and `jit-bundle-freshness`, which reads
+  library entries; TensileLite queries the current device when it reads one.
+  With `HIPBLASLT_JIT_TESTING=ON` in a build for gfx950 it also has
+  `jit-mock-backend`, `jit-bundle-failures`, `jit-helper-failures` and
+  `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax` and `jit-api-alpha-zero`.
 
 A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` and none
 of the tests that replay bundles, because the committed library entries are
