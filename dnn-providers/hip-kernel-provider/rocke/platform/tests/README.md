@@ -6,6 +6,15 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 ## Entry point
 
+Install test dependencies from the platform directory with
+`python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
+Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+types. Host tests that need this optional runtime dependency use
+`pytest.importorskip`; a minimal authoring installation can run the remaining
+tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
+`ROCKE_REQUIRE_GFX1250=1`; missing dependencies or the requested GPU must fail
+that validation rather than count as successful coverage.
+
 ```
 python tests/run_all.py            # relative-path guard + byte-identity gate + pytest (+ctest if built)
 python tests/run_all.py --only gemm
