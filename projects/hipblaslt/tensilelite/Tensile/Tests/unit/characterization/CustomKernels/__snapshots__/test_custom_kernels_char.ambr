@@ -12,6 +12,7 @@
     'isp': dict({
       'Extra': 9,
       'KernArgsVersion': 2,
+      'PersistentLoopArgsVersion': 0,
     }),
   })
 # ---

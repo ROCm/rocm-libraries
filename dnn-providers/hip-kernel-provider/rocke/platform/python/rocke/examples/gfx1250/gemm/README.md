@@ -1,7 +1,8 @@
 # gfx1250 scaled GEMM examples
 
 Matrix dtype names normalize through `core/dtypes.py`: `fp8e4m3`, `bf8e5m2`,
-and `fp4e2m1`, with short aliases `fp8`, `bf8`, and `fp4` for these examples.
+`fp6e2m3`, `fp6e3m2`, and `fp4e2m1`, with short aliases `fp8`, `bf8`,
+`fp6`, `bf6`, and `fp4` for these examples.
 Example argument parsing normalizes aliases before checking supported choices.
 
 Run these modules from an installed rocKE environment, or with the platform's
@@ -11,26 +12,36 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | Example | Matrix inputs | Scale contract |
 | --- | --- | --- |
 | `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
+| `mxfp6_gemm` | Packed FP6 E2M3 or E3M2 on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6 --output-dtype fp16
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp4_gemm --compile-route hip --case all
 ```
 
 Each example constructs a family-specific spec and invokes the shared verifier
 to prepare inputs, pack them, compile once, launch, and compare with an
 independent decoded reference. M and N must be positive multiples of 16; the
-bounded correctness fixtures support K=128 and K=256, with BF16 output.
+bounded correctness fixtures support K=128 and K=256. All three examples accept
+`--output-dtype bf16` (the default) or `--output-dtype fp16`, selecting both output
+storage and reference rounding.
 
 The default `wmma_scale` instruction uses one E8M0 scale per 32 K elements.
 `--matrix-path wmma_scale16` explicitly selects the native 16-element block
 variant. Scale bytes are packed in increasing K-group order. FP8 uses one byte
-per value; [FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
+per value; [FP6 uses four codes per three bytes](FP6.md);
+[FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
 
 `--case all` checks neutral scales, independent A/B scales, varying scales, and
-every scale group. These bounded exact fixtures do not establish arbitrary-input
-rounding, special-value semantics, or performance. The kernel builders and
+every scale group. Native comparisons require exact numerical equality after
+output-type rounding; positive and negative zero compare equal. They do not
+check output zero-sign or signed-zero accumulation semantics. These bounded
+fixtures do not establish arbitrary-input rounding, E8M0 NaN behavior, or
+performance. The kernel builders and
 runtime/packing utilities are shared; each example exposes one input contract.
 
 The generic `block_scaled_gemm_verify` CLI remains available for regression
@@ -40,7 +51,8 @@ default in the focused MX examples.
 `mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
 homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
 or `--dtype both` explicitly. Both operands use the selected format with E8M0
-scales. Mixed matrix formats are outside these examples.
+scales. `mxfp6_gemm` similarly defaults to both homogeneous FP6 encodings;
+use `--dtype fp6` or `--dtype bf6` to select one. Mixed matrix formats are outside these examples.
 
 The target-independent aliases in `core/dtypes.py` normalize logical format
 names. Recognition does not imply that a target supports an atom; use its
