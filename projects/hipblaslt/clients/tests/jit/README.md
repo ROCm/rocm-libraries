@@ -20,13 +20,13 @@ ctest --test-dir "$project_build/clients/tests/jit" -L jit-gpu --output-on-failu
 ```
 
 `-L jit-cpu` runs the tests that need no GPU. `-L jit-gpu` runs the tests that
-load and launch code on device 0, which must be a gfx950. Each test writes under
+need device 0, which must be a gfx950. Each test writes under
 `clients/tests/jit/scratch` in the build directory, which CTest empties before
 the tests run. The CTest tests are:
 
-- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
-  `jit-bundle-freshness`.
-- `jit-gpu`: `jit-code-object-gpu`.
+- `jit-cpu`: `jit-source-bundle`, `jit-component` and `jit-code-object`.
+- `jit-gpu`: `jit-code-object-gpu` and `jit-bundle-freshness`, which reads
+  library entries; TensileLite queries the current device when it reads one.
 
 A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness`, because
 the committed library entries are MsgPack.
