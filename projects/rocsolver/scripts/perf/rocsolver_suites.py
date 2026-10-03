@@ -590,10 +590,9 @@ def gels_suite(*, suite, precision, case):
                 m,n = get_mn(s_shape, s, mode)
                 ld_b = get_ld(s)
                 ld_a = get_ld(m)
-                ld_x = get_ld(n)
                 if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b}')
 
 
 def gelsBatch_suite(*, suite, precision, case):
@@ -613,15 +612,14 @@ def gelsBatch_suite(*, suite, precision, case):
     size = get_size_configurations(case, mode)
     for s_shape in ['overdet', 'underdet']:
         for s_nrhs in ['one', 'half_n', 'n']:
-            for s in size:
+            for s, bc in size:
                 nrhs = get_nrhs(s_nrhs, s)
                 m,n = get_mn(s_shape, s, mode)
                 ld_b = get_ld(s)
                 ld_a = get_ld(m)
-                ld_x = get_ld(n)
                 if (s_shape == 'overdet' and m >= n) or (s_shape == 'underdet' and m < n):
                     row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'nrhs': s_nrhs, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {m} -n {n} --nrhs {nrhs} --lda {ld_a} --ldb {ld_b}')
 
 
 def xxgqr_suite(*, suite, precision, case):
