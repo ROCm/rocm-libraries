@@ -26,16 +26,20 @@ load and launch code on device 0, which must be a gfx950. Each test writes under
 the tests run.
 
 `HIPBLASLT_JIT_TESTING=ON` links the mock backend that
-`hipblaslt-jit-mock-backend-test` replays bundles through. The CTest tests are:
+`hipblaslt-jit-mock-backend-test` and `hipblaslt-jit-api-test` replay bundles
+through. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
   `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-source-bundle` and `jit-disabled`.
 - `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
-  build for gfx950 also `jit-mock-backend`.
+  build for gfx950 also `jit-mock-backend`, `jit-bundle-failures`,
+  `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
+  and `jit-api-alpha-zero`.
 
-A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` or
-`jit-mock-backend`, because the committed library entries are MsgPack.
+A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` and none
+of the tests that replay bundles, because the committed library entries are
+MsgPack.
 
 ## What each test checks
 
@@ -47,6 +51,10 @@ A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` or
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |
 | `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, rejected mock options, and bundle lifetime |
+| `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name |
+| `jit-api-alpha-zero` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
+| `jit-helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
+| `jit-bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
 | `jit-disabled` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 
 The `GemmPointerCheck` tests in `hipblaslt-test` check that `Gemm::setProblem`
@@ -63,6 +71,14 @@ fault and rejected mock options.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
 uses as the scratch parent; it needs no GPU. Both are built only with
 `HIPBLASLT_ENABLE_JIT=ON`.
+
+`hipblaslt-jit-api-test --replay BUNDLE` runs the public execution checks on a
+solution the mock backend replays from `BUNDLE`; `--m`, `--n`, `--k`,
+`--amax`, `--alpha-zero` and `--workspace-fallback` shape the problem, and
+`--second-replay` names the bundle of its second solution.
+`test_bundle_failures.py` and `test_helper_failures.py` take that binary, a
+valid split-K source bundle and a fresh output directory; they damage copies of
+the bundle and replay them.
 
 ## Code-object tests
 

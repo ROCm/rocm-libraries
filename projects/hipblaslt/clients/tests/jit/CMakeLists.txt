@@ -28,6 +28,13 @@ function(hipblaslt_jit_test name label)
         LABELS ${label} FIXTURES_REQUIRED hipblaslt-jit-scratch)
 endfunction()
 
+# hipblaslt_jit_python_test(name label script args...) runs a script here.
+function(hipblaslt_jit_python_test name label script)
+    hipblaslt_jit_test(${name} ${label} "${Python_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/${script}" ${ARGN})
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT PYTHONDONTWRITEBYTECODE=1)
+endfunction()
+
 function(hipblaslt_jit_stage)
     foreach(test_target ${ARGN})
         target_compile_features(${test_target} PRIVATE cxx_std_17)
@@ -81,12 +88,32 @@ if(HIPBLASLT_JIT_TESTING)
     target_include_directories(hipblaslt-jit-mock-backend-test PRIVATE
         "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/include")
     target_link_libraries(hipblaslt-jit-mock-backend-test PRIVATE roc::hipblaslt hip::device)
-    hipblaslt_jit_stage(hipblaslt-jit-mock-backend-test)
+
+    # The public C and C++ GEMM APIs on solutions replayed through the mock backend.
+    add_executable(hipblaslt-jit-api-test jit_api_test.cpp)
+    target_include_directories(hipblaslt-jit-api-test PRIVATE "${hipblaslt_jit_source}")
+    target_link_libraries(hipblaslt-jit-api-test PRIVATE roc::hipblaslt hip::device)
+    hipblaslt_jit_stage(hipblaslt-jit-mock-backend-test hipblaslt-jit-api-test)
 
     # The committed bundles hold gfx950 code and MsgPack library entries.
     if(hipblaslt_jit_gfx950 AND NOT HIPBLASLT_ENABLE_YAML)
+        set(api $<TARGET_FILE:hipblaslt-jit-api-test>)
         hipblaslt_jit_test(jit-mock-backend jit-gpu
             $<TARGET_FILE:hipblaslt-jit-mock-backend-test> "${hipblaslt_jit_splitk}")
+        foreach(case "splitk;splitk;--k;512"
+                     "streamk;streamk;--k;4096;--workspace-fallback;1"
+                     "amax;amax;--amax;1"
+                     "alpha-zero;amax;--amax;1;--alpha-zero;1")
+            list(POP_FRONT case name bundle)
+            hipblaslt_jit_test(jit-api-${name} jit-gpu
+                ${api} --replay "${hipblaslt_jit_data}/gfx950/${bundle}" ${case})
+        endforeach()
+        set_tests_properties(jit-api-streamk PROPERTIES ENVIRONMENT
+            "TENSILE_PERSISTENT_FIXED_GRID=16;TENSILE_PERSISTENT_DYNAMIC_GRID=0;TENSILE_DB=64")
+        hipblaslt_jit_python_test(jit-bundle-failures jit-gpu test_bundle_failures.py
+            ${api} "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/bundle-failures")
+        hipblaslt_jit_python_test(jit-helper-failures jit-gpu test_helper_failures.py
+            ${api} "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/helper-failures")
     endif()
 endif()
 
