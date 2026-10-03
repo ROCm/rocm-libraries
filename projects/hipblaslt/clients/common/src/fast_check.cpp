@@ -1853,6 +1853,15 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
         result.message = "fast_check could not copy D and E to the host\n";
         return result;
     }
+    if(scale_e == 0)
+    {
+        result.passed  = false;
+        result.message = "E is scaled by 0, so it does not give the pre-activation values and the "
+                         "activation cannot be checked from it\n";
+        if(amax)
+            *amax = std::numeric_limits<double>::quiet_NaN();
+        return result;
+    }
     const int64_t      count   = d.rows * d.cols * batch_count;
     const double       e_limit = exact_limit(e.type);
     int64_t            bad = 0, inexact = 0;
@@ -1917,10 +1926,10 @@ double fast_check_amax_device(const FastCheckMatrix& d,
         return std::numeric_limits<double>::quiet_NaN();
     for(int64_t idx = 0; idx < d.rows * d.cols * batch_count && !hd.empty(); idx++)
         top = std::max(top, std::fabs(load(hd.data(), d.type, size_t(idx))));
-    // A rounded D no longer gives the pre-scale value amaxD is computed from.
-    if(!(top < limit))
+    // A rounded D, or one scaled by 0, no longer gives the pre-scale value amaxD is computed from.
+    if(!(top < limit) || scale_d == 0)
         return std::numeric_limits<double>::quiet_NaN();
-    return top / scale_d;
+    return top / std::fabs(scale_d);
 }
 
 FastCheckResult fast_check_bias_gradient(const FastCheckProblem& p,

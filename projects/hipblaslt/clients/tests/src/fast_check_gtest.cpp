@@ -969,9 +969,10 @@ namespace
         }
     }
 
-    // amaxD without an activation is the largest |D| over scale_d. A value outside the range the
-    // type stores exactly may have been rounded, so neither amaxD nor the activation can be
-    // checked from it, and both say so rather than report a wrong value.
+    // amaxD without an activation is the largest |D| over |scale_d|. A value outside the range the
+    // type stores exactly may have been rounded, and a scale of 0 erases the values, so neither
+    // amaxD nor the activation can be checked from it, and both say so rather than report a wrong
+    // value.
     TEST(FastCheckDevice_pre_checkin, amax_and_activation_need_exact_values)
     {
         DeviceMatrix       d, e;
@@ -985,6 +986,8 @@ namespace
         e.write(he);
         d.write(hd);
         EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 2, 0), 1.5);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, -2, 0), 1.5);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 0, 0)));
         double amax = -1;
         auto   res  = fast_check_activation_device(d.matrix(),
                                                 e.matrix(),
@@ -998,6 +1001,20 @@ namespace
                                                 &amax);
         EXPECT_TRUE(res.passed) << res.message;
         EXPECT_EQ(amax, 3);
+
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           0,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scaled by 0"), std::string::npos) << res.message;
+        EXPECT_TRUE(std::isnan(amax));
 
         // f32 stores integers exactly below 2^24.
         e.set(39, 16777216.f);

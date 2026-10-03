@@ -6129,7 +6129,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if(std::isnan(want))
                             reportFailure("fast_check amaxD",
                                           "amaxD cannot be checked: the verified D or E holds "
-                                          "values outside the range its type stores exactly\n");
+                                          "values outside the range its type stores exactly, "
+                                          "or is scaled by 0\n");
                         else if(!(got == want))
                             reportFailure("fast_check amaxD",
                                           "amaxD holds " + std::to_string(got)
