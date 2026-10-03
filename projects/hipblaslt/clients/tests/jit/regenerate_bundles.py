@@ -42,6 +42,15 @@ BUNDLES = {
         "M=256, N=128, K=4096; TileProcessingStrategy=StreamK, WorkAssignment=StaticGrid,"
         " StreamKAtomic=0",
     ),
+    "streamk-hybrid": (
+        "Tensile.SingleSolution",
+        f"{FIXTURES}/single_solution_streamk_hybrid.yaml",
+        "gfx950",
+        "bundle",
+        "M=256, N=128, K=4096; TileProcessingStrategy=StreamK, WorkAssignment=Hybrid,"
+        " WorkGroupMapping=0, WorkGroupMappingXCC=-1, as a Hybrid Stream-K candidate of the"
+        " origami.gemm.persistent.v1 contract is compiled",
+    ),
     "amax": (
         "Tensile.SingleSolution",
         f"{FIXTURES}/single_solution_amax.yaml",

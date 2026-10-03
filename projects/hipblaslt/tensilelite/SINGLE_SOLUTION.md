@@ -107,6 +107,7 @@ The fixtures in `Tensile/Tests/unit/test_data/` illustrate these choices:
 | `single_solution_splitk.yaml` | Split-K across four workgroups, with beta and output-conversion helper families |
 | `single_solution_adaptive.yaml` | Runtime-selected split count and accumulation mode |
 | `single_solution_streamk.yaml` | Stream-K with partial-tile reduction |
+| `single_solution_streamk_hybrid.yaml` | Hybrid Stream-K with the mapping and stagger chosen at each launch |
 | `single_solution_amax.yaml` | Unscaled output-amax with packed stores |
 
 `GlobalSplitU` selects the split-K count. Values greater than one and the
