@@ -19,13 +19,17 @@ on:
       amdgpu_families:
         type: string
         required: true
+      # Test architecture when it differs from the emulated device's.
+      test_target:
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   rocjitsu-tensilelite-linux:
-    name: rocjitsu tensilelite (${{ inputs.amdgpu_families }})
+    name: rocjitsu tensilelite (${{ inputs.amdgpu_families }}${{ inputs.test_target != '' && format(', {0}', inputs.test_target) || '' }})
     continue-on-error: true
     runs-on: ${{ inputs.build_runs_on }}
     timeout-minutes: 400
@@ -44,6 +48,7 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ROCJITSU_TEST_TARGET: ${{ inputs.test_target }}
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
@@ -121,6 +126,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: rocjitsu-tensilelite-reports-${{ inputs.amdgpu_families }}
+          name: rocjitsu-tensilelite-reports-${{ inputs.amdgpu_families }}${{ inputs.test_target != '' && format('-{0}', inputs.test_target) || '' }}
           path: rocjitsu-tensilelite-reports/
           if-no-files-found: ignore

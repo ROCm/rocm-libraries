@@ -313,6 +313,29 @@ jobs:
       build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
       amdgpu_families: gfx125X-dcgpu
 
+  rocjitsu_tensilelite_gfx125x_strict:
+    name: rocjitsu tensilelite (gfx125X-dcgpu, gfx1250-strict)
+    # Records how the gfx1250-strict (A0) configs fare on the gfx1250 emulator,
+    # which has no strict target yet. Same trigger as the gfx1250 sidecar.
+    needs: [ci-env, configure, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+        ) &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-tensilelite-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      amdgpu_families: gfx125X-dcgpu
+      test_target: gfx1250-strict
+
   rocjitsu_tensilelite_gfx94x:
     name: rocjitsu tensilelite (gfx94X-dcgpu)
     # A caller cannot depend on an individual job inside a reusable workflow,

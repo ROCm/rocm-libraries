@@ -23,6 +23,9 @@ PYTHON="${PYTHON:-$(command -v python3)}"
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 AMDGPU_FAMILIES="${AMDGPU_FAMILIES:-}"
 ROCJITSU_GPU_TARGET="${ROCJITSU_GPU_TARGET:-}"
+# Architecture to select and build tests for when it differs from the emulated
+# device, e.g. gfx1250-strict configs on the gfx1250 emulator.
+ROCJITSU_TEST_TARGET="${ROCJITSU_TEST_TARGET:-}"
 ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
 ROCJITSU_BUILD_DIR="${ROCJITSU_BUILD_DIR:-${PWD}/rocjitsu-build}"
 ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
@@ -176,8 +179,9 @@ if [[ "${LLVM_HOST_RUNTIME_DIR}" != "${LLVM_RUNTIME_ROOT}" ]]; then
 fi
 
 select_rocjitsu_target
+TEST_TARGET="${ROCJITSU_TEST_TARGET:-${ROCJITSU_GPU_TARGET}}"
 
-if [[ -z "${ROCJITSU_CONFIG}" || ! -f "${ROCJITSU_CONFIG}" ]]; then
+if [[ -z "${ROCJITSU_CONFIG}"|| ! -f "${ROCJITSU_CONFIG}" ]]; then
   echo "rocjitsu config not found: ${ROCJITSU_CONFIG}" >&2
   exit 1
 fi
@@ -268,6 +272,7 @@ export PYTHONPATH="${SCRIPT_DIR}:${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}
 echo "ROCM_PATH=${ROCM_PATH}"
 echo "AMDGPU_FAMILIES=${AMDGPU_FAMILIES}"
 echo "ROCJITSU_GPU_TARGET=${ROCJITSU_GPU_TARGET}"
+echo "TEST_TARGET=${TEST_TARGET}"
 echo "ROCJITSU_CONFIG=${ROCJITSU_CONFIG}"
 echo "ROCJITSU_MARCH=${ROCJITSU_MARCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
@@ -365,8 +370,8 @@ run_tensilelite_tests() {
       -- "${PYTHON}" -m pytest \
         "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
         -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
-        -m "${ROCJITSU_GPU_TARGET}" \
-        --gpu-targets="${ROCJITSU_GPU_TARGET}" \
+        -m "${TEST_TARGET}" \
+        --gpu-targets="${TEST_TARGET}" \
         -v -s \
         -n "${PYTEST_WORKERS}" \
         --client-lock-scope=worker \
@@ -374,7 +379,7 @@ run_tensilelite_tests() {
         --junit-xml="${junit_dir}/tensilelite.xml" \
         --prebuilt-client="${TENSILELITE_CLIENT}" \
         --global-parameters="LibraryFormat='msgpack'" \
-        "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_GPU_TARGET}" \
+        "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${TEST_TARGET}" \
         "$@"
   ) 2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"
 
@@ -427,7 +432,7 @@ JUNIT_PARSE
 }
 
 set +e
-run_timed "tensilelite tests (${ROCJITSU_GPU_TARGET})" run_tensilelite_tests "$@"
+run_timed "tensilelite tests (${TEST_TARGET})" run_tensilelite_tests "$@"
 test_status=$?
 set -e
 
