@@ -37,6 +37,7 @@
 #include "stinkytofu/pipeline/ModuleAdaptors.hpp"
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
@@ -242,12 +243,25 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
         // the module opts in. Must precede InsertVgprMsbPass so the new
         // branches/labels are present when MSB configuration is materialized.
+        // KernelWriter keeps these apart. A caller that sets both module options
+        // directly would still split the loop and then clone only part of it.
+        if (moduleOptions.ClusterBarrier && moduleOptions.ClusterBarrierSplitWaveLoop) {
+            for (const CloneSpec& spec : moduleOptions.CloneList) {
+                if (spec.name == "InitCIterWmma") {
+                    STINKY_UNREACHABLE(
+                        "ClusterBarrierSplitWaveLoop and an InitCIterWmma CloneList "
+                        "cannot both be set");
+                }
+            }
+        }
+
         if (moduleOptions.ClusterBarrier) {
             pm.addPass(createInsertClusterBarrierPass(
                 /*streamKMulticast=*/moduleOptions.StreamKMulticast,
                 /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
                 /*rule3SignalLeadCycles=*/
-                resolvedKnobs.clusterBarrierRule3SignalLeadCycles));
+                resolvedKnobs.clusterBarrierRule3SignalLeadCycles,
+                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can
