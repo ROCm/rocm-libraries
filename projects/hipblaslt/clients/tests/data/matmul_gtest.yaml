@@ -3802,9 +3802,12 @@ Tests:
 ###############################################################################
 
 # scaleA and scaleB as one value (1) or a vector (2). On gfx942 and gfx950 the
-# library offers them for fp8 inputs only, and vector scales only with a 16-bit
-# output; gfx90a offers neither. scaleC and scaleD come only with an fp8 output,
-# which the integer scales would saturate, so they are covered by amaxD below.
+# library offers them for fp8 inputs only, vector scales only with a 16-bit output,
+# and no mix of one value and a vector; gfx90a offers neither. scaleC and scaleD
+# come only with an fp8 output, which the integer scales would saturate.
+# ROCM-32062: the client CPU reference scales the wrong rows of A when lda exceeds
+# the rows stored, so the vector cases keep lda and ldb packed, and the
+# *_lda_ROCM32062 cases, quarantined in known_bugs.yaml, keep them padded.
 - name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz
   category: pre_checkin
   function:
@@ -3815,8 +3818,42 @@ Tests:
   transB: N
   alpha: 2.0
   beta: -2.0
-  scaleA: [ 1, 2 ]
-  scaleB: [ 1, 2 ]
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_fnuz_vec
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 72, ldb: 72, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_scales_fp8_fnuz_vec_lda_ROCM32062
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
@@ -3851,8 +3888,42 @@ Tests:
   transB: N
   alpha: 2.0
   beta: -2.0
-  scaleA: [ 1, 2 ]
-  scaleB: [ 1, 2 ]
+  scaleA: 1
+  scaleB: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_matches_unit_check_scales_fp8_vec
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 72, ldb: 72, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_scales_fp8_vec_lda_ROCM32062
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
   initialization: integer_exact
   unit_check: 1
   fast_check: 1

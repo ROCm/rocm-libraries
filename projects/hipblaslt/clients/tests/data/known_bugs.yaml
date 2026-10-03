@@ -53,6 +53,10 @@ Known bugs:
   # and no platform is listed. REMOVE this entry in the PR that fixes ROCM-32062;
   # the test then becomes its regression gate. Review by 2026-11-01.
   - { name: matmul_fast_check_epilogue_padded_lda_ROCM32062, function: matmul }
+  # ROCM-32062 also hits the scaleA vector, in the same loop: with a padded lda the
+  # reference reads scale entries past M and returns NaN or Inf. Same removal rule.
+  - { name: matmul_fast_check_scales_fp8_fnuz_vec_lda_ROCM32062, function: matmul }
+  - { name: matmul_fast_check_scales_fp8_vec_lda_ROCM32062, function: matmul }
   # ROCM-32138: the library accepts HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
   # but never passes it to the kernel, so E is written unscaled on every GPU. Both
   # fast_check and unit_check report it. REMOVE this entry in the PR that fixes
