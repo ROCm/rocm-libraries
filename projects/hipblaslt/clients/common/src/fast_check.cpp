@@ -1830,13 +1830,22 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
         result.message = "fast_check could not copy D and E to the host\n";
         return result;
     }
-    const int64_t      count = d.rows * d.cols * batch_count;
-    int64_t            bad   = 0;
-    double             top   = 0;
+    const int64_t      count   = d.rows * d.cols * batch_count;
+    const double       e_limit = exact_limit(e.type);
+    int64_t            bad = 0, inexact = 0;
+    double             top = 0;
     std::ostringstream msg;
     for(int64_t idx = 0; idx < count; idx++)
     {
-        double pre = load(he.data(), e.type, size_t(idx)) / scale_e;
+        const double stored_e = load(he.data(), e.type, size_t(idx));
+        // E is verified against its rounded value, so at or past this limit the pre-activation it
+        // gives may not be the one D was computed from.
+        if(!(std::fabs(stored_e) < e_limit))
+        {
+            ++inexact;
+            continue;
+        }
+        double pre = stored_e / scale_e;
         double a   = pre;
         if(act == FastCheckActivation::relu)
             a = std::max(pre, 0.0);
@@ -1859,8 +1868,16 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                          + " elements of D do not match the activation applied to the verified E:"
                          + msg.str() + "\n";
     }
+    if(inexact > 0)
+    {
+        result.passed = false;
+        result.message += std::to_string(inexact)
+                          + " elements of E are outside the range its type stores exactly, so the "
+                            "activation cannot be checked from them. Use a wider aux_type, or "
+                            "smaller inputs or scales.\n";
+    }
     if(amax)
-        *amax = top;
+        *amax = inexact > 0 ? std::numeric_limits<double>::quiet_NaN() : top;
     return result;
 }
 
@@ -1869,10 +1886,14 @@ double fast_check_amax_device(const FastCheckMatrix& d,
                               double                 scale_d,
                               hipStream_t            stream)
 {
-    std::vector<char> hd  = host_region(d, batch_count, stream);
-    double            top = 0;
+    std::vector<char> hd    = host_region(d, batch_count, stream);
+    const double      limit = exact_limit(d.type);
+    double            top   = 0;
     for(int64_t idx = 0; idx < d.rows * d.cols * batch_count && !hd.empty(); idx++)
         top = std::max(top, std::fabs(load(hd.data(), d.type, size_t(idx))));
+    // A rounded D no longer gives the pre-scale value amaxD is computed from.
+    if(!(top < limit))
+        return std::numeric_limits<double>::quiet_NaN();
     return top / scale_d;
 }
 

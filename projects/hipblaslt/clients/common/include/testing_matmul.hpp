@@ -1131,8 +1131,12 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(!arg.gradient && arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
         return "fast_check supports a bias with one value per row of D (bias_source a or d), not "
                "bias_source b";
-    if(!arg.gradient && arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < arg.M[0])
-        return "fast_check requires bias_stride to be at least M";
+    // A bias gradient from B has one value per column of D; every other bias, one per row.
+    const int64_t bias_length
+        = arg.gradient && arg.bias_source == hipblaslt_bias_source::b ? arg.N[0] : arg.M[0];
+    if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < bias_length)
+        return "fast_check requires bias_stride to be at least the bias vector's length, "
+               + std::to_string(bias_length);
     for(hipDataType t : {TiA, TiB, To, Tc})
     {
         std::string why;
@@ -6122,7 +6126,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                         CHECK_HIP_ERROR(
                             synchronize(hAmaxD[i], dAmaxD[i], 0, 0, 0, 0, 1, false, stream));
                         got = fast_check_load(hAmaxD[i].buf(), Talpha, 0);
-                        if(!(got == want))
+                        if(std::isnan(want))
+                            reportFailure("fast_check amaxD",
+                                          "amaxD cannot be checked: the verified D or E holds "
+                                          "values outside the range its type stores exactly\n");
+                        else if(!(got == want))
                             reportFailure("fast_check amaxD",
                                           "amaxD holds " + std::to_string(got)
                                               + ", the verified D gives " + std::to_string(want)

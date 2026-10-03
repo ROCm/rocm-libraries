@@ -170,7 +170,8 @@ enum class FastCheckActivation
 // pre-activation result the kernel also writes: E is verified like D (with scale_e in place of
 // scale_d), and then every element of D must equal scale_d * act(E / scale_e), rounded to D's
 // type. Copies the M x N x batch regions of D and E to the host. Sets *amax, when given, to the
-// largest |act(E / scale_e)|, the value amaxD must hold. E must hold its values exactly.
+// largest |act(E / scale_e)|, the value amaxD must hold. Fails, and sets *amax to NaN, when an
+// element of E is outside the range its type stores exactly.
 FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                                              const FastCheckMatrix& e,
                                              int64_t                batch_count,
@@ -183,7 +184,8 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                                              double*                amax);
 
 // The largest |element| of a verified device D divided by scale_d, the value amaxD must hold
-// without an activation. Copies D's M x N x batch region to the host.
+// without an activation, or NaN when D holds values outside the range its type stores exactly.
+// Copies D's M x N x batch region to the host.
 double fast_check_amax_device(const FastCheckMatrix& d,
                               int64_t                batch_count,
                               double                 scale_d,
