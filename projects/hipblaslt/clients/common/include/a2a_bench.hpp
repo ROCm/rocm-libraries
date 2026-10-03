@@ -31,6 +31,8 @@ namespace hipblaslt_bench
 
     constexpr uint32_t kCommChannels = 2;
 
+    constexpr uint32_t kRecvSlices = 2;
+
     struct RankResources
     {
         hipblasLtHandle_t                  handle    = nullptr;
@@ -43,9 +45,11 @@ namespace hipblaslt_bench
         void*                              dB        = nullptr;
         void*                              dC        = nullptr;
         void*                              dD        = nullptr;
-        void*                              dRecv     = nullptr;
         void*                              workspace = nullptr;
-        void*                recvPtrs[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
+        void* dRecv[kRecvSlices]                                     = {};
+        void* recvPtrs[kRecvSlices][HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
         hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
         TcpRendezvous*                                               rendezvous = nullptr;
@@ -59,10 +63,11 @@ namespace hipblaslt_bench
             if(stream != nullptr)
                 static_cast<void>(hipStreamSynchronize(stream));
 
-            // recvPtrs[rank] aliases dRecv; the rest are IPC maps.
-            for(void* p : recvPtrs)
-                if(p != nullptr && p != dRecv)
-                    static_cast<void>(hipIpcCloseMemHandle(p));
+            // recvPtrs[s][rank] aliases dRecv[s]; the rest are IPC maps.
+            for(uint32_t s = 0; s < kRecvSlices; ++s)
+                for(void* p : recvPtrs[s])
+                    if(p != nullptr && p != dRecv[s])
+                        static_cast<void>(hipIpcCloseMemHandle(p));
 
             for(hipblasLtMatrixLayout_t l : lay)
                 if(l != nullptr)
@@ -78,7 +83,8 @@ namespace hipblaslt_bench
             static_cast<void>(hipFree(dB));
             static_cast<void>(hipFree(dC));
             static_cast<void>(hipFree(dD));
-            static_cast<void>(hipFree(dRecv));
+            for(void* p : dRecv)
+                static_cast<void>(hipFree(p));
             static_cast<void>(hipFree(workspace));
 
             ownedQueues.clear();
@@ -139,11 +145,13 @@ namespace hipblaslt_bench
     }
 
     // Rank s hands peer p the feature shard [p*shard, (p+1)*shard) of all its
-    // tokens, landing at recv_p[(s*tokens + t)*shard + fw]. Both buffers are
-    // resized to one such block, laid out [token, feature].
+    // tokens, landing at recv_p[(s*tokens + t)*shard + fw] in slice
+    // launchIndex % kRecvSlices. Both buffers are resized to one such block,
+    // laid out [token, feature].
     inline bool check_recv(const LauncherEnv&              env,
                            const Arguments&                arg,
                            RankResources&                  res,
+                           int64_t                         launchIndex,
                            std::vector<hipblasLtBfloat16>& gold,
                            std::vector<hipblasLtBfloat16>& landed)
     {
@@ -173,11 +181,12 @@ namespace hipblaslt_bench
                                      size_t(shard) * sizeof(hipblasLtBfloat16),
                                      size_t(arg.N[0]),
                                      hipMemcpyDeviceToHost));
-            CHECK_HIP_RC(hipMemcpy(landed.data(),
-                                   static_cast<const hipblasLtBfloat16*>(res.recvPtrs[p])
-                                       + size_t(env.rank) * block,
-                                   block * sizeof(hipblasLtBfloat16),
-                                   hipMemcpyDeviceToHost));
+            CHECK_HIP_RC(hipMemcpy(
+                landed.data(),
+                static_cast<const hipblasLtBfloat16*>(res.recvPtrs[launchIndex % kRecvSlices][p])
+                    + size_t(env.rank) * block,
+                block * sizeof(hipblasLtBfloat16),
+                hipMemcpyDeviceToHost));
 
             for(size_t i = 0; i < block; ++i)
                 if(float(gold[i]) != 0.0f)
@@ -224,9 +233,12 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipMalloc(&res.dB, bytesB));
         CHECK_HIP_RC(hipMalloc(&res.dC, bytesD));
         CHECK_HIP_RC(hipMalloc(&res.dD, bytesD));
-        CHECK_HIP_RC(hipMalloc(&res.dRecv, bytesRecv));
         CHECK_HIP_RC(hipMalloc(&res.workspace, kWorkspaceSize));
-        CHECK_HIP_RC(hipMemset(res.dRecv, 0, bytesRecv));
+        for(void*& p : res.dRecv)
+        {
+            CHECK_HIP_RC(hipMalloc(&p, bytesRecv));
+            CHECK_HIP_RC(hipMemset(p, 0, bytesRecv));
+        }
 
         try
         {
@@ -269,8 +281,9 @@ namespace hipblaslt_bench
                                            rendezvous_allgather_trampoline,
                                            res.rendezvous));
 
-        if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv, res.recvPtrs))
-            return false;
+        for(uint32_t s = 0; s < kRecvSlices; ++s)
+            if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv[s], res.recvPtrs[s]))
+                return false;
 
         CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
         CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused,
@@ -283,8 +296,8 @@ namespace hipblaslt_bench
         CHECK_LT_RC(
             hipblasLtFusedEpilogueSetAttribute(res.fused,
                                                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                               res.recvPtrs,
-                                               arg.a2a_world * sizeof(res.recvPtrs[0])));
+                                               res.recvPtrs[0],
+                                               arg.a2a_world * sizeof(res.recvPtrs[0][0])));
         CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
             res.fused,
             HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
