@@ -8,15 +8,18 @@
  * __builtin_nontemporal_load / __builtin_nontemporal_store, a default one
  * does not, the unaligned memcpy load path does not yet lower the hint
  * (ROCKE_ERR_NOTIMPL; it still lowers without it), a non-bool attr is rejected
- * rather than coerced, an out-of-range hint puts the builder in its error
- * state, the io helpers' _ex forms (load_vec, load_vec_as_f32, store_vec)
- * forward the hint to the op they emit, and the original io helper
+ * rather than coerced, an out-of-range hint or a struct_size of 0 (opts not
+ * built with ROCKE_MEM_OPTS_INIT) puts the builder in its error state, a
+ * temporal_hint lying past the caller's struct_size (an older, shorter struct)
+ * is never read, the io helpers' _ex forms (load_vec, load_vec_as_f32,
+ * store_vec) forward the hint to the op they emit, and the original io helper
  * signatures still build and emit no nontemporal access (HIP or LLVM).
  *
  * With `--hip <case> <arch>` it prints the lowered HIP source of one copy
  * kernel built exactly like tests/core/test_nontemporal_lowering.py's
  * _copy_kernel, so that test can byte-compare the two engines.
  */
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -42,7 +45,7 @@ void fail(const char* what, const char* where, int line)
 
 rocke_mem_opts_t hint_opts(bool streaming)
 {
-    rocke_mem_opts_t o = {};
+    rocke_mem_opts_t o = ROCKE_MEM_OPTS_INIT;
     o.temporal_hint = streaming ? ROCKE_TEMPORAL_STREAMING : ROCKE_TEMPORAL_DEFAULT;
     return o;
 }
@@ -246,9 +249,13 @@ enum class BadHint
     store_vec
 };
 
-/* An out-of-range temporal_hint must leave the builder in its error state
- * (ROCKE_ERR_VALUE), never be treated as streaming. */
-void check_bad_hint(BadHint which, const char* what)
+/* Invalid opts (an out-of-range temporal_hint, or a struct_size that was never
+ * set) must leave the builder in its error state (ROCKE_ERR_VALUE) with an
+ * error naming the problem, never be treated as streaming or as defaults. */
+void check_bad_opts(BadHint which,
+                    const rocke_mem_opts_t& bad,
+                    const char* expect,
+                    const char* what)
 {
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "nt_bad") != ROCKE_OK)
@@ -262,8 +269,6 @@ void check_bad_hint(BadHint which, const char* what)
     if(!rocke_ir_builder_ok(&b))
         fail("valid setup load must succeed", what, __LINE__);
     const int ops_before = rocke_ir_builder_kernel(&b)->body->num_ops;
-    rocke_mem_opts_t bad = {};
-    bad.temporal_hint = static_cast<rocke_temporal_hint_t>(2);
     rocke_value_t* f[8] = {};
     /* The engine reports builder errors as the sticky status or as a thrown
      * ckc::Error, depending on the boundary; accept either, as other tests do. */
@@ -290,17 +295,46 @@ void check_bad_hint(BadHint which, const char* what)
             break;
         }
         rejected = !produced && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
-                   && has(rocke_ir_builder_error(&b), "invalid temporal_hint 2");
+                   && has(rocke_ir_builder_error(&b), expect);
     }
     catch(const ckc::Error& error)
     {
-        rejected = error.code() == ROCKE_ERR_VALUE && has(error.what(), "invalid temporal_hint 2");
+        rejected = error.code() == ROCKE_ERR_VALUE && has(error.what(), expect);
     }
     if(!rejected)
-        fail("out-of-range temporal_hint must be a ROCKE_ERR_VALUE builder error", what, __LINE__);
+        fail("invalid rocke_mem_opts_t must be a ROCKE_ERR_VALUE builder error", what, __LINE__);
     if(rocke_ir_builder_kernel(&b)->body->num_ops != ops_before)
-        fail("out-of-range temporal_hint must not record an op", what, __LINE__);
+        fail("invalid rocke_mem_opts_t must not record an op", what, __LINE__);
     rocke_ir_builder_free(&b);
+}
+
+/* A caller built against an older, shorter rocke_mem_opts_t passes a smaller
+ * struct_size. Simulate one whose header ended before temporal_hint: the
+ * library must not read that field (here deliberately set to STREAMING) and
+ * must lower both ops with the default policy. */
+void check_short_struct(const char* arch)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "nt_short") != ROCKE_OK)
+    {
+        fail("builder init failed", arch, __LINE__);
+        return;
+    }
+    rocke_mem_opts_t shorter = ROCKE_MEM_OPTS_INIT;
+    shorter.struct_size = (uint32_t)offsetof(rocke_mem_opts_t, temporal_hint);
+    shorter.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+    rocke_value_t* src = copy_param(&b, "S", rocke_bf16(), true);
+    rocke_value_t* dst = copy_param(&b, "D", rocke_bf16(), false);
+    rocke_value_t* off = rocke_b_mul(&b, rocke_b_thread_id_x(&b), rocke_b_const_i32(&b, 8));
+    rocke_value_t* v = rocke_b_global_load_vN_ex(&b, src, off, rocke_bf16(), 8, 0, &shorter);
+    rocke_b_global_store_vN_ex(&b, dst, off, v, 8, 0, &shorter);
+    rocke_b_ret(&b);
+    const std::string ll = lower_built_llvm(&b, arch);
+    rocke_ir_builder_free(&b);
+    if(ll.empty())
+        fail("a shorter struct_size must still build and lower", arch, __LINE__);
+    else if(has(ll, "nontemporal"))
+        fail("a temporal_hint past struct_size must not be read", arch, __LINE__);
 }
 
 void self_check(const char* arch)
@@ -404,12 +438,28 @@ int main(int argc, char** argv)
         return 2;
     }
     for(const char* arch : {"gfx942", "gfx950"})
+    {
         self_check(arch);
-    check_bad_hint(BadHint::load_vN, "global_load_vN_ex");
-    check_bad_hint(BadHint::store_vN, "global_store_vN_ex");
-    check_bad_hint(BadHint::load_vec, "load_vec_ex");
-    check_bad_hint(BadHint::load_vec_as_f32, "load_vec_as_f32_ex");
-    check_bad_hint(BadHint::store_vec, "store_vec_ex");
+        check_short_struct(arch);
+    }
+    rocke_mem_opts_t out_of_range = ROCKE_MEM_OPTS_INIT;
+    out_of_range.temporal_hint = static_cast<rocke_temporal_hint_t>(2);
+    rocke_mem_opts_t no_size = {};
+    no_size.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+    const struct
+    {
+        BadHint which;
+        const char* what;
+    } helpers[] = {{BadHint::load_vN, "global_load_vN_ex"},
+                   {BadHint::store_vN, "global_store_vN_ex"},
+                   {BadHint::load_vec, "load_vec_ex"},
+                   {BadHint::load_vec_as_f32, "load_vec_as_f32_ex"},
+                   {BadHint::store_vec, "store_vec_ex"}};
+    for(const auto& h : helpers)
+    {
+        check_bad_opts(h.which, out_of_range, "invalid temporal_hint 2", h.what);
+        check_bad_opts(h.which, no_size, "invalid rocke_mem_opts_t.struct_size 0", h.what);
+    }
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);

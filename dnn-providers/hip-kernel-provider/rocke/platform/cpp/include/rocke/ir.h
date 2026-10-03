@@ -574,13 +574,28 @@ typedef enum rocke_temporal_hint
 } rocke_temporal_hint_t;
 
 /* Options for vector global memory ops (rocke_b_global_load_vN_ex,
- * rocke_b_global_store_vN_ex, and the io helpers' _ex forms). NULL = all
- * defaults. Rules: fields are only appended; 0 always means "default"; callers
- * zero-init ({0}). A new option is a new field here, never a new _ex2 entry. */
+ * rocke_b_global_store_vN_ex, and the io helpers' _ex forms).
+ *
+ * opts == NULL means all defaults. Otherwise initialize with
+ * ROCKE_MEM_OPTS_INIT, which records sizeof(rocke_mem_opts_t) as the caller's
+ * compiler saw it, then set the fields you need:
+ *
+ *     rocke_mem_opts_t o = ROCKE_MEM_OPTS_INIT;
+ *     o.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+ *
+ * Extension contract: new fields are only appended, and every field's 0 value
+ * means "default". The library reads a field only when it lies inside
+ * struct_size and uses the default otherwise, so a caller built against an
+ * older, shorter struct keeps working with a newer library. struct_size == 0
+ * (e.g. `= {}` without the macro) is rejected with ROCKE_ERR_VALUE rather than
+ * silently ignoring the caller's settings. */
 typedef struct rocke_mem_opts
 {
+    uint32_t struct_size; /* sizeof(rocke_mem_opts_t) at the caller's compile time */
     rocke_temporal_hint_t temporal_hint;
 } rocke_mem_opts_t;
+
+#define ROCKE_MEM_OPTS_INIT {(uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT}
 
 /* ============================== TYPE SYSTEM ============================== */
 

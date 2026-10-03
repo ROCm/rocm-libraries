@@ -66,8 +66,10 @@ static void build(rocke_ir_builder_t* b, const nt_config_t* c)
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* width = rocke_b_const_i32(b, c->n);
     rocke_value_t* off = rocke_b_mul(b, tid, width);
-    rocke_mem_opts_t load_opts = {c->load_hint};
-    rocke_mem_opts_t store_opts = {c->store_hint};
+    rocke_mem_opts_t load_opts = ROCKE_MEM_OPTS_INIT;
+    rocke_mem_opts_t store_opts = ROCKE_MEM_OPTS_INIT;
+    load_opts.temporal_hint = c->load_hint;
+    store_opts.temporal_hint = c->store_hint;
     rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c->n, 0, &load_opts);
     rocke_b_global_store_vN_ex(b, dst, off, v, c->n, 0, &store_opts);
     rocke_b_ret(b);

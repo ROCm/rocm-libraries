@@ -205,12 +205,32 @@ void rocke_b_global_store(
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, ops, 3, &a);
 }
 
+/* True when `field` lies inside the caller's struct_size, i.e. the caller's
+ * header had it. Fields past struct_size come from an older, shorter struct
+ * and must not be read; they take their default. */
+#define MEM_OPT_HAS(opts, field) \
+    ((opts)->struct_size >= offsetof(rocke_mem_opts_t, field) + sizeof((opts)->field))
+
 /* Resolve rocke_mem_opts_t.temporal_hint (NULL opts = defaults): 1 for
- * ROCKE_TEMPORAL_STREAMING, 0 for ROCKE_TEMPORAL_DEFAULT, -1 (builder error
- * set) for any other value -- never silently treated as streaming. */
+ * ROCKE_TEMPORAL_STREAMING, 0 for ROCKE_TEMPORAL_DEFAULT or a temporal_hint
+ * outside the caller's struct_size, -1 (builder error set) for a struct_size
+ * too small to hold the size field itself (missing ROCKE_MEM_OPTS_INIT) or any
+ * other hint value -- never silently treated as streaming. */
 static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opts, const char* what)
 {
     if(!opts)
+        return 0;
+    if(!MEM_OPT_HAS(opts, struct_size))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "%s: invalid rocke_mem_opts_t.struct_size %u (initialize with "
+                              "ROCKE_MEM_OPTS_INIT)",
+                              what,
+                              (unsigned)opts->struct_size);
+        return -1;
+    }
+    if(!MEM_OPT_HAS(opts, temporal_hint))
         return 0;
     switch(opts->temporal_hint)
     {
