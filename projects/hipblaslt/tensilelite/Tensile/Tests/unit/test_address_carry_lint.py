@@ -145,6 +145,45 @@ def test_an_address_update_before_a_jump_is_still_reported():
     assert len(reasons) == 1 and "s8" in reasons[0]
 
 
+def test_a_scalar_carry_moved_far_by_the_scheduler_is_clean():
+    # The gfx950 fp8 kernels: the carry-in comes 40 vector instructions after the carry-out, and
+    # nothing in between writes SCC.
+    filler = "\n".join("    v_perm_b32 v27, v55, v54, s78" for _ in range(40))
+    asm = f"""
+    s_add_u32 s68, s68, s76
+{filler}
+    s_addc_u32 s69, s69, 0
+    buffer_load_dwordx4 v8, s[68:71], 0 offen lds
+    """
+    assert _reasons(asm) == []
+
+
+def test_a_scalar_carry_lost_to_an_scc_write_is_reported():
+    asm = """
+    s_add_u32 s68, s68, s76
+    s_cmp_eq_u32 s73, 0
+    s_addc_u32 s69, s69, 0
+    buffer_load_dwordx4 v8, s[68:71], 0 offen lds
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "before SCC changes" in reasons[0]
+
+
+def test_findings_keep_their_line_numbers_across_kernels():
+    asm = "\n".join(
+        [
+            ".amdgpu_hsa_kernel first",
+            "    s_load_dwordx2 s[10:11], s[4:5], 0x0",
+            ".amdgpu_hsa_kernel second",
+            "    s_nop 0",
+            "    s_add_i32 s8, s8, 64",
+            "    s_load_dwordx2 s[10:11], s[8:9], 0x0",
+        ]
+    )
+    findings = lint(asm)
+    assert [f.line for f in findings] == [5]
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first

@@ -12,11 +12,13 @@ lands 4 GiB away (ROCM-32046, class C on AIHPBLAS-4988).
 The lint finds the registers used as the low dword of an address: the base of a buffer resource
 descriptor (s[N:N+3] in a buffer instruction), the address pair of a scalar load (s[A:A+1]), and
 the address pair or saddr of a global or flat access. For each write to such a register by an add
-or subtract, it requires either a carry-producing instruction followed, within a short window,
-by a carry-consuming write to the next register, or a full redefinition of the pair. Anything
-else is reported, if the updated value is next used as an address before it is overwritten or an
-unconditional jump. An add of two constants sets the register rather than advancing an address,
-so it is not reported. The scan is otherwise linear, so a finding is a lead to read, not a proof.
+or subtract, it requires either a carry-producing instruction followed by a carry-consuming write
+to the next register, or a full redefinition of the pair. A scalar carry is followed until SCC
+changes, since the scheduler can move the carry-in far from the carry-out; a vector carry, for a
+short window. Anything else is reported, if the updated value is next used as an address before it
+is overwritten or an unconditional jump. An add of two constants sets the register rather than
+advancing an address, so it is not reported. The scan is otherwise linear, so a finding is a lead
+to read, not a proof.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated
@@ -63,6 +65,11 @@ NO_CARRY = {
 PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64", "v_add_nc_u64"}
 # Unconditional transfers: the next instruction in the listing is not the next one executed.
 JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
+# Scalar instructions that write SCC, which ends a scalar carry chain.
+_SCC_WRITERS = re.compile(
+    r"^s_(add|sub|addc|subb|addk|cmp|cmpk|bitcmp|and|or|xor|andn[12]|orn[12]|nand|nor|xnor|not|"
+    r"lshl|lshr|ashr|bfe|abs|absdiff|min|max|bcnt|quadmask|wqm)"
+)
 
 WINDOW = 16
 # How far a written low dword is followed to its next use.
@@ -121,9 +128,9 @@ class Instruction:
     operands: list[str]
 
 
-def parse(asm: str) -> list[Instruction]:
+def parse(asm: str, first_line: int = 1) -> list[Instruction]:
     out = []
-    for n, raw in enumerate(asm.splitlines(), 1):
+    for n, raw in enumerate(asm.splitlines(), first_line):
         text = re.split(r"//|;", raw)[0].strip()
         if not text or text.startswith(".") or text.endswith(":"):
             continue
@@ -197,25 +204,34 @@ _KERNEL_START = re.compile(
 )
 
 
-def kernels(asm: str) -> list[str]:
-    """Splits assembly into one chunk per kernel, so registers are judged within their kernel."""
+def _kernel_chunks(asm: str) -> list[tuple[int, str]]:
+    """One (first line number, text) chunk per kernel."""
     starts = [m.start() for m in _KERNEL_START.finditer(asm)]
     if not starts:
-        return [asm]
-    # Keep line numbers: each chunk is padded with the newlines that precede it.
+        return [(1, asm)]
     bounds = [0] + starts[1:] + [len(asm)]
-    return ["\n" * asm.count("\n", 0, a) + asm[a:b] for a, b in zip(bounds, bounds[1:])]
+    chunks, line, pos = [], 1, 0
+    for a, b in zip(bounds, bounds[1:]):
+        line += asm.count("\n", pos, a)
+        pos = a
+        chunks.append((line, asm[a:b]))
+    return chunks
+
+
+def kernels(asm: str) -> list[str]:
+    """Splits assembly into one chunk per kernel, so registers are judged within their kernel."""
+    return [text for _, text in _kernel_chunks(asm)]
 
 
 def lint(asm: str) -> list[Finding]:
     findings = []
-    for chunk in kernels(asm):
-        findings += _lint_kernel(chunk)
+    for first_line, chunk in _kernel_chunks(asm):
+        findings += _lint_kernel(chunk, first_line)
     return findings
 
 
-def _lint_kernel(asm: str) -> list[Finding]:
-    insts = parse(asm)
+def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
+    insts = parse(asm, first_line)
     uses = [address_operands(inst) for inst in insts]
     writes = [written(inst) for inst in insts]
     lows = {r for u in uses for r in u}
@@ -226,6 +242,23 @@ def _lint_kernel(asm: str) -> list[Finding]:
             if low in uses[j]:
                 return True
             if low in writes[j] or insts[j].mnemonic in JUMPS:
+                return False
+        return False
+
+    def consumes(j: int, low: Reg, high: Reg) -> bool:
+        """Whether instruction j adds a carry into high, or redefines the whole pair."""
+        return (insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]) or (
+            insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]
+        )
+
+    def scalar_carried(start: int, low: Reg, high: Reg) -> bool:
+        """Whether a scalar carry reaches high. The scheduler may move the carry-in well away
+        from the carry-out, so it is followed until SCC changes rather than for a fixed count.
+        """
+        for j in range(start + 1, min(len(insts), start + 1 + FLOW_WINDOW)):
+            if consumes(j, low, high):
+                return True
+            if insts[j].mnemonic in JUMPS or _SCC_WRITERS.match(insts[j].mnemonic):
                 return False
         return False
 
@@ -248,20 +281,20 @@ def _lint_kernel(asm: str) -> list[Finding]:
                     )
                 )
         elif inst.mnemonic in CARRY_OUT:
-            carried = any(
-                insts[j].mnemonic in CARRY_IN
-                and writes[j][:1] == [high]
-                or insts[j].mnemonic in PAIR_DEFS
-                and writes[j][:1] == [low]
-                for j in range(i + 1, min(len(insts), i + 1 + WINDOW))
-            )
+            if inst.mnemonic.startswith("s_"):
+                carried, where = scalar_carried(i, low, high), "before SCC changes"
+            else:
+                carried = any(
+                    consumes(j, low, high) for j in range(i + 1, min(len(insts), i + 1 + WINDOW))
+                )
+                where = f"within {WINDOW} instructions"
             if not carried and flows_to_address(low, i):
                 findings.append(
                     Finding(
                         inst.line,
                         inst.text,
                         f"{inst.mnemonic} sets a carry out of {low}, the low dword of an "
-                        f"address, but nothing within {WINDOW} instructions adds it into {high}",
+                        f"address, but nothing {where} adds it into {high}",
                     )
                 )
     return findings
