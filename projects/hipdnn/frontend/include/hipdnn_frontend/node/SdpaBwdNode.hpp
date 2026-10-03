@@ -25,11 +25,12 @@ namespace hipdnn_frontend::graph
  * - Softmax statistics (logsumexp) from the forward pass
  *
  * The backward pass uses the flash attention algorithm to compute:
- *   dV = softmax(Q * K^T / sqrt(d_k))^T * dO
- *   dP = dO * V^T         (where P = softmax(Q * K^T / sqrt(d_k)))
+ *   dV = softmax(scale * Q * K^T)^T * dO
+ *   dP = dO * V^T         (where P = softmax(scale * Q * K^T))
  *   dS = P * (dP - rowsum(dO * O))
- *   dQ = dS * K / sqrt(d_k)
- *   dK = dS^T * Q / sqrt(d_k)
+ *   dQ = scale * dS * K
+ *   dK = scale * dS^T * Q
+ * where scale is the attention scale, 1.0 (no scaling) when none is set.
  */
 class SdpaBwdNode : public BaseNode<SdpaBwdNode, NodeType::SDPA_BWD>
 {

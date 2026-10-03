@@ -35,8 +35,8 @@ struct Flash2FwdParams
     int seqLenKv = 2048;
     int headDim = 128; // head_dim_qk (== head_dim_v for our kernel)
 
-    // Attention scale (0 -> use 1/sqrt(headDim) at runtime)
-    float attnScale = 0.0f;
+    // Softmax scale: attn_scale_value, 1.0 (no scaling) when the graph leaves it unset
+    float attnScale = 1.0f;
 
     // Causal mask flag
     bool causal = false;

@@ -744,9 +744,10 @@ The table is a representative vocabulary for reading this RFC, not the normative
 `ceil_div`, `min`, `max`, and `rsqrt` earn their place in real dispatch code: every grid formula here
 is a `ceil_div` over a sequence or spatial dim, and `min`/`max` size a workspace that depends on a
 knob, such as a split-K GEMM whose scratch is the larger of its partials and its reduction, or one
-floored at a minimum. `rsqrt` expresses the SDPA convention's implicit default scale
-(`1/sqrt` of the head extent, read positionally as `$q.dims[3]`), which two kernel families in this
-repository compute today.
+floored at a minimum. `rsqrt` expresses a scale derived from the head extent (`1/sqrt` of
+`$q.dims[3]`, read positionally), the conventional softmax scale a kernel computes for itself. It
+is not the default for SDPA's `attn_scale_value`: hipDNN reads an unset scale as 1.0 (no scaling),
+as cuDNN does, which `value_or_default` with a literal 1.0 expresses.
 `value_or_default(["$field", <fallback>])` reads a possibly-absent optional field and substitutes
 the fallback when unset, so a matcher treats an unset field like an explicitly-defaulted one, the way
 hand-written applicability code already does. The fallback is usually a literal, but it may be any
@@ -2357,8 +2358,8 @@ follow-up RFCs.
    descriptor distinguish the two, so an operator can see a kernel's true LDS footprint, or is the
    launch value the only thing dispatch needs?
 6. **Deriving a conventional default versus requiring it explicitly:** where an operation defines a
-   conventional default for an attribute, such as SDPA's implicit `1/sqrt` scale over the head
-   extent, a pack may either derive it or require the graph to supply it
+   conventional default for an attribute, such as SDPA's scale (1.0 when `attn_scale_value` is
+   unset), a pack may either derive it or require the graph to supply it
    ([the worked example's criteria](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-criteria)). Deriving accepts
    more graphs; requiring keeps the pack's contract narrow and its dispatch free of derived values.
    Should this be an author's choice per pack, as it is today, or a convention the schema settles

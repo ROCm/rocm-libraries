@@ -36,7 +36,6 @@ import argparse
 import datetime
 import hashlib
 import json
-import math
 import os
 import subprocess
 import sys
@@ -55,7 +54,10 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         byte-identical to 1.1.0. The 35 checked-in bundles 1.1.0 produced carry
 #         the key backfilled by hand and keep recording 1.1.0 provenance; see the
 #         `notes` field in their .meta.json.
-GENERATOR_VERSION = "1.2.0"
+# 1.3.0 — With no --attn-scale, the scale is 1.0 (no scaling), matching how hipDNN
+#         reads an unset attn_scale_value; it was 1/sqrt(D_qk). Bundles that pass
+#         --attn-scale are unchanged.
+GENERATOR_VERSION = "1.3.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -676,7 +678,8 @@ def generate_forward_bundle(
         sys.exit(1)
 
     if attn_scale is None:
-        attn_scale = 1.0 / math.sqrt(D_qk)
+        # An unset attn_scale_value means no scaling in hipDNN, as in cuDNN.
+        attn_scale = 1.0
 
     os.makedirs(os.path.dirname(base_filename) or ".", exist_ok=True)
 
@@ -930,7 +933,7 @@ def main():
         "--attn-scale",
         type=float,
         default=None,
-        help="Attention scale (default: 1/sqrt(D_qk))",
+        help="Attention scale (default: 1.0, no scaling, as for an unset attn_scale_value)",
     )
     parser.add_argument(
         "--validate",

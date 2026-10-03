@@ -7,7 +7,7 @@
  *
  * This file defines the SdpaAttributes class used to configure
  * scaled dot-product attention operations, computing
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V.
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V.
  */
 
 #pragma once
@@ -30,8 +30,11 @@ namespace hipdnn_frontend::graph
  *
  * SdpaAttributes configures a scaled dot-product attention operation:
  * @code
- * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+ * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
  * @endcode
+ *
+ * `scale` is attn_scale_value or the Attn_scale tensor. When neither is set it is 1.0
+ * (no scaling), as in cuDNN; set 1/sqrt(d_k) explicitly for the conventional scaling.
  *
  * **Tensor Shapes (BHSD ordering):**
  * - **Q** (query): `(B, H, S_q, D)` — batch, heads, query sequence length, head dimension
@@ -59,7 +62,7 @@ namespace hipdnn_frontend::graph
  * - ALiBi positional encoding
  * - Paged attention (page_table_k, page_table_v)
  * - FP8 quantization (descale/scale tensors)
- * - Attention scale override (attn_scale_value)
+ * - Attention scale (attn_scale_value or an Attn_scale tensor; 1.0 when neither is set)
  *
  * @code{.cpp}
  * SdpaAttributes attr;

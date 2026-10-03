@@ -576,8 +576,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     else
     {
-        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
-            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        const float scaleVal = plan_utils::attnScaleOrDefault(sdpaAttrs);
         attnScale = hipdnn_plugin_sdk::ScalarOperand{
             0,
             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
