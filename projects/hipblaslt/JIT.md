@@ -26,8 +26,9 @@ loader are implemented. Internal entry points let the JIT test binaries
 generate a GEMM solution through a backend and run it with `hipblasLtMatmul`
 or `hipblaslt_ext::Gemm`, or publish generated solutions into a persistent
 JIT solution library on disk, whose solution indices any later process runs
-without generating again. The only backend is a test mock that replays
-pre-generated source bundles. No generator backend is implemented yet, and no
+without generating again. For a backend that consumes a prediction, an Origami
+predictor first ranks candidate configurations. The only backend is a test mock
+that replays pre-generated source bundles. No generator backend is implemented yet, and no
 public API reaches JIT.
 
 ## Current behavior
@@ -82,13 +83,16 @@ interface, so that each implementation can be replaced and tested on its own.
 
 | Stage | Interface | Contract |
 | --- | --- | --- |
+| Predict | `Predictor::predict(PredictionRequest, TuningKnowledge, Prediction&)` | Only for a backend that consumes a prediction. Ranks candidates built from the tuning knowledge's seeds, best first, each naming its modeled contract. |
 | Generate | `Backend::generate(GenerationRequest, std::vector<GeneratedSolution>&)` | Returns up to `GenerationRequest::count` solutions, best first, and builds and loads nothing. Each `GeneratedSolution` holds a one-solution TensileLite library entry, its main kernel name, and the source units to build. `NotSupported` means the request is outside the backend's domain. |
 | Build | `CodeObjectBuilder::build(GeneratedSolution, GenerationRequest, BuiltSolution&)` | Builds a solution's units into code objects. `GeneratedSolution` has no code-object field; only `BuiltSolution` adds the main code object and its helpers. |
 | Support | `SolutionLoader::support` | Evaluates the entry's predicates and workspace for the request, and loads no code. |
 | Publish | `SolutionStore::publish` | Stores built solutions and returns one library index per solution, in order. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
 | Load | `SolutionLoader::load` | Loads the code objects into a process-local executable `KernelBundle`. |
 
-`Jit::generate` is the only code that sequences these stages. It asks the
+`Jit::generate` is the only code that sequences these stages. When the backend
+consumes a prediction, it first runs the predictor and passes on only the
+candidates whose contract the backend transports. It then asks the
 backend for at most the requested count of solutions in a private scratch
 directory, forwarding the workspace limit and the kernels the caller already
 has. It then builds each solution and checks its support until the count is
@@ -96,12 +100,32 @@ reached. With a store it publishes the supported solutions, and loads them only
 when publishing fails; without a store it loads them. A failure in one
 solution's build or support skips that solution and keeps the rest.
 
-Each failure is recorded with its stage (configure, generate, build, support,
-load or publish) in `Jit::Outcome::failures`, in the order it happened.
+Each failure is recorded with its stage (configure, predict, generate, build,
+support, load or publish) in `Jit::Outcome::failures`, in the order it happened.
 The scratch directory is created under the temporary directory, removed when
 the call succeeds, and kept after a failure that left files in it. `Jit`
 requires a backend, a builder and a loader; the store is optional. One `Jit`
 can generate from several threads at once.
+
+**Contracts and versions.** `BackendInfo::contracts` lists the modeled
+contracts a backend transports; an empty set means it consumes no prediction.
+`Predictor::modeledContracts()` lists those a predictor emits. A backend with
+contracts requires a predictor that shares at least one, and tuning knowledge;
+`Jit` rejects the components otherwise. The `Jit`'s version is the backend's
+version, followed for such a backend by
+`|predictor=<id>;contracts=<shared contracts, sorted>|knowledge=<id>@<version>`.
+`Jit` creates its store from `Components::store`, a factory it calls once with
+the backend's information and that version, so the cache key changes whenever
+the predictor, the shared contracts or the knowledge version change.
+
+**Candidates.** Each `Candidate` names its modeled contract (empty means the
+prediction's `modeledContract`), the index of the seed it came from, and
+provenance JSON that the backend records. `parameters` are forwarded to the
+backend in that contract's vocabulary; `modeled` values are recorded, not
+forwarded. A consumer ignores candidate fields it does not know, so contracts
+can add fields without breaking older consumers. `ExecutionPolicy` names how a kernel covers
+the output tiles: `strategy` is none, data-parallel or Stream-K, and
+`assignment` is a static grid, a dynamic work queue or hybrid.
 
 `OperationRequest` names only its kind, so `Jit` sees no GEMM. The interfaces
 are for compiled-in implementations and do not establish a stable external
@@ -109,6 +133,15 @@ plugin application binary interface (ABI).
 
 The implementations are:
 
+- Predictor: `makeOrigamiPredictor()`, in `hipblaslt-jit-origami-predictor.cpp`,
+  expands the tuning knowledge's candidate seeds across the target's matrix
+  instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1`
+  contract; see [Origami modeled inputs](#origami-modeled-inputs).
+- Tuning knowledge: `makeCatalogKnowledge()`, in
+  `hipblaslt-jit-catalog-knowledge.cpp` (id `catalog.v1`): 11 tile shapes, two
+  DepthU rules, cache hints that are only the defaults on gfx90a and gfx1250,
+  and policy none for every seed. It supplies no values for unmodeled knobs,
+  which keep the backend's defaults.
 - Code-object builder: `makeComgrBuilder()`; see
   [building generated sources](#building-generated-sources).
 - Loader: `makeTensileLoader()`, in `hipblaslt-jit-loader.cpp`, parses the
@@ -125,9 +158,54 @@ The implementations are:
   skipping excluded kernels; the comgr builder still builds them. Its faults
   fail generation and leave a log in the scratch directory, replace the main
   kernel assembly with an invalid instruction so the build fails, append the
-  request to a file and fail, or abort the process. Tests reach it through
-  `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`. Only builds with
+  request to a file and fail, or abort the process. Given modeled contracts it
+  consumes the predictions of the Origami predictor and the catalog knowledge.
+  Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`. Only builds with
   `HIPBLASLT_JIT_TESTING=ON` compile it; it is not a production backend.
+
+### Origami modeled inputs
+
+Jit runs the Origami predictor for a backend that consumes the
+`origami.gemm.dp.v1` contract. This private contract covers the existing data-parallel candidate
+domain. Origami ranks caller-supplied configurations; it does not synthesize
+their fields or choose whether to enable Stream-K. Origami's `stream_k=0` and
+occupancy 1 remain explicit model inputs, and the recipe keeps TensileLite's
+non-persistent `TileProcessingStrategy=None`. Every applicable prediction is transferred;
+defaults supply only settings that this model does not predict.
+
+The inventory below follows `shared/origami/include/origami/{origami,gemm,streamk,types}.hpp`
+and their implementations. A selected configuration is an output of ranking even
+though its fields originate in the caller's candidate catalog.
+
+| Origami output | Generator input or use | Conditions |
+| --- | --- | --- |
+| `rank_configs` / `select_config`: ordered configuration and latency | Nine-value `MatrixInstruction` recipe (MI plus retained wave topology), macro tile, `DepthU`, `NonTemporalA/B`; latency and order in provenance | Estimation ranks the existing target instruction/tile/depth/cache-hint catalog. No kernel benchmarking. |
+| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. |
+| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. |
+| `select_workgroup_mapping`: `wgmxccchunk`, `wgmxccsplitk` | Retained in every candidate's `modeled.workgroup_mapping` | Nonzero values require the Stream-K mapping ABI and reject the current data-parallel candidate; neither is substituted with `WorkGroupMappingXCCGroup`. |
+| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. |
+| `select_staggerU`: `staggerUStrideShift` | `StaggerUStride = DepthU × Tensile DataType bytes × 2^shift` | Check the derived `_staggerStrideShift`; zero stagger may normalize the byte stride without changing its meaning. |
+| `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `TileProcessingStrategy=None`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
+| `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
+| `streamk::select_hybrid_mode` | Static/dynamic schedule of a Stream-K kernel with `WorkAssignment=Hybrid` | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
+| `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
+| Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The predictor uses the full instruction catalog plus ranking, preserving the selected MI. |
+| GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |
+
+Unpredicted inputs include wave topology, occupancy, Stream-K enablement and grid
+policy, workspace limits, vector widths, subtile/main-loop choice, prefetch and
+scheduling, direct-to-LDS/VGPR settings, load coalescing, swizzle/layout and
+split-U policy. Some are fixed by the request or candidate domain; others retain
+Tensile defaults and derivation. Formocast consumes additional backend settings
+to estimate cost; it does not fill them in. Epilogue overhead is not modeled.
+
+A backend that consumes the contract rejects missing modeled fields,
+unsupported translations, and any derived recipe that changes a modeled value
+or cannot carry it at runtime.
+Rejection advances to the next ranked candidate; exhausting the ranking fails
+with reasons and emits no selected recipe. A CU budget smaller than the device's
+XCD count is rejected before calling the mapping selectors. Diagnostic manifests
+retain raw outputs, translated parameters, defaults, and rejections.
 
 ### Build
 
@@ -239,7 +317,7 @@ still run on every match.
 | Field | Contents |
 | --- | --- |
 | `target` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
-| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the mock backend's is a hash of its replayed bundles. |
+| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the mock backend's is a hash of its replayed bundles. For a backend that consumes predictions, the version is followed by `\|predictor=<id>;contracts=<contracts>\|knowledge=<id>@<version>`: the predictor, the modeled contracts that both it and the backend support, sorted, and the tuning knowledge with its version. |
 | `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
 | `code_object_version` | The code-object version that the generator and the builder use (4) |
 | `rocm_path` | The ROCm path that the builder passes to comgr |

@@ -111,7 +111,7 @@ namespace
             target.isa      = target.targetId.substr(0, target.targetId.find(':'));
             fs::create_directories(scratch);
             const ProbeRequest      probe;
-            const GenerationRequest request{probe, target, 1, 0, {}, scratch};
+            const GenerationRequest request{probe, target, nullptr, 1, 0, {}, scratch};
             BuiltSolution           built;
             const auto status = makeComgrBuilder()->build(solution, request, built);
             if(!status.ok())

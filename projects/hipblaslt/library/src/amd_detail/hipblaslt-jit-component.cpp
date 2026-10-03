@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-prediction.hpp"
+#include <algorithm>
 #include <cerrno>
 #include <new>
 #include <optional>
@@ -103,6 +105,8 @@ namespace hipblaslt_jit
         {
         case Stage::Configure:
             return "configure";
+        case Stage::Predict:
+            return "predict";
         case Stage::Generate:
             return "generate";
         case Stage::Build:
@@ -125,6 +129,32 @@ namespace hipblaslt_jit
         const auto& c = m_components;
         if(!c.backend || !c.builder || !c.loader)
             throw std::invalid_argument("Jit requires a backend, a builder and a loader");
+        const auto& info        = c.backend->info();
+        const auto& transported = info.contracts;
+        m_version               = info.version;
+        if(!transported.empty())
+        {
+            if(c.predictor)
+                for(const auto& contract : c.predictor->modeledContracts())
+                    if(transported.count(contract))
+                        m_contracts.insert(contract);
+            auto join = [](const std::set<std::string>& contracts, const char* separator) {
+                std::string names;
+                for(const auto& contract : contracts)
+                    names += (names.empty() ? "" : separator) + contract;
+                return names;
+            };
+            if(m_contracts.empty() || !c.knowledge)
+                throw std::invalid_argument("Backend " + info.id
+                                            + " requires a predictor for one of "
+                                            + join(transported, ", ") + " and tuning knowledge");
+            m_version += "|predictor=" + std::string(c.predictor->id())
+                         + ";contracts=" + join(m_contracts, ",")
+                         + "|knowledge=" + std::string(c.knowledge->id()) + "@"
+                         + c.knowledge->version();
+        }
+        if(c.store)
+            m_store = c.store(info, m_version);
     }
 
     Jit::Outcome Jit::generate(const OperationRequest&         request,
@@ -142,6 +172,35 @@ namespace hipblaslt_jit
             outcome.failures.push_back(std::move(status));
         };
 
+        Prediction prediction;
+        const bool predicted = !m_contracts.empty();
+        if(predicted)
+        {
+            auto status = guarded([&] {
+                return c.predictor->predict(
+                    {request, target, workspaceLimit}, *c.knowledge, prediction);
+            });
+            auto& ranked = prediction.ranked;
+            ranked.erase(std::remove_if(ranked.begin(),
+                                        ranked.end(),
+                                        [&](const Candidate& candidate) {
+                                            return !m_contracts.count(
+                                                candidate.contract.empty()
+                                                    ? prediction.modeledContract
+                                                    : candidate.contract);
+                                        }),
+                         ranked.end());
+            if(status.ok() && ranked.empty())
+                status = {Status::Code::NotSupported,
+                          Stage::Predict,
+                          "No predicted candidate has a contract the backend transports"};
+            if(!status.ok())
+            {
+                record(Stage::Predict, std::move(status));
+                return outcome;
+            }
+        }
+
         std::optional<Scratch> scratch;
         auto                   status = guarded([&] {
             scratch.emplace();
@@ -152,8 +211,13 @@ namespace hipblaslt_jit
             record(Stage::Configure, std::move(status));
             return outcome;
         }
-        const GenerationRequest generation{
-            request, target, count, workspaceLimit, excludeKernels, scratch->path()};
+        const GenerationRequest generation{request,
+                                           target,
+                                           predicted ? &prediction : nullptr,
+                                           count,
+                                           workspaceLimit,
+                                           excludeKernels,
+                                           scratch->path()};
         std::vector<GeneratedSolution> generated;
         status = guarded([&] { return c.backend->generate(generation, generated); });
         if(!status.ok())
@@ -189,10 +253,10 @@ namespace hipblaslt_jit
         }
 
         bool load = true;
-        if(c.store && !supported.empty())
+        if(m_store && !supported.empty())
         {
             std::vector<int32_t> indices;
-            status = guarded([&] { return c.store->publish(request, target, supported, indices); });
+            status = guarded([&] { return m_store->publish(request, target, supported, indices); });
             if(status.ok() && indices.size() != supported.size())
                 status = {Status::Code::Failed,
                           Stage::Publish,

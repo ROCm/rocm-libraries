@@ -567,14 +567,25 @@ namespace
                 "The record fault did not append one line per request");
         std::cout << "PASS the record fault appends each request and fails: " << lines[0] << '\n';
 
+        mock::Options predicted{{replay}};
+        predicted.contracts = {"origami.gemm.dp.v1"};
+        require(jit::getJitAlgo(device, request, backend(predicted), bytes, solution, diagnostics)
+                        == HIPBLAS_STATUS_SUCCESS
+                    && diagnostics.message.find("ranked candidates") != std::string::npos,
+                "The mock did not consume an Origami prediction: " + diagnostics.message);
+        std::cout << "PASS the mock replays after an Origami prediction: " << diagnostics.message
+                  << '\n';
+
         jit::Backend rejected;
+        predicted.contracts = {"test.unmodeled.v1"};
         mock::Options unrecorded{{replay}, mock::Options::Fault::Record};
-        for(const auto& options : {mock::Options{}, unrecorded})
+        for(const auto& options : {mock::Options{}, unrecorded, predicted})
             require(mock::createBackend(options, rejected, diagnostics)
                             == HIPBLAS_STATUS_INVALID_VALUE
                         && !abi::BackendAccess::get(rejected) && !diagnostics.message.empty(),
                     "Invalid mock options were accepted");
-        std::cout << "PASS no bundle and a record fault without a file rejected\n";
+        std::cout << "PASS no bundle, a record fault without a file and an unmodeled contract "
+                     "rejected\n";
 
         std::weak_ptr<const abi::CompiledSolution> released;
         std::weak_ptr<const abi::KernelBundle>     releasedBundle;

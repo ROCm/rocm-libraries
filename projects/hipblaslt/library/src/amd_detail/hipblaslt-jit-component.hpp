@@ -5,8 +5,10 @@
 #include "hipblaslt-jit-backend.hpp"
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <hip/hip_runtime_api.h>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -24,6 +26,7 @@ namespace hipblaslt_jit
     enum class Stage
     {
         Configure,
+        Predict,
         Generate,
         Build,
         Support,
@@ -32,7 +35,7 @@ namespace hipblaslt_jit
         Publish,
     };
 
-    // "configure", "generate", ... as reports name stages.
+    // "configure", "predict", ... as reports name stages.
     const char* toString(Stage stage) noexcept;
 
     struct Status
@@ -67,6 +70,11 @@ namespace hipblaslt_jit
 
         static Status make(int device, DeviceTarget& target);
     };
+
+    // Defined in hipblaslt-jit-prediction.hpp.
+    struct Prediction;
+    class TuningKnowledge;
+    class Predictor;
 
     // A header a HIP unit includes by name.
     struct IncludeFile
@@ -110,6 +118,7 @@ namespace hipblaslt_jit
     {
         const OperationRequest&  request;
         const DeviceTarget&      target;
+        const Prediction*        prediction = nullptr; // set only for backends that consume one
         size_t                   count      = 1;
         size_t                   workspaceLimit = 0;
         std::vector<std::string> excludeKernels; // kernels the caller already has
@@ -119,9 +128,10 @@ namespace hipblaslt_jit
 
     struct BackendInfo
     {
-        std::string id;
-        std::string name; // reported as Diagnostics::backend
-        std::string version; // changes whenever the generated solutions can change
+        std::string           id;
+        std::string           name; // reported as Diagnostics::backend
+        std::set<std::string> contracts; // modeled contracts it transports; empty: no prediction
+        std::string           version; // changes whenever the generated solutions can change
     };
 
     class Backend
@@ -202,12 +212,18 @@ namespace hipblaslt_jit
     class Jit
     {
     public:
+        // Makes the store for the backend under the Jit's version.
+        using StoreFactory = std::function<std::shared_ptr<const SolutionStore>(
+            const BackendInfo& backend, const std::string& version)>;
+
         struct Components
         {
             std::shared_ptr<const Backend>           backend;
+            std::shared_ptr<const Predictor>         predictor; // iff the backend consumes predictions
+            std::shared_ptr<const TuningKnowledge>   knowledge; // iff predictor
             std::shared_ptr<const CodeObjectBuilder> builder;
             std::shared_ptr<const SolutionLoader>    loader;
-            std::shared_ptr<const SolutionStore>     store; // optional
+            StoreFactory                             store; // optional
         };
 
         struct Outcome
@@ -218,10 +234,11 @@ namespace hipblaslt_jit
             std::string                                      summary; // the backend's success note
         };
 
-        // Throws std::invalid_argument when a required component is missing.
+        // Throws std::invalid_argument when a required component is missing or
+        // the predictor models no contract the backend transports.
         explicit Jit(Components components);
 
-        // Generate, build and check support, then publish, or load when
+        // Predict, generate, build and check support, then publish, or load when
         // there is no store or publishing failed. Returns at most count
         // solutions that support the request. Thread-safe.
         Outcome generate(const OperationRequest&         request,
@@ -234,9 +251,22 @@ namespace hipblaslt_jit
         {
             return m_components;
         }
+        // The backend's version; with a prediction, followed by
+        // |predictor=<id>;contracts=<sorted contracts>|knowledge=<id>@<version>.
+        const std::string& version() const noexcept
+        {
+            return m_version;
+        }
+        const std::shared_ptr<const SolutionStore>& store() const noexcept
+        {
+            return m_store;
+        }
 
     private:
-        Components m_components;
+        Components                           m_components;
+        std::set<std::string>                m_contracts; // the backend's and the predictor's
+        std::string                          m_version;
+        std::shared_ptr<const SolutionStore> m_store;
     };
 }
 

@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-mock.hpp"
+#include "hipblaslt-jit-prediction.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/Tensile.hpp>
 #include <algorithm>
@@ -50,7 +51,7 @@ namespace hipblaslt_ext::experimental::jit::mock
             explicit MockBackend(const Options& options)
                 : m_fault(options.fault)
                 , m_record(options.record)
-                , m_info{"mock", "mock", ""}
+                , m_info{"mock", "mock", options.contracts, ""}
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The mock backend has no bundle to replay");
@@ -160,10 +161,12 @@ namespace hipblaslt_ext::experimental::jit::mock
                     return {Status::Code::NotSupported,
                             Stage::Generate,
                             "No replayed solution solves this problem"};
-                return {Status::Code::Success,
-                        Stage::Generate,
-                        "The mock replayed " + std::to_string(solutions.size())
-                            + (solutions.size() == 1 ? " bundle" : " bundles")};
+                std::string summary = "The mock replayed " + std::to_string(solutions.size())
+                                      + (solutions.size() == 1 ? " bundle" : " bundles");
+                if(request.prediction)
+                    summary += " for " + std::to_string(request.prediction->ranked.size())
+                               + " ranked candidates";
+                return {Status::Code::Success, Stage::Generate, std::move(summary)};
             }
 
         private:
@@ -186,12 +189,15 @@ namespace hipblaslt_ext::experimental::jit::mock
         diagnostics = {"mock", ""};
         try
         {
-            backend = detail::BackendAccess::make(
-                std::make_shared<const hipblaslt_jit::Jit>(
-                    hipblaslt_jit::Jit::Components{makeBackend(options),
-                                                   hipblaslt_jit::makeComgrBuilder(),
-                                                   hipblaslt_jit::makeTensileLoader(),
-                                                   nullptr}));
+            const bool predicted = !options.contracts.empty();
+            backend              = detail::BackendAccess::make(
+                std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
+                    makeBackend(options),
+                    predicted ? hipblaslt_jit::makeOrigamiPredictor() : nullptr,
+                    predicted ? hipblaslt_jit::makeCatalogKnowledge() : nullptr,
+                    hipblaslt_jit::makeComgrBuilder(),
+                    hipblaslt_jit::makeTensileLoader(),
+                    nullptr}));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)

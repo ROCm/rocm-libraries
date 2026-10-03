@@ -61,7 +61,8 @@ endif()
 # Compiles the Jit stages directly; runs without a GPU.
 add_executable(hipblaslt-jit-component-test
     jit_component_test.cpp
-    "${hipblaslt_jit_source}/hipblaslt-jit-component.cpp")
+    "${hipblaslt_jit_source}/hipblaslt-jit-component.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp")
 target_include_directories(hipblaslt-jit-component-test PRIVATE "${hipblaslt_jit_source}")
 target_link_libraries(hipblaslt-jit-component-test PRIVATE
     roc::hipblaslt hip::host Threads::Threads)

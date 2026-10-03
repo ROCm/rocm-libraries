@@ -3,6 +3,7 @@
 #pragma once
 
 #include "hipblaslt-jit.hpp"
+#include <set>
 
 // Not installed. An in-process backend for JIT tests: it replays pre-generated
 // source bundles without running a generator; the solutions are still built
@@ -29,6 +30,10 @@ namespace hipblaslt_ext::experimental::jit::mock
             Trap, // any generation aborts the process
         } fault = Fault::None;
         std::string record;
+        // The modeled contracts whose predictions the mock accepts, or none.
+        // createBackend pairs them with the Origami predictor and the catalog
+        // knowledge.
+        std::set<std::string> contracts;
     };
 
     // The mock as a Jit backend; throws when a bundle cannot be read.
