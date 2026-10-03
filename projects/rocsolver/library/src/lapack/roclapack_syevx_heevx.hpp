@@ -153,16 +153,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS1) syevx_sort_eigs(const rocblas_int n
     auto const nev = nevA[bid];
     auto const info = infoA[bid];
 
-    S* W = WW + (bid * strideW);
+    S* W = WW + (rocblas_stride(bid) * strideW);
     T* Z = load_ptr_batch<T>(ZZ, bid, shiftZ, strideZ);
     rocblas_int* ifail = nullptr;
     if(ifailA)
-        ifail = ifailA + (bid * strideIfail);
+        ifail = ifailA + (rocblas_stride(bid) * strideIfail);
 
     assert(nev <= n);
     assert(isplit_map != nullptr);
 
-    auto const map = isplit_map + (bid * n);
+    auto const map = isplit_map + (rocblas_stride(bid) * n);
     bool constexpr use_shell_sort = true;
 
     __syncthreads();

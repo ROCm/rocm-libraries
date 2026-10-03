@@ -77,7 +77,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) geqr2_kernel_small(const I m,
         const auto tidy = tid / (MAX_THDS / 2);
         for(I j = tidy; j < n; j += 2)
         {
-            a[i + j * m] = A[i + j * lda];
+            a[i + j * m] = A[idx2D(i, j, lda)];
         }
     }
 
@@ -154,7 +154,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) geqr2_kernel_small(const I m,
         const auto tidy = tid / (MAX_THDS / 2);
         for(I j = tidy; j < n; j += 2)
         {
-            A[i + j * lda] = a[i + j * m];
+            A[idx2D(i, j, lda)] = a[i + j * m];
         }
     }
 }

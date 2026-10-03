@@ -60,13 +60,13 @@ ROCSOLVER_KERNEL void orgl2_init_ident(const rocblas_int m,
 
         if(i == j)
             // ones along the main diagonal
-            Ap[i + j * lda] = 1.0;
+            Ap[idx2D(i, j, lda)] = 1.0;
         else if(j < i)
             // zero the lower triangular factor L
-            Ap[i + j * lda] = 0.0;
+            Ap[idx2D(i, j, lda)] = 0.0;
         else if(i >= k)
             // zero the bottom part of the matrix, leaving k Householder vectors
-            Ap[i + j * lda] = 0.0;
+            Ap[idx2D(i, j, lda)] = 0.0;
     }
 }
 

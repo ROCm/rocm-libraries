@@ -119,8 +119,8 @@ ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
     int bid = hipBlockIdx_x;
 
     // select batch instance
-    S* D = DA + bid * strideD;
-    S* W = WA + bid * strideW;
+    S* D = DA + rocblas_stride(bid) * strideD;
+    S* W = WA + rocblas_stride(bid) * strideW;
 
     // check if diagonal element is in range and return
     S d = D[0];
@@ -161,21 +161,21 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEBZ_SPLIT_THDS)
     const int tid = hipThreadIdx_x;
     const int bid = hipBlockIdx_y;
     const int bdim = hipBlockDim_x;
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // workspace
     rocblas_int* ninter = splits + n + 2;
     rocblas_int* tmpIS = ninter + 2 * n;
     // using W as temp array to store the spit off-diagonal
     // (to use in case range = index)
-    S* W = WW + bid * strideW;
+    S* W = WW + rocblas_stride(bid) * strideW;
     //nsplit is not needed; the number of split blocks goes into last entry
     //of splits when compact = true
     bool compact = true;
     rocblas_int* nsplit = nullptr;
     // range bounds
-    S* bounds = workA + bid * (4 * n + 2);
+    S* bounds = workA + rocblas_stride(bid) * (4 * n + 2);
     S* pivmin = bounds + 2;
     S* Esqr = pivmin + 1;
     S* Dcpy = Esqr + n - 1;
@@ -224,14 +224,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
 
     // select batch instance to work with
     /* --------------------------------------------------- */
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
@@ -353,21 +353,21 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     S* C;
     if(CC)
         C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     rocblas_int* info = iinfo + bid;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
     rocblas_int* psA = nsA + n;
     // workspace for solvers
-    S* W = WA + bid * (2 * n);
+    S* W = WA + rocblas_stride(bid) * (2 * n);
     /* --------------------------------------------------- */
 
     // local variables
@@ -415,8 +415,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
             sbs = ns[tid];
             p2 = ps[tid];
 
-            run_steqr(tidb, tidb_inc, sbs, D + p2, E + p2, C + p2 + p2 * ldc, ldc, info, W + p2 * 2,
-                      30 * bs, eps, ssfmin, ssfmax, false);
+            run_steqr(tidb, tidb_inc, sbs, D + p2, E + p2, C + idx2D(p2, p2, ldc), ldc, info,
+                      W + p2 * 2, 30 * bs, eps, ssfmin, ssfmax, false);
             __syncthreads();
         }
     }
@@ -447,16 +447,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     const int tid = hipThreadIdx_x;
     const int bid = hipBlockIdx_y;
     const int bdim = hipBlockDim_x;
-    S* D = DD + bid * strideD;
-    S* W = WW + bid * strideW;
-    S* V = VV + bid * strideV;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* W = WW + rocblas_stride(bid) * strideW;
+    S* V = VV + rocblas_stride(bid) * strideV;
     rocblas_int* nev = nevA + bid;
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // workspace
     rocblas_int* ninter = splits + n + 2;
     rocblas_int* idd = ninter + 2 * n;
     // range bounds
-    S* bounds = workA + bid * (4 * n + 2);
+    S* bounds = workA + rocblas_stride(bid) * (4 * n + 2);
     S* pmin = bounds + 2;
     S* Esqr = pmin + 1;
     S* Dcpy = Esqr + n - 1;
@@ -555,7 +555,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
             if(j != nn)
             {
                 for(int i = tid; i < n; i += bdim)
-                    V[i + nn * ldv] = V[i + j * ldv];
+                    V[idx2D(i, nn, ldv)] = V[idx2D(i, j, ldv)];
             }
             nn++;
         }
@@ -611,14 +611,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     S* C;
     if(CC)
         C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
@@ -628,13 +628,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
     // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (2 * n);
+    S* z = tmpzA + rocblas_stride(bid) * (2 * n);
     // roots of secular equations
     S* evs = z + n;
     // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    S* vecs = vecsA + rocblas_stride(bid) * 2 * (rocblas_stride(n) * n);
     // temp values during the merges
-    S* temps = vecs + (n * n);
+    S* temps = vecs + (rocblas_stride(n) * n);
     /* --------------------------------------------------- */
 
     // temporary arrays in shared memory
@@ -717,7 +717,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
 
             // copy elements of z
             for(int j = tx; j < sz; j += dim)
-                z[p2 + j] = ptz[(p2 + j) * ldc] / sqrt(2);
+                z[p2 + j] = ptz[idx2D(0, p2 + j, ldc)] / sqrt(2);
             /* ----------------------------------------------------------------- */
 
             // 3b. calculate deflation tolerance
@@ -836,10 +836,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
                             // update C with the rotation
                             for(int ii = 0; ii < n; ++ii)
                             {
-                                valf = C[ii + base * ldc];
-                                valg = C[ii + top * ldc];
-                                C[ii + base * ldc] = valf * c - valg * s;
-                                C[ii + top * ldc] = valf * s + valg * c;
+                                valf = C[idx2D(ii, base, ldc)];
+                                valg = C[idx2D(ii, top, ldc)];
+                                C[idx2D(ii, base, ldc)] = valf * c - valg * s;
+                                C[idx2D(ii, top, ldc)] = valf * s + valg * c;
                             }
                         }
                     }
@@ -925,14 +925,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
 
     // select batch instance to work with
     /* --------------------------------------------------- */
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
@@ -942,13 +942,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
     // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (2 * n);
+    S* z = tmpzA + rocblas_stride(bid) * (2 * n);
     // roots of secular equations
     S* evs = z + n;
     // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    S* vecs = vecsA + rocblas_stride(bid) * 2 * (rocblas_stride(n) * n);
     // temp values during the merges
-    S* temps = vecs + (n * n);
+    S* temps = vecs + (rocblas_stride(n) * n);
     /* --------------------------------------------------- */
 
     // local variables
@@ -1205,14 +1205,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     S* C;
     if(CC)
         C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
@@ -1222,13 +1222,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     // container of permutations when solving the secular eqns
     rocblas_int* pers = idd + n;
     // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (2 * n);
+    S* z = tmpzA + rocblas_stride(bid) * (2 * n);
     // roots of secular equations
     S* evs = z + n;
     // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    S* vecs = vecsA + rocblas_stride(bid) * 2 * (rocblas_stride(n) * n);
     // temp values during the merges
-    S* temps = vecs + (n * n);
+    S* temps = vecs + (rocblas_stride(n) * n);
     /* --------------------------------------------------- */
 
     // temporary arrays in shared memory
@@ -1401,7 +1401,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
                             if(ii < sz)
                             {
                                 for(int kk = tidb; kk < dd; kk += dim)
-                                    temp += C[i + (per[kk] + in) * ldc] * temps[kk + (p2 + j) * n];
+                                    temp += C[idx2D(i, per[kk] + in, ldc)] * temps[kk + (p2 + j) * n];
                             }
                             inrms[tidb] = temp;
                             __syncthreads();
@@ -1474,13 +1474,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     S* C;
     if(CC)
         C = load_ptr_batch<S>(CC, bid, shiftC, strideC);
-    S* D = DD + bid * strideD;
+    S* D = DD + rocblas_stride(bid) * strideD;
     /* --------------------------------------------------- */
 
     // temporary arrays in global memory
     /* --------------------------------------------------- */
     // contains the beginning of split blocks
-    rocblas_int* splits = splitsA + bid * (5 * n + 2);
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (5 * n + 2);
     // the sub-blocks sizes
     rocblas_int* nsA = splits + n + 2;
     // the sub-blocks initial positions
@@ -1488,11 +1488,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
     // if idd[i] = 0, the value in position i has been deflated
     rocblas_int* idd = psA + n;
     // the rank-1 modification vectors in the merges
-    S* z = tmpzA + bid * (2 * n);
+    S* z = tmpzA + rocblas_stride(bid) * (2 * n);
     // roots of secular equations
     S* evs = z + n;
     // updated eigenvectors after merges
-    S* vecs = vecsA + bid * 2 * (n * n);
+    S* vecs = vecsA + rocblas_stride(bid) * 2 * (rocblas_stride(n) * n);
     /* --------------------------------------------------- */
 
     // temporary arrays in shared memory
@@ -1581,7 +1581,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDCX_BDIM)
                 if(tidb == 0)
                     D[p2 + j] = evs[p2 + j];
                 for(int i = in + tidb; i < in + sz; i += dim)
-                    C[i + (p2 + j) * ldc] = vecs[i + (p2 + j) * n];
+                    C[idx2D(i, p2 + j, ldc)] = vecs[i + (p2 + j) * n];
             }
             /* ----------------------------------------------------------------- */
         }
@@ -1620,7 +1620,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS1) stedcx_sort(const rocblas_int n,
         T* C = nullptr;
         if(CC)
             C = load_ptr_batch<T>(CC, bid, shiftC, strideC);
-        S* D = DD + (bid * strideD);
+        S* D = DD + (rocblas_stride(bid) * strideD);
         rocblas_int nn;
         if(nev)
             nn = nev[bid];
@@ -1681,8 +1681,8 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
     s1 = sizeof(S) * (4 * n + 2) * batch_count;
 
     // extra requirements for original eigenvectors of small independent blocks
-    *size_tempvect = (n * n) * batch_count * sizeof(S);
-    *size_tempgemm = 2 * (n * n) * batch_count * sizeof(S);
+    *size_tempvect = (rocblas_stride(n) * n) * batch_count * sizeof(S);
+    *size_tempgemm = 2 * (rocblas_stride(n) * n) * batch_count * sizeof(S);
     if(COMPLEX)
         s2 = n * n * batch_count * sizeof(S);
     else

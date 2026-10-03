@@ -65,7 +65,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(TRTRI_MAX_COLS)
     T rA[DIM];
 #pragma unroll
     for(int j = 0; j < DIM; ++j)
-        rA[j] = A[i + j * lda];
+        rA[j] = A[idx2D(i, j, lda)];
 
     // shared memory (for communication between threads in group)
     __shared__ T common[DIM];
@@ -129,7 +129,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(TRTRI_MAX_COLS)
     // write results to global memory from local array
 #pragma unroll
     for(int j = 0; j < DIM; j++)
-        A[i + j * lda] = rA[j];
+        A[idx2D(i, j, lda)] = rA[j];
 }
 
 /*************************************************************

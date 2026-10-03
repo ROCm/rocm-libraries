@@ -32,6 +32,7 @@
 #include <hip/hip_runtime.h>
 
 #include "ideal_sizes.hpp"
+#include "lib_host_helpers.hpp"
 #include "lib_macros.hpp"
 #include "libcommon.hpp"
 
@@ -81,7 +82,7 @@ __device__ __host__ void
 {
     int tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     if(tid < n)
-        swap(a[inca * tid], b[incb * tid]);
+        swap(a[rocblas_stride(inca) * tid], b[rocblas_stride(incb) * tid]);
 }
 
 template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
@@ -119,7 +120,7 @@ __device__ void
     else
     {
         for(rocblas_int i = 0; i < n; ++i)
-            swap(a[inca * i], b[incb * i]);
+            swap(a[rocblas_stride(inca) * i], b[rocblas_stride(incb) * i]);
     };
 }
 
@@ -686,9 +687,9 @@ ROCSOLVER_KERNEL void copy_mat(copymat_direction direction,
             T* Bp = &buffer[b * strideB];
 
             if(direction == copymat_to_buffer)
-                Bp[i + j * ldb] = Ap[i + j * lda];
+                Bp[idx2D(i, j, ldb)] = Ap[idx2D(i, j, lda)];
             else // direction == copymat_from_buffer
-                Ap[i + j * lda] = Bp[i + j * ldb];
+                Ap[idx2D(i, j, lda)] = Bp[idx2D(i, j, ldb)];
         }
     }
 }
@@ -730,7 +731,7 @@ ROCSOLVER_KERNEL void copy_mat(const rocblas_int m,
             T* Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
             T* Bp = load_ptr_batch<T>(B, b, shiftB, strideB);
 
-            Bp[i + j * ldb] = Ap[i + j * lda];
+            Bp[idx2D(i, j, ldb)] = Ap[idx2D(i, j, lda)];
         }
     }
 }
@@ -772,11 +773,14 @@ ROCSOLVER_KERNEL void copy_mat(copymat_direction direction,
             S* Bp = &buffer[b * strideB];
 
             if(direction == copymat_to_buffer)
-                Bp[i + j * ldb] = REAL ? Ap[i + j * lda].real() : Ap[i + j * lda].imag();
+                Bp[idx2D(i, j, ldb)]
+                    = REAL ? Ap[idx2D(i, j, lda)].real() : Ap[idx2D(i, j, lda)].imag();
             else if(REAL)
-                Ap[i + j * lda] = rocblas_complex_num<S>(Bp[i + j * ldb], Ap[i + j * lda].imag());
+                Ap[idx2D(i, j, lda)]
+                    = rocblas_complex_num<S>(Bp[idx2D(i, j, ldb)], Ap[idx2D(i, j, lda)].imag());
             else
-                Ap[i + j * lda] = rocblas_complex_num<S>(Ap[i + j * lda].real(), Bp[i + j * ldb]);
+                Ap[idx2D(i, j, lda)]
+                    = rocblas_complex_num<S>(Ap[idx2D(i, j, lda)].real(), Bp[idx2D(i, j, ldb)]);
         }
     }
 }
@@ -820,11 +824,11 @@ ROCSOLVER_KERNEL void copy_trans_mat(const rocblas_operation trans,
             T2* Bp = load_ptr_batch<T2>(B, b, shiftB, strideB);
 
             if(trans == rocblas_operation_conjugate_transpose)
-                Bp[j + i * ldb] = T2(conj(Ap[i + j * lda]));
+                Bp[idx2D(j, i, ldb)] = T2(conj(Ap[idx2D(i, j, lda)]));
             else if(trans == rocblas_operation_transpose)
-                Bp[j + i * ldb] = T2(Ap[i + j * lda]);
+                Bp[idx2D(j, i, ldb)] = T2(Ap[idx2D(i, j, lda)]);
             else
-                Bp[i + j * ldb] = T2(Ap[i + j * lda]);
+                Bp[idx2D(i, j, ldb)] = T2(Ap[idx2D(i, j, lda)]);
         }
     }
 }
@@ -846,9 +850,9 @@ ROCSOLVER_KERNEL void init_ident(const rocblas_int m,
         T* a = load_ptr_batch<T>(A, b, shiftA, strideA);
 
         if(i == j)
-            a[i + j * lda] = 1.0;
+            a[idx2D(i, j, lda)] = 1.0;
         else
-            a[i + j * lda] = 0.0;
+            a[idx2D(i, j, lda)] = 0.0;
     }
 }
 
@@ -907,7 +911,7 @@ ROCSOLVER_KERNEL void subtract_tau(const rocblas_int i,
 
     T t = -(*tau);
     *tau = t;
-    Ap[i + j * lda] = 1.0 + t;
+    Ap[idx2D(i, j, lda)] = 1.0 + t;
 }
 
 template <typename T>
@@ -939,7 +943,7 @@ ROCSOLVER_KERNEL void set_diag(S* D,
 {
     I b = hipBlockIdx_x;
     I i = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
-    I j = i + i * lda;
+    const rocblas_stride j = idx2D(i, i, lda);
 
     S* d = load_ptr_batch<S>(D, b, shiftd, strided);
     T* a = load_ptr_batch<T>(A, b, shifta, stridea);
@@ -968,7 +972,7 @@ ROCSOLVER_KERNEL void set_diag(S* D,
 {
     I b = hipBlockIdx_x;
     I i = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
-    I j = i + i * lda;
+    const rocblas_stride j = idx2D(i, i, lda);
 
     S* d = load_ptr_batch<S>(D, b, shiftd, strided);
     T* a = load_ptr_batch<T>(A, b, shifta, stridea);
@@ -992,7 +996,7 @@ ROCSOLVER_KERNEL void restore_diag(S* D,
 {
     I b = hipBlockIdx_x;
     I i = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
-    I j = i + i * lda;
+    const rocblas_stride j = idx2D(i, i, lda);
 
     S* d = load_ptr_batch<S>(D, b, shiftd, strided);
     T* a = load_ptr_batch<T>(A, b, shifta, stridea);
@@ -1025,7 +1029,7 @@ ROCSOLVER_KERNEL void set_zero(const rocblas_int m,
         if(full || (lower && j > i) || (upper && i > j))
         {
             T* Ap = load_ptr_batch<T>(A, b, shiftA, strideA);
-            Ap[i + j * lda] = 0.0;
+            Ap[idx2D(i, j, lda)] = 0.0;
         }
     }
 }
@@ -1113,21 +1117,22 @@ ROCSOLVER_KERNEL void copyshift_right(const bool copy,
 
     if(i < dim && j < dim && j <= i)
     {
-        rocblas_int offset = j * (j + 1) / 2; // to acommodate in smaller array W
+        const rocblas_stride offset
+            = rocblas_stride(j) * (j + 1) / 2; // to acommodate in smaller array W
 
         if(copy)
         {
             // copy columns
-            Wp[i + j * ldw - offset] = (j == 0 ? 0.0 : Ap[i + 1 + (j - 1) * lda]);
+            Wp[i + rocblas_stride(j) * ldw - offset] = (j == 0 ? 0.0 : Ap[idx2D(i + 1, j - 1, lda)]);
         }
         else
         {
             // shift columns to the right
-            Ap[i + 1 + j * lda] = Wp[i + j * ldw - offset];
+            Ap[idx2D(i + 1, j, lda)] = Wp[i + rocblas_stride(j) * ldw - offset];
 
             // make first row the identity
             if(i == j)
-                Ap[(j + 1) * lda] = 0.0;
+                Ap[idx2D(0, j + 1, lda)] = 0.0;
         }
     }
 }
@@ -1153,25 +1158,27 @@ ROCSOLVER_KERNEL void copyshift_left(const bool copy,
 
     // make last row the identity
     if(i == 0 && j == 0 && !copy)
-        Ap[dim + dim * lda] = 1.0;
+        Ap[idx2D(dim, dim, lda)] = 1.0;
 
     if(i < dim && j < dim && i <= j)
     {
-        rocblas_int offset = j * ldw - j * (j + 1) / 2; // to acommodate in smaller array W
+        const rocblas_stride offset = rocblas_stride(j) * ldw
+            - rocblas_stride(j) * (j + 1) / 2; // to acommodate in smaller array W
 
         if(copy)
         {
             // copy columns
-            Wp[i + j * ldw - offset] = (j == dim - 1 ? 0.0 : Ap[i + (j + 2) * lda]);
+            Wp[i + rocblas_stride(j) * ldw - offset]
+                = (j == dim - 1 ? 0.0 : Ap[idx2D(i, j + 2, lda)]);
         }
         else
         {
             // shift columns to the left
-            Ap[i + (j + 1) * lda] = Wp[i + j * ldw - offset];
+            Ap[idx2D(i, j + 1, lda)] = Wp[i + rocblas_stride(j) * ldw - offset];
 
             // make last row the identity
             if(i == j)
-                Ap[dim + j * lda] = 0.0;
+                Ap[idx2D(dim, j, lda)] = 0.0;
         }
     }
 }
@@ -1201,17 +1208,18 @@ ROCSOLVER_KERNEL void copyshift_down(const bool copy,
 
     if(i < dim && j < dim && i <= j)
     {
-        rocblas_int offset = j * ldw - j * (j + 1) / 2; // to acommodate in smaller array W
+        const rocblas_stride offset = rocblas_stride(j) * ldw
+            - rocblas_stride(j) * (j + 1) / 2; // to acommodate in smaller array W
 
         if(copy)
         {
             // copy rows
-            Wp[i + j * ldw - offset] = (i == 0 ? 0.0 : Ap[i - 1 + (j + 1) * lda]);
+            Wp[i + rocblas_stride(j) * ldw - offset] = (i == 0 ? 0.0 : Ap[idx2D(i - 1, j + 1, lda)]);
         }
         else
         {
             // shift rows downward
-            Ap[i + (j + 1) * lda] = Wp[i + j * ldw - offset];
+            Ap[idx2D(i, j + 1, lda)] = Wp[i + rocblas_stride(j) * ldw - offset];
 
             // make first column the identity
             if(i == j)
@@ -1316,7 +1324,7 @@ ROCSOLVER_KERNEL void check_singularity(const rocblas_int n,
 
     for(int i = hipThreadIdx_y; i < n; i += hipBlockDim_y)
     {
-        if(a[i + i * lda] == 0)
+        if(a[idx2D(i, i, lda)] == 0)
         {
             rocblas_int _info_temp = _info;
             while(_info_temp == 0 || _info_temp > i + 1)

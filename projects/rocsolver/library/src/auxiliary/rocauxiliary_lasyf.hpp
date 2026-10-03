@@ -61,8 +61,8 @@ __device__ void lasyf_gemv(const rocblas_int tid,
     {
         T temp = 0;
         for(int j = 0; j < n; j++)
-            temp += A[i + j * lda] * x[j * incx];
-        y[i * incy] = alpha * temp + beta * y[i * incy];
+            temp += A[idx2D(i, j, lda)] * x[rocblas_stride(j) * incx];
+        y[rocblas_stride(i) * incy] = alpha * temp + beta * y[rocblas_stride(i) * incy];
     }
 }
 
@@ -88,8 +88,8 @@ __device__ void lasyf_gemm(const rocblas_int tid,
         int j = e / m;
         T temp = 0;
         for(int l = 0; l < k; l++)
-            temp += A[i + l * lda] * B[j + l * ldb];
-        C[i + j * ldc] = alpha * temp + beta * C[i + j * ldc];
+            temp += A[idx2D(i, l, lda)] * B[idx2D(j, l, ldb)];
+        C[idx2D(i, j, ldc)] = alpha * temp + beta * C[idx2D(i, j, ldc)];
     }
 }
 
@@ -137,11 +137,11 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
     {
         // copy column k of A to column kw of W and update
         for(i = tid; i <= k; i += MAX_THDS)
-            W[i + kw * ldw] = A[i + k * lda];
+            W[i + kw * ldw] = A[idx2D(i, k, lda)];
         __syncthreads();
         if(k < n - 1)
         {
-            lasyf_gemv<MAX_THDS>(tid, k + 1, n - k - 1, minone, A + (k + 1) * lda, lda,
+            lasyf_gemv<MAX_THDS>(tid, k + 1, n - k - 1, minone, A + idx2D(0, k + 1, lda), lda,
                                  W + k + (kw + 1) * ldw, ldw, one, W + kw * ldw, 1);
             __syncthreads();
         }
@@ -174,13 +174,13 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
             {
                 // copy column imax of A to column kw-1 of W and update
                 for(i = tid; i <= imax; i += MAX_THDS)
-                    W[i + (kw - 1) * ldw] = A[i + imax * lda];
+                    W[i + (kw - 1) * ldw] = A[idx2D(i, imax, lda)];
                 for(i = tid; i < k - imax; i += MAX_THDS)
-                    W[(imax + i + 1) + (kw - 1) * ldw] = A[imax + (imax + i + 1) * lda];
+                    W[(imax + i + 1) + (kw - 1) * ldw] = A[idx2D(imax, imax + i + 1, lda)];
                 __syncthreads();
                 if(k < n - 1)
                 {
-                    lasyf_gemv<MAX_THDS>(tid, k + 1, n - k - 1, minone, A + (k + 1) * lda, lda,
+                    lasyf_gemv<MAX_THDS>(tid, k + 1, n - k - 1, minone, A + idx2D(0, k + 1, lda), lda,
                                          W + imax + (kw + 1) * ldw, ldw, one, W + (kw - 1) * ldw, 1);
                     __syncthreads();
                 }
@@ -227,15 +227,15 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
             {
                 // interchange rows and columns kp and kk
                 if(tid == 0)
-                    A[kp + kp * lda] = A[kk + kk * lda];
+                    A[idx2D(kp, kp, lda)] = A[idx2D(kk, kk, lda)];
 
                 for(i = tid; i < kk - kp - 1; i += MAX_THDS)
-                    A[kp + (kp + i + 1) * lda] = A[(kp + i + 1) + kk * lda];
+                    A[idx2D(kp, kp + i + 1, lda)] = A[idx2D((kp + i + 1), kk, lda)];
                 for(i = tid; i < kp; i += MAX_THDS)
-                    A[i + kp * lda] = A[i + kk * lda];
+                    A[idx2D(i, kp, lda)] = A[idx2D(i, kk, lda)];
                 __syncthreads();
                 for(i = tid; i < n - k - 1; i += MAX_THDS)
-                    swap(A[kk + (k + i + 1) * lda], A[kp + (k + i + 1) * lda]);
+                    swap(A[idx2D(kk, k + i + 1, lda)], A[idx2D(kp, k + i + 1, lda)]);
                 for(i = tid; i < n - kk; i += MAX_THDS)
                     swap(W[kk + (kkw + i) * ldw], W[kp + (kkw + i) * ldw]);
                 __syncthreads();
@@ -247,9 +247,9 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
 
                 T r1 = T(1) / W[k + kw * ldw];
                 if(tid == 0)
-                    A[k + k * lda] = W[k + kw * ldw];
+                    A[idx2D(k, k, lda)] = W[k + kw * ldw];
                 for(i = tid; i < k; i += MAX_THDS)
-                    A[i + k * lda] = r1 * W[i + kw * ldw];
+                    A[idx2D(i, k, lda)] = r1 * W[i + kw * ldw];
                 __syncthreads();
             }
             else
@@ -264,16 +264,17 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
                     d21 = T(1) / ((d11 * d22 - T(1)) * d21);
                     for(i = tid; i <= k - 2; i += MAX_THDS)
                     {
-                        A[i + (k - 1) * lda] = d21 * (d11 * W[i + (kw - 1) * ldw] - W[i + kw * ldw]);
-                        A[i + k * lda] = d21 * (d22 * W[i + kw * ldw] - W[i + (kw - 1) * ldw]);
+                        A[idx2D(i, k - 1, lda)]
+                            = d21 * (d11 * W[i + (kw - 1) * ldw] - W[i + kw * ldw]);
+                        A[idx2D(i, k, lda)] = d21 * (d22 * W[i + kw * ldw] - W[i + (kw - 1) * ldw]);
                     }
                 }
 
                 if(tid == 0)
                 {
-                    A[(k - 1) + (k - 1) * lda] = W[(k - 1) + (kw - 1) * ldw];
-                    A[(k - 1) + k * lda] = W[(k - 1) + kw * ldw];
-                    A[k + k * lda] = W[k + kw * ldw];
+                    A[idx2D((k - 1), k - 1, lda)] = W[(k - 1) + (kw - 1) * ldw];
+                    A[idx2D((k - 1), k, lda)] = W[(k - 1) + kw * ldw];
+                    A[idx2D(k, k, lda)] = W[k + kw * ldw];
                 }
                 __syncthreads();
             }
@@ -310,10 +311,10 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
     {
         int jb = std::min(nb, k - j + 1);
         for(i = j; i < j + jb; i++)
-            lasyf_gemv<MAX_THDS>(tid, i - j + 1, n - k - 1, minone, A + j + (k + 1) * lda, lda,
-                                 W + i + (kw + 1) * ldw, ldw, one, A + j + i * lda, 1);
-        lasyf_gemm<MAX_THDS>(tid, j, jb, n - k - 1, minone, A + (k + 1) * lda, lda,
-                             W + j + (kw + 1) * ldw, ldw, one, A + j * lda, lda);
+            lasyf_gemv<MAX_THDS>(tid, i - j + 1, n - k - 1, minone, A + idx2D(j, k + 1, lda), lda,
+                                 W + i + (kw + 1) * ldw, ldw, one, A + idx2D(j, i, lda), 1);
+        lasyf_gemm<MAX_THDS>(tid, j, jb, n - k - 1, minone, A + idx2D(0, k + 1, lda), lda,
+                             W + j + (kw + 1) * ldw, ldw, one, A + idx2D(0, j, lda), lda);
     }
     __syncthreads();
 
@@ -335,7 +336,7 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
         if(kp != kk && j < n)
         {
             for(i = tid; i < n - j; i += MAX_THDS)
-                swap(A[kp + (j + i) * lda], A[kk + (j + i) * lda]);
+                swap(A[idx2D(kp, j + i, lda)], A[idx2D(kk, j + i, lda)]);
             __syncthreads();
         }
     }
@@ -384,7 +385,7 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
     {
         // copy column k of A to column k of W and update
         for(i = tid; i < n - k; i += MAX_THDS)
-            W[(k + i) + k * ldw] = A[(k + i) + k * lda];
+            W[(k + i) + k * ldw] = A[idx2D((k + i), k, lda)];
         __syncthreads();
         lasyf_gemv<MAX_THDS>(tid, n - k, k, minone, A + k, lda, W + k, ldw, one, W + k + k * ldw, 1);
         __syncthreads();
@@ -419,9 +420,9 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
             {
                 // copy column imax of A to column k+1 of W and update
                 for(i = tid; i < imax - k; i += MAX_THDS)
-                    W[(k + i) + (k + 1) * ldw] = A[imax + (k + i) * lda];
+                    W[(k + i) + (k + 1) * ldw] = A[idx2D(imax, k + i, lda)];
                 for(i = tid; i < n - imax; i += MAX_THDS)
-                    W[(imax + i) + (k + 1) * ldw] = A[(imax + i) + imax * lda];
+                    W[(imax + i) + (k + 1) * ldw] = A[idx2D((imax + i), imax, lda)];
                 __syncthreads();
                 lasyf_gemv<MAX_THDS>(tid, n - k, k, minone, A + k, lda, W + imax, ldw, one,
                                      W + k + (k + 1) * ldw, 1);
@@ -474,15 +475,15 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
             {
                 // interchange rows and columns kp and kk
                 if(tid == 0)
-                    A[kp + kp * lda] = A[kk + kk * lda];
+                    A[idx2D(kp, kp, lda)] = A[idx2D(kk, kk, lda)];
 
                 for(i = tid; i < kp - kk - 1; i += MAX_THDS)
-                    A[kp + (kk + i + 1) * lda] = A[(kk + i + 1) + kk * lda];
+                    A[idx2D(kp, kk + i + 1, lda)] = A[idx2D((kk + i + 1), kk, lda)];
                 for(i = tid; i < n - kp - 1; i += MAX_THDS)
-                    A[(kp + i + 1) + kp * lda] = A[(kp + i + 1) + kk * lda];
+                    A[idx2D((kp + i + 1), kp, lda)] = A[idx2D((kp + i + 1), kk, lda)];
                 __syncthreads();
                 for(i = tid; i < k; i += MAX_THDS)
-                    swap(A[kk + i * lda], A[kp + i * lda]);
+                    swap(A[idx2D(kk, i, lda)], A[idx2D(kp, i, lda)]);
                 for(i = tid; i <= kk; i += MAX_THDS)
                     swap(W[kk + i * ldw], W[kp + i * ldw]);
                 __syncthreads();
@@ -494,9 +495,9 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
 
                 T r1 = T(1) / W[k + k * ldw];
                 if(tid == 0)
-                    A[k + k * lda] = W[k + k * ldw];
+                    A[idx2D(k, k, lda)] = W[k + k * ldw];
                 for(i = tid; i < n - k - 1; i += MAX_THDS)
-                    A[(k + i + 1) + k * lda] = r1 * W[(k + i + 1) + k * ldw];
+                    A[idx2D((k + i + 1), k, lda)] = r1 * W[(k + i + 1) + k * ldw];
                 __syncthreads();
             }
             else
@@ -511,16 +512,16 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
                     d21 = T(1) / ((d11 * d22 - T(1)) * d21);
                     for(i = k + 2 + tid; i < n; i += MAX_THDS)
                     {
-                        A[i + k * lda] = d21 * (d11 * W[i + k * ldw] - W[i + (k + 1) * ldw]);
-                        A[i + (k + 1) * lda] = d21 * (d22 * W[i + (k + 1) * ldw] - W[i + k * ldw]);
+                        A[idx2D(i, k, lda)] = d21 * (d11 * W[i + k * ldw] - W[i + (k + 1) * ldw]);
+                        A[idx2D(i, k + 1, lda)] = d21 * (d22 * W[i + (k + 1) * ldw] - W[i + k * ldw]);
                     }
                 }
 
                 if(tid == 0)
                 {
-                    A[k + k * lda] = W[k + k * ldw];
-                    A[(k + 1) + k * lda] = W[(k + 1) + k * ldw];
-                    A[(k + 1) + (k + 1) * lda] = W[(k + 1) + (k + 1) * ldw];
+                    A[idx2D(k, k, lda)] = W[k + k * ldw];
+                    A[idx2D((k + 1), k, lda)] = W[(k + 1) + k * ldw];
+                    A[idx2D((k + 1), k + 1, lda)] = W[(k + 1) + (k + 1) * ldw];
                 }
                 __syncthreads();
             }
@@ -557,10 +558,10 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         int jb = std::min(nb, n - j);
         for(i = j; i < j + jb; i++)
             lasyf_gemv<MAX_THDS>(tid, j + jb - i, k, minone, A + i, lda, W + i, ldw, one,
-                                 A + i + i * lda, 1);
+                                 A + idx2D(i, i, lda), 1);
         if(j + jb < n)
             lasyf_gemm<MAX_THDS>(tid, n - j - jb, jb, k, minone, A + (j + jb), lda, W + j, ldw, one,
-                                 A + (j + jb) + j * lda, lda);
+                                 A + idx2D(j + jb, j, lda), lda);
     }
     __syncthreads();
 
@@ -582,7 +583,7 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         if(kp != kk && j >= 0)
         {
             for(i = tid; i <= j; i += MAX_THDS)
-                swap(A[kp + i * lda], A[kk + i * lda]);
+                swap(A[idx2D(kp, i, lda)], A[idx2D(kk, i, lda)]);
             __syncthreads();
         }
     }
@@ -610,8 +611,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LASYF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * nb);
-    rocblas_int* ipiv = ipivA + (bid * strideP);
+    T* W = WA + (rocblas_stride(bid) * n * nb);
+    rocblas_int* ipiv = ipivA + (rocblas_stride(bid) * strideP);
 
     // shared arrays
     __shared__ S sval[LASYF_MAX_THDS];
@@ -643,8 +644,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LASYF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * nb);
-    rocblas_int* ipiv = ipivA + (bid * strideP);
+    T* W = WA + (rocblas_stride(bid) * n * nb);
+    rocblas_int* ipiv = ipivA + (rocblas_stride(bid) * strideP);
 
     // shared arrays
     __shared__ S sval[LASYF_MAX_THDS];

@@ -57,7 +57,7 @@ __device__ void trtri_kernel_upper(const rocblas_diagonal diag,
 
     // diagonal element
     if(diag == rocblas_diagonal_non_unit && i < n)
-        a[i + i * lda] = 1.0 / a[i + i * lda];
+        a[idx2D(i, i, lda)] = 1.0 / a[idx2D(i, i, lda)];
     __syncthreads();
 
     // compute element i of each column j
@@ -65,18 +65,18 @@ __device__ void trtri_kernel_upper(const rocblas_diagonal diag,
     for(rocblas_int j = 1; j < n; j++)
     {
         if(i < j && i < n)
-            w[i] = a[i + j * lda];
+            w[i] = a[idx2D(i, j, lda)];
         __syncthreads();
 
         if(i < j && i < n)
         {
-            ajj = (diag == rocblas_diagonal_non_unit ? a[j + j * lda] : 1);
-            aij = (diag == rocblas_diagonal_non_unit ? a[i + i * lda] : 1) * w[i];
+            ajj = (diag == rocblas_diagonal_non_unit ? a[idx2D(j, j, lda)] : 1);
+            aij = (diag == rocblas_diagonal_non_unit ? a[idx2D(i, i, lda)] : 1) * w[i];
 
             for(rocblas_int ii = i + 1; ii < j; ii++)
-                aij += a[i + ii * lda] * w[ii];
+                aij += a[idx2D(i, ii, lda)] * w[ii];
 
-            a[i + j * lda] = -ajj * aij;
+            a[idx2D(i, j, lda)] = -ajj * aij;
         }
         __syncthreads();
     }
@@ -95,7 +95,7 @@ __device__ void trtri_kernel_lower(const rocblas_diagonal diag,
 
     // diagonal element
     if(diag == rocblas_diagonal_non_unit && i < n)
-        a[i + i * lda] = 1.0 / a[i + i * lda];
+        a[idx2D(i, i, lda)] = 1.0 / a[idx2D(i, i, lda)];
     __syncthreads();
 
     // compute element i of each column j
@@ -103,18 +103,18 @@ __device__ void trtri_kernel_lower(const rocblas_diagonal diag,
     for(rocblas_int j = n - 2; j >= 0; j--)
     {
         if(i > j && i < n)
-            w[i] = a[i + j * lda];
+            w[i] = a[idx2D(i, j, lda)];
         __syncthreads();
 
         if(i > j && i < n)
         {
-            ajj = (diag == rocblas_diagonal_non_unit ? a[j + j * lda] : 1);
-            aij = (diag == rocblas_diagonal_non_unit ? a[i + i * lda] : 1) * w[i];
+            ajj = (diag == rocblas_diagonal_non_unit ? a[idx2D(j, j, lda)] : 1);
+            aij = (diag == rocblas_diagonal_non_unit ? a[idx2D(i, i, lda)] : 1) * w[i];
 
             for(rocblas_int ii = i - 1; ii > j; ii--)
-                aij += a[i + ii * lda] * w[ii];
+                aij += a[idx2D(i, ii, lda)] * w[ii];
 
-            a[i + j * lda] = -ajj * aij;
+            a[idx2D(i, j, lda)] = -ajj * aij;
         }
         __syncthreads();
     }
@@ -137,17 +137,17 @@ __device__ void trmm_kernel_left_upper(const rocblas_diagonal diag,
     for(int j = 0; j < n; j++)
     {
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
-            w[i] = b[i + j * ldb];
+            w[i] = b[idx2D(i, j, ldb)];
         __syncthreads();
 
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
         {
-            bij = (diag == rocblas_diagonal_non_unit ? a[i + i * lda] : 1) * w[i];
+            bij = (diag == rocblas_diagonal_non_unit ? a[idx2D(i, i, lda)] : 1) * w[i];
 
             for(int k = i + 1; k < m; k++)
-                bij += a[i + k * lda] * w[k];
+                bij += a[idx2D(i, k, lda)] * w[k];
 
-            b[i + j * ldb] = *alpha * bij;
+            b[idx2D(i, j, ldb)] = *alpha * bij;
         }
         __syncthreads();
     }
@@ -170,17 +170,17 @@ __device__ void trmm_kernel_left_lower(const rocblas_diagonal diag,
     for(int j = 0; j < n; j++)
     {
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
-            w[i] = b[i + j * ldb];
+            w[i] = b[idx2D(i, j, ldb)];
         __syncthreads();
 
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
         {
-            bij = (diag == rocblas_diagonal_non_unit ? a[i + i * lda] : 1) * w[i];
+            bij = (diag == rocblas_diagonal_non_unit ? a[idx2D(i, i, lda)] : 1) * w[i];
 
             for(int k = 0; k < i; k++)
-                bij += a[i + k * lda] * w[k];
+                bij += a[idx2D(i, k, lda)] * w[k];
 
-            b[i + j * ldb] = *alpha * bij;
+            b[idx2D(i, j, ldb)] = *alpha * bij;
         }
         __syncthreads();
     }
@@ -202,13 +202,13 @@ __device__ void trsm_kernel_right_upper(const rocblas_diagonal diag,
     {
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
         {
-            ajj = (diag == rocblas_diagonal_non_unit ? 1.0 / a[j + j * lda] : 1);
-            bij = *alpha * b[i + j * ldb];
+            ajj = (diag == rocblas_diagonal_non_unit ? 1.0 / a[idx2D(j, j, lda)] : 1);
+            bij = *alpha * b[idx2D(i, j, ldb)];
 
             for(int k = 0; k < j; k++)
-                bij -= a[k + j * lda] * b[i + k * ldb];
+                bij -= a[idx2D(k, j, lda)] * b[idx2D(i, k, ldb)];
 
-            b[i + j * ldb] = ajj * bij;
+            b[idx2D(i, j, ldb)] = ajj * bij;
         }
         __syncthreads();
     }
@@ -230,13 +230,13 @@ __device__ void trsm_kernel_right_lower(const rocblas_diagonal diag,
     {
         for(int i = hipThreadIdx_y; i < m; i += hipBlockDim_y)
         {
-            ajj = (diag == rocblas_diagonal_non_unit ? 1.0 / a[j + j * lda] : 1);
-            bij = *alpha * b[i + j * ldb];
+            ajj = (diag == rocblas_diagonal_non_unit ? 1.0 / a[idx2D(j, j, lda)] : 1);
+            bij = *alpha * b[idx2D(i, j, ldb)];
 
             for(int k = j + 1; k < n; k++)
-                bij -= a[k + j * lda] * b[i + k * ldb];
+                bij -= a[idx2D(k, j, lda)] * b[idx2D(i, k, ldb)];
 
-            b[i + j * ldb] = ajj * bij;
+            b[idx2D(i, j, ldb)] = ajj * bij;
         }
         __syncthreads();
     }
@@ -305,11 +305,11 @@ __device__ void lasr(const rocblas_side side,
             {
                 for(rocblas_int j = 0; j < n; ++j)
                 {
-                    temp = A[i + j * lda];
+                    temp = A[idx2D(i, j, lda)];
                     cs = c[i];
                     sn = s[i];
-                    A[i + j * lda] = cs * temp + sn * A[i + 1 + j * lda];
-                    A[i + 1 + j * lda] = cs * A[i + 1 + j * lda] - sn * temp;
+                    A[idx2D(i, j, lda)] = cs * temp + sn * A[idx2D(i + 1, j, lda)];
+                    A[idx2D(i + 1, j, lda)] = cs * A[idx2D(i + 1, j, lda)] - sn * temp;
                 }
             }
         }
@@ -319,11 +319,11 @@ __device__ void lasr(const rocblas_side side,
             {
                 for(rocblas_int j = 0; j < n; ++j)
                 {
-                    temp = A[i + j * lda];
+                    temp = A[idx2D(i, j, lda)];
                     cs = c[i - 1];
                     sn = s[i - 1];
-                    A[i + j * lda] = cs * temp - sn * A[i - 1 + j * lda];
-                    A[i - 1 + j * lda] = cs * A[i - 1 + j * lda] + sn * temp;
+                    A[idx2D(i, j, lda)] = cs * temp - sn * A[idx2D(i - 1, j, lda)];
+                    A[idx2D(i - 1, j, lda)] = cs * A[idx2D(i - 1, j, lda)] + sn * temp;
                 }
             }
         }
@@ -337,11 +337,11 @@ __device__ void lasr(const rocblas_side side,
             {
                 for(rocblas_int i = 0; i < m; ++i)
                 {
-                    temp = A[i + j * lda];
+                    temp = A[idx2D(i, j, lda)];
                     cs = c[j];
                     sn = s[j];
-                    A[i + j * lda] = cs * temp + sn * A[i + (j + 1) * lda];
-                    A[i + (j + 1) * lda] = cs * A[i + (j + 1) * lda] - sn * temp;
+                    A[idx2D(i, j, lda)] = cs * temp + sn * A[idx2D(i, j + 1, lda)];
+                    A[idx2D(i, j + 1, lda)] = cs * A[idx2D(i, j + 1, lda)] - sn * temp;
                 }
             }
         }
@@ -351,11 +351,11 @@ __device__ void lasr(const rocblas_side side,
             {
                 for(rocblas_int i = 0; i < m; ++i)
                 {
-                    temp = A[i + j * lda];
+                    temp = A[idx2D(i, j, lda)];
                     cs = c[j - 1];
                     sn = s[j - 1];
-                    A[i + j * lda] = cs * temp - sn * A[i + (j - 1) * lda];
-                    A[i + (j - 1) * lda] = cs * A[i + (j - 1) * lda] + sn * temp;
+                    A[idx2D(i, j, lda)] = cs * temp - sn * A[idx2D(i, j - 1, lda)];
+                    A[idx2D(i, j - 1, lda)] = cs * A[idx2D(i, j - 1, lda)] + sn * temp;
                 }
             }
         }
@@ -643,7 +643,7 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval)
     val1 = 0;
     for(I i = tid; i < n; i += MAX_THDS)
     {
-        val2 = aabs<S>(A[i * incA]);
+        val2 = aabs<S>(A[rocblas_stride(i) * incA]);
         if(val1 < val2)
             val1 = val2;
     }
@@ -718,7 +718,7 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval, I* si
     idx1 = INT_MAX;
     for(I i = tid; i < n; i += MAX_THDS)
     {
-        val2 = aabs<S>(A[i * incA]);
+        val2 = aabs<S>(A[rocblas_stride(i) * incA]);
         idx2 = i + 1; // add one to make it 1-based index
         if(val1 < val2 || idx1 == INT_MAX)
         {
@@ -828,7 +828,7 @@ __device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval)
     val1 = 0;
     for(I i = tid; i < n; i += MAX_THDS)
     {
-        val2 = rocblas_abs(A[i * incA]);
+        val2 = rocblas_abs(A[rocblas_stride(i) * incA]);
         if(val1 < val2)
             val1 = val2;
     }
@@ -903,7 +903,7 @@ __device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval, I* si
     idx1 = INT_MAX;
     for(I i = tid; i < n; i += MAX_THDS)
     {
-        val2 = rocblas_abs(A[i * incA]);
+        val2 = rocblas_abs(A[rocblas_stride(i) * incA]);
         idx2 = i + 1; // add one to make it 1-based index
         if(val1 < val2 || idx1 == INT_MAX)
         {
@@ -1011,7 +1011,7 @@ __device__ void nrm2(const rocblas_int tid, const rocblas_int n, T* A, const roc
     // read into shared memory while doing initial step
     // (each thread reduce as many elements as needed to cover the original array)
     for(int i = tid; i < n; i += MAX_THDS)
-        val = val + A[i * incA] * A[i * incA];
+        val = val + A[rocblas_stride(i) * incA] * A[rocblas_stride(i) * incA];
     sval[tid] = val;
     __syncthreads();
 
@@ -1083,7 +1083,9 @@ __device__ void dot(const rocblas_int tid,
     // read into shared memory while doing initial step
     // (each thread reduce as many elements as needed to cover the original array)
     for(int i = tid; i < n; i += MAX_THDS)
-        val = val + x[i * incX] * (CONJY ? conj(y[i * incY]) : y[i * incY]);
+        val = val
+            + x[rocblas_stride(i) * incX]
+                * (CONJY ? conj(y[rocblas_stride(i) * incY]) : y[rocblas_stride(i) * incY]);
 
     if(n <= 1)
     {
@@ -1282,7 +1284,8 @@ ROCSOLVER_KERNEL void axpy_kernel(const rocblas_int n,
         T* a = alpha + b * stride_alpha;
 
         // axpy
-        y[i * incy] = a[0] * x[i * incx] + y[i * incy];
+        y[rocblas_stride(i) * incy]
+            = a[0] * x[rocblas_stride(i) * incx] + y[rocblas_stride(i) * incy];
     }
 }
 
@@ -3824,16 +3827,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     if(ty == 0 && row < dim)
     {
         if constexpr(UNIT)
-            res_A = x[row * incx];
+            res_A = x[rocblas_stride(row) * incx];
         else
-            res_A = A[row + row * lda] * x[row * incx];
+            res_A = A[idx2D(row, row, lda)] * x[rocblas_stride(row) * incx];
     }
 
     // multiply and sum across columns
     for(rocblas_int col = ty; col < n; col += DIM_Y)
     {
         if(row < m && ((!LOWER && col > row) || (LOWER && col < row)))
-            res_A += A[row + col * lda] * x[col * incx];
+            res_A += A[idx2D(row, col, lda)] * x[rocblas_stride(col) * incx];
     }
 
     // move partial sum to shared memory to sum further
@@ -3848,7 +3851,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
             sdata[tid] += sdata[tid + DIM_X * i];
 
         if(row < m)
-            y[row * incy] = a * sdata[tid] + b * y[row * incy];
+            y[rocblas_stride(row) * incy] = a * sdata[tid] + b * y[rocblas_stride(row) * incy];
     }
 }
 
@@ -3902,9 +3905,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_in
         if((!LOWER && col > row) || (LOWER && col < row))
         {
             if constexpr(CONJ)
-                res += conj(A[row]) * x[row * incx];
+                res += conj(A[row]) * x[rocblas_stride(row) * incx];
             else
-                res += A[row] * x[row * incx];
+                res += A[row] * x[rocblas_stride(row) * incx];
         }
     }
 
@@ -3929,15 +3932,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_in
     {
         if constexpr(UNIT)
         {
-            y[col * incy] = a * (x[col * incx] + res) + b * y[col * incy];
+            y[rocblas_stride(col) * incy]
+                = a * (x[rocblas_stride(col) * incx] + res) + b * y[rocblas_stride(col) * incy];
         }
         else if constexpr(CONJ)
         {
-            y[col * incy] = a * (conj(A[col]) * x[col * incx] + res) + b * y[col * incy];
+            y[rocblas_stride(col) * incy] = a * (conj(A[col]) * x[rocblas_stride(col) * incx] + res)
+                + b * y[rocblas_stride(col) * incy];
         }
         else
         {
-            y[col * incy] = a * (A[col] * x[col * incx] + res) + b * y[col * incy];
+            y[rocblas_stride(col) * incy] = a * (A[col] * x[rocblas_stride(col) * incx] + res)
+                + b * y[rocblas_stride(col) * incy];
         }
     }
 }

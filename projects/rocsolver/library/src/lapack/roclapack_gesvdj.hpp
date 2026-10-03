@@ -71,13 +71,13 @@ ROCSOLVER_KERNEL void gesvdj_finalize(const rocblas_int n,
 
     for(j = 0; j < n; j++)
     {
-        sigma = std::real(A[j + j * lda]);
+        sigma = std::real(A[idx2D(j, j, lda)]);
 
         if(tid == 0)
             S[j] = std::abs(sigma);
 
         if(sigma < 0)
-            B[tid + j * ldb] = -B[tid + j * ldb];
+            B[idx2D(tid, j, ldb)] = -B[idx2D(tid, j, ldb)];
     }
 }
 

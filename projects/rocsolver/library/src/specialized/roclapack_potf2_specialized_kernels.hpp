@@ -104,7 +104,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 const auto row = jb * PANEL_SIZE + tidx;
                 if(col < n && row < n && row <= col)
                 {
-                    const auto idx = col * lda + row;
+                    const auto idx = idx2D(row, col, lda);
                     Arg[arg_idx] = A[idx];
                 }
             }
@@ -114,7 +114,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 const auto row = i * PANEL_SIZE + tidx;
                 if(col < n && row < n && row >= col)
                 {
-                    const auto idx = col * lda + row;
+                    const auto idx = idx2D(row, col, lda);
                     Arg[arg_idx] = A[idx];
                 }
             }
@@ -313,7 +313,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 const auto row = jb * PANEL_SIZE + tidx;
                 if(col < n && row < n && row <= col)
                 {
-                    const auto idx = col * lda + row;
+                    const auto idx = idx2D(row, col, lda);
                     A[idx] = Arg[arg_idx];
                 }
             }
@@ -323,7 +323,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                 const auto row = i * PANEL_SIZE + tidx;
                 if(col < n && row < n && row >= col)
                 {
-                    const auto idx = col * lda + row;
+                    const auto idx = idx2D(row, col, lda);
                     A[idx] = Arg[arg_idx];
                 }
             }

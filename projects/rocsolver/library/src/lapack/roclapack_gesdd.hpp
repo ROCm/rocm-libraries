@@ -74,10 +74,10 @@ ROCSOLVER_KERNEL void gesdd_flip_signs(const rocblas_int n,
         {
             for(k = 0; k < n; k++)
             {
-                sigma = std::real(D[k + k * ldr]);
+                sigma = std::real(D[idx2D(k, k, ldr)]);
                 if(sigma < 0)
                 {
-                    U[j + k * ldq] = -U[j + k * ldq];
+                    U[idx2D(j, k, ldq)] = -U[idx2D(j, k, ldq)];
                 }
 
                 if(j == 0)

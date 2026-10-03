@@ -166,9 +166,9 @@ ROCSOLVER_KERNEL void stebz_case1_kernel(const rocblas_erange range,
     {
         // select batch instance
         T* D = load_ptr_batch<T>(DA, bid, shiftD, strideD);
-        T* W = WA + bid * strideW;
-        rocblas_int* IB = IBA + bid * strideIB;
-        rocblas_int* IS = ISA + bid * strideIS;
+        T* W = WA + rocblas_stride(bid) * strideW;
+        rocblas_int* IB = IBA + rocblas_stride(bid) * strideIB;
+        rocblas_int* IS = ISA + rocblas_stride(bid) * strideIS;
 
         // one split block
         nsplit[bid] = 1;
@@ -438,18 +438,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEBZ_SPLIT_THDS)
     T* E = load_ptr_batch<T>(EA, bid, shiftE, strideE);
     rocblas_int* nsplit = nsplitA + bid;
     T* pivmin = pivminA + bid;
-    T* Esqr = EsqrA + bid * (n - 1);
+    T* Esqr = EsqrA + rocblas_stride(bid) * (n - 1);
     T* bounds = boundsA + 2 * bid;
-    rocblas_int* IS = ISA + (bid * strideIS);
+    rocblas_int* IS = ISA + (rocblas_stride(bid) * strideIS);
     // tmpIS stores the block indices found by each thread
-    rocblas_int* tmpIS = tmpISA + (bid * n);
+    rocblas_int* tmpIS = tmpISA + (rocblas_stride(bid) * n);
     // using W as temp array to store the spit off-diagonal
     // (to use in case range = index)
-    T* W = WA + bid * strideW;
+    T* W = WA + rocblas_stride(bid) * strideW;
     // using inter and ninter as auxiliary arrays to find
     // a range for the case range = index
-    T* inter = interA + bid * (2 * n);
-    rocblas_int* ninter = ninterA + bid * (2 * n);
+    T* inter = interA + rocblas_stride(bid) * (2 * n);
+    rocblas_int* ninter = ninterA + rocblas_stride(bid) * (2 * n);
 
     // shared memory setup for iamax.
     // (sidx also temporarily stores the number of blocks found by each thread)
@@ -797,21 +797,21 @@ ROCSOLVER_KERNEL void __launch_bounds__(IBISEC_THDS)
     const int bid = hipBlockIdx_y;
     T* D = load_ptr_batch<T>(DA, bid, shiftD, strideD);
     T* E = load_ptr_batch<T>(EA, bid, shiftE, strideE);
-    T* W = WA + bid * strideW;
-    rocblas_int* IB = IBA + bid * strideIB;
-    rocblas_int* IS = ISA + bid * strideIS;
-    T* Esqr = EsqrA + bid * (n - 1);
-    T* bounds = boundsA + bid * 2;
+    T* W = WA + rocblas_stride(bid) * strideW;
+    rocblas_int* IB = IBA + rocblas_stride(bid) * strideIB;
+    rocblas_int* IS = ISA + rocblas_stride(bid) * strideIS;
+    T* Esqr = EsqrA + rocblas_stride(bid) * (n - 1);
+    T* bounds = boundsA + rocblas_stride(bid) * 2;
     T pmin = pivmin[bid];
     rocblas_int* info = infoA + bid;
     // nofb is the number of split blocks in the matrix
     rocblas_int nofb = nsplit[bid];
     // the bounds and related number of eigenvalues of the intervals
     // in all split blocks are stored in inter and ninter
-    T* inter = interA + bid * (4 * n);
-    rocblas_int* ninter = ninterA + bid * (4 * n);
+    T* inter = interA + rocblas_stride(bid) * (4 * n);
+    rocblas_int* ninter = ninterA + rocblas_stride(bid) * (4 * n);
     // tmpnev stores the number of eigenvalues found in each split block
-    rocblas_int* tmpnev = tmpnevA + bid * n;
+    rocblas_int* tmpnev = tmpnevA + rocblas_stride(bid) * n;
 
     // Shared arrays (sh_name):
     // after each iteration, a thread that found a new interval will activate this flag
@@ -959,20 +959,20 @@ ROCSOLVER_KERNEL void stebz_synthesis_kernel(const rocblas_erange range,
     {
         // select batch instance
         T* D = load_ptr_batch<T>(DA, bid, shiftD, strideD);
-        T* W = WA + bid * strideW;
-        rocblas_int* IB = IBA + bid * strideIB;
-        rocblas_int* IS = ISA + bid * strideIS;
+        T* W = WA + rocblas_stride(bid) * strideW;
+        rocblas_int* IB = IBA + rocblas_stride(bid) * strideIB;
+        rocblas_int* IS = ISA + rocblas_stride(bid) * strideIS;
         rocblas_int nofb = nsplit[bid];
-        T* Esqr = EsqrA + bid * (n - 1);
+        T* Esqr = EsqrA + rocblas_stride(bid) * (n - 1);
         T pmin = pivmin[bid];
-        T* bounds = boundsA + bid * 2;
+        T* bounds = boundsA + rocblas_stride(bid) * 2;
         rocblas_int* nev = nevA + bid;
         // tmpnev stores the number of eigenvalues found in each split block
-        rocblas_int* tmpnev = tmpnevA + bid * n;
+        rocblas_int* tmpnev = tmpnevA + rocblas_stride(bid) * n;
         // if range = index, inter and ninter will store temporary ordered eigenvalues
         // with its indices to discard those out of range
-        T* inter = interA + bid * 2 * n;
-        rocblas_int* ninter = ninterA + bid * 2 * n;
+        T* inter = interA + rocblas_stride(bid) * 2 * n;
+        rocblas_int* ninter = ninterA + rocblas_stride(bid) * 2 * n;
 
         run_stebz_synthesis(range, order, n, ilow, iup, D, nev, nofb, W, IB, IS, tmpnev, pmin, Esqr,
                             bounds, inter, ninter, eps);

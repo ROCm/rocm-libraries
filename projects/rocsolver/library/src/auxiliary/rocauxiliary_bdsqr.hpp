@@ -184,19 +184,19 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             rocblas_int k = (t2b ? 0 : n - 1);
             rocblas_int rk = (t2b ? 0 : n - 2);
 
-            temp1 = V[k + j * ldv];
+            temp1 = V[idx2D(k, j, ldv)];
             for(rocblas_int kk = 0; kk < n - 1; kk++)
             {
-                temp2 = V[(k + dir) + j * ldv];
+                temp2 = V[idx2D((k + dir), j, ldv)];
                 c = rots[rk];
                 s = rots[rk + n];
-                V[k + j * ldv] = c * temp1 - s * temp2;
+                V[idx2D(k, j, ldv)] = c * temp1 - s * temp2;
                 temp1 = c * temp2 + s * temp1;
 
                 k += dir;
                 rk += dir;
             }
-            V[k + j * ldv] = temp1;
+            V[idx2D(k, j, ldv)] = temp1;
         }
     }
     if(U && nu)
@@ -209,19 +209,19 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             rocblas_int k = (t2b ? 0 : n - 1);
             rocblas_int rk = (t2b ? nr : (n - 2) + nr);
 
-            temp1 = U[i + k * ldu];
+            temp1 = U[idx2D(i, k, ldu)];
             for(rocblas_int kk = 0; kk < n - 1; kk++)
             {
-                temp2 = U[i + (k + dir) * ldu];
+                temp2 = U[idx2D(i, k + dir, ldu)];
                 c = rots[rk];
                 s = rots[rk + n];
-                U[i + k * ldu] = c * temp1 - s * temp2;
+                U[idx2D(i, k, ldu)] = c * temp1 - s * temp2;
                 temp1 = c * temp2 + s * temp1;
 
                 k += dir;
                 rk += dir;
             }
-            U[i + k * ldu] = temp1;
+            U[idx2D(i, k, ldu)] = temp1;
         }
     }
     if(C && nc)
@@ -234,19 +234,19 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             rocblas_int k = (t2b ? 0 : n - 1);
             rocblas_int rk = (t2b ? nr : (n - 2) + nr);
 
-            temp1 = C[k + j * ldc];
+            temp1 = C[idx2D(k, j, ldc)];
             for(rocblas_int kk = 0; kk < n - 1; kk++)
             {
-                temp2 = C[(k + dir) + j * ldc];
+                temp2 = C[idx2D((k + dir), j, ldc)];
                 c = rots[rk];
                 s = rots[rk + n];
-                C[k + j * ldc] = c * temp1 - s * temp2;
+                C[idx2D(k, j, ldc)] = c * temp1 - s * temp2;
                 temp1 = c * temp2 + s * temp1;
 
                 k += dir;
                 rk += dir;
             }
-            C[k + j * ldc] = temp1;
+            C[idx2D(k, j, ldc)] = temp1;
         }
     }
 }
@@ -376,10 +376,10 @@ ROCSOLVER_KERNEL void bdsqr_init(const rocblas_int n,
     rocblas_int bid = hipBlockIdx_y;
 
     // select batch instance to work with
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
-    rocblas_int* splits = splitsA + bid * (2 * n);
-    S* work = workA + bid * strideW;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (2 * n);
+    S* work = workA + rocblas_stride(bid) * strideW;
 
     bool found = false;
     rocblas_int ii = 0;
@@ -499,11 +499,11 @@ ROCSOLVER_KERNEL void bdsqr_lower2upper(const rocblas_int n,
 
     // select batch instance to work with
     // (avoiding arithmetics with possible nullptrs)
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     T* U = (UU ? load_ptr_batch<T>(UU, bid, shiftU, strideU) : nullptr);
     T* C = (CC ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr);
-    S* rots = workA + bid * strideW + 4;
+    S* rots = workA + rocblas_stride(bid) * strideW + 4;
 
     if(tid == 0)
     {
@@ -538,13 +538,13 @@ ROCSOLVER_KERNEL void bdsqr_lower2upper(const rocblas_int n,
             temp1 = U[i + 0 * ldu];
             for(j = 0; j < n - 1; j++)
             {
-                temp2 = U[i + (j + 1) * ldu];
+                temp2 = U[idx2D(i, j + 1, ldu)];
                 c = rots[j];
                 s = rots[j + n];
-                U[i + j * ldu] = c * temp1 - s * temp2;
+                U[idx2D(i, j, ldu)] = c * temp1 - s * temp2;
                 temp1 = c * temp2 + s * temp1;
             }
-            U[i + (n - 1) * ldu] = temp1;
+            U[idx2D(i, n - 1, ldu)] = temp1;
         }
     }
     if(nc)
@@ -552,16 +552,16 @@ ROCSOLVER_KERNEL void bdsqr_lower2upper(const rocblas_int n,
         // rotate from the left (forward direction)
         for(j = tid; j < nc; j += hipBlockDim_x)
         {
-            temp1 = C[0 + j * ldc];
+            temp1 = C[idx2D(0, j, ldc)];
             for(i = 0; i < n - 1; i++)
             {
-                temp2 = C[(i + 1) + j * ldc];
+                temp2 = C[idx2D((i + 1), j, ldc)];
                 c = rots[i];
                 s = rots[i + n];
-                C[i + j * ldc] = c * temp1 - s * temp2;
+                C[idx2D(i, j, ldc)] = c * temp1 - s * temp2;
                 temp1 = c * temp2 + s * temp1;
             }
-            C[(n - 1) + j * ldc] = temp1;
+            C[idx2D((n - 1), j, ldc)] = temp1;
         }
     }
 }
@@ -609,13 +609,13 @@ ROCSOLVER_KERNEL void bdsqr_compute(const rocblas_int n,
 
     // select batch instance
     // (avoiding arithmetics with possible nullptrs)
-    S* D = DD + bid * strideD;
-    S* E = EE + bid * strideE;
+    S* D = DD + rocblas_stride(bid) * strideD;
+    S* E = EE + rocblas_stride(bid) * strideE;
     T* V = (VV ? load_ptr_batch<T>(VV, bid, shiftV, strideV) : nullptr);
     T* U = (UU ? load_ptr_batch<T>(UU, bid, shiftU, strideU) : nullptr);
     T* C = (CC ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr);
-    rocblas_int* splits = splitsA + bid * (2 * n);
-    S* work = workA + bid * strideW;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (2 * n);
+    S* work = workA + rocblas_stride(bid) * strideW;
     S* rots = work + 4;
 
     // shared variables
@@ -686,8 +686,8 @@ ROCSOLVER_KERNEL void bdsqr_compute(const rocblas_int n,
             if(tid == 0)
                 splits[4 * sid] = (t2b ? 1 : -1);
 
-            bdsqr_QRstep(tid, t2b, k - i + 1, nv, nu, nc, D + i, E + i, V, i, ldv, U, i * ldu, ldu,
-                         C, i, ldc, smin, rots + incW * i);
+            bdsqr_QRstep(tid, t2b, k - i + 1, nv, nu, nc, D + i, E + i, V, i, ldv, U,
+                         idx2D(0, i, ldu), ldu, C, i, ldc, smin, rots + incW * i);
         }
         else
         {
@@ -735,8 +735,8 @@ ROCSOLVER_KERNEL void bdsqr_rotate(const rocblas_int n,
     T* V = (VV ? load_ptr_batch<T>(VV, bid, shiftV, strideV) : nullptr);
     T* U = (UU ? load_ptr_batch<T>(UU, bid, shiftU, strideU) : nullptr);
     T* C = (CC ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr);
-    rocblas_int* splits = splitsA + bid * (2 * n);
-    S* work = workA + bid * strideW;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (2 * n);
+    S* work = workA + rocblas_stride(bid) * strideW;
 
     // local variables
     rocblas_int dir, k_start, k_end;
@@ -779,19 +779,19 @@ ROCSOLVER_KERNEL void bdsqr_rotate(const rocblas_int n,
                 rocblas_int k = (t2b ? k_start : k_end);
                 rocblas_int rk = (t2b ? 0 : nn - 2);
 
-                temp1 = V[k + tid * ldv];
+                temp1 = V[idx2D(k, tid, ldv)];
                 for(rocblas_int kk = k_start; kk < k_end; kk++)
                 {
-                    temp2 = V[(k + dir) + tid * ldv];
+                    temp2 = V[idx2D((k + dir), tid, ldv)];
                     c = rots[rk];
                     s = rots[rk + nn];
-                    V[k + tid * ldv] = c * temp1 - s * temp2;
+                    V[idx2D(k, tid, ldv)] = c * temp1 - s * temp2;
                     temp1 = c * temp2 + s * temp1;
 
                     k += dir;
                     rk += dir;
                 }
-                V[k + tid * ldv] = temp1;
+                V[idx2D(k, tid, ldv)] = temp1;
             }
             if(U && tid < nu)
             {
@@ -799,19 +799,19 @@ ROCSOLVER_KERNEL void bdsqr_rotate(const rocblas_int n,
                 rocblas_int k = (t2b ? k_start : k_end);
                 rocblas_int rk = (t2b ? nr : (nn - 2) + nr);
 
-                temp1 = U[tid + k * ldu];
+                temp1 = U[idx2D(tid, k, ldu)];
                 for(rocblas_int kk = k_start; kk < k_end; kk++)
                 {
-                    temp2 = U[tid + (k + dir) * ldu];
+                    temp2 = U[idx2D(tid, k + dir, ldu)];
                     c = rots[rk];
                     s = rots[rk + nn];
-                    U[tid + k * ldu] = c * temp1 - s * temp2;
+                    U[idx2D(tid, k, ldu)] = c * temp1 - s * temp2;
                     temp1 = c * temp2 + s * temp1;
 
                     k += dir;
                     rk += dir;
                 }
-                U[tid + k * ldu] = temp1;
+                U[idx2D(tid, k, ldu)] = temp1;
             }
             if(C && tid < nc)
             {
@@ -819,19 +819,19 @@ ROCSOLVER_KERNEL void bdsqr_rotate(const rocblas_int n,
                 rocblas_int k = (t2b ? k_start : k_end);
                 rocblas_int rk = (t2b ? nr : (nn - 2) + nr);
 
-                temp1 = C[k + tid * ldc];
+                temp1 = C[idx2D(k, tid, ldc)];
                 for(rocblas_int kk = k_start; kk < k_end; kk++)
                 {
-                    temp2 = C[(k + dir) + tid * ldc];
+                    temp2 = C[idx2D((k + dir), tid, ldc)];
                     c = rots[rk];
                     s = rots[rk + nn];
-                    C[k + tid * ldc] = c * temp1 - s * temp2;
+                    C[idx2D(k, tid, ldc)] = c * temp1 - s * temp2;
                     temp1 = c * temp2 + s * temp1;
 
                     k += dir;
                     rk += dir;
                 }
-                C[k + tid * ldc] = temp1;
+                C[idx2D(k, tid, ldc)] = temp1;
             }
         }
     }
@@ -854,9 +854,9 @@ ROCSOLVER_KERNEL void bdsqr_update_endpoints(const rocblas_int n,
         return;
 
     // select batch instance to work with
-    S* E = EE + bid * strideE;
-    rocblas_int* splits = splitsA + bid * (2 * n);
-    S* work = workA + bid * strideW;
+    S* E = EE + rocblas_stride(bid) * strideE;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (2 * n);
+    S* work = workA + rocblas_stride(bid) * strideW;
 
     // local variables
     rocblas_int k_start, k_end, applyqr, iter;
@@ -931,8 +931,8 @@ ROCSOLVER_KERNEL void bdsqr_chk_completed(const rocblas_int n,
         return;
 
     // array pointers
-    rocblas_int* splits = splitsA + bid * (2 * n);
-    S* work = workA + bid * strideW;
+    rocblas_int* splits = splitsA + rocblas_stride(bid) * (2 * n);
+    S* work = workA + rocblas_stride(bid) * strideW;
 
     // local variables
     rocblas_int k_start, k_end, iter;
@@ -1008,12 +1008,12 @@ ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
     rocblas_int local_info = 0;
 
     // array pointers
-    S* const D = DD + bid * strideD;
-    S* const E = EE + bid * strideE;
+    S* const D = DD + rocblas_stride(bid) * strideD;
+    S* const E = EE + rocblas_stride(bid) * strideE;
     T* const V = (VV ? load_ptr_batch<T>(VV, bid, shiftV, strideV) : nullptr);
     T* const U = (UU ? load_ptr_batch<T>(UU, bid, shiftU, strideU) : nullptr);
     T* const C = (CC ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr);
-    rocblas_int* map = (splits_map ? splits_map + bid * (2 * n) : nullptr);
+    rocblas_int* map = (splits_map ? splits_map + rocblas_stride(bid) * (2 * n) : nullptr);
 
     // ensure all singular values converged and are positive
     for(rocblas_int i = 0; i < n; i++)
@@ -1088,19 +1088,19 @@ ROCSOLVER_KERNEL void bdsqr_finalize(const rocblas_int n,
                 if(nv)
                 {
                     for(j = tid; j < nv; j += hipBlockDim_x)
-                        swap(V[m + j * ldv], V[i + j * ldv]);
+                        swap(V[idx2D(m, j, ldv)], V[idx2D(i, j, ldv)]);
                     __syncthreads();
                 }
                 if(nu)
                 {
                     for(j = tid; j < nu; j += hipBlockDim_x)
-                        swap(U[j + m * ldu], U[j + i * ldu]);
+                        swap(U[idx2D(j, m, ldu)], U[idx2D(j, i, ldu)]);
                     __syncthreads();
                 }
                 if(nc)
                 {
                     for(j = tid; j < nc; j += hipBlockDim_x)
-                        swap(C[m + j * ldc], C[i + j * ldc]);
+                        swap(C[idx2D(m, j, ldc)], C[idx2D(i, j, ldc)]);
                     __syncthreads();
                 }
             }

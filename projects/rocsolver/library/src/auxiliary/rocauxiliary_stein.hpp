@@ -63,9 +63,9 @@ __device__ void stein_reorthogonalize(rocblas_int i,
     {
         ztr = 0;
         for(jr = 0; jr < n; jr++)
-            ztr = ztr + work[jr] * Z[(b1 + jr) + i * ldz];
+            ztr = ztr + work[jr] * Z[idx2D((b1 + jr), i, ldz)];
         for(jr = 0; jr < n; jr++)
-            work[jr] = work[jr] - ztr * Z[(b1 + jr) + i * ldz];
+            work[jr] = work[jr] - ztr * Z[idx2D((b1 + jr), i, ldz)];
     }
 }
 
@@ -85,9 +85,9 @@ __device__ void stein_reorthogonalize(rocblas_int i,
     {
         ztr = 0;
         for(jr = 0; jr < n; jr++)
-            ztr = ztr + work[jr] * Z[(b1 + jr) + i * ldz].real();
+            ztr = ztr + work[jr] * Z[idx2D((b1 + jr), i, ldz)].real();
         for(jr = 0; jr < n; jr++)
-            work[jr] = work[jr] - ztr * Z[(b1 + jr) + i * ldz].real();
+            work[jr] = work[jr] - ztr * Z[idx2D((b1 + jr), i, ldz)].real();
     }
 }
 
@@ -267,7 +267,7 @@ __device__ void run_stein(const int tid,
             }
 
             for(i = tid; i < n; i += MAX_THDS)
-                Z[i + j * ldz] = (i >= b1 && i <= bn ? work[i - b1] : T(0));
+                Z[idx2D(i, j, ldz)] = (i >= b1 && i <= bn ? work[i - b1] : T(0));
             __syncthreads();
 
             xjm = xj;

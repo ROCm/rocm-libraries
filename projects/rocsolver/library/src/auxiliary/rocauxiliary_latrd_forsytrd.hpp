@@ -105,7 +105,7 @@ ROCSOLVER_KERNEL void latrd_reduce_kernel(const rocblas_fill uplo,
         if(i < m)
         {
             for(int j = idc; j < n; j += totalthsc)
-                val += dac[i + j * ldd];
+                val += dac[idx2D(i, j, ldd)];
         }
         tmp[tidr + tidc * threadsr] = val;
         __syncthreads();
@@ -219,7 +219,7 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -328,7 +328,7 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -610,7 +610,7 @@ ROCSOLVER_KERNEL void latrd_upper_updateW_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();
@@ -725,7 +725,7 @@ ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
 
             // operation for all rows
             if(i < m && j < n)
-                ac -= A1[i + j * lda1] * sx1 + A2[i + j * lda2] * sx2;
+                ac -= A1[idx2D(i, j, lda1)] * sx1 + A2[idx2D(i, j, lda2)] * sx2;
         }
         acs[tidr + tidc * threadsr] = ac;
         __syncthreads();

@@ -63,8 +63,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * SYTRF_BLOCKSIZE);
-    rocblas_int* ipiv = ipivA + (bid * strideP);
+    T* W = WA + (rocblas_stride(bid) * n * SYTRF_BLOCKSIZE);
+    rocblas_int* ipiv = ipivA + (rocblas_stride(bid) * strideP);
 
     // local and shared variables
     __shared__ int iinfo;
@@ -125,8 +125,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
 
     // get array pointers
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = WA + (bid * n * SYTRF_BLOCKSIZE);
-    rocblas_int* ipiv = ipivA + (bid * strideP);
+    T* W = WA + (rocblas_stride(bid) * n * SYTRF_BLOCKSIZE);
+    rocblas_int* ipiv = ipivA + (rocblas_stride(bid) * strideP);
 
     // local and shared variables
     __shared__ int iinfo;
@@ -150,14 +150,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(SYTRF_MAX_THDS)
     {
         if(k < n - SYTRF_SYTF2_SWITCHSIZE)
         {
-            lasyf_device_lower<SYTRF_MAX_THDS>(tid, n - k, SYTRF_BLOCKSIZE, &kb, A + k + k * lda,
+            lasyf_device_lower<SYTRF_MAX_THDS>(tid, n - k, SYTRF_BLOCKSIZE, &kb, A + idx2D(k, k, lda),
                                                lda, ipiv + k, &iinfo, W, sidx, sval);
             ktemp = k + kb;
         }
         else
         {
-            sytf2_device_lower<SYTRF_MAX_THDS>(tid, n - k, A + k + k * lda, lda, ipiv + k, &iinfo,
-                                               sidx, sval);
+            sytf2_device_lower<SYTRF_MAX_THDS>(tid, n - k, A + idx2D(k, k, lda), lda, ipiv + k,
+                                               &iinfo, sidx, sval);
             ktemp = n;
         }
         __syncthreads();

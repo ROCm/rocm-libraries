@@ -183,7 +183,7 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
     if(recover_A)
     {
         Acpy = work_Acpy;
-        work = Acpy + n * n * batch_count;
+        work = Acpy + rocblas_stride(n) * n * batch_count;
 
         ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2, 1),
                                 0, stream, copymat_to_buffer, n, n, A, shiftA, lda, strideA, Acpy,

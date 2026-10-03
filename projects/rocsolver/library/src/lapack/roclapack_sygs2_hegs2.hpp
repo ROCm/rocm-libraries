@@ -63,10 +63,10 @@ ROCSOLVER_KERNEL void sygs2_set_diag1(const rocblas_int k,
         T* B = load_ptr_batch<T>(BB, b, shiftB, strideB);
         T* W = work + b * strideW;
 
-        T akk = A[k + k * lda];
-        T bkk = B[k + k * ldb];
+        T akk = A[idx2D(k, k, lda)];
+        T bkk = B[idx2D(k, k, ldb)];
         akk /= bkk * bkk;
-        A[k + k * lda] = akk;
+        A[idx2D(k, k, lda)] = akk;
 
         W[0] = T(1.0) / bkk;
         W[1] = T(-0.5) * akk;
@@ -95,8 +95,8 @@ ROCSOLVER_KERNEL void sygs2_set_diag2(const rocblas_int k,
         T* B = load_ptr_batch<T>(BB, b, shiftB, strideB);
         T* W = work + b * strideW;
 
-        T akk = A[k + k * lda];
-        T bkk = B[k + k * ldb];
+        T akk = A[idx2D(k, k, lda)];
+        T bkk = B[idx2D(k, k, ldb)];
 
         W[0] = bkk;
         W[1] = T(0.5) * akk;
@@ -121,7 +121,7 @@ ROCSOLVER_KERNEL void sygs2_set_diag3(const rocblas_int k,
         T* A = load_ptr_batch<T>(AA, b, shiftA, strideA);
         T* W = work + b * strideW;
 
-        A[k + k * lda] = W[2];
+        A[idx2D(k, k, lda)] = W[2];
     }
 }
 

@@ -56,8 +56,8 @@ __device__ void copy_and_zero(const rocblas_int m,
         int j = k / m;
         if(i > j)
         {
-            w[i + j * ldw] = a[i + j * lda];
-            a[i + j * lda] = 0;
+            w[idx2D(i, j, ldw)] = a[idx2D(i, j, lda)];
+            a[idx2D(i, j, lda)] = 0;
         }
     }
     __syncthreads();
@@ -72,7 +72,7 @@ __device__ void zero_work(const rocblas_int m, const rocblas_int n, T* w, const 
     {
         int i = k % m;
         int j = k / m;
-        w[i + j * ldw] = 0;
+        w[idx2D(i, j, ldw)] = 0;
     }
     __syncthreads();
 }
@@ -89,7 +89,7 @@ __device__ void getri_pivot(const rocblas_int n, T* a, const rocblas_int lda, ro
         if(jp != j)
         {
             for(int i = hipThreadIdx_y; i < n; i += hipBlockDim_y)
-                swap(a[i + j * lda], a[i + jp * lda]);
+                swap(a[idx2D(i, j, lda)], a[idx2D(i, jp, lda)]);
             __syncthreads();
         }
     }
@@ -117,7 +117,7 @@ ROCSOLVER_KERNEL void getri_kernel_large1(const rocblas_int n,
     if(info[b] != 0)
         zero_work(n - j, jb, w + j, n);
     else
-        copy_and_zero(n - j, jb, a + j + j * lda, lda, w + j, n);
+        copy_and_zero(n - j, jb, a + idx2D(j, j, lda), lda, w + j, n);
 }
 
 template <typename T, typename U>

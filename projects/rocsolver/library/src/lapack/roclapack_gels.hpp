@@ -60,7 +60,7 @@ ROCSOLVER_KERNEL void gels_set_zero(const rocblas_int k1,
     {
         T* Bp = load_ptr_batch<T>(B, b, shiftB, strideB);
 
-        Bp[(i + k1) + j * ldb] = 0;
+        Bp[idx2D((i + k1), j, ldb)] = 0;
     }
 }
 
