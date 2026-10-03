@@ -5,7 +5,7 @@
 // manifest's kernel-argument and persistent-loop argument layout versions equal
 // those in GlobalParameters.py, its code-object version equals the builder's,
 // the host library reads its library entry, and comgr builds its sources into a
-// code object that defines its main kernel. Needs no GPU.
+// code object that defines its main kernel.
 //
 // usage: hipblaslt-jit-bundle-freshness-test DATA_DIR SCRATCH_DIR
 
