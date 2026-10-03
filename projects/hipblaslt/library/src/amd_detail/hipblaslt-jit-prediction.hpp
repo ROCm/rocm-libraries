@@ -12,6 +12,11 @@
 #include <string_view>
 #include <vector>
 
+namespace TensileLite
+{
+    class ContractionProblemGemm;
+}
+
 // Ranked candidates for the backends that consume a prediction.
 namespace hipblaslt_jit
 {
@@ -116,6 +121,12 @@ namespace hipblaslt_jit
 
     std::shared_ptr<const Predictor>       makeOrigamiPredictor();
     std::shared_ptr<const TuningKnowledge> makeCatalogKnowledge();
+    // makeOrigamiPredictor()'s ranking of a GEMM already lowered for Tensile.
+    Prediction rankWithOrigami(const OperationRequest&,
+                               const TensileLite::ContractionProblemGemm&,
+                               const DeviceTarget&,
+                               size_t workspaceLimit,
+                               const TuningKnowledge&);
     // Tuned sets from the knowledge files in a Tensile library directory, then the
     // catalog's seeds. perArchitecture: each file sits in a subdirectory named for
     // its library architecture; otherwise the directory holds the files.

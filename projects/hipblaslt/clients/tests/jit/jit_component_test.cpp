@@ -722,16 +722,22 @@ namespace
             const auto& hints
                 = target.isa == "gfx90a" || target.isa == "gfx1250" ? defaultHints : allHints;
             require(seeds.size() == tiles.size(), std::string(isa) + ": wrong seed count");
+            using Strategy   = hj::ExecutionPolicy::Strategy;
+            using Assignment = hj::ExecutionPolicy::Assignment;
+            const bool streamK = target.isa != "gfx90a";
             for(size_t i = 0; i < seeds.size(); ++i)
                 require(seeds[i].tile == tiles[i] && seeds[i].depthRules == depthRules
                             && seeds[i].cacheHints == hints && !seeds[i].instruction
-                            && seeds[i].policies.size() == 1
-                            && seeds[i].policies[0].strategy == hj::ExecutionPolicy::Strategy::None,
+                            && seeds[i].policies.size() == (streamK ? 2u : 1u)
+                            && seeds[i].policies[0].strategy == Strategy::None
+                            && (!streamK
+                                || (seeds[i].policies[1].strategy == Strategy::StreamK
+                                    && seeds[i].policies[1].assignment == Assignment::Hybrid)),
                         std::string(isa) + ": wrong seed " + std::to_string(i));
             require(knowledge->defaults(request, target, {}).empty(),
                     "Catalog knowledge supplied parameter values");
         }
-        std::cout << "PASS catalog knowledge seeds 11 tiles with per-architecture cache hints\n";
+        std::cout << "PASS catalog knowledge seeds 11 tiles with per-architecture cache hints and Stream-K\n";
     }
 
     // Runs in a child with HIPBLASLT_JIT_DEBUG=all; each scenario's lines follow its name.

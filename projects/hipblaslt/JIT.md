@@ -142,17 +142,19 @@ The implementations are:
 - Predictor: `makeOrigamiPredictor()`, in `hipblaslt-jit-origami-predictor.cpp`,
   puts the tuning knowledge's fixed seeds first, each as one
   `tensilelite.tuned.v1` candidate. It then expands the other seeds across the
-  target's matrix instructions, ranks them with Origami, and emits the
-  `origami.gemm.dp.v1` contract; see
+  target's matrix instructions and their execution policies, ranks them with
+  Origami in one call, and emits the `origami.gemm.dp.v1` and
+  `origami.gemm.persistent.v1` contracts; see
   [Origami modeled inputs](#origami-modeled-inputs) and
   [predictor and TuningKnowledge](#predictor-and-tuningknowledge).
 - Tuning knowledge: `makeCatalogKnowledge()`, in
   `hipblaslt-jit-catalog-knowledge.cpp` (id `catalog.v1`): 11 tile shapes, two
   DepthU rules, cache hints that are only the defaults on gfx90a and gfx1250,
-  and policy none for every seed. It supplies no values for unmodeled knobs,
+  and policy none for every seed. On gfx942, gfx950 and gfx1250 each seed also
+  lists the Hybrid Stream-K policy. It supplies no values for unmodeled knobs,
   which keep the backend's defaults.
 - Tuning library knowledge: `makeTuningLibraryKnowledge()`, in
-  `hipblaslt-jit-tuning-knowledge.cpp` (id `tensilelite-logic.v1`), returns up
+  `hipblaslt-jit-tuning-knowledge.cpp` (id `tensilelite-logic.v3`), returns up
   to 8 tuned sets from the knowledge file of the device's architecture, then
   the catalog's seeds. `hipblaslt-jit-knowledge.cpp` reads the files and finds
   the nearest sets.
@@ -204,6 +206,20 @@ occupancy 1 remain explicit model inputs, and the recipe keeps TensileLite's
 non-persistent `TileProcessingStrategy=None`. Every applicable prediction is transferred;
 defaults supply only settings that this model does not predict.
 
+On gfx942, gfx950 and gfx1250, when the request allows workspace and has no
+auxiliary output, the catalog also offers each configuration as a Hybrid
+Stream-K kernel under the `origami.gemm.persistent.v1` contract, with
+`stream_k=5`. One `rank_configs` call ranks both kinds, and a data-parallel
+candidate stays ahead of a Stream-K one of equal latency. A backend that
+transports the contract compiles the candidate with
+`TileProcessingStrategy=StreamK`, `WorkAssignment=Hybrid`, `StreamKAtomic=0`,
+`GlobalSplitU=0`, `WorkGroupMapping=0` and `WorkGroupMappingXCC=-1`, so the
+runtime chooses the grid, reduction, static or dynamic assignment, workgroup
+mapping and stagger at each launch, as for the pre-tuned Stream-K kernels. The
+candidate records Origami's prediction of each in `modeled.execution`,
+`modeled.launch` (including `hybrid_mode`), `modeled.workgroup_mapping` and
+`modeled.stagger`. Origami's hybrid mode is static outside gfx950.
+
 The inventory below follows `shared/origami/include/origami/{origami,gemm,streamk,types}.hpp`
 and their implementations. A selected configuration is an output of ranking even
 though its fields originate in the caller's candidate catalog.
@@ -211,14 +227,14 @@ though its fields originate in the caller's candidate catalog.
 | Origami output | Generator input or use | Conditions |
 | --- | --- | --- |
 | `rank_configs` / `select_config`: ordered configuration and latency | Nine-value `MatrixInstruction` recipe (MI plus retained wave topology), macro tile, `DepthU`, `NonTemporalA/B`; latency and order in provenance | Estimation ranks the existing target instruction/tile/depth/cache-hint catalog. No kernel benchmarking. |
-| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. |
-| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. |
+| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. A persistent candidate records it and compiles `WorkGroupMapping=0`. |
+| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. A persistent candidate records it and compiles `WorkGroupMappingXCC=-1`. |
 | `select_workgroup_mapping`: `wgmxccchunk`, `wgmxccsplitk` | Retained in every candidate's `modeled.workgroup_mapping` | Nonzero values require the Stream-K mapping ABI and reject the current data-parallel candidate; neither is substituted with `WorkGroupMappingXCCGroup`. |
-| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. |
+| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. A persistent candidate's stagger is recorded; the runtime chooses it at each launch. |
 | `select_staggerU`: `staggerUStrideShift` | `StaggerUStride = DepthU × Tensile DataType bytes × 2^shift` | Check the derived `_staggerStrideShift`; zero stagger may normalize the byte stride without changing its meaning. |
 | `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `TileProcessingStrategy=None`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
-| `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
-| `streamk::select_hybrid_mode` | Static/dynamic schedule of a Stream-K kernel with `WorkAssignment=Hybrid` | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
+| `streamk::select_reduction`, `select_grid_size` | A persistent candidate's `modeled.launch` reduction (tree or parallel), grid and split factor | Recorded; the runtime calls the same APIs at each launch. |
+| `streamk::select_hybrid_mode` | A persistent candidate's `modeled.launch.hybrid_mode` | Recorded; the runtime decides at each launch of a Hybrid kernel. |
 | `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
 | Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The predictor uses the full instruction catalog plus ranking, preserving the selected MI. |
 | GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |
@@ -281,7 +297,10 @@ A fixed seed becomes one candidate with the `tensilelite.tuned.v1` contract. Its
 `parameters` are the tuned set's as they are, including the nine-value
 `MatrixInstruction`, `DepthU`, `NonTemporalA/B`, the execution policy, the
 workgroup mapping and `GlobalSplitU` (with `-1`) and its algorithm, plus the
-size asserts that the problem satisfies. Its `modeled` field holds `macro_tile`
+size asserts that the problem satisfies. A Stream-K set without a persistent
+XCC mapping is the exception: it gets `WorkGroupMapping=0` and
+`WorkGroupMappingXCC=-1`, so the runtime maps and staggers it at each launch.
+Its `modeled` field holds `macro_tile`
 (MT0, MT1, DepthU) and `execution` (`strategy`, `assignment`), and its
 provenance, sent as `knowledge`, records the branch, group, logic file, row and
 distance. Fixed seeds keep the knowledge's order, and Origami's latency orders
@@ -290,10 +309,13 @@ With no workspace, the predictor skips Stream-K seeds and seeds with a fixed
 `GlobalSplitU` above 1. The catalog's seeds follow in Origami's order.
 
 `Jit` passes a backend only the candidates whose contract it transports. No
-backend in this repository transports `tensilelite.tuned.v1`: the mock and the
-test backend carry only `origami.gemm.dp.v1`, and the test backend uses the
-catalog knowledge. Until a generator backend transports tuned sets, the
-knowledge files and fixed seeds do not change what JIT generates.
+backend in this repository transports `tensilelite.tuned.v1` or
+`origami.gemm.persistent.v1`: the mock and the test backend carry only
+`origami.gemm.dp.v1`, and the test backend uses the catalog knowledge. Until a
+generator backend transports tuned sets, the knowledge files and fixed seeds do
+not change what JIT generates. The catalog's Stream-K candidates likewise take
+effect only with a backend that transports the persistent contract. `Jit`
+drops them for the others, whose cache key does not name the contract.
 
 ### Pre-tuned heuristic selection
 

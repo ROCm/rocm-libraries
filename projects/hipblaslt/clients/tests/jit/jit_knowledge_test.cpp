@@ -7,8 +7,10 @@
 #include "hipblaslt-jit-problem-type.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -461,7 +463,7 @@ namespace
         };
 
         const auto installed = hipblaslt_jit::makeTuningLibraryKnowledge(tree, true);
-        require(installed->id() == "tensilelite-logic.v1" && installed->version() == "gfx950=aaaa",
+        require(installed->id() == "tensilelite-logic.v3" && installed->version() == "gfx950=aaaa",
                 "Installed version " + installed->version());
         for(const char* arch : {"gfx950", "gfx942", "gfx1250", "gfx90a"})
             queries(*installed, arch);
@@ -590,6 +592,192 @@ namespace
         }
         return match.seeds.empty();
     }
+
+    // A device of the architecture as Origami models it, without a GPU.
+    hipblaslt_jit::DeviceTarget device(const std::string& isa, size_t cuCount)
+    {
+        using Hardware = origami::hardware_t;
+        auto gpu       = std::make_shared<TensileLite::hip::HipAMDGPU>();
+        gpu->analyticalHardware
+            = std::make_shared<Hardware>(Hardware::get_hardware_for_arch(
+                Hardware::arch_name_to_enum(isa),
+                cuCount,
+                isa == "gfx942" ? 65536 : isa == "gfx950" ? 163840 : 327680,
+                524288,
+                4 << 20,
+                2100000));
+        hipblaslt_jit::DeviceTarget target;
+        target.targetId = target.isa = target.libraryArch = isa;
+        target.cuCount                                     = static_cast<int>(cuCount);
+        target.hardware                                    = gpu;
+        return target;
+    }
+
+    TensileLite::ContractionProblemGemm gemm(
+        rocisa::DataType type, size_t m, size_t n, size_t k, int cuBudget = 0)
+    {
+        auto problem = TensileLite::ContractionProblemGemm::GEMM_Strides(
+            false, false, type, type, type, type, m, n, k, 1, m, m * k, k, k * n, m, m * n, m, m * n, 0.5);
+        problem.setComputeInputTypeA(type);
+        problem.setComputeInputTypeB(type);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setHighPrecisionAccumulate(true);
+        problem.setParams().setSmCountTarget(cuBudget);
+        return problem;
+    }
+
+    size_t field(const std::string& json, const std::string& name)
+    {
+        const auto at = json.find("\"" + name + "\":");
+        require(at != std::string::npos, "No " + name + " in " + json);
+        return std::stoull(json.substr(at + name.size() + 3));
+    }
+
+    std::string modeled(const hipblaslt_jit::Candidate& candidate, const std::string& name)
+    {
+        for(const auto& value : candidate.modeled)
+            if(value.name == name)
+                return value.json;
+        throw std::runtime_error("No modeled " + name);
+    }
+
+    std::string parameters(const hipblaslt_jit::Candidate& candidate)
+    {
+        std::string result;
+        for(const auto& value : candidate.parameters)
+            result += value.name + '=' + value.json + ';';
+        return result;
+    }
+
+    // The catalog's data-parallel and Hybrid Stream-K candidates in one Origami ranking.
+    void testPredictor()
+    {
+        using rocisa::DataType;
+        constexpr const char* dp         = "origami.gemm.dp.v1";
+        constexpr const char* persistent = "origami.gemm.persistent.v1";
+        const auto            catalog    = hipblaslt_jit::makeCatalogKnowledge();
+        NotGemm               request;
+        const auto            rank = [&](const hipblaslt_jit::DeviceTarget&         target,
+                              const TensileLite::ContractionProblemGemm& problem,
+                              size_t                                     workspace) {
+            return hipblaslt_jit::rankWithOrigami(request, problem, target, workspace, *catalog);
+        };
+        for(const auto& [isa, cus] :
+            {std::pair{"gfx942", 304}, std::pair{"gfx950", 256}, std::pair{"gfx1250", 192}})
+        {
+            const auto target = device(isa, cus);
+            // At most 512 candidates per request, 8 of them the knowledge's tuned sets.
+            for(const auto type : {DataType::Half,
+                                   DataType::BFloat16,
+                                   DataType::Float,
+                                   DataType::XFloat32,
+                                   DataType::Double,
+                                   DataType::Int8,
+                                   isa == std::string("gfx942") ? DataType::Float8_fnuz
+                                                                : DataType::Float8})
+                require(rank(target, gemm(type, 1024, 5120, 25600), 1 << 30).ranked.size() <= 504,
+                        std::string(isa) + ": more candidates than a request holds");
+
+            const auto problem = gemm(DataType::BFloat16, 1024, 5120, 25600);
+            const auto all     = rank(target, problem, 1 << 30).ranked;
+            const auto none    = rank(target, problem, 0).ranked;
+            std::vector<const hipblaslt_jit::Candidate*> dataParallel;
+            size_t                                       persistents = 0;
+            for(size_t i = 0; i < all.size(); ++i)
+            {
+                const auto& candidate = all[i];
+                if(candidate.contract == dp)
+                {
+                    dataParallel.push_back(&candidate);
+                    continue;
+                }
+                require(candidate.contract == persistent, std::string(isa) + ": " + candidate.contract);
+                ++persistents;
+                require(modeled(candidate, "execution")
+                            == R"({"strategy":"StreamK","assignment":"Hybrid"})",
+                        "The catalog's Stream-K kernels are Hybrid");
+                const auto launch = modeled(candidate, "launch");
+                const auto mt     = modeled(candidate, "macro_tile");
+                const auto tiles  = ((1024 + std::stoull(mt.substr(1)) - 1) / std::stoull(mt.substr(1)))
+                                   * ((5120 + std::stoull(mt.substr(mt.find(',') + 1)) - 1)
+                                      / std::stoull(mt.substr(mt.find(',') + 1)));
+                require(field(launch, "split_factor") == (field(launch, "grid") + tiles - 1) / tiles,
+                        "split_factor is ceil(grid / tiles): " + launch);
+                require(launch.find(R"("hybrid_mode":"static")") != std::string::npos,
+                        "A device of its own runs Stream-K statically: " + launch);
+                // Data-parallel first when it ties with the same kernel as Stream-K.
+                for(size_t j = i + 1; j < all.size(); ++j)
+                    require(all[j].contract != dp || parameters(all[j]) != parameters(candidate)
+                                || all[j].predictedCycles != candidate.predictedCycles,
+                            "A tied data-parallel candidate ranks after its Stream-K one");
+            }
+            require(persistents && !dataParallel.empty(), std::string(isa) + ": both contracts");
+            // Origami breaks exact ties only among its best, which can now be Stream-K.
+            require(none.size() == dataParallel.size(),
+                    "Without workspace only the data-parallel candidates");
+            std::vector<uint32_t> ids, alone;
+            for(size_t i = 0; i < none.size(); ++i)
+            {
+                require(none[i].predictedCycles == dataParallel[i]->predictedCycles,
+                        "Stream-K candidates leave the data-parallel ranking as it was");
+                ids.push_back(dataParallel[i]->id);
+                alone.push_back(none[i].id);
+            }
+            std::sort(ids.begin(), ids.end());
+            std::sort(alone.begin(), alone.end());
+            require(ids == alone, "The same data-parallel candidates without workspace");
+            auto aux = problem;
+            aux.setUseE(true);
+            require(rank(target, aux, 1 << 30).ranked.size() == dataParallel.size(),
+                    "With an auxiliary output only the data-parallel candidates");
+
+            // A co-tenant leaves fewer CUs: only gfx950's Origami then picks dynamic.
+            size_t dynamic = 0;
+            for(const auto& candidate :
+                rank(target, gemm(DataType::BFloat16, 8192, 8192, 8192, 128), 1 << 30).ranked)
+                if(candidate.contract == persistent)
+                    dynamic += modeled(candidate, "launch").find(R"("hybrid_mode":"dynamic")")
+                               != std::string::npos;
+            require((dynamic > 0) == (std::string(isa) == "gfx950"),
+                    std::string(isa) + ": " + std::to_string(dynamic) + " dynamic");
+        }
+        for(const auto& candidate :
+            rank(device("gfx90a", 104), gemm(DataType::Half, 1024, 5120, 25600), 1 << 30).ranked)
+            require(candidate.contract == dp, "gfx90a has data-parallel candidates only");
+    }
+
+    // Prints the catalog's ranking of an FP16 NN GEMM on a modeled device, one
+    // candidate per line, for architectures this host lacks.
+    int predict(const std::string& isa, int cuCount, char** sizes)
+    {
+        namespace json = hipblaslt_jit::json;
+        NotGemm    request;
+        const auto prediction
+            = hipblaslt_jit::rankWithOrigami(request,
+                                             gemm(rocisa::DataType::Half,
+                                                  std::stoull(sizes[0]),
+                                                  std::stoull(sizes[1]),
+                                                  std::stoull(sizes[2])),
+                                             device(isa, cuCount),
+                                             size_t(1) << 30,
+                                             *hipblaslt_jit::makeCatalogKnowledge());
+        for(const auto& candidate : prediction.ranked)
+        {
+            json::Members values{{"contract", json::quote(candidate.contract)}}, parameters;
+            for(const auto& value : candidate.modeled)
+                values.emplace_back(value.name, value.json);
+            for(const auto& value : candidate.parameters)
+                parameters.emplace_back(value.name, value.json);
+            std::cout << json::object({
+                {"id", json::literal(candidate.id)},
+                {"predicted_cycles", json::literal(candidate.predictedCycles)},
+                {"parameters", json::object(parameters)},
+                {"modeled", json::object(values)},
+            }) << '\n';
+        }
+        return prediction.ranked.empty();
+    }
 }
 
 int main(int argc, char** argv)
@@ -600,12 +788,15 @@ int main(int argc, char** argv)
             return decode(argv[2]);
         if(argc == 9 && std::string(argv[1]) == "--nearest")
             return nearest(argv[2], argv[3], argv + 4, std::stoi(argv[8]));
+        if(argc == 7 && std::string(argv[1]) == "--predict")
+            return predict(argv[2], std::stoi(argv[3]), argv + 4);
         if(argc != 2)
         {
             std::cerr << "Usage: " << argv[0] << " FRESH_OUTPUT_DIRECTORY\n"
                       << "       " << argv[0] << " --decode KNOWLEDGE_FILE\n"
                       << "       " << argv[0]
-                      << " --nearest KNOWLEDGE_FILE CORE_KEY M N BATCH K CU_COUNT\n";
+                      << " --nearest KNOWLEDGE_FILE CORE_KEY M N BATCH K CU_COUNT\n"
+                      << "       " << argv[0] << " --predict ARCHITECTURE CU_COUNT M N K\n";
             return 2;
         }
         const fs::path dir = argv[1];
@@ -623,6 +814,7 @@ int main(int argc, char** argv)
         testLazy(dir / "fixture.dat.zlib");
         testHeaders(dir);
         testLibrary(dir, log);
+        testPredictor();
         std::cout << "PASS jit-knowledge" << std::endl;
         return 0;
     }
