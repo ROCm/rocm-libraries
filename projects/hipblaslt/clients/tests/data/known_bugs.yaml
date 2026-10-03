@@ -38,6 +38,15 @@ Known bugs:
   # lists. Review by 2026-11-01.
   - { name: matmul_fast_check_store_extent_ROCM31016, function: matmul, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_size_t_output_overflow_all_solutions, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  # ROCM-32151: some bf16 solutions write about half the right value in the last
+  # partial M tile. On gfx942 they are offered only with
+  # TENSILE_SOLUTION_SELECTION_METHOD=2, which the Stream-K case needs. ROCM-32153:
+  # gfx950 f16 solutions 405799 and 407668 are wrong at 4099 x 2053 x 129. REMOVE each
+  # entry in the PR that fixes its defect. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
   # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
   # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
   # unit_check fails a correct GPU result. Host-side, so every platform is affected
