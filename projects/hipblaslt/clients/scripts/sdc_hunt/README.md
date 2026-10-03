@@ -37,7 +37,15 @@ category, `sdc_hunt`, is in no tier, so they run only when asked for. Pass
 `TENSILE_SOLUTION_SELECTION_METHOD=2` before running (it is recorded).
 
 The script exits non-zero if any run failed. A failing run's full output is saved
-next to the results file and named in the record's `log` field.
+next to the results file, under a name that includes the invocation's start time,
+and named in the record's `log` field.
+
+A run is not counted as clean unless its load really ran: the script waits for the
+cotenant's `READY` (up to `--load-ready-seconds`), or gives other loads
+`--load-settle-seconds`, and records a load that exits before the run as
+`load_failed`. A load that stops during the run is recorded as
+`load_ran_throughout: false`. A run in which no test ran, usually a stale binary or
+a mistyped `--filter`, also fails.
 
 This is for dedicated hardware, not CI: the runs hold the GPU for a long time, and
 on gfx1250 a page fault can leave the GPU unusable until it is reset (ROCM-32049).
