@@ -255,6 +255,22 @@ namespace
     {
         require(debug::childCategories().empty(), "Child categories without HIPBLASLT_JIT");
         std::cout << "PASS a generator child gets no --debug value without HIPBLASLT_JIT\n";
+        // knowledge and prediction lines come from hipBLASLt, never from a generator.
+        for(const auto& [value, expected] : {std::pair{"all", "timing,progress"},
+                                             std::pair{"knowledge,prediction", ""},
+                                             std::pair{"prediction,timing", "timing"}})
+        {
+            const auto run   = child("categories",
+                                   "categories-" + std::string(value),
+                                   {{"HIPBLASLT_JIT_DEBUG", value}});
+            const auto lines = split(run.log);
+            require(std::count(lines.begin(),
+                               lines.end(),
+                               "child-categories " + std::string(expected))
+                        == 1,
+                    std::string(value) + ": wrong child categories: " + run.log);
+        }
+        std::cout << "PASS a generator child gets only the timing and progress categories\n";
     }
 
     void childTiming()
@@ -351,9 +367,16 @@ int main(int argc, char** argv)
     try
     {
         if(argc == 4 && std::string(argv[1]) == "--child")
+        {
+            if(std::string(argv[2]) == "categories")
+            {
+                std::cout << "child-categories " << debug::childCategories() << std::endl;
+                return 0;
+            }
             return std::string(argv[2]) == "observer"
                        ? observerScenario(fs::path(argv[3]) / "observer")
                        : 2;
+        }
         if(argc != 2)
         {
             std::cerr << "Usage: " << argv[0] << " FRESH_OUTPUT_DIRECTORY\n";

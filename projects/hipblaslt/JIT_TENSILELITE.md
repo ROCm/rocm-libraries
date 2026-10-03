@@ -218,8 +218,9 @@ serialized one-solution library, `sources/` holds the main kernel assembly and
 the helper HIP source with its headers, and `manifest.json` records provenance.
 Generator diagnostics remain in the sibling `<output>.log`; the child working
 directory is `<output>.cwd`. When
-[`HIPBLASLT_JIT_DEBUG`](JIT.md#diagnostics-with-hipblaslt_jit_debug) is in
-effect, the backend passes the generator `--debug` and
+[`HIPBLASLT_JIT_DEBUG`](JIT.md#diagnostics-with-hipblaslt_jit_debug) has
+`timing` or `progress` on, the backend passes the generator `--debug` with those
+categories and
 `--debug-dir <output>.cwd/jit-debug`, so that directory holds the generator's
 `events.jsonl` and `timing.json`. Use a new output path for another
 compilation.
@@ -322,7 +323,7 @@ generator's own work:
 hipblaslt jit-debug {"v":1,"cat":"progress","ev":"child.candidate","pid":4242,"tid":1,"t_ms":2357.843,"q":"4242.1","gen":"4242.g1","child_pid":4250,"seq":9,"child_t_ms":2306.568,"rejected_so_far":0,"rank":0,"index":0,"of":72,"id":135,"outcome":"selected"}
 ```
 
-With a category on, hipBLASLt passes `--debug <categories> --debug-dir <dir>`
+With `timing` or `progress` on, hipBLASLt passes `--debug <categories> --debug-dir <dir>`
 to `Tensile.JitGemm` or `Tensile.SingleSolution`, where `<dir>` is `jit-debug`
 in the generator's working directory inside the scratch directory. The
 generator appends its progress events to `events.jsonl` there as they happen
