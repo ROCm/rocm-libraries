@@ -722,10 +722,10 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         return rocke_ir_builder_status(b);
     }
 
-    const rocke_layout_map_t* a_map = op->a_layout;
-    const rocke_layout_map_t* c_map = op->c_layout;
-    int a_frag = op->a_frag_len;
-    int c_frag = op->c_frag_len;
+    const rocke_layout_map_t* a_map = op->srcs[0].layout;
+    const rocke_layout_map_t* c_map = op->dst.layout;
+    int a_frag = op->srcs[0].frag_len;
+    int c_frag = op->dst.frag_len;
     int n_dk = head_size / 16;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:

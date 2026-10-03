@@ -236,9 +236,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
               ? NULL
               : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
 
-    ctx->a_per_lane = ctx->op->a_frag_len;
-    ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->a_per_lane = ctx->op->srcs[0].frag_len;
+    ctx->b_per_lane = ctx->op->srcs[1].frag_len;
+    ctx->c_per_lane = ctx->op->dst.frag_len;
 
     /* ---- block tile dims ---- (817) */
     ctx->block_m = spec->tile_m;
