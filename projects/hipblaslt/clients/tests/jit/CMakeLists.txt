@@ -160,6 +160,18 @@ endif()
 
 # Compiles the JIT solution library directly; runs without a GPU.
 if(NOT HIPBLASLT_ENABLE_YAML)
+    # The tuning knowledge reader and matcher, on a fixture database it writes.
+    add_executable(hipblaslt-jit-knowledge-test
+        jit_knowledge_test.cpp
+        "${hipblaslt_jit_source}/hipblaslt-jit-knowledge.cpp")
+    target_include_directories(hipblaslt-jit-knowledge-test PRIVATE "${hipblaslt_jit_source}")
+    target_compile_definitions(hipblaslt-jit-knowledge-test PRIVATE TENSILE_MSGPACK)
+    target_link_libraries(hipblaslt-jit-knowledge-test PRIVATE
+        roc::hipblaslt ${hipblaslt_msgpack_target} ZLIB::ZLIB hip::host)
+    hipblaslt_jit_test(jit-knowledge jit-cpu $<TARGET_FILE:hipblaslt-jit-knowledge-test>
+        "${hipblaslt_jit_scratch}/knowledge")
+    hipblaslt_jit_stage(hipblaslt-jit-knowledge-test)
+
     add_executable(hipblaslt-jit-library-test
         jit_library_test.cpp
         "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
