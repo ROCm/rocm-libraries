@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -92,8 +93,9 @@ def environment_record(xnack: str, load: str) -> dict:
     return record
 
 
-def load_command(load: str, test_bin: Path) -> Optional[list[str]]:
-    """The background workload for one load setting, or None for no load."""
+def load_command(load: str, test_bin: Path, cotenant_log: Path) -> Optional[list[str]]:
+    """The background workload for one load setting, or None for no load. The cotenant writes its
+    kernel's output, including READY, to cotenant_log."""
     if load == "none":
         return None
     if load == "gemm":
@@ -110,6 +112,8 @@ def load_command(load: str, test_bin: Path) -> Optional[list[str]]:
             str(cotenant),
             "--cus",
             load.split(":", 1)[1],
+            "--log",
+            str(cotenant_log),
             "--",
             "sleep",
             "infinity",
@@ -166,17 +170,24 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
     )
 
     background, load_log = None, None
-    bg_cmd = load_command(load, args.test_bin)
+    cotenant_log = args.results.with_suffix(f".{stem}.cotenant.log")
+    bg_cmd = load_command(load, args.test_bin, cotenant_log)
     # The load is stopped however this run ends, including on Ctrl-C while it settles, so it
     # never carries over into a later combination.
     try:
         if bg_cmd:
             load_log = args.results.with_suffix(f".{stem}.load.log")
             with load_log.open("w") as bg_out:
+                # Its own session, so stopping it reaches the cotenant and the command the
+                # cotenant launcher runs as well.
                 background = subprocess.Popen(
-                    bg_cmd, env=env, stdout=bg_out, stderr=subprocess.STDOUT
+                    bg_cmd,
+                    env=env,
+                    stdout=bg_out,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
                 )
-            problem = wait_for_load(background, load, load_log, args)
+            problem = wait_for_load(background, load, cotenant_log, args)
             if problem:
                 record.update(
                     {
@@ -220,8 +231,11 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
         record["log"] = str(log)
     if load_log and is_failure(record):
         record["load_log"] = str(load_log)
+        if cotenant_log.exists():
+            record["cotenant_log"] = str(cotenant_log)
     elif load_log:
         load_log.unlink(missing_ok=True)
+        cotenant_log.unlink(missing_ok=True)
     return record
 
 
@@ -233,11 +247,17 @@ def as_text(data) -> str:
 
 
 def stop(process: subprocess.Popen) -> None:
-    process.terminate()
-    try:
-        process.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        process.kill()
+    """Stops a background load and everything it started (its process group)."""
+    for sig, wait in ((signal.SIGTERM, 30), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            process.wait(timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def wait_for_load(
@@ -266,7 +286,10 @@ def wait_for_load(
 
 def is_failure(record: dict) -> bool:
     return bool(
-        record["tests_failed"] or record["exit_code"] != 0 or record.get("error")
+        record["tests_failed"]
+        or record["exit_code"] != 0
+        or record.get("error")
+        or record.get("load_ran_throughout") is False
     )
 
 
