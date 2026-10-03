@@ -1300,17 +1300,24 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
                 return false;
         }
 
-        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
-        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
-        // TODO remove after all types are supported
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   every gfx942 (MI300X and MI300A): fp16/bf16/fp64
+        //   228-CU MI300A only:               complex-fp64, fp32, complex-fp32
+        // TODO expand once more gfx942 configs are validated
         if(arch == 942)
         {
-            if constexpr(sizeof(Ti) == 2)
+            constexpr bool any_gfx942 = sizeof(Ti) == 2 || std::is_same<Ti, double>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, float>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
             {
-                if(prob.handle->device_properties.multiProcessorCount != 304)
+                if(prob.handle->device_properties.multiProcessorCount != 228)
                     return false;
             }
-            else if constexpr(!std::is_same<Ti, double>::value)
+            else if constexpr(!any_gfx942)
             {
                 return false;
             }
