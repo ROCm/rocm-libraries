@@ -741,6 +741,36 @@ namespace
         EXPECT_GT(counts[2], 0);
     }
 
+    // With overlapping batches (a stride shorter than one matrix), the sparse_k fill must stay
+    // inside the allocation, lda * N + (batch_count - 1) * stride elements.
+    TEST(FastCheckDevice_pre_checkin, sparse_k_fill_stays_inside_overlapping_batches)
+    {
+        IntegerExactPatternScope scope;
+        const size_t             K = 64, M = 5, ld = 8, stride = 2 * ld, batches = 3, guard = 64;
+        const size_t             used = ld * K + (batches - 1) * stride;
+        std::vector<float>       h(used + guard, 77.f);
+        float*                   d = nullptr;
+        ASSERT_EQ(hipMalloc(&d, h.size() * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(d, h.data(), h.size() * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, false);
+        hipblaslt_init_device(ABC_dims::A,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d,
+                              M,
+                              K,
+                              ld,
+                              HIP_R_32F,
+                              stride,
+                              batches);
+        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        (void)hipFree(d);
+        for(size_t idx = used; idx < h.size(); idx++)
+            EXPECT_EQ(h[idx], 77.f) << "offset " << idx;
+    }
+
     // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
     // name is rejected.
     TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
