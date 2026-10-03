@@ -121,6 +121,31 @@ def test_data_registers_of_a_buffer_load_are_not_addresses():
     assert _reasons(asm) == []
 
 
+def test_a_long_branch_offset_is_not_an_address():
+    # The gfx950 long-branch sequence: s64 holds a constant branch offset, and the next use of
+    # s[64:65] as an address is in another block, past the jump.
+    asm = """
+    s_getpc_b64 s[62:63]
+    s_add_i32 s64, 0x424f4, 4
+    s_add_u32 s62, s62, s64
+    s_addc_u32 s63, s63, 0
+    s_setpc_b64 s[62:63]
+    s_cmp_eq_u64 s[64:65], 0
+    s_load_dword s8, s[64:65], 0x0
+    """
+    assert _reasons(asm) == []
+
+
+def test_an_address_update_before_a_jump_is_still_reported():
+    asm = """
+    s_add_i32 s8, s8, 64
+    s_load_dwordx2 s[10:11], s[8:9], 0x0
+    s_branch label_next
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "s8" in reasons[0]
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first

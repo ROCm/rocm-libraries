@@ -14,8 +14,9 @@ descriptor (s[N:N+3] in a buffer instruction), the address pair of a scalar load
 the address pair or saddr of a global or flat access. For each write to such a register by an add
 or subtract, it requires either a carry-producing instruction followed, within a short window,
 by a carry-consuming write to the next register, or a full redefinition of the pair. Anything
-else is reported, if the updated value is next used as an address before it is overwritten. The
-scan is linear and ignores control flow, so a finding is a lead to read, not a proof.
+else is reported, if the updated value is next used as an address before it is overwritten or an
+unconditional jump. An add of two constants sets the register rather than advancing an address,
+so it is not reported. The scan is otherwise linear, so a finding is a lead to read, not a proof.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated
@@ -60,6 +61,8 @@ NO_CARRY = {
 }
 # Instructions that rewrite a whole pair, which ends any obligation on its low dword.
 PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64", "v_add_nc_u64"}
+# Unconditional transfers: the next instruction in the listing is not the next one executed.
+JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
 
 WINDOW = 16
 # How far a written low dword is followed to its next use.
@@ -222,7 +225,7 @@ def _lint_kernel(asm: str) -> list[Finding]:
         for j in range(start + 1, min(len(insts), start + 1 + FLOW_WINDOW)):
             if low in uses[j]:
                 return True
-            if low in writes[j]:
+            if low in writes[j] or insts[j].mnemonic in JUMPS:
                 return False
         return False
 
@@ -233,6 +236,8 @@ def _lint_kernel(asm: str) -> list[Finding]:
             continue
         low, high = dst[0], dst[0].plus(1)
         if inst.mnemonic in NO_CARRY:
+            if not any(parse_regs(o) for o in inst.operands[1:]):
+                continue
             if flows_to_address(low, i):
                 findings.append(
                     Finding(
