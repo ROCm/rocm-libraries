@@ -73,7 +73,7 @@ the helper symbols before the first submission.
 | One-solution builder | One recipe and target produce a source bundle through `Tensile.SingleSolution --source-only` and the existing TensileLite generators and validators: the main kernel assembly, the helper HIP source and its headers, and the one-solution library entry. It builds no code objects in this mode. |
 | Ranked recipe selector | Supplied candidates and problem facts produce validated recipes or rejection reasons. `Tensile.JitGemm` calls the builder without running a model, and publishes the first `requested_solutions` accepted candidates (default 1) that `exclude_kernel_names` does not name, each with a different kernel. It compares the kernel names that the published library uses. |
 | TensileLite backend | `hipblaslt-jit-tensilelite.cpp`. It writes the `Tensile.JitGemm` request from the prediction, or passes an explicit recipe through, runs the generator with `--source-only`, and returns each published bundle's library entry, main kernel assembly and helper source. It builds and loads nothing. |
-| Process backend | `hipblaslt-jit-tensilelite-backend.cpp` defines `makeDefaultProcessBackend` for heuristic queries: the TensileLite backend configured from the [tool paths](#tool-paths), the Origami predictor and the catalog knowledge. |
+| Process backend | `hipblaslt-jit-tensilelite-backend.cpp` defines `makeDefaultProcessBackend` for heuristic queries: the TensileLite backend configured from the [tool paths](#tool-paths), the Origami predictor and the tuning library knowledge. |
 | Direct entry point and test | An explicit recipe and GEMM descriptors produce a checked algorithm. `hipblaslt-jit-direct-gemm-test` exercises C/C++ execution independently of the generic entry point, and `hipblaslt-jit-generic-gemm-test` runs the generic flow with this backend. |
 
 With `createBackend`, an empty `Options::configPath` makes Jit run the Origami
@@ -241,11 +241,11 @@ through `tensilelite::createBackend` when `Options::configPath` is empty.
 
 `TensileLiteBackend` implements the Jit backend interface. Both entry points
 create it through `tensilelite::createBackend`, which configures a Jit with the
-Origami predictor, the TensileLite defaults as tuning knowledge, the comgr
+Origami predictor, the tuning library knowledge, the comgr
 builder and the Tensile loader. Without a recipe, the backend consumes the
 predictor's prediction and writes it as the `Tensile.JitGemm` request; with a recipe, Jit skips prediction and the backend
-passes the recipe to `Tensile.SingleSolution`. Knobs the model does not predict
-keep TensileLite defaults and derivation. Both run with `--source-only` and the
+passes the recipe to `Tensile.SingleSolution`. Knobs that neither the model nor
+a tuned seed supplies keep TensileLite defaults and derivation. Both run with `--source-only` and the
 code-object version of the Jit request. When Jit asks for more than one
 solution, the request adds `requested_solutions`, and `Tensile.JitGemm`
 publishes one bundle per accepted candidate as `bundle-<rank>`, each with a

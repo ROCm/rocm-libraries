@@ -253,5 +253,5 @@ reasons. Complex, zero-K, alpha-zero, and mixed MAC-type cases verify the absenc
 of a usable ranking and the absence of generation. These are diagnostic checks,
 not successful numerical executions. Explicit supported recipes have their own
 builder/runtime coverage. None of these tests establishes the activation
-specialization or tuning-blueprint behavior described in the
+specialization described in the
 [roadmap](../../../JIT_ROADMAP.md#roadmap).

@@ -313,7 +313,8 @@ The library's TensileLite backend creates the ranked request internally
 from a generic operation request. Tuned sets from the knowledge file come first,
 as `tensilelite.tuned.v1` candidates. Its data-parallel GEMM contract supplies
 `MatrixInstruction`, macro tile/`DepthU`, `NonTemporalA/B`, workgroup mapping,
-stagger and launch outputs. This module retains the supplied order, translates
+stagger and launch outputs. On gfx942, gfx950 and gfx1250, Hybrid Stream-K
+candidates name the `origami.gemm.persistent.v1` contract in `modeled.contract`. This module retains the supplied order, translates
 model units, and rejects unsupported or changed predictions before compilation. Descriptor
 scale modes are translated here, separately from tuning parameters, so the C++
 caller does not repeat target-dependent layout rules.

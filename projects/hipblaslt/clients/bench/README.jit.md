@@ -1,8 +1,9 @@
 # Benchmark JIT GEMM solutions with hipblaslt-bench
 
 With `HIPBLASLT_JIT=2`, `hipblaslt-bench` benchmarks just-in-time (JIT)
-generated kernels through its ordinary heuristic query. For problems covered by
-its GPU performance model, Origami ranks kernel parameter recipes.
+generated kernels through its ordinary heuristic query. Tuned parameter sets
+from the knowledge file come first, and for problems covered by its GPU
+performance model, Origami ranks the other kernel parameter recipes.
 `Tensile.JitGemm` validates those recipes in order and asks
 `Tensile.SingleSolution` to generate the first valid solutions, including any
 helper kernels they need, and hipBLASLt compiles them with comgr and publishes
@@ -11,16 +12,17 @@ them into the JIT solution library.
 Generation finishes inside the heuristic query, before correctness checks,
 warmup, and timing. CPU timing still includes host dispatch for each GEMM. This
 feature targets functional coverage; the predicted solution is not guaranteed to
-be the fastest available kernel. Incorporating tuning knowledge into prediction
-is planned work in the [JIT roadmap](../../JIT_ROADMAP.md#roadmap).
+be the fastest available kernel. The [JIT guide](../../JIT.md#predictor-and-tuningknowledge)
+describes the tuning knowledge, and the [JIT roadmap](../../JIT_ROADMAP.md#roadmap)
+the remaining calibration and measurement work.
 
 The components interact in this order:
 
 1. The benchmark creates ordinary matrix descriptors and calls
    `hipblasLtMatmulAlgoGetHeuristic` or `GemmInstance::algoGetHeuristic`.
 2. hipBLASLt looks the problem up in the JIT solution library. For the solutions
-   it lacks, the library-owned TensileLite backend asks Origami for ranked
-   tuning parameters.
+   it lacks, the library-owned TensileLite backend takes the nearest tuned sets
+   from the knowledge file and asks Origami for ranked tuning parameters.
 3. `Tensile.JitGemm` validates the supplied candidates, and `SingleSolution`
    writes the first valid ones as source bundles: main kernel assembly, helper
    source and library entry.
@@ -87,11 +89,12 @@ instruction set before compilation. Origami ranks `MatrixInstruction`, macro til
 outputs applicable to the data-parallel candidate domain. The
 [modeled-input inventory](../../JIT.md#origami-modeled-inputs) records translations
 and mode constraints. Unsupported translations or changed modeled values reject
-the candidate. Only unpredicted parameters begin with TensileLite defaults and
-are then derived or validated by its solution builder.
+the candidate. Only parameters that neither Origami nor a tuned seed supplies
+begin with TensileLite defaults and are then derived or validated by its
+solution builder.
 The manifest records which values came from prediction, defaults, or derivation.
-If Origami returns no finite positive-latency ranking, the request fails before
-invoking the generator. If every ranked recipe is invalid, the request reports
+If Origami returns no finite positive-latency ranking and the knowledge supplies
+no tuned seed, the request fails before invoking the generator. If every ranked recipe is invalid, the request reports
 all candidate rejection reasons. Neither path adds a default or native recipe.
 In both cases the heuristic query returns no solution, stderr has one
 `hipblaslt error: JIT ...` line naming the cause, and the benchmark reports
@@ -115,9 +118,15 @@ with gfx1250 overrides, so its latency estimates are not calibrated for gfx1250.
 The estimates omit bias, activation, scaling, auxiliary-output, and output-amax overhead.
 These affect ranking; TensileLite still checks whether the chosen recipe is legal for the target.
 
-Predicted recipes keep `GlobalSplitU: 1` and `TileProcessingStrategy: None`, so they do not split
-the K reduction across workgroups. Exploring split-K and Stream-K during
-prediction is outside this initial policy. For an exact recipe, use the
+Tuned seeds (`tensilelite.tuned.v1`) keep their tuned split-K (`GlobalSplitU`)
+and execution policy (`TileProcessingStrategy`, `WorkAssignment`). The catalog's
+data-parallel recipes (`origami.gemm.dp.v1`) keep `GlobalSplitU: 1` and
+`TileProcessingStrategy: None`. On gfx942, gfx950 and gfx1250, when the request
+allows workspace and has no auxiliary output, the catalog also offers Hybrid
+Stream-K candidates (`origami.gemm.persistent.v1`), whose grid, reduction and
+mapping the runtime chooses at each launch. Without workspace, the predictor
+skips Stream-K seeds and seeds with a fixed `GlobalSplitU` above 1. The [JIT guide](../../JIT.md#predictor-and-tuningknowledge)
+describes both. For an exact recipe, use the
 `direct-gemm` case in the [JIT tests](../tests/jit/README.md) or
 `python -m Tensile.SingleSolution`. Explicit YAML bypasses prediction and can
 select split-K or Stream-K recipes accepted by the generator and runtime.

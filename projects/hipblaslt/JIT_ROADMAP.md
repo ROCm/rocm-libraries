@@ -68,11 +68,11 @@ TensileLite.
 | Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| HipKittens, other backends | Extension points behind the same interface. The HipKittens backend instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It serves one gfx950 kernel through the internal entry points, and heuristic queries when `HIPBLASLT_JIT_BACKENDS` names it (see the [HipKittens backend guide](JIT_HIPKITTENS.md)). |
+| HipKittens, other backends | Extension points behind the same interface. The HipKittens backend instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It serves gfx950 BF16 and FP16 TN GEMM kernels through the internal entry points, and heuristic queries when `HIPBLASLT_JIT_BACKENDS` names it (see the [HipKittens backend guide](JIT_HIPKITTENS.md)). |
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
-| TuningKnowledge | A new interface that supplies values for knobs the model does not predict. It initially returns TensileLite defaults; real tuning data (tuning blueprints) is planned as [future work](#roadmap). |
+| TuningKnowledge | A new interface that supplies the seeds the Predictor ranks, including values for knobs the model does not predict. The TensileLite backend's knowledge supplies tuned sets from a database built from the shipped logic files, then the catalog's tile shapes; see [predictor and TuningKnowledge](JIT.md#predictor-and-tuningknowledge). |
 | Code-object builder | hipBLASLt C++ that turns emitted source into executable code objects through AMD comgr. |
 | JIT solution library | The persistent cache of generated solutions, loaded as a second master library. |
 
@@ -82,7 +82,8 @@ Jit is the component name; the design does not introduce a `JitInterface`
 type name. Jit passes the algorithm parameters and gfx target to the selected
 backend and receives solutions back. Backend implementations are backend
 specific and independent of one another: TensileLite is live, HipKittens serves
-the internal entry points, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
+the internal entry points and, when `HIPBLASLT_JIT_BACKENDS` names it, heuristic
+queries; other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
 does not depend on TensileLite.
 
 Backends generate code at run time. Prebuilt or handwritten assembly kernels are
@@ -104,9 +105,13 @@ The Predictor produces ranked candidates for Jit. Its inputs are Origami and
 TuningKnowledge. The C++ Origami predictor behind the Predictor interface
 (`hipblaslt-jit-origami-predictor.cpp`) ranks synthetic candidates with Origami
 and emits the `origami.gemm.dp.v1` and `origami.gemm.persistent.v1` modeled
-contracts. TuningKnowledge supplies
-the TensileLite defaults used today for unmodeled knobs. Replacing those
-defaults with stored tuning data is later work, listed under
+contracts. The TensileLite backend's TuningKnowledge reads a knowledge file
+built from the shipped logic files and supplies the nearest tuned sets first,
+each as a `tensilelite.tuned.v1` candidate that keeps its tuned split-K and
+execution policy. The catalog's seeds follow, and on gfx942, gfx950 and gfx1250
+Origami ranks them as data-parallel and Hybrid Stream-K candidates; see
+[predictor and TuningKnowledge](JIT.md#predictor-and-tuningknowledge).
+Calibration and native gfx942 and gfx1250 measurement remain
 [future work](#roadmap).
 
 ### Code-object construction with comgr
@@ -226,7 +231,7 @@ each step advances.
 | Step | Status | Scope | Work area |
 | --- | --- | --- | --- |
 | 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` used the internal header until step 5 removed it. | Backend interface |
-| 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
+| 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them. | Backend interface; prediction; tuning knowledge |
 | 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. comgr's own cache keeps its default. | Backend interface |
 | 4. JIT solution library | Done | One standard lazy TensileLite library per cache key under `HIPBLASLT_JIT_LIBRARY_PATH` or a private per-user default, with exact-size entries merged under a file lock by atomic rename, loaded as a second master library that reloads when other processes publish, with reserved solution indices from 2^30 to `INT32_MAX`. `jit::getLibraryAlgos` looks solutions up and publishes them; step 5 connects the heuristic queries to it. | JIT solution library (cache) |
 | 5. Heuristic integration | Done | `HIPBLASLT_JIT` modes 0, 1 and 2 in `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm, with the fallback order and failure rules above and every JIT failure reported on stderr. The tool-path defaults are compiled into the library, a JIT-off build warns once when it sees `HIPBLASLT_JIT`, and `hipblaslt-bench --jit-gemm` is removed. The shared driver checks each mode, reuse of the library by a second process, failure reports and the JIT-off warning. | JustInTime library type; backend interface |
@@ -238,7 +243,7 @@ The following work sits outside the seven steps and remains future:
 | Work | Remaining contract |
 | --- | --- |
 | Activation specialization | Generated kernels already compile the requested bias (presence, type and source), aux output, scale vectors, amax and gate residual exactly. Only the activation stays generic: each kernel carries every activation kind and selects the requested one at run time. Compiling only the requested kind remains future work; it measured a gain of 0.7% or less on gfx950. This is separate from modeling epilogue cost. |
-| Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
-| HipKittens and other backends | Implement the backend interface. The [HipKittens backend](JIT_HIPKITTENS.md) serves one gfx950 BF16 GEMM kernel through the internal entry points, and heuristic queries after or before TensileLite when `HIPBLASLT_JIT_BACKENDS` names it. More kernels and more targets remain future. |
+| Tuning knowledge | The TensileLite backend's TuningKnowledge supplies tuned seeds from a database built from the shipped logic files, and the catalog's Hybrid Stream-K candidates under the `origami.gemm.persistent.v1` contract (see [predictor and TuningKnowledge](JIT.md#predictor-and-tuningknowledge)). Calibrating Origami's estimates, which on gfx1250 combine provisional gfx950 memory values with gfx1250 overrides, and measuring the tuned seeds and Stream-K candidates on native gfx942 and gfx1250 devices, where their test routes are compile-only, remain future. |
+| HipKittens and other backends | Implement the backend interface. The [HipKittens backend](JIT_HIPKITTENS.md) serves gfx950 BF16 and FP16 TN GEMM kernels with alpha, beta·C, strided batches and any leading dimensions, through the internal entry points, and heuristic queries after or before TensileLite when `HIPBLASLT_JIT_BACKENDS` names it. Tails (partial tiles), gfx1250, FP8 and MXFP8, and other backends remain future. |
 | KFA metadata convergence | Complete the KFA metadata that JIT generators emit, then prove argument, launch, helper, workspace and synchronization equivalence before generated kernels share the custom-kernel dispatch path. This reuses the KFA path; it does not make the JIT load prebuilt kernels. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |
