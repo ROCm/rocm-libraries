@@ -267,10 +267,7 @@ jobs:
             -DTENSILELITE_BUILD_TESTING=OFF -DTENSILELITE_ENABLE_CLIENT=OFF \
             2>&1 | tee jit-test-logs/configure.log
           cmake --build "$build" --parallel "$jobs" 2>&1 | tee jit-test-logs/build.log
-          # Reading a library entry queries the current device for its WorkgroupMappingXCC
-          # predicate, so the tests that read the gfx950 bundles' entries need a GPU.
           ctest --test-dir "$build/clients/tests/jit" -L jit-cpu --no-tests=error \
-            -E '^jit-(library|library-concurrency|bundle-freshness)$' \
             --output-on-failure 2>&1 | tee jit-test-logs/ctest.log
           "$build/clients/staging/hipblaslt-jit-knowledge-test" --decode \
             "$build/Tensile/library/gfx942/hipblaslt-jit-knowledge-gfx942.dat.zlib" \
