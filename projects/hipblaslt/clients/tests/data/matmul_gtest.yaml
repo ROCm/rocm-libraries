@@ -4760,6 +4760,8 @@ Tests:
 # the E8M0 scales with 1, 2 or 4, chosen per block of 32. fast_check checks D
 # against the dequantized values, so every element of D is exact and a scale
 # read from the wrong block changes it. One batch, lda and ldb equal to the rows.
+# The MX kernels need M and N to be multiples of 16, so 1040 x 528 is the edge-tile
+# shape here.
 ###############################################################################
 
 # Every fp8 format pair, each solution launched and checked twice.
@@ -4773,7 +4775,7 @@ Tests:
     - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   matrix_size:
     - { M: 256, N: 256, K: 512 }
-    - { M: 1031, N: 517, K: 1024 }
+    - { M: 1040, N: 528, K: 1024 }
   transA: T
   transB: N
   alpha: 2.0
@@ -4794,7 +4796,7 @@ Tests:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
   matrix_size:
-    - { M: 1031, N: 517, K: 1024 }
+    - { M: 1040, N: 528, K: 1024 }
   transA: T
   transB: N
   alpha: 2.0

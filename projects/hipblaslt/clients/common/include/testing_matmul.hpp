@@ -3046,8 +3046,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-            hA.emplace_back(TiA, fast_check_only ? 0 : size_A[i]);
-            hB.emplace_back(TiB, fast_check_only ? 0 : size_B[i]);
+            // MX operands are generated on the host, so they keep their host copy.
+            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : size_A[i]);
+            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : size_B[i]);
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
