@@ -1131,6 +1131,11 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
             return "fast_check supports MX scales only on both A and B";
         if(!isMxFp8(TiA) || !isMxFp8(TiB))
             return "fast_check supports MX scales only with fp8 (E4M3, E5M2) A and B";
+        // integer_exact writes E8M0 scale codes, which a UE4M3 or UE5M3 format would read as
+        // other values.
+        if(scaleDataType(arg.scaleA) != HIP_R_8F_UE8M0
+           || scaleDataType(arg.scaleB) != HIP_R_8F_UE8M0)
+            return "fast_check supports MX scales only in an E8M0 (UE8M0) format";
         if(arg.batch_count > 1)
             return "fast_check supports MX scales for a single batch only";
     }
@@ -6318,6 +6323,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                             buffers.push_back({"scaleAlpha_vector",
                                                dScaleAlphaVec[i].buf(),
                                                size_scaleAlphaVec[i] * realDataTypeSize(Talpha)});
+                        // MX scales are one byte each, and either can be placed.
+                        if(isBlockScaling(arg.scaleA))
+                            buffers.push_back(
+                                {"scale_a", dScaleA[i].buf(), size_scaleAVec[i] * num_batches[i]});
+                        if(isBlockScaling(arg.scaleB))
+                            buffers.push_back(
+                                {"scale_b", dScaleB[i].buf(), size_scaleBVec[i] * num_batches[i]});
                         reportFailure("fast_check",
                                       scan.message + res.message
                                           + fast_check_describe_buffers(buffers));
