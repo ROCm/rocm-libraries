@@ -5,9 +5,12 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Added
+* Added support for the `gfx1250-strict` architecture.
 * Added the matrix-matrix based interpolation operators `MMExtPI` and `MMExtPE` to the `InterpolationType` enumeration, selectable through `RugeStuebenAMG::SetInterpolationType()`.
 * Added `RugeStuebenAMG::SetInterpolationTruncationFactor()` and `RugeStuebenAMG::SetInterpolationMaxElmts()` to truncate the interpolation operator, dropping entries that are small relative to the largest entry of their row and capping the number of entries per row.
-* Added support for the `gfx1250-strict` architecture.
+
+### Changed
+* All device memory in the HIP backend, including temporary rocPRIM buffers, is now allocated and released through the rocALUTION allocation layer instead of direct `hipMalloc` and `hipFree` calls.
 
 ### Resolved issues
 * Fixed wrong smoothed aggregation prolongation operators from the deprecated `LocalMatrix::AMGSmoothedAggregation()` on wave32 devices for rows with 64 or more entries.
