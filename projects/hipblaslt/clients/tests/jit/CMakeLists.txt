@@ -139,6 +139,7 @@ if(HIPBLASLT_JIT_TESTING)
             HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/mock-backend-library)
         foreach(case "splitk;splitk;--k;512"
                      "streamk;streamk;--k;4096;--workspace-fallback;1"
+                     "streamk-hybrid;streamk-hybrid;--k;4096;--workspace-fallback;1"
                      "amax;amax;--amax;1"
                      "alpha-zero;amax;--amax;1;--alpha-zero;1")
             list(POP_FRONT case name bundle)
