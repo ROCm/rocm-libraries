@@ -985,6 +985,19 @@ def deferCyclicGC():
         atexit.register(gc.unfreeze)
 
 
+# hipBLASLt reserves solution indices from 2**30 for solutions it generates at run time.
+RESERVED_JIT_INDEX = 2**30
+
+
+def checkReservedJitIndices(solutionCount: int):
+    """Raise when solutionCount indices from 0 would reach the reserved JIT range."""
+    if solutionCount > RESERVED_JIT_INDEX:
+        raise RuntimeError(
+            f"{solutionCount} solutions exceed the {RESERVED_JIT_INDEX} indices below the range "
+            "hipBLASLt reserves for JIT solutions"
+        )
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -1101,6 +1114,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             for _, sol in lib.solutions.items():
                 sol.index = solnReIndex
                 solnReIndex += 1
+    checkReservedJitIndices(solnReIndex)
 
     if args["GenSolTable"]:
         matchTable = {}

@@ -77,6 +77,19 @@ namespace hipblaslt_ext::experimental::jit
                                                 Solution&      solution,
                                                 Diagnostics&   diagnostics);
 
+    // Up to count solution indices for exactly this request: those already in the
+    // JIT solution library in the order they were published, then solutions
+    // generated with backend and published now, best first, under the same device
+    // rules as getJitAlgo. The indices persist across processes; pass them to
+    // hipblaslt_ext::getAlgosFromIndex.
+    HIPBLASLT_EXPORT hipblasStatus_t getLibraryAlgos(int                   device,
+                                                     const Request&        request,
+                                                     const Backend&        backend,
+                                                     size_t                count,
+                                                     size_t                maxWorkspaceBytes,
+                                                     std::vector<int32_t>& indices,
+                                                     Diagnostics&          diagnostics);
+
     // Build the implemented GEMM request from existing hipBLASLt descriptors.
     // Other operations can add factories without changing getJitAlgo or Backend.
     HIPBLASLT_EXPORT hipblasStatus_t makeGemmRequest(hipblasLtHandle_t       handle,

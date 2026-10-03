@@ -29,17 +29,18 @@ the tests run.
 `hipblaslt-jit-mock-backend-test` and `hipblaslt-jit-api-test` replay bundles
 through. The CTest tests are:
 
-- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object` and
-  `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
+- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object`,
+  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-source-bundle` and `jit-disabled`.
 - `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
-  build for gfx950 also `jit-mock-backend`, `jit-bundle-failures`,
+  build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
+  `jit-bundle-failures`,
   `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
   and `jit-api-alpha-zero`.
 
-A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-bundle-freshness` and none
-of the tests that replay bundles, because the committed library entries are
-MsgPack.
+A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-library`,
+`jit-library-concurrency` or `jit-bundle-freshness` and none of the tests that
+replay bundles, because the library entries are MsgPack.
 
 ## What each test checks
 
@@ -51,6 +52,9 @@ MsgPack.
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |
 | `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, rejected mock options, and bundle lifetime |
+| `jit-mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A query for two solutions generates only for the shortfall and skips the published kernel. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
+| `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
+| `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name |
 | `jit-api-alpha-zero` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
 | `jit-helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
@@ -67,7 +71,10 @@ without JIT.
 directory; CTest passes `data/gfx950/splitk`. It creates the mock backend with
 `jit::mock::createBackend` from `hipblaslt-jit-mock.hpp`, so generation runs no
 generator, and checks an FP16 problem with M=256, N=128, K=512, the record
-fault and rejected mock options.
+fault and rejected mock options. With `--library` after the bundle it runs the
+`jit-mock-backend-library` checks instead, and starts its second process
+itself. That mode refuses to run unless `HIPBLASLT_JIT_LIBRARY_PATH` is set, so
+that it never publishes into the default library.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
 uses as the scratch parent; it needs no GPU. Both are built only with
 `HIPBLASLT_ENABLE_JIT=ON`.
@@ -79,6 +86,16 @@ solution the mock backend replays from `BUNDLE`; `--m`, `--n`, `--k`,
 `test_bundle_failures.py` and `test_helper_failures.py` take that binary, a
 valid split-K source bundle and a fresh output directory; they damage copies of
 the bundle and replay them.
+
+## JIT solution library tests
+
+`hipblaslt-jit-library-test` compiles the JIT solution library directly and
+needs no GPU. It takes a split-K source bundle, `data/gfx950/splitk` in CTest,
+whose library entry it publishes under several kernel names, and a scratch
+directory for the libraries it creates; it ignores
+`HIPBLASLT_JIT_LIBRARY_PATH`. Adding `--writers N --per-writer M` runs the
+multi-process check instead: N writer processes each publish M entries shared
+by all writers and M of their own, while one reader process looks them up.
 
 ## Code-object tests
 

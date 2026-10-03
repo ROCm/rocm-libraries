@@ -19,6 +19,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -597,18 +598,134 @@ namespace
         std::cout << "PASS missing replay bundle rejected\n";
         std::cout << "ALL MOCK BACKEND CHECKS PASSED\n";
     }
+
+    std::vector<int32_t> libraryAlgos(Problem& p, const jit::Backend& provider, const char* label)
+    {
+        int device = -1;
+        HIP(hipGetDevice(&device));
+        float                alpha = 1.25f, beta = 0.5f;
+        std::vector<int32_t> indices;
+        jit::Diagnostics     diagnostics;
+        const auto           status = jit::getLibraryAlgos(device,
+                                                 p.request(alpha, beta),
+                                                 provider,
+                                                 1,
+                                                 std::numeric_limits<size_t>::max(),
+                                                 indices,
+                                                 diagnostics);
+        require(status == HIPBLAS_STATUS_SUCCESS && indices.size() == 1 && indices[0] >= (1 << 30),
+                std::string(label) + ": " + diagnostics.message + " (status "
+                    + std::to_string(status) + ")");
+        std::cout << label << ": " << diagnostics.message << '\n';
+        return indices;
+    }
+
+    // Runs index the way a caller that holds only the index would.
+    void runIndex(Problem& p, int32_t index, const std::string& replay, const std::string& label)
+    {
+        std::vector<int>                              wanted{index};
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        BLAS(hipblaslt_ext::getAlgosFromIndex(p.handle, wanted, results));
+        require(results.size() == 1 && hipblaslt_ext::getIndexFromAlgo(results[0].algo) == index,
+                label + ": the index did not resolve");
+        auto& algo = results[0].algo;
+        require(hipblaslt_ext::getKernelNameFromAlgo(p.handle, algo)
+                    == solutionField(replay, "kernel_name"),
+                label + ": kernel name lookup did not reach the published kernel");
+        float  alpha = 1.25f, beta = 0.5f;
+        size_t bytes = 0;
+        BLAS(hipblaslt_ext::matmulIsAlgoSupported(
+            p.handle, p.desc, &alpha, p.la, p.lb, &beta, p.lc, p.ld, algo, bytes));
+        require(bytes > 0, label + ": the split-K solution reported no workspace");
+        p.W = std::make_unique<DeviceBuffer<unsigned char>>(bytes);
+        p.poison();
+        BLAS(p.call(algo, alpha, beta, 0));
+        p.verify(label, 0, alpha, beta);
+    }
+
+    void publishToLibrary(const std::string& replay)
+    {
+        const char* root = std::getenv("HIPBLASLT_JIT_LIBRARY_PATH");
+        require(root && *root, "Set HIPBLASLT_JIT_LIBRARY_PATH to a scratch directory");
+        Problem    p;
+        const auto index = libraryAlgos(p, backend(replay), "Publishing process")[0];
+        require(std::filesystem::exists(std::filesystem::u8path(root) / "v1" / "allocator.dat"),
+                "The library was not created under HIPBLASLT_JIT_LIBRARY_PATH");
+        require(libraryAlgos(p, backend(replay, mock::Options::Fault::Trap), "Repeated lookup")[0]
+                    == index,
+                "A repeated lookup returned another index");
+        {
+            int device = -1;
+            HIP(hipGetDevice(&device));
+            float                alpha = 1.25f, beta = 0.5f;
+            std::vector<int32_t> indices;
+            jit::Diagnostics     diagnostics;
+            const auto           status = jit::getLibraryAlgos(device,
+                                                     p.request(alpha, beta),
+                                                     backend(replay),
+                                                     2,
+                                                     std::numeric_limits<size_t>::max(),
+                                                     indices,
+                                                     diagnostics);
+            require(status == HIPBLAS_STATUS_SUCCESS && indices == std::vector<int32_t>{index}
+                        && diagnostics.message == "Nothing was published",
+                    "Generating for a shortfall did not skip the published kernel: "
+                        + diagnostics.message);
+        }
+        std::cout << "PASS a shortfall generation skips the kernels the library already holds\n";
+        runIndex(p, index, replay, "Published index");
+        std::cout << "PASS mock solution published into the JIT library and run by its index\n";
+
+        std::cout.flush();
+        const auto indexText = std::to_string(index);
+        const auto child     = fork();
+        require(child >= 0, "fork failed");
+        if(child == 0)
+        {
+            execl("/proc/self/exe",
+                  "hipblaslt-jit-mock-backend-test",
+                  replay.c_str(),
+                  "--library-reader",
+                  indexText.c_str(),
+                  static_cast<char*>(nullptr));
+            _exit(127);
+        }
+        int status = 0;
+        require(waitpid(child, &status, 0) == child && WIFEXITED(status)
+                    && WEXITSTATUS(status) == 0,
+                "The second process failed (wait status " + std::to_string(status) + ")");
+        std::cout << "ALL MOCK BACKEND LIBRARY CHECKS PASSED\n";
+    }
+
+    void readLibrary(const std::string& replay, int32_t index)
+    {
+        Problem p;
+        runIndex(p, index, replay, "Index from another process");
+        std::cout << "PASS a new process ran another process's index before any lookup\n";
+        require(libraryAlgos(p, backend(replay, mock::Options::Fault::Trap), "Second process")[0]
+                    == index,
+                "The second process found another index");
+        std::cout << "PASS a new process found the published solution without generating\n";
+    }
 }
 
 int main(int argc, char** argv)
 {
-    if(argc != 2)
+    const std::string mode = argc > 2 ? argv[2] : "";
+    if(!(argc == 2 || (argc == 3 && mode == "--library")
+         || (argc == 4 && mode == "--library-reader")))
     {
-        std::cerr << "Usage: " << argv[0] << " SPLITK_API_OUTPUT/bundle\n";
+        std::cerr << "Usage: " << argv[0] << " SPLITK_API_OUTPUT/bundle [--library]\n";
         return 2;
     }
     try
     {
-        test(argv[1]);
+        if(argc == 2)
+            test(argv[1]);
+        else if(argc == 3)
+            publishToLibrary(argv[1]);
+        else
+            readLibrary(argv[1], std::stoi(argv[3]));
     }
     catch(const std::exception& error)
     {

@@ -97,9 +97,13 @@ if(HIPBLASLT_JIT_TESTING)
 
     # The committed bundles hold gfx950 code and MsgPack library entries.
     if(hipblaslt_jit_gfx950 AND NOT HIPBLASLT_ENABLE_YAML)
+        set(mock $<TARGET_FILE:hipblaslt-jit-mock-backend-test>)
         set(api $<TARGET_FILE:hipblaslt-jit-api-test>)
-        hipblaslt_jit_test(jit-mock-backend jit-gpu
-            $<TARGET_FILE:hipblaslt-jit-mock-backend-test> "${hipblaslt_jit_splitk}")
+        hipblaslt_jit_test(jit-mock-backend jit-gpu ${mock} "${hipblaslt_jit_splitk}")
+        hipblaslt_jit_test(jit-mock-backend-library jit-gpu
+            ${mock} "${hipblaslt_jit_splitk}" --library)
+        set_tests_properties(jit-mock-backend-library PROPERTIES ENVIRONMENT
+            HIPBLASLT_JIT_LIBRARY_PATH=${hipblaslt_jit_scratch}/mock-backend-library)
         foreach(case "splitk;splitk;--k;512"
                      "streamk;streamk;--k;4096;--workspace-fallback;1"
                      "amax;amax;--amax;1"
@@ -117,10 +121,31 @@ if(HIPBLASLT_JIT_TESTING)
     endif()
 endif()
 
-# Fails when the committed bundles no longer match the layout versions in
-# GlobalParameters.py, the builder's code-object version or the host library.
 # The library entries are MsgPack, which a YAML build cannot read.
 if(NOT HIPBLASLT_ENABLE_YAML)
+    # Compiles the JIT solution library directly; runs without a GPU.
+    add_executable(hipblaslt-jit-library-test
+        jit_library_test.cpp
+        "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-fs.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-library.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-msgpack.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp")
+    target_include_directories(hipblaslt-jit-library-test PRIVATE
+        "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+    target_compile_definitions(hipblaslt-jit-library-test PRIVATE
+        HIPBLASLT_ENABLE_JIT HIPBLASLT_JIT_LIBRARY_TESTING)
+    target_link_libraries(hipblaslt-jit-library-test PRIVATE
+        roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} ZLIB::ZLIB amd_comgr
+        hip::device Threads::Threads)
+    hipblaslt_jit_test(jit-library jit-cpu $<TARGET_FILE:hipblaslt-jit-library-test>
+        "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/library")
+    hipblaslt_jit_test(jit-library-concurrency jit-cpu $<TARGET_FILE:hipblaslt-jit-library-test>
+        "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/library-concurrency"
+        --writers 8 --per-writer 4)
+
+    # Fails when the committed bundles no longer match the layout versions in
+    # GlobalParameters.py, the builder's code-object version or the host library.
     set(parameters "${PROJECT_SOURCE_DIR}/tensilelite/Tensile/Common/GlobalParameters.py")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${parameters}")
     file(READ "${parameters}" parameters)
@@ -144,5 +169,5 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     hipblaslt_jit_test(jit-bundle-freshness jit-cpu
         $<TARGET_FILE:hipblaslt-jit-bundle-freshness-test>
         "${hipblaslt_jit_data}" "${hipblaslt_jit_scratch}/bundle-freshness")
-    hipblaslt_jit_stage(hipblaslt-jit-bundle-freshness-test)
+    hipblaslt_jit_stage(hipblaslt-jit-library-test hipblaslt-jit-bundle-freshness-test)
 endif()

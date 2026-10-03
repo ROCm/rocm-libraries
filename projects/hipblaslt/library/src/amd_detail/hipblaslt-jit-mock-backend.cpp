@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-hash.hpp"
+#include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-mock.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
@@ -34,10 +35,9 @@ namespace hipblaslt_ext::experimental::jit::mock
         {
             std::string line(request.request.kind());
             line += ' ' + request.target.isa + " sizes=";
-            const auto problem = hipblaslt_jit::lowerForJit(gemm);
-            const auto count   = problem.c().dimensions() + problem.boundIndices().size();
-            for(size_t i = 0; i < count; ++i)
-                line += (i ? "," : "") + std::to_string(problem.size(i));
+            const auto sizes = hipblaslt_jit::problemSizes(hipblaslt_jit::lowerForJit(gemm));
+            for(size_t i = 0; i < sizes.size(); ++i)
+                line += (i ? "," : "") + std::to_string(sizes[i]);
             line += " count=" + std::to_string(request.count) + " exclude=";
             for(size_t i = 0; i < request.excludeKernels.size(); ++i)
                 line += (i ? "," : "") + request.excludeKernels[i];

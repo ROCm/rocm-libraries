@@ -24,9 +24,11 @@ component defines the stages of that generation and the order in which they
 run. Its interfaces, a comgr code-object builder and a TensileLite solution
 loader are implemented. Internal entry points let the JIT test binaries
 generate a GEMM solution through a backend and run it with `hipblasLtMatmul`
-or `hipblaslt_ext::Gemm`. The only backend is a test mock that replays
-pre-generated source bundles. No generator backend or solution store is
-implemented yet, and no public API reaches JIT.
+or `hipblaslt_ext::Gemm`, or publish generated solutions into a persistent
+JIT solution library on disk, whose solution indices any later process runs
+without generating again. The only backend is a test mock that replays
+pre-generated source bundles. No generator backend is implemented yet, and no
+public API reaches JIT.
 
 ## Current behavior
 
@@ -44,14 +46,18 @@ APIs:
   `Solution`.
 - `jit::getGemmAlgo` adapts the solution to the algorithm that
   `hipblasLtMatmul` and `Gemm` accept.
+- `jit::getLibraryAlgos` instead returns solution indices from the
+  [JIT solution library](#persistent-solution-library), generating and
+  publishing the solutions it lacks; `hipblaslt_ext::getAlgosFromIndex` turns
+  them into algorithms.
 
 The header is internal, as are `hipblaslt-jit-mock.hpp` and
 `hipblaslt-jit-gemm-internal.hpp`: they are not installed and
-`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports three
+`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports four
 functions and one type from them with `HIPBLASLT_EXPORT` for the JIT test
 binaries, which link against the shared library: `jit::makeGemmRequest`,
-`jit::getJitAlgo`, `jit::getGemmAlgo` and the `jit::detail::GemmRequest`
-request type. A build with `HIPBLASLT_JIT_TESTING=ON` also exports
+`jit::getJitAlgo`, `jit::getGemmAlgo`, `jit::getLibraryAlgos` and the
+`jit::detail::GemmRequest` request type. A build with `HIPBLASLT_JIT_TESTING=ON` also exports
 `jit::mock::createBackend`. No installed header declares them, and they are
 not a supported API.
 
@@ -108,6 +114,11 @@ The implementations are:
 - Loader: `makeTensileLoader()`, in `hipblaslt-jit-loader.cpp`, parses the
   entry, checks support and workspace with TensileLite's predicates, and loads
   the code object into a process-local `TensileBundle`.
+- Solution store: the JIT solution library, in `hipblaslt-jit-library.cpp`,
+  with `hipblaslt-jit-msgpack.cpp` writing the library files and
+  `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic
+  replacement. `getLibraryAlgos` sets it as the store of its `Jit`; see
+  [persistent solution library](#persistent-solution-library).
 - Mock backend: `hipblaslt-jit-mock-backend.cpp` replays a list of source
   bundles without a generator. A generation returns, in list order, up to the
   requested count of bundles whose predicates accept the device and problem,
@@ -167,6 +178,106 @@ restrictions. The library propagates support failures, including a mismatch
 between the supplied physical MX scale layout and the compiled solution. Jit
 never benchmarks generated solutions. A failed build names the retained
 `comgr.log` in its message.
+
+### Persistent solution library
+
+The JIT solution library keeps generated solutions on disk so that later
+processes run them without generating again. `jit::getLibraryAlgos` is its
+entry point: for one request it returns up to the requested number of solution
+indices, first the published solutions that match the request, in the order
+they were first published, then solutions that `Jit` generates with the
+supplied backend and publishes. Any process then passes an index to
+`hipblaslt_ext::getAlgosFromIndex`, `hipblasLtMatmul` and `Gemm` as it would a
+prebuilt index.
+
+**Location and permissions.** The root is `HIPBLASLT_JIT_LIBRARY_PATH` or, when
+that is unset or empty, `/tmp/hipblaslt-jit-<uid>/` on Linux and
+`%TEMP%\hipblaslt-jit-<user>` on Windows. hipBLASLt creates missing directories
+with mode 0700. On Linux it refuses the root, and each directory it uses below
+the root, when the path is a symbolic link or not a directory, is owned by
+another user, or is writable by group or others; a readable directory such as
+0755 is accepted. Windows checks only for reparse points and non-directories.
+There is no setting that accepts a shared, writable directory. A refused
+directory, a privileged (setuid or setgid) process and a build that reads YAML
+libraries disable the library for the process, and each use then fails with
+`JIT solution library disabled: <reason>`. A prebuilt library that already uses
+the reserved index range also disables it.
+
+**Layout.** Under a `v1` schema directory, each cache key has its own
+directory, named after the ISA and a 64-bit hash of the key. Each key directory
+is a standard lazy TensileLite library that the stock loader reads: a master
+file, the index mapping, and one entry (`.dat`) and code object (`.co`) per
+solution. For example:
+
+```text
+$HIPBLASLT_JIT_LIBRARY_PATH/
+└── v1/
+    ├── allocator.dat                  next free solution index
+    ├── lock                           publication lock for the whole root
+    └── gfx950-677afeae9fbc7f02/       one directory per cache key
+        ├── cache-key.json
+        ├── TensileLibrary_lazy_gfx950.dat
+        ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
+        ├── TensileLibrary_JIT_ad7857c9cccf2981_555e7809bfd8786c.dat
+        ├── TensileLibrary_JIT_ad7857c9cccf2981_555e7809bfd8786c.co
+        └── staging/                   temporary files before rename
+```
+
+An entry name is `TensileLibrary_JIT_<ProblemType hash>_<kernel and size hash>`,
+so publishers of the same solution for the same problem choose the same files.
+When a name already holds another kernel, the publisher appends `_1`, `_2` and
+so on. Each entry holds one solution, with its solution index rewritten to the
+allocated one. Each master row is
+`And(SizeEqual(M), SizeEqual(N), SizeEqual(batch), SizeEqual(K), <the entry's
+problem predicate>)` pointing to a placeholder for the entry, so a lookup
+matches only the exact sizes within the full ProblemType. The solution's own
+hardware, problem and task predicates, including its workspace requirement,
+still run on every match.
+
+**Cache key.** `cache-key.json` records, in canonical JSON:
+
+| Field | Contents |
+| --- | --- |
+| `target` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
+| `backend` | Backend identifier and version. Each backend defines its version to change whenever its output can; the mock backend's is a hash of its replayed bundles. |
+| `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
+| `code_object_version` | The code-object version that the generator and the builder use (4) |
+| `rocm_path` | The ROCm path that the builder passes to comgr |
+| `compiler_environment` | `HIP_PATH`, `LLVM_PATH`, and every set `AMD_COMGR_*` variable, such as `AMD_COMGR_DRIVER_OPTIONS_APPEND` and `AMD_COMGR_HOTSWAP_*`, except those that control only comgr's cache, logging, temporary files and statistics |
+| `schema` | The library schema version (1) |
+
+A process uses only the directory whose name and `cache-key.json` both match
+its key exactly. It ignores other directories and never modifies or deletes
+them, and a directory whose `cache-key.json` holds a different key fails the
+lookup or publication with a message that says so. To resolve an index it has
+not looked up, a process searches the directories for its device whose key
+matches everything except the backend, so a later process can run the solution
+without configuring the backend that generated it.
+
+**Indices.** JIT solutions use solution indices from 2^30 to `INT32_MAX`.
+Prebuilt libraries stay below that range: `TensileCreateLibrary` stops with an
+error when a library's solution indices would reach 2^30. `allocator.dat` holds
+the next index, so indices stay unique across every key directory under a root
+and are never reused while the root exists. Publication fails once the range is
+exhausted. `tensile_host.cpp` routes reserved indices to the JIT solution
+library, with its own solution adapter whose code-object directory is the key
+directory, and all other indices to the prebuilt library. An index that no JIT
+library holds resolves to an empty library, so callers report their usual
+missing-solution error.
+
+**Publication and refresh.** A publisher holds `lock` (waiting up to 120
+seconds) while it allocates indices and writes, in this order: `allocator.dat`,
+the code objects, the entries, the mapping and the master. Each file is written
+under `staging/` and renamed into place, so readers never see a partial file.
+A process that stops at any point leaves a library that loads, whose master
+refers only to complete entries; the next publisher reuses or overwrites what
+it left. Republishing a published solution writes nothing and returns its
+index. Each lookup reloads the master when another process has replaced the
+master or mapping file, and resolving an unknown index reloads it too. A
+solution already resolved from an earlier master stays valid.
+
+**Clearing.** hipBLASLt never deletes entries. To clear the library, delete
+the root directory, or one key directory, while no process is using it.
 
 ### Building generated sources
 

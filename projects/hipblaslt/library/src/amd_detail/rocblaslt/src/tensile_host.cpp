@@ -43,6 +43,7 @@
 #include "tensile_host.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
+#include "../../hipblaslt-jit-library.hpp"
 #include "../../hipblaslt-jit-loader.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt_internal.hpp"
@@ -3183,6 +3184,16 @@ namespace
                                      "mapping"
                                   << std::endl;
                     }
+#ifdef HIPBLASLT_ENABLE_JIT
+                    const auto& mapping   = m_library->libraryMapping;
+                    const auto& solutions = m_library->solutions;
+                    if((!mapping.empty() && hipblaslt_jit::isJitIndex(mapping.rbegin()->first))
+                       || (!solutions.empty()
+                           && hipblaslt_jit::isJitIndex(solutions.rbegin()->first)))
+                        hipblaslt_jit::JitLibrary::process().disable(
+                            tensileLibPath.string()
+                            + " uses solution indices reserved for JIT solutions");
+#endif
                     m_tensileLibPath = tensileLibPath.string();
                 }
                 return 0;
@@ -3246,8 +3257,34 @@ namespace
         }
 
         // If an adapter is found, it is assumed that the library is initialized
+        auto master = host.get_library();
+#ifdef HIPBLASLT_ENABLE_JIT
+        int32_t index = 0;
+        if(algo)
+            std::memcpy(&index, algo->data, sizeof(index));
+        if(hipblaslt_jit::isJitIndex(index))
+        {
+            hipblaslt_jit::Status why;
+            const auto view = hipblaslt_jit::JitLibrary::process().resolve(device, index, why);
+            if(view.master)
+            {
+                master  = view.master;
+                adapter = view.adapter;
+            }
+            else
+            {
+                // An empty library makes each caller report its usual missing-solution error.
+                static auto* unresolved = new std::shared_ptr<
+                    TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(
+                    std::make_shared<TensileLite::MasterSolutionLibrary<
+                        TensileLite::ContractionProblemGemm>>());
+                log_error(__func__, why.message);
+                master = *unresolved;
+            }
+        }
+#endif
         if(library)
-            *library = host.get_library();
+            *library = master;
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         if(deviceProp)
             *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
@@ -3352,6 +3389,17 @@ namespace
     {
 #ifdef HIPBLASLT_ENABLE_JIT
         return algo && hipblaslt_ext::experimental::detail::isJitAlgo(*algo);
+#else
+        return false;
+#endif
+    }
+
+    // A process-local JIT algorithm or a JIT library index.
+    [[maybe_unused]] bool isJitSolution(const rocblaslt_matmul_algo* algo)
+    {
+#ifdef HIPBLASLT_ENABLE_JIT
+        return isJitAlgorithm(algo)
+               || (algo && hipblaslt_jit::isJitIndex(*reinterpret_cast<const int*>(algo->data)));
 #else
         return false;
 #endif
@@ -3674,7 +3722,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     try
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(useRocRoller(handle, prob))
+        if(!isJitSolution(algo) && useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -5168,9 +5216,10 @@ using GemmMasterLibraryPtr
 static rocblaslt_status validateGemmLibraryAndHardware(const GemmMasterLibraryPtr&            library,
                                                        const std::shared_ptr<TensileLite::Hardware>& hardware,
                                                        const char* caller,
-                                                       const char* nullHardwareMessage)
+                                                       const char* nullHardwareMessage,
+                                                       bool        needsLibrary = true)
 {
-    if(!library)
+    if(!library && needsLibrary)
         return rocblaslt_status_invalid_pointer;
     if(!hardware)
     {
@@ -5192,12 +5241,21 @@ rocblaslt_status
 
     auto adapter = get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
 
+#ifdef HIPBLASLT_ENABLE_JIT
+    // JIT indices resolve without a prebuilt library.
+    const bool needsLibrary
+        = solutionIndex.empty()
+          || !std::all_of(solutionIndex.begin(), solutionIndex.end(), hipblaslt_jit::isJitIndex);
+#else
+    const bool needsLibrary = true;
+#endif
     if(rocblaslt_status const st = validateGemmLibraryAndHardware(
            library,
            hardware,
            __func__,
            "Tensile Hardware is null; cannot resolve solution indices (library not "
-           "initialized for this device?)");
+           "initialized for this device?)",
+           needsLibrary);
        st != rocblaslt_status_success)
         return st;
 
@@ -5214,7 +5272,18 @@ rocblaslt_status
         }
 
 #endif
+#ifdef HIPBLASLT_ENABLE_JIT
+        hipblaslt_jit::Status why;
+        auto                  solution
+            = hipblaslt_jit::isJitIndex(index)
+                  ? hipblaslt_jit::JitLibrary::process().solutionByIndex(
+                      handle->device, *hardware, index, why)
+                  : library->getSolutionByIndex(*hardware, index);
+        if(!why.ok())
+            log_error(__func__, why.message);
+#else
         auto solution = library->getSolutionByIndex(*hardware, index);
+#endif
         if(!solution)
         {
             isOutOfBound = true;
@@ -5482,7 +5551,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
 #endif
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(!isJitSolution(algo) && useRocRoller(handle, prob))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = getTensileData(gemmData);
