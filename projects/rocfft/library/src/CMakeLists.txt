@@ -244,7 +244,6 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
-  data_layout.cpp
   exec_info.cpp
   plan.cpp
   transform.cpp
@@ -316,6 +315,7 @@ target_link_std_experimental_filesystem( rocfft-rtc-cache )
 
 # generating kernels from TreeNodes and launching them
 add_library( rocfft-rtc-launch OBJECT
+  data_layout.cpp
   rtc_kernel.cpp
   rtc_bluestein_kernel.cpp
   rtc_realcomplex_kernel.cpp
