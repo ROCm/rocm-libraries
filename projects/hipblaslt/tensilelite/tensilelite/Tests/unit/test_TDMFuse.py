@@ -252,15 +252,6 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
 @pytest.mark.parametrize(
     "fuse, overrides, clause",
     [
-        (2, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
-         "MXSB is in A's descriptor group but follows B's LDS block count"),
-        # The mirror has to name the other scale: at 3 the set sits on B, so
-        # MXSB follows its own owner and MXSA is the member carrying the second
-        # cadence.
-        (3, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
-         "MXSA is in B's descriptor group but follows A's LDS block count"),
-        (3, {"PrefetchGlobalReadA": 2, "PrefetchGlobalReadB": 1},
-         "MXSA is in B's descriptor group but follows A's LDS block count"),
         (2, {"MatrixInstruction": [16, 16, 128, 1, 1, 2, 4, 2, 4], "WorkGroup": [32, 8, 1]},
          "TDMFuse=2 with MX scales on both tensors supports 2 or 4 waves; got NumWaves=8"),
         (1, {"TDMInst": 1}, "TDMA and TDMB must be enabled simultaneously"),
@@ -589,7 +580,7 @@ def test_last_iter_disable_without_wave_separated_sets(monkeypatch, over):
 def _tokenWriter():
     """A writer carrying the per-side tensor tokens decoupled PGR installs."""
     return Stub(states=types.SimpleNamespace(ldsTensorTokenIdxA=7,
-                                             ldsTensorTokenIdxB=9))
+                                             ldsTensorTokenIdxB=9, kernel={}))
 
 
 def test_an_issue_declares_every_lds_side_its_set_fills():
@@ -2235,11 +2226,10 @@ _LIMIT_MESSAGES = {
                              _HEAD["mx_a"] + " are not implemented with UseSubtileImpl: the subtile "
                              "scale loads always set up both MXSA and MXSB. Use UseSubtileImpl=0 (the "
                              "gfx1250 TDM path)"),
-    "r15_divergent_pair": (2, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
-                           "TDMFuse=2 with MX scales on both tensors is not implemented at a divergent "
-                           "decoupled pair (PGRA=1, PGRB=2 -> 1 and 2 LDS blocks) on more than one "
-                           "wave: MXSB is in A's descriptor group but follows B's LDS block count. Use "
-                           "an equal pair, or TDMFuse=0 or 1"),
+    "r15_divergent_halfplr": (2, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2, "HalfPLR": 1},
+                              "TDMFuse=2 with MX scales on both tensors is not implemented with HalfPLR=1 at a "
+                              "divergent decoupled pair (PGRA=1, PGRB=2 -> 1 and 2 LDS blocks). Use "
+                              "HalfPLR=0, an equal pair, or TDMFuse=0 or 1"),
     "r18_onesided_divergent_pair": (0, {"ProblemType": _MXSB_ONLY, "PrefetchGlobalReadA": 1,
                                         "PrefetchGlobalReadB": 2},
                                     _HEAD["mx_b"] + " are not implemented at a divergent decoupled "

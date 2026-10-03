@@ -26,6 +26,8 @@ from tensilelite.Components.DecouplePGR import (
     DCP_THICK_GATE_SUPPORTED,
     DCP_THICK_GATE_TEXT,
     DCP_THICK_GATE_TOKENS,
+    dcpClusterHandshakeViolations,
+    dcpClusterRejectReason,
     dcpThickGateFromTokenPasses,
     decoupledSingleBuffered,
     decoupledThickGateRelaxation,
@@ -827,7 +829,10 @@ def test_solution_rejects_a_plr_that_leaves_no_late_sub_iteration(
 @pytest.mark.parametrize(
     "overrides, clause",
     [
-        ({"ClusterDim": [2, 1]}, "ClusterDim != [1, 1] is incompatible with divergent"),
+        ({"ClusterDim": [1, 2]}, "the single-buffered A cannot have cluster peers"),
+        ({"ClusterDim": [2, 2]}, "the single-buffered A cannot have cluster peers"),
+        ({"PrefetchGlobalReadA": 2, "PrefetchGlobalReadB": 1, "ClusterDim": [2, 1]},
+         "the single-buffered B cannot have cluster peers"),
         ({"ProblemType": {"Sparse": 1}}, "Sparse is not supported"),
         ({"1LDSBuffer": 1}, "1LDSBuffer=1 allows one LDS block per tensor"),
         ({"PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 0, "PrefetchGlobalReadB": 1},
@@ -849,6 +854,769 @@ def test_solution_cluster_allows_equal_pgr(_gp_gfx1250, gfx1250_iim, assembler, 
     sol, out = _derive(gfx1250_iim, assembler, capsys, ClusterDim=[2, 1],
                        PrefetchGlobalReadA=2, PrefetchGlobalReadB=2)
     assert sol.get("Valid") is True, out
+    assert sol["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+# The double-buffered tensor's axis: ClusterDim[0] peers share B, ClusterDim[1] peers share A.
+_THICK_AXIS_CLUSTERS = [(1, 2, [2, 1]), (1, 2, [4, 1]), (2, 1, [1, 2]), (2, 1, [1, 4])]
+_HANDSHAKE_ARMS = [(0, 4), (1, 0), (1, 4), (2, 0), (2, 4), (3, 0), (3, 4)]
+# MXSA is live here, so A single-buffered at TDMFuse 3 is rejected under a cluster.
+_THICK_AXIS_CASES = [c + arm for c in _THICK_AXIS_CLUSTERS for arm in _HANDSHAKE_ARMS
+                     if not (c[0] < c[1] and arm[0] == 3)]
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse, scheduleIterAlg", _THICK_AXIS_CASES)
+def test_solution_lets_the_double_buffered_tensor_multicast(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse,
+        scheduleIterAlg):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse,
+                       ScheduleIterAlg=scheduleIterAlg, ClusterDim=clusterDim,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    assert sol["Multicast"] and sol["ClusterBarrier"]
+    assert sol["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+_MX_BOTH = {"MXBlockA": 32, "MXBlockB": 32}
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, override, expected", [
+    (1, 2, [2, 1], {}, None),
+    (1, 2, [1, 2], {}, "single-buffered A"),
+    (2, 1, [1, 4], {}, None),
+    (2, 1, [4, 1], {}, "single-buffered B"),
+    (2, 1, [2, 2], {}, "single-buffered B"),
+    (2, 2, [2, 2], {}, None),
+    (1, 2, [1, 1], {}, None),
+    (1, 2, [2, 1], {"ClusterBarrier": False}, "double-buffered B needs ClusterBarrier"),
+    (2, 1, [1, 2], {"ClusterBarrier": False}, "double-buffered A needs ClusterBarrier"),
+    (1, 2, [2, 1], {"Multicast": False, "ClusterBarrier": False}, None),
+    (1, 2, [2, 1], {"HalfPLR": 1, "InitCIterWmma": 0, "TDMFuse": 1}, "HalfPLR=1 with InitCIterWmma=0 at TDMFuse=1"),
+    (2, 1, [1, 2], {"HalfPLR": 2, "InitCIterWmma": 0, "TDMFuse": 1}, "HalfPLR=2 with InitCIterWmma=0 at TDMFuse=1"),
+    (1, 2, [4, 1], {"HalfPLR": 3, "InitCIterWmma": 0, "TDMFuse": 1}, "HalfPLR=3 with InitCIterWmma=0 at TDMFuse=1"),
+    (1, 2, [2, 1], {"HalfPLR": 3, "InitCIterWmma": 0, "TDMFuse": 0}, None),
+    (2, 1, [1, 4], {"HalfPLR": 1, "InitCIterWmma": 0, "TDMFuse": 0}, None),
+    (1, 2, [4, 1], {"HalfPLR": 1, "InitCIterWmma": 0, "TDMFuse": 2}, "HalfPLR=1 with InitCIterWmma=0 at TDMFuse=2"),
+    (2, 1, [1, 4], {"HalfPLR": 2, "InitCIterWmma": 0, "TDMFuse": 3}, "HalfPLR=2 with InitCIterWmma=0 at TDMFuse=3"),
+    (2, 1, [1, 2], {"HalfPLR": 2, "InitCIterWmma": 1, "TDMFuse": 3}, None),
+    (2, 1, [1, 2], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 3}, "HalfPLR=3 halves the double-buffered A"),
+    (1, 2, [2, 1], {"TDMFuse": 3, "ProblemType": _MX_BOTH}, "at TDMFuse=3 MXSA rides the double-buffered B's descriptor set"),
+    (1, 2, [2, 1], {"TDMFuse": 3}, None),
+    (2, 1, [1, 2], {"TDMFuse": 2, "ProblemType": _MX_BOTH}, None),
+    (2, 1, [1, 2], {"TDMFuse": 2, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH},
+     "on 2 waves at TDMFuse=2 with MX scales on both tensors"),
+    (2, 1, [1, 4], {"TDMFuse": 3, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH},
+     "on 2 waves at TDMFuse=3 with MX scales on both tensors"),
+    (2, 1, [1, 2], {"TDMFuse": 2, "NumWaves": 2, "ScheduleIterAlg": 0, "ProblemType": _MX_BOTH}, None),
+    (2, 1, [1, 2], {"TDMFuse": 2, "NumWaves": 4, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (1, 2, [2, 1], {"TDMFuse": 2, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (2, 1, [1, 2], {"TDMFuse": 2, "NumWaves": 2, "ScheduleIterAlg": 4}, None),
+    (2, 1, [1, 2], {"TDMFuse": 1, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (2, 1, [1, 4], {"TDMFuse": 0, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (1, 2, [2, 1], {"TDMFuse": 1, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (1, 2, [4, 1], {"TDMFuse": 0, "NumWaves": 2, "ScheduleIterAlg": 4, "ProblemType": _MX_BOTH}, None),
+    (1, 2, [2, 1], {"TDMFuse": 2}, None),
+    (2, 1, [1, 4], {"TDMFuse": 2}, None),
+    (2, 1, [1, 2], {"TDMFuse": 3}, None),
+    (1, 2, [2, 1], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 0}, None),
+    (2, 1, [1, 4], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 0}, None),
+    (1, 2, [2, 1], {"HalfPLR": 1, "InitCIterWmma": 1, "TDMFuse": 1}, None),
+    (2, 1, [1, 2], {"HalfPLR": 2, "InitCIterWmma": 1, "TDMFuse": 1}, None),
+    (1, 2, [2, 1], {"HalfPLR": 2, "InitCIterWmma": 1, "TDMFuse": 1}, "HalfPLR=2 halves the double-buffered B"),
+    (2, 1, [1, 2], {"HalfPLR": 1, "InitCIterWmma": 1, "TDMFuse": 1}, "HalfPLR=1 halves the double-buffered A"),
+    (2, 1, [1, 4], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 1}, "HalfPLR=3 halves the double-buffered A"),
+    (1, 2, [1, 1], {"HalfPLR": 3}, None),
+    # Mirrors, so every arm above is pinned for both single-buffered sides.
+    (1, 2, [2, 2], {}, "single-buffered A"),
+    (1, 2, [4, 1], {}, None),
+    (2, 1, [1, 1], {}, None),
+    (2, 1, [1, 1], {"HalfPLR": 3}, None),
+    (2, 1, [1, 2], {"Multicast": False, "ClusterBarrier": False}, None),
+    (2, 1, [1, 2], {"HalfPLR": 3, "InitCIterWmma": 0, "TDMFuse": 1}, "HalfPLR=3 with InitCIterWmma=0 at TDMFuse=1"),
+    (2, 1, [1, 4], {"HalfPLR": 2, "InitCIterWmma": 0, "TDMFuse": 2}, "HalfPLR=2 with InitCIterWmma=0 at TDMFuse=2"),
+    (1, 2, [4, 1], {"HalfPLR": 1, "InitCIterWmma": 0, "TDMFuse": 3}, "HalfPLR=1 with InitCIterWmma=0 at TDMFuse=3"),
+    (1, 2, [4, 1], {"HalfPLR": 2, "InitCIterWmma": 0, "TDMFuse": 0}, None),
+    (2, 1, [1, 2], {"HalfPLR": 3, "InitCIterWmma": 0, "TDMFuse": 0}, None),
+    (1, 2, [2, 1], {"HalfPLR": 1, "InitCIterWmma": 1, "TDMFuse": 3}, None),
+    (1, 2, [2, 1], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 3}, "HalfPLR=3 halves the double-buffered B"),
+    (1, 2, [2, 1], {"HalfPLR": 3, "InitCIterWmma": 1, "TDMFuse": 1}, "HalfPLR=3 halves the double-buffered B"),
+    (1, 2, [2, 1], {"TDMFuse": 2, "ProblemType": _MX_BOTH}, None),
+    (2, 1, [1, 2], {"TDMFuse": 3, "ProblemType": _MX_BOTH}, None),
+])
+def test_cluster_reject_reason(pgrA, pgrB, clusterDim, override, expected):
+    ks = dict({"PrefetchGlobalRead": 1, "PrefetchGlobalReadA": pgrA, "PrefetchGlobalReadB": pgrB,
+               "ClusterDim": clusterDim, "Multicast": True, "ClusterBarrier": True}, **override)
+    reason = dcpClusterRejectReason(ks)
+    assert (reason is None) if expected is None else (expected in reason), reason
+
+
+_HANDSHAKE_ASM = {}
+
+
+# (PrefetchGlobalReadA, PrefetchGlobalReadB, ClusterDim, single-buffered side)
+_HANDSHAKE_PAIRS = [(1, 2, [2, 1], "A"), (2, 1, [1, 2], "B")]
+_HANDSHAKE_CASES = [pair + arm for pair in _HANDSHAKE_PAIRS for arm in _HANDSHAKE_ARMS
+                    if not (pair[3] == "A" and arm[0] == 3)]
+
+
+def _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse, scheduleIterAlg,
+                  **overrides):
+    """Emitted text of a handshake pair, shared across the tests below."""
+    key = (pgrA, pgrB, tuple(clusterDim), tdmFuse, scheduleIterAlg, tuple(sorted(overrides.items())))
+    if key not in _HANDSHAKE_ASM:
+        sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse,
+                           ScheduleIterAlg=scheduleIterAlg, ClusterDim=clusterDim,
+                           PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB, **overrides)
+        assert sol.get("Valid") is True, out
+        errs, asm = _emitDerived(sol, assembler)
+        assert errs == [0] and asm, (errs, capsys.readouterr().out[-2000:])
+        _HANDSHAKE_ASM[key] = asm
+    return _HANDSHAKE_ASM[key]
+
+
+def _handshakeLines(asm):
+    """(lines, code without comments, elected cluster signal, the cluster wait after it)."""
+    lines = asm.splitlines()
+    code = [line.split("//")[0].strip() for line in lines]
+    sig = next(i for i, line in enumerate(code)
+               if line == "s_barrier_signal -3" and i > 0 and "DcpCSigSkip" in code[i - 1])
+    wait = code.index("s_barrier_wait -3", sig + 1)
+    return lines, code, sig, wait
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse, scheduleIterAlg", _HANDSHAKE_CASES)
+def test_emitted_handshake_signals_after_the_read_barrier_and_waits_after_the_refill(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse,
+        scheduleIterAlg):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse,
+                        scheduleIterAlg)
+    thinSet = _thinSet(thin, tdmFuse)
+    assert dcpClusterHandshakeViolations(asm, thin, thinSet) == []
+    _, lines, sig, wait = _handshakeLines(asm)
+    late = [line for line in lines[sig:wait] if line.startswith("tensor_load_to_lds")]
+    # Wave-separated TDM uses one descriptor name for both tensors, so a load inside the
+    # single-buffered late-fill branch is not classified by name.
+    assert late and (tdmFuse == 0 or all(any("tdm%sGroup0" % tc in line for tc in thinSet)
+                                         for line in late)), late
+    assert not any(line.startswith("s_wait_tensorcnt") for line in lines[sig - 3:wait + 1]), \
+        lines[sig - 3:wait + 1]
+
+
+def _mutate(asm, edit):
+    lines, _, sig, wait = _handshakeLines(asm)
+    edit(lines, sig, wait)
+    return "\n".join(lines)
+
+
+def _dropSignal(lines, sig, wait):
+    del lines[sig]
+
+
+def _signalTwice(lines, sig, wait):
+    lines[sig + 1:sig + 1] = [lines[sig - 2], lines[sig - 1].replace("DcpCSigSkip", "DcpCSigSkipX"),
+                              lines[sig], "label_DcpCSigSkipX:"]
+
+
+def _readAfterTheBarrier(lines, sig, wait):
+    lines.insert(sig - 2, "ds_load_b32 v0, v0")
+
+
+def _signalAheadOfTheBarrier(lines, sig, wait):
+    barrier = [i for i in range(sig) if lines[i].lstrip().startswith("s_barrier_wait -1")][-1]
+    pair = lines[barrier - 1:barrier + 1]
+    del lines[barrier - 1:barrier + 1]
+    lines[sig:sig] = pair
+
+
+def _loadAfterTheWait(lines, sig, wait):
+    load = next(i for i in range(sig, wait) if lines[i].lstrip().startswith("tensor_load_to_lds"))
+    lines.insert(wait + 1, lines[load])
+
+
+def _waitOnOneWave(lines, sig, wait):
+    lines[wait:wait + 1] = ["s_cmp_eq_u32 s[sgprWaveIdx], 1", "s_cbranch_scc0 label_DcpWaitSkip",
+                            lines[wait], "label_DcpWaitSkip:"]
+
+
+def _dropHandshake(lines, sig, wait):
+    del lines[wait]
+    del lines[sig - 2:sig + 2]
+
+
+def _dropWait(lines, sig, wait):
+    del lines[wait]
+
+
+def _isLoad(line):
+    return line.lstrip().startswith("tensor_load_to_lds")
+
+
+def _thickLoadInTheWindow(lines, sig, wait):
+    drain = [i for i in range(sig) if lines[i].lstrip().startswith("s_wait_dscnt")][-1]
+    lines.insert(wait, next(filter(_isLoad, reversed(lines[:drain]))))
+
+
+def _bypassTheHandshake(lines, sig, wait):
+    drain = [i for i in range(sig) if lines[i].lstrip().startswith("s_wait_dscnt")][-1]
+    lines.insert(wait + 1, "label_DcpBypass:")
+    lines.insert(drain, "s_cbranch_vccz label_DcpBypass")
+
+
+def _joinInTheElection(lines, sig, wait):
+    lines.insert(sig - 1, "label_DcpJoin:")
+
+
+def _loadAheadOfTheBarrier(lines, sig, wait):
+    barrier = [i for i in range(sig) if lines[i].lstrip().startswith("s_barrier_signal -1")][-1]
+    lines.insert(barrier, next(filter(_isLoad, lines[sig:wait])))
+
+
+def _readInTheElectionSlot(lines, sig, wait):
+    lines.insert(sig - 1, "ds_read_b32 v0, v0")
+
+
+def _waitOnWaveZeroPastANop(lines, sig, wait):
+    lines[wait:wait + 1] = ["s_cmp_eq_u32 s[sgprWaveIdx], 0", "s_nop 0",
+                            "s_cbranch_scc0 label_DcpWaitSkip", lines[wait], "label_DcpWaitSkip:"]
+
+
+def _waitOnARegisterCompare(lines, sig, wait):
+    lines[wait:wait + 1] = ["s_cmp_eq_u32 s[sgprWaveIdx], s54", "s_cbranch_scc0 label_DcpWaitSkip",
+                            lines[wait], "label_DcpWaitSkip:"]
+
+
+def _closeTheLoopWithALongJump(lines, sig, wait):
+    back = next(i for i in range(wait, len(lines))
+                if lines[i].split("//")[0].split() == ["s_cbranch_scc0", "label_LoopBeginL"])
+    lines[back:back + 1] = ["s_cbranch_scc1 label_DcpLoopExit", "s_getpc_b64 s[90:91]",
+                            "s_add_i32 s92, label_LoopBeginL, 4", "s_add_u32 s90, s90, s92",
+                            "s_addc_u32 s91, s91, 0", "s_setpc_b64 s[90:91]", "label_DcpLoopExit:"]
+
+
+def _bypassALongJumpLoop(lines, sig, wait):
+    _closeTheLoopWithALongJump(lines, sig, wait)
+    _bypassTheHandshake(lines, sig, wait)
+
+
+def _longJumpAheadOfTheElection(lines, sig, wait):
+    drain = max(i for i in range(sig) if re.match(r"\s*s_wait_(?:\w+_)?dscnt\s+(?:0x0|0)\b", lines[i]))
+    lines[sig - 2:sig - 2] = ["s_getpc_b64 s[90:91]", "s_add_i32 s92, label_DcpDrainAgain, 4",
+                              "s_add_u32 s90, s90, s92", "s_addc_u32 s91, s91, 0", "s_setpc_b64 s[90:91]"]
+    lines.insert(drain, "label_DcpDrainAgain:")
+
+
+def _indirectJumpAtTheLoopHead(lines, sig, wait):
+    lines.insert([line.split("//")[0].strip() for line in lines].index("label_LoopBeginL:") + 1,
+                 "s_swappc_b64 s[90:91], s[92:93]")
+
+
+def _skipBackToTheDrain(lines, sig, wait):
+    skip = lines[sig - 1].split("//")[0].split()[1]
+    del lines[next(i for i in range(sig + 1, len(lines)) if lines[i].split("//")[0].strip() == skip + ":")]
+    drain = max(i for i in range(sig) if re.match(r"\s*s_wait_(?:\w+_)?dscnt\s+(?:0x0|0)\b", lines[i]))
+    lines.insert(drain, skip + ":")
+
+
+def _sendTheOtherWavesBackAfterTheWait(lines, sig, wait):
+    lines[wait + 1:wait + 1] = ["s_cmp_eq_u32 s[sgprWaveIdx], 0", "s_cbranch_scc0 label_LoopBeginL"]
+
+
+def _sendTheOtherWavesToAnUnknownLabel(lines, sig, wait):
+    lines[wait + 1:wait + 1] = ["s_cmp_eq_u32 s[sgprWaveIdx], 0", "s_cbranch_scc0 label_DcpNowhere"]
+
+
+def _signalAheadOfTheEnd(lines, sig, wait):
+    lines.insert(max(i for i, line in enumerate(lines) if line.lstrip().startswith("s_endpgm")), "s_barrier_signal -3")
+
+
+def _signalInsteadOfTheEnd(lines, sig, wait):
+    lines[max(i for i, line in enumerate(lines) if line.lstrip().startswith("s_endpgm"))] = "s_barrier_signal -3"
+
+
+_BROKEN_HANDSHAKES = [
+    (_dropSignal, "waits with no signal posted"),
+    (_signalTwice, "signals twice"),
+    (_readAfterTheBarrier, "ds_load_b32 before its read barrier"),
+    (_signalAheadOfTheBarrier, "before its read barrier"),
+    (_loadAfterTheWait, "issues a tensor load after its cluster wait"),
+    (_waitOnOneWave, "depends on the wave index"),
+    (_dropHandshake, "holds 0 cluster handshakes"),
+    (_dropHandshake, "no decoupled-PGR cluster signal"),
+    (_signalAheadOfTheEnd, "ends with a signal posted"),
+    (_signalInsteadOfTheEnd, "a cluster signal is still posted at the end"),
+    (_dropWait, "has no cluster wait after its signal"),
+    (_thickLoadInTheWindow, "a double-buffered tensor load precedes its cluster wait"),
+    (_bypassTheHandshake, "skips its cluster signal"),
+    (_bypassALongJumpLoop, "skips its cluster signal"),
+    (_longJumpAheadOfTheElection, "s_setpc_b64 before its read barrier"),
+    (_joinInTheElection, "lands inside its election"),
+    (_loadAheadOfTheBarrier, "tensor_load_to_lds before its read barrier"),
+    (_readInTheElectionSlot, "ds_read_b32 sits in the election slot"),
+    (_waitOnWaveZeroPastANop, "depends on the wave index"),
+    (_waitOnARegisterCompare, "signals twice"),
+    (_indirectJumpAtTheLoopHead, "jumps to an unknown label"),
+    (_skipBackToTheDrain, "goes back over or into a cluster barrier region"),
+    (_sendTheOtherWavesBackAfterTheWait, "goes back over or into a cluster barrier region"),
+    (_sendTheOtherWavesToAnUnknownLabel, "jumps to an unknown label"),
+]
+
+
+@pytest.mark.parametrize("edit, expected", _BROKEN_HANDSHAKES)
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse, scheduleIterAlg", _HANDSHAKE_CASES)
+def test_handshake_checker_flags_each_broken_shape(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse,
+        scheduleIterAlg, edit, expected):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse,
+                        scheduleIterAlg)
+    problems = dcpClusterHandshakeViolations(_mutate(asm, edit), thin, _thinSet(thin, tdmFuse))
+    assert any(expected in problem for problem in problems), problems
+
+
+def _nestedElection(lines):
+    """Line indices (outer compare, inner compare, inner branch, signal) of a nested wave-0 election."""
+    code = [line.split("//")[0].strip() for line in lines]
+    ops = [i for i, c in enumerate(code) if c and not c.endswith(":")]
+    for a, b, c, d, e in zip(ops, ops[1:], ops[2:], ops[3:], ops[4:]):
+        if (code[a] == code[c] == "s_cmp_eq_u32 s[sgprWaveIdx], 0" and code[b].startswith("s_cbranch_scc0 ")
+                and code[d].startswith("s_cbranch_scc0 ") and code[e] == "s_barrier_signal -3"):
+            return a, c, d, e
+    raise AssertionError("no nested wave-0 election")
+
+
+def _innerSkipPastTheJoin(lines, nest):
+    wait = next(i for i in range(nest[3], len(lines)) if lines[i].split("//")[0].strip() == "s_barrier_wait -3")
+    lines.insert(wait + 1, "label_NestedPastJoin:")
+    lines[nest[2]] = "s_cbranch_scc0 label_NestedPastJoin"
+
+
+def _waitInsideTheElections(lines, nest):
+    lines.insert(nest[1], "s_barrier_wait -3")
+
+
+def _innerElectionOnAnotherWave(lines, nest):
+    lines[nest[1]] = "s_cmp_eq_u32 s[sgprWaveIdx], 1"
+
+
+def _branchOntoTheSignal(lines, nest):
+    lines.insert(nest[3], "label_NestedSignal:")
+    lines.insert(nest[0], "s_cbranch_vccz label_NestedSignal")
+
+
+def _branchOntoTheInnerElection(lines, nest):
+    lines.insert(nest[1], "label_NestedInner:")
+    lines.insert(nest[0], "s_cbranch_vccz label_NestedInner")
+
+
+def _foreignInstructionBetweenTheElections(lines, nest):
+    lines.insert(nest[1], "s_nop 0")
+
+
+_NESTED_ELECTIONS = [
+    (_branchOntoTheInnerElection, "depends on the wave index"),
+    (_foreignInstructionBetweenTheElections, "depends on the wave index"),
+    (_innerSkipPastTheJoin, "depends on the wave index"),
+    (_waitInsideTheElections, "depends on the wave index"),
+    (_innerElectionOnAnotherWave, "depends on the wave index"),
+    (_branchOntoTheSignal, "depends on the wave index"),
+]
+
+
+@pytest.mark.parametrize("edit, expected", _NESTED_ELECTIONS)
+@pytest.mark.parametrize("scheduleIterAlg", [0, 4])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+def test_handshake_checker_reads_nested_wave_zero_elections(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, scheduleIterAlg,
+        edit, expected):
+    # Only TDMFuse=1 kernels carry the nested election (InitCIterWmma's clone of the pre-signal).
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, 1, scheduleIterAlg)
+    lines = asm.splitlines()
+    edit(lines, _nestedElection(lines))
+    problems = dcpClusterHandshakeViolations("\n".join(lines), thin)
+    assert (problems == []) if expected is None else any(expected in p for p in problems), problems
+
+
+# HalfPLR at TDMFuse 1 halves only the single-buffered side (A takes bit 0, B bit 1) and needs
+# InitCIterWmma 1 under a cluster; TDMFuse 0 also takes 0; with MX scales on both tensors 2/3 reject HalfPLR.
+_HALFPLR_HANDSHAKES = [case[:4] + (halfPLR,) + case[4:] + (initC,) for case in _HANDSHAKE_CASES if case[4] < 2
+                       for halfPLR in ((1, 2, 3) if case[4] == 0 else (1 if case[3] == "A" else 2,))
+                       for initC in ((0, 1) if case[4] == 0 else (1,))]
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, halfPLR, tdmFuse, scheduleIterAlg, initCIterWmma",
+                         _HALFPLR_HANDSHAKES)
+def test_halfplr_gives_every_loop_copy_its_own_handshake(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, halfPLR, tdmFuse,
+        scheduleIterAlg, initCIterWmma):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse, scheduleIterAlg,
+                        HalfPLR=halfPLR, InitCIterWmma=initCIterWmma)
+    assert dcpClusterHandshakeViolations(asm, thin) == []
+    loop = asm[asm.index("label_LoopBeginL:"):asm.index("label_LoopEndL:")]
+    assert loop.count("dcp cluster signal") == loop.count("dcp cluster wait") == 3, loop.count("dcp cluster")
+    assert _halfPlrUnmasked(asm) == [] and _halfPlrUnmasked(_withoutLoopMasks(asm))
+
+
+def _copyHandshake(lines, copy):
+    """(elected cluster signal, the cluster wait after it) of one main-loop copy."""
+    code = [line.split("//")[0].strip() for line in lines]
+    begin = code.index("label_LoopBeginL:")
+    sig = [i for i in range(begin, len(code))
+           if code[i] == "s_barrier_signal -3" and "DcpCSigSkip" in code[i - 1]][copy]
+    return sig, code.index("s_barrier_wait -3", sig + 1)
+
+
+def _signalTwiceInTheCopy(lines, sig, wait):
+    skip = lines[sig - 1].split()[1] + "X"
+    lines[sig + 1:sig + 1] = [lines[sig - 2], "s_cbranch_scc0 " + skip, lines[sig], skip + ":"]
+
+
+def _dropHandshakeUnderARenamedLoop(lines, sig, wait):
+    _dropHandshake(lines, sig, wait)
+    lines[:] = [re.sub(r"\blabel_LoopBeginL\b", "label_DcpRenamedLoop", line) for line in lines]
+
+
+_BROKEN_COPIES = [
+    (_dropHandshake, "copy 1 holds 0 cluster handshakes"),
+    (_signalTwiceInTheCopy, "copy 1 holds 2 cluster handshakes"),
+    (_bypassTheHandshake, "leaves copy 1 on a wave-0 path that skips its cluster signal"),
+    (_dropHandshakeUnderARenamedLoop, "label_DcpRenamedLoop copy 1 holds 0 cluster handshakes"),
+]
+
+
+@pytest.mark.parametrize("edit, expected", _BROKEN_COPIES)
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, halfPLR, tdmFuse, scheduleIterAlg, initCIterWmma",
+                         _HALFPLR_HANDSHAKES)
+def test_handshake_checker_flags_a_broken_halfplr_loop_copy(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, halfPLR, tdmFuse,
+        scheduleIterAlg, initCIterWmma, edit, expected):
+    lines = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse, scheduleIterAlg,
+                          HalfPLR=halfPLR, InitCIterWmma=initCIterWmma).splitlines()
+    edit(lines, *_copyHandshake(lines, 1))
+    problems = dcpClusterHandshakeViolations("\n".join(lines), thin)
+    assert any(expected in problem for problem in problems), problems
+
+
+# (PrefetchGlobalReadA, PrefetchGlobalReadB, MatrixInstruction, DepthU): the single-buffered tensor
+# spans all four waves, A on [4,1] and B on [1,4].
+_SEGMENT_INTERLEAVE_PAIRS = [(1, 2, [16, 16, 128, 1, 1, 1, 32, 4, 1], 256),
+                             (2, 1, [16, 16, 128, 1, 1, 4, 4, 1, 4], 512)]
+
+
+@pytest.mark.parametrize("clustered", [False, True])
+@pytest.mark.parametrize("tdmFuse", [0, 1])
+@pytest.mark.parametrize("pgrA, pgrB, mi, depthU", _SEGMENT_INTERLEAVE_PAIRS)
+def test_divergent_segment_interleave_puts_the_single_buffered_comps_around_a_block(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, mi, depthU, tdmFuse, clustered):
+    thin, thick, first = ("A", "B", "MXSB") if pgrA < pgrB else ("B", "A", "A")
+    clusterDim = ([2, 1] if thin == "A" else [1, 2]) if clustered else [1, 1]
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=mi, DepthU=depthU, TDMFuse=tdmFuse,
+                       LDSTrInst=False, ClusterDim=clusterDim, LDSSegmentInterleave=1,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    seg = sol["LDSSegInterleaveOffsets"]
+    assert sol["LDSSegmentInterleave"] == 1 and seg["activeTC"] == thin
+    assert all(sol["LdsOffset" + tc] == seg["ldsBase" + tc] for tc in ("A", "MXSA", "MXSB", "B")), seg
+    assert sol["LdsOffsetBlk" + thick] == seg["dcpThickStride"]
+    comp, jump, stride = seg["ldsBase" + first], seg["writeStrideBytes"], seg["dcpThickStride"]
+    block, scales = jump - comp, seg["ldsBaseMXS" + thin]
+    regions = sorted([(0, comp), (jump, jump + comp),
+                      (scales, scales + sol["LdsNumElementsAlignedMXS" + thin]),
+                      (comp, comp + block), (comp + stride, comp + stride + block)])
+    assert all(a[1] <= b[0] for a, b in zip(regions, regions[1:])), regions
+    last = seg["ldsBaseB"] + stride + sol["ldsNumBytesB"] if thick == "B" else comp + stride + block
+    assert last <= sol["LdsNumBytes"] <= sol["MaxLDS"], (last, sol["LdsNumBytes"])
+    assert jump // 65536 > (comp - 1) // 65536
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-2000:])
+    assert not clustered or dcpClusterHandshakeViolations(asm, thin) == []
+
+
+# HalfPLR halves each wave tile, so A single-buffered on [4,1] (wave tile 1 along A) takes HalfPLR 2 only.
+_SEGMENT_INTERLEAVE_HALFPLR = [pair + (halfPLR,) for pair in _SEGMENT_INTERLEAVE_PAIRS
+                               for halfPLR in ((2,) if pair[0] < pair[1] else (1, 2, 3))]
+# A single-buffered on a wave tile of 2 along A, so it can halve A as well.
+_SEGMENT_INTERLEAVE_HALFPLR += [(1, 2, [16, 16, 128, 1, 1, 2, 16, 4, 1], 512, halfPLR) for halfPLR in (1, 2, 3)]
+_LR_SWAP_INIT = re.compile(r"v_add_nc_u32 v\[vgprLocalReadSwapAddr(\w+?)(?:-\d+)?\], (\d+), ")
+
+
+@pytest.mark.parametrize("tdmFuse", [0, 1])
+@pytest.mark.parametrize("pgrA, pgrB, mi, depthU, halfPLR", _SEGMENT_INTERLEAVE_HALFPLR)
+def test_halfplr_divergent_segment_interleave_swaps_by_the_interleaved_stride(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, mi, depthU, halfPLR, tdmFuse):
+    thin = "A" if pgrA < pgrB else "B"
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=mi, DepthU=depthU, TDMFuse=tdmFuse,
+                       LDSTrInst=False, LDSSegmentInterleave=1, HalfPLR=halfPLR,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True and sol["LDSSegmentInterleave"] == 1, out
+    stride = sol["LDSSegInterleaveOffsets"]["dcpThickStride"]
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-2000:])
+    # Every swap, HalfPLR's tail fix-up included, xors with LocalReadSwapAddr.
+    side = {"A": "A", "MXSA": "A", "B": "B", "MXSB": "B"}
+    assert set(_LR_SWAP_INIT.findall(asm)) == {(tc, "0" if side[tc] == thin else str(stride)) for tc in side}
+    tail = asm[asm.index("HalfPLR: re-enable TDM"):asm.index("label_Skip_HPLR_Adjust:")]
+    assert len(re.findall(r"v_xor_b32 v\[vgprLocalReadAddr\w+(?:-\d+)?\], v\[vgprLocalReadSwapAddr", tail)) == 4
+
+
+_HALFPLR_MASK = re.compile(r"^\s*s_cmov_b32 s\[sgpr([\w+]+)\], 0\b")
+_HALFPLR_MASKED = re.compile(r"^\s*(?:tensor_load_to_lds s\[sgpr(tdm\w+Group0):"
+                             r"|s_cselect_b32 \S+, \S+, s\[sgpr(tdm\w+Incs)\])")
+
+
+def _halfPlrUnmasked(asm):
+    """Main-loop TDM loads and increment selects not masked by the loop-counter test since the last use."""
+    lines = asm.splitlines()
+    begin = lines.index("label_LoopBeginL:")
+    end = next(i for i in range(begin, len(lines)) if re.search(r"s_cbranch_scc[01] label_LoopBeginL\b", lines[i]))
+    masked, unmasked, compare = set(), [], ""
+    for line in lines[begin:end]:
+        if re.match(r"\s*s_(?:bit)?cmp", line):
+            compare = line
+        mask = _HALFPLR_MASK.match(line)
+        if mask and "sgprLoopCounterL" in compare:
+            masked.add(mask.group(1))
+            continue
+        use = _HALFPLR_MASKED.match(line)
+        if use:
+            reg = use.group(1) + "+0" if use.group(1) else use.group(2)
+            if reg not in masked:
+                unmasked.append(line.strip())
+            masked.discard(reg)
+    return unmasked
+
+
+def _withoutLoopMasks(asm):
+    """asm with the main loop's HalfPLR masks dropped, the positive control of _halfPlrUnmasked."""
+    lines = asm.splitlines()
+    begin = lines.index("label_LoopBeginL:")
+    return "\n".join("s_nop 0" if i > begin and _HALFPLR_MASK.match(line) else line for i, line in enumerate(lines))
+
+
+@pytest.mark.parametrize("scheduleIterAlg", [0, 4])
+@pytest.mark.parametrize("halfPLR", [1, 2, 3])
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_halfplr_masks_every_last_trip_fill_of_a_divergent_tdmfuse1_pair(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, halfPLR, scheduleIterAlg):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, HalfPLR=halfPLR, ScheduleIterAlg=scheduleIterAlg,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-2000:])
+    loop = asm[asm.index("label_LoopBeginL:"):asm.index("label_LoopEndL:")]
+    loads = re.findall(r"tensor_load_to_lds s\[sgpr(tdm\w+Group0):", loop)
+    assert sorted(set(loads)) == ["tdmAGroup0", "tdmBGroup0"] and len(loads) == 6, loads
+    assert _halfPlrUnmasked(asm) == []
+    assert _halfPlrUnmasked(asm.replace("s_cmov_b32 s[sgprtdmBGroup0+0], 0", "s_nop 0"))
+
+
+def test_divergent_segment_interleave_names_why_it_cannot_apply(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, LDSTrInst=False, LDSSegmentInterleave=1)
+    assert sol.get("Valid") is not True and "interleaves both tensors" in out, out
+
+
+def _loopTestAsUnsignedLe(lines, sig, wait):
+    lines[:] = [re.sub(r"^(\s*)s_cmp_eq_u32( s\[sgprLoopCounterL\], (?:0x0|0)\b)", r"\1s_cmp_le_u32\2", line)
+                for line in lines]
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse, scheduleIterAlg", _HANDSHAKE_CASES)
+def test_handshake_checker_reads_an_unsigned_le_zero_loop_test_like_eq(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse,
+        scheduleIterAlg):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse,
+                        scheduleIterAlg)
+    edited = _mutate(asm, _loopTestAsUnsignedLe)
+    assert edited != asm
+    assert dcpClusterHandshakeViolations(edited, thin, _thinSet(thin, tdmFuse)) == []
+    signed = edited.replace("s_cmp_le_u32 s[sgprLoopCounterL]", "s_cmp_le_i32 s[sgprLoopCounterL]")
+    assert dcpClusterHandshakeViolations(signed, thin, _thinSet(thin, tdmFuse)) != []
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse, scheduleIterAlg", _HANDSHAKE_CASES)
+def test_handshake_checker_reads_a_long_jump_back_edge_like_a_branch(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse,
+        scheduleIterAlg):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse,
+                        scheduleIterAlg)
+    assert dcpClusterHandshakeViolations(_mutate(asm, _closeTheLoopWithALongJump), thin, _thinSet(thin, tdmFuse)) == []
+
+
+# (PrefetchGlobalReadA, PrefetchGlobalReadB, ClusterDim, TDMFuse): A single-buffered with its scale on its own
+# set, and B single-buffered with MXSB riding A's set.
+_HANDSHAKE_SOLUTIONS = [(1, 2, [2, 1], 0), (2, 1, [1, 2], 2)]
+
+
+def _handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ScheduleIterAlg=4,
+                       ClusterDim=clusterDim, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    return sol
+
+
+DCP_HANDSHAKE_FAILED = 13
+
+
+def _recordOverflowCodes(monkeypatch):
+    """overflowedResources of every kernel emitted while the patch is active."""
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+
+    codes, getSource = [], KernelWriterAssembly.getSourceFileString
+
+    def recordCode(writer, kernel):
+        result = getSource(writer, kernel)
+        codes.append(writer.states.overflowedResources)
+        return result
+    monkeypatch.setattr(KernelWriterAssembly, "getSourceFileString", recordCode)
+    return codes
+
+
+def _recordWarnings(monkeypatch):
+    import tensilelite.KernelWriter as kernelWriter
+    warnings = []
+    monkeypatch.setattr(kernelWriter, "printWarning", warnings.append)
+    return warnings
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse", _HANDSHAKE_SOLUTIONS)
+def test_a_broken_emitted_handshake_fails_the_kernel(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, pgrA, pgrB, clusterDim, tdmFuse):
+    import tensilelite.KernelWriter as kernelWriter
+    calls = []
+
+    def broken(asm, *args):
+        calls.append(args)
+        return ["broken"]
+
+    monkeypatch.setattr(kernelWriter, "dcpClusterHandshakeViolations", broken)
+    warnings, codes = _recordWarnings(monkeypatch), _recordOverflowCodes(monkeypatch)
+    errs, _ = _emitDerived(_handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse),
+                           assembler)
+    thin = "A" if pgrA < pgrB else "B"
+    assert calls == [(thin, _thinSet(thin, tdmFuse))], calls
+    assert errs == [-2] and any("cluster handshake broken: broken" in w for w in warnings), (errs, warnings)
+    assert codes == [DCP_HANDSHAKE_FAILED], codes
+
+
+def _editAheadOfTheHandshake(monkeypatch, edit, check=None):
+    """Run edit(leaves after the barrier, owner, position) at the workgroup barrier ahead of every
+    late fill's refill, then the handshake insertion, then check()."""
+    from tensilelite.KernelWriter import KernelWriter, moduleLeaves, moduleTree
+    insert = KernelWriter._dcpInsertClusterHandshake
+
+    def edited(writer, kernel, rootModule):
+        lates = [late for late in moduleTree(rootModule) if late.name.startswith("TDM decoupled late fill ")]
+        assert lates
+        for late in lates:
+            flat = list(moduleLeaves(late))
+            load = next(i for i, (item, _, _) in enumerate(flat) if type(item).__name__ == "TensorLoadToLds")
+            anchor = next(i for i in range(load - 1, -1, -1) if type(flat[i][0]).__name__ == "SBarrier")
+            edit(flat[anchor + 1:], *flat[anchor][1:])
+        result = insert(writer, kernel, rootModule)
+        if check:
+            check()
+        return result
+
+    monkeypatch.setattr(KernelWriter, "_dcpInsertClusterHandshake", edited)
+
+
+@pytest.mark.parametrize("controlFlow", ["label", "long branch"])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse", _HANDSHAKE_SOLUTIONS)
+def test_handshake_insertion_fails_on_control_flow_before_scc_is_rewritten(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, pgrA, pgrB, clusterDim, tdmFuse, controlFlow):
+    from rocisa.code import Label
+    from rocisa.container import ContinuousRegister
+    from rocisa.instruction import SLongBranchPositive
+
+    def controlFlowAfterTheAnchor(after, owner, pos):
+        target = Label("DcpTestJump", "")
+        added = ([Label("DcpTestJoin", "")] if controlFlow == "label" else
+                 [SLongBranchPositive(target, ContinuousRegister(idx=0, size=3)), target])
+        items = list(owner.items())
+        owner.setItems(items[:pos + 1] + added + items[pos + 1:])
+
+    warnings, codes = _recordWarnings(monkeypatch), _recordOverflowCodes(monkeypatch)
+    _editAheadOfTheHandshake(monkeypatch, controlFlowAfterTheAnchor)
+    errs, _ = _emitDerived(_handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse),
+                           assembler)
+    assert errs == [-2] and any("control flow prevents proving SCC dead" in w for w in warnings), \
+        (errs, warnings)
+    assert codes == [DCP_HANDSHAKE_FAILED], codes
+
+
+def _sccDefAndUse():
+    """An SCC write and a read of it that leave every register as it was."""
+    from rocisa.container import sgpr
+    from rocisa.instruction import SCmpEQU32, SCSelectB32
+    return (SCmpEQU32(src0=sgpr("WaveIdx"), src1=sgpr("WaveIdx"), comment="dcp test scc def"),
+            SCSelectB32(dst=sgpr("WaveIdx"), src0=sgpr("WaveIdx"), src1=sgpr("WaveIdx"), comment="dcp test scc use"))
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse", _HANDSHAKE_SOLUTIONS)
+def test_handshake_insertion_lifts_the_barrier_over_the_scc_def_of_a_read_after_it(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, pgrA, pgrB, clusterDim, tdmFuse):
+    owners, orders = [], []
+
+    def defAheadReadAfter(after, owner, pos):
+        define, use = _sccDefAndUse()
+        items = list(owner.items())
+        owner.setItems(items[:pos] + [define, items[pos], use] + items[pos + 1:])
+        owners.append(owner)
+
+    def order():
+        for owner in owners:
+            text = [str(item) for item in owner.items()]
+            orders.append(tuple([i for i, t in enumerate(text) if s in t]
+                                for s in ("dcp cluster signal", "dcp test scc def", "dcp test scc use")))
+
+    warnings = _recordWarnings(monkeypatch)
+    _editAheadOfTheHandshake(monkeypatch, defAheadReadAfter, order)
+    errs, _ = _emitDerived(_handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse),
+                           assembler)
+    assert errs == [0] and not any("cluster handshake" in w for w in warnings), (errs, warnings)
+    # The election writes SCC, so it lands ahead of the def instead of between the def and its read.
+    assert orders and all(len(sig) == len(define) == len(use) == 1 and sig[0] < define[0] == use[0] - 1
+                          for sig, define, use in orders), orders
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse", _HANDSHAKE_SOLUTIONS)
+def test_handshake_insertion_fails_when_scc_stays_live_across_the_barrier(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, pgrA, pgrB, clusterDim, tdmFuse):
+    from rocisa.container import sgpr
+    from rocisa.instruction import SMovB32
+
+    def defGapRead(after, owner, pos):
+        define, use = _sccDefAndUse()
+        gap = SMovB32(dst=sgpr("WaveIdx"), src=sgpr("WaveIdx"), comment="dcp test gap")
+        items = list(owner.items())
+        owner.setItems(items[:pos] + [define, gap, items[pos], use] + items[pos + 1:])
+
+    warnings, codes = _recordWarnings(monkeypatch), _recordOverflowCodes(monkeypatch)
+    _editAheadOfTheHandshake(monkeypatch, defGapRead)
+    errs, _ = _emitDerived(_handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse),
+                           assembler)
+    assert errs == [-2] and any("SCC is live after its workgroup barrier" in w for w in warnings), (errs, warnings)
+    assert codes == [DCP_HANDSHAKE_FAILED], codes
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, tdmFuse", _HANDSHAKE_SOLUTIONS)
+def test_handshake_insertion_fails_when_nothing_after_the_barrier_touches_scc(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, pgrA, pgrB, clusterDim, tdmFuse):
+    from rocisa.container import sgpr
+    from rocisa.instruction import SMovB32
+
+    def neutralAfter(after, owner, pos):
+        for item, own, at in after:
+            if type(item).__name__.startswith(("S", "Label")):
+                items = list(own.items())
+                items[at] = SMovB32(dst=sgpr("WaveIdx"), src=sgpr("WaveIdx"), comment="dcp test no scc")
+                own.setItems(items)
+
+    warnings, codes = _recordWarnings(monkeypatch), _recordOverflowCodes(monkeypatch)
+    _editAheadOfTheHandshake(monkeypatch, neutralAfter)
+    errs, _ = _emitDerived(_handshakeSolution(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse),
+                           assembler)
+    assert errs == [-2] and any("cannot prove SCC dead after its workgroup barrier" in w for w in warnings), \
+        (errs, warnings)
+    assert codes == [DCP_HANDSHAKE_FAILED], codes
 
 
 def test_solution_equal_one_degenerates_to_scalar(_gp_gfx1250, gfx1250_iim, assembler, capsys):
@@ -1372,6 +2140,76 @@ _RESOLVED_LDS_KEYS = (
     "UnrollMajorLDSA", "UnrollMajorLDSB", "UnrollMajorLDSMXSA", "UnrollMajorLDSMXSB",
     "DirectToVgprA", "DirectToVgprB", "DirectToVgprMXSA", "DirectToVgprMXSB",
 )
+
+
+# At TDMFuse 2 MXSB rides A's descriptor set, at 3 MXSA rides B's.
+_RIDERS = {2: ("MXSB", "A"), 3: ("MXSA", "B")}
+
+
+def _thinSet(thin, tdmFuse):
+    """Tensors on the single-buffered blocks: a riding scale moves with its set owner."""
+    rider, owner = _RIDERS.get(tdmFuse, (None, None))
+    members = {thin, "MXS" + thin} - {rider} | ({rider} if owner == thin else set())
+    return tuple(tc for tc in ("A", "MXSA", "B", "MXSB") if tc in members)
+
+
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_divergent_shared_scale_set_takes_its_owners_blocks(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    rider, owner = _RIDERS[tdmFuse]
+    assert DP.dcpLdsSide(rider) != owner == DP.dcpLdsSide(rider, sol)
+    assert DP.dcpThinSet(sol) == _thinSet("A" if pgrA < pgrB else "B", tdmFuse)
+    blocks = {"A": (pgrA, sol["LdsOffsetBlkA"], 0),
+              "B": (pgrB, sol["LdsOffsetBlkB"], pgrA * sol["LdsOffsetBlkA"])}
+    # One compare against the owner's second copy swaps the set, so every member sits
+    # in the owner's block, after the owner.
+    assert sol["LdsOffset%s" % owner] == blocks[owner][2]
+    for tc in ("A", "MXSA", "MXSB", "B"):
+        nBlk, stride, base = blocks[DP.dcpLdsSide(tc, sol)]
+        offset = sol["LdsOffset%s" % tc]
+        assert base <= offset and offset + sol["LdsNumElementsAligned%s" % tc] <= base + stride, tc
+        if tc != "A":
+            assert sol.get("LdsOffset%s_Blk" % tc) == (offset + stride if nBlk > 1 else None), tc
+    # LdsNumBytes ends where the last copy of the last member ends; B counts its unaligned size.
+    assert sol["LdsNumBytes"] == max(
+        sol["LdsOffset%s" % tc] + (blocks[DP.dcpLdsSide(tc, sol)][0] - 1) * blocks[DP.dcpLdsSide(tc, sol)][1]
+        + (sol["ldsNumBytesB"] if tc == "B" else sol["LdsNumElementsAligned%s" % tc])
+        for tc in ("A", "MXSA", "MXSB", "B")), sol["LdsNumBytes"]
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-2000:])
+
+
+# (pair, single-buffered side, TDMFuse, a member of the double-buffered set, missed by the default classification)
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse, member, missedByDefault", [
+    (2, 1, [1, 2], "B", 2, "MXSB", True),
+    (1, 2, [2, 1], "A", 2, "B", False),
+    (2, 1, [1, 2], "B", 3, "A", False),
+])
+def test_handshake_checker_flags_a_double_buffered_set_load_in_the_window(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse, member,
+        missedByDefault):
+    asm = _handshakeAsm(gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, tdmFuse, 4)
+    lines, code, sig, wait = _handshakeLines(asm)
+    load = next(line for line in code if line.startswith("tensor_load_to_lds"))
+    lines.insert(wait, re.sub(r"tdm\w+?Group", "tdm%sGroup" % member, load))
+    expected = "a double-buffered tensor load precedes its cluster wait"
+    assert any(expected in p for p in dcpClusterHandshakeViolations("\n".join(lines), thin, _thinSet(thin, tdmFuse)))
+    # The default classification takes the single-buffered tensor's own scale as single-buffered.
+    assert missedByDefault != any(expected in p for p in dcpClusterHandshakeViolations("\n".join(lines), thin))
+
+
+@pytest.mark.parametrize("tdmFuse, pgrA, pgrB, halfPLR", [(2, 1, 2, 1), (2, 2, 1, 3), (3, 2, 1, 2), (3, 1, 2, 3)])
+def test_divergent_shared_scale_set_rejects_halfplr(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, halfPLR):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB, HalfPLR=halfPLR)
+    assert sol.get("Valid") is not True
+    assert ("TDMFuse=%d with MX scales on both tensors is not implemented with HalfPLR=%d at a divergent "
+            "decoupled pair" % (tdmFuse, halfPLR)) in out, out
 
 
 def _derivedLdsBytesAB(sol, pgrA, pgrB):
@@ -1910,10 +2748,18 @@ def test_solution_auto_exhausting_the_ranking_still_rejects(
 def test_solution_auto_does_not_retry_an_unrelated_rejection(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
     sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
-        MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2], ClusterDim=[2, 1],
-        PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2], StreamK=3, StreamKForceDPOnly=1,
+        GlobalSplitU=0, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
     assert sol.get("Valid") is False, out
-    assert "ClusterDim != [1, 1] is incompatible with" in out, out
+    assert "persistent tail cannot normalize LDS to buffer 0" in out, out
+
+
+def test_auto_pair_ranking_keeps_the_single_buffered_side_off_the_cluster_axes():
+    assert pgrAutoPairRanking(2, _postConversionState(ClusterDim=[2, 1]), _F8F4) == [(2, 2), (1, 2)]
+    assert pgrAutoPairRanking(2, _postConversionState(ClusterDim=[1, 2]), _F8F4) == [(2, 2), (2, 1)]
+    assert pgrAutoPairRanking(2, _postConversionState(ClusterDim=[2, 2]), _F8F4) == [(2, 2)]
+    held = _postConversionState(PrefetchGlobalReadA=-1, PrefetchGlobalReadB=1, ClusterDim=[2, 1])
+    assert "has no cluster peers" in resolvePrefetchGlobalReadSpecialValues(held)
 
 
 def test_solution_derivation_leaves_no_capacity_marker_behind(
@@ -2042,7 +2888,7 @@ def test_the_schedule_iter_alg_3_refusal_is_correctness_not_conservatism(
         _emitDerived(sol, assembler)
 
 
-# Divergent pairs on TDMFuse 1 with HalfPLR and on TDMFuse 1-3 without MX.
+# Divergent pairs on TDMFuse 1 with HalfPLR, on TDMFuse 1-3 without MX and on TDMFuse 2/3 with both scales.
 _LATE_FILL_MX = {"both": (32, 32), "none": (0, 0), "A only": (32, 0), "B only": (0, 32)}
 
 
@@ -2059,7 +2905,7 @@ def test_late_fill_moves_the_thin_set_where_a_and_b_have_sets_of_their_own(
         expected = None
     elif fuse == 1 and mx == "both":
         expected = ("globalReadIncrement%s" % thin,)
-    elif fuse in (1, 2, 3) and mx == "none":
+    elif fuse in (1, 2, 3) and mx == "none" or fuse in (2, 3) and mx == "both":
         expected = ("globalReadIncrementA", "globalReadIncrementB")
     else:
         expected = None
@@ -2149,3 +2995,276 @@ def test_scale_less_divergent_pair_moves_its_thin_set_instead_of_splitting_by_pa
     assert any("DcpEarlyFill" in label for label in labels), "no early fill set was emitted"
     assert not any("DcpLateFill" in label for label in labels), \
         "the fill group was split by wave parity"
+
+
+_UNSCALED = {"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0}
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+def test_unscaled_divergent_pair_takes_the_handshake_on_its_every_wave_sets(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, thin):
+    # Without MX scales TDMFuse 1-3 give A and B a set each on every wave.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB, ProblemType=_UNSCALED)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, errs
+    assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+    _, lines, sig, wait = _handshakeLines(asm)
+    late = [line for line in lines[sig:wait] if line.startswith("tensor_load_to_lds")]
+    assert late and all("tdm%sGroup0" % thin in line for line in late), late
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+@pytest.mark.parametrize("unscaled", ["MXBlockA", "MXBlockB"])
+@pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
+def test_one_sided_mx_divergent_pair_stays_rejected_under_a_cluster(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, unscaled, pgrA, pgrB, clusterDim, thin):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB,
+                       ProblemType={"MacDataTypeB": "F8", unscaled: 0})
+    assert sol.get("Valid") is not True
+    # A single-buffered at TDMFuse 3 with MXSA meets the cluster reject first.
+    assert ("are not implemented at a divergent decoupled pair" in out
+            or (thin, tdmFuse, unscaled) == ("A", 3, "MXBlockB")), out
+
+
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+@pytest.mark.parametrize("unscaled", ["MXBlockA", "MXBlockB"])
+@pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
+def test_one_sided_mx_divergent_pair_stays_rejected_without_a_cluster(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, unscaled, pgrA, pgrB):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB, ProblemType={"MacDataTypeB": "F8", unscaled: 0})
+    assert sol.get("Valid") is not True
+    assert "are not implemented at a divergent decoupled pair" in out, out
+
+
+# Under a cluster only the single-buffered side's HalfPLR (A bit 0, B bit 1) passes the cluster rules.
+_BOTH_SCALE_HALFPLR = (
+    [(fuse, pgrA, pgrB, [1, 1], halfPLR) for fuse in (2, 3) for pgrA, pgrB, _, _ in _HANDSHAKE_PAIRS
+     for halfPLR in (1, 2, 3)]
+    + [(fuse, pgrA, pgrB, clusterDim, 1 if thin == "A" else 2) for fuse in (2, 3)
+       for pgrA, pgrB, clusterDim, thin in _HANDSHAKE_PAIRS if not (thin == "A" and fuse == 3)])
+
+
+@pytest.mark.parametrize("tdmFuse, pgrA, pgrB, clusterDim, halfPLR", _BOTH_SCALE_HALFPLR)
+def test_both_scale_divergent_pair_rejects_every_halfplr_at_tdmfuse_2_and_3(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, halfPLR):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       HalfPLR=halfPLR, InitCIterWmma=1, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is not True
+    assert ("TDMFuse=%d with MX scales on both tensors is not implemented with HalfPLR=%d at a divergent "
+            "decoupled pair" % (tdmFuse, halfPLR)) in out, out
+
+
+@pytest.mark.parametrize("tdmFuse, pgrA, pgrB, clusterDim, clause", [
+    (3, 1, 2, [2, 1], "at TDMFuse=3 MXSA rides the double-buffered B's descriptor set"),
+    (3, 1, 2, [4, 1], "at TDMFuse=3 MXSA rides the double-buffered B's descriptor set"),
+    (2, 1, 2, [1, 4], "the single-buffered A cannot have cluster peers"),
+    (1, 2, 1, [4, 1], "the single-buffered B cannot have cluster peers"),
+    (3, 2, 1, [2, 2], "the single-buffered B cannot have cluster peers"),
+])
+def test_solution_rejects_these_divergent_clusters(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, clause):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is not True
+    assert clause in out, out
+
+
+# Without MX scales TDMFuse 2/3 open HalfPLR: any value at [1,1], the single-buffered side's under a cluster.
+_UNSCALED_HALFPLR = (
+    [(fuse, pgrA, pgrB, [1, 1], thin, halfPLR) for fuse in (2, 3) for pgrA, pgrB, _, thin in _HANDSHAKE_PAIRS
+     for halfPLR in (1, 2, 3)]
+    + [(fuse, pgrA, pgrB, clusterDim, thin, 1 if thin == "A" else 2) for fuse in (2, 3)
+       for pgrA, pgrB, clusterDim, thin in _HANDSHAKE_PAIRS])
+
+
+@pytest.mark.parametrize("tdmFuse, pgrA, pgrB, clusterDim, thin, halfPLR", _UNSCALED_HALFPLR)
+def test_unscaled_divergent_pair_opens_halfplr_at_tdmfuse_2_and_3(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, thin, halfPLR):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       HalfPLR=halfPLR, InitCIterWmma=1, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB,
+                       ProblemType=_UNSCALED)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, errs
+    assert _halfPlrUnmasked(asm) == [] and _halfPlrUnmasked(_withoutLoopMasks(asm))
+    if clusterDim != [1, 1]:
+        assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+
+
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_unscaled_divergent_pair_rejects_halving_the_double_buffered_side_under_a_cluster(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, thin):
+    thick = "B" if thin == "A" else "A"
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       HalfPLR=2 if thick == "B" else 1, InitCIterWmma=1, PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB, ProblemType=_UNSCALED)
+    assert sol.get("Valid") is not True
+    assert "halves the double-buffered %s" % thick in out, out
+
+
+@pytest.mark.parametrize("clustered", [False, True])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+@pytest.mark.parametrize("tdmFuse", [0, 2])
+def test_divergent_pair_takes_a_global_split_u(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, thin, clustered):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=tdmFuse, GlobalSplitU=3,
+                       ClusterDim=clusterDim if clustered else [1, 1], PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, errs
+    if clustered:
+        assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+
+
+@pytest.mark.parametrize("tdmFuse", [0, 1])
+@pytest.mark.parametrize("pgrA, pgrB, mi, depthU", _SEGMENT_INTERLEAVE_PAIRS)
+def test_auto_segment_interleave_takes_the_divergent_layout(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, mi, depthU, tdmFuse):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=mi, DepthU=depthU, TDMFuse=tdmFuse,
+                       LDSTrInst=False, LDSSegmentInterleave=-1, PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True, out
+    assert sol["LDSSegmentInterleave"] == 1, out
+    assert sol["LDSSegInterleaveOffsets"]["activeTC"] == ("A" if pgrA < pgrB else "B")
+
+
+@pytest.mark.parametrize("tdmFuse, rider", [(2, "MXSB"), (3, "MXSA")])
+@pytest.mark.parametrize("pgrA, pgrB, mi, depthU", _SEGMENT_INTERLEAVE_PAIRS)
+def test_divergent_segment_interleave_refuses_a_riding_scale(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, mi, depthU, tdmFuse, rider):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=mi, DepthU=depthU, TDMFuse=tdmFuse,
+                       LDSTrInst=False, LDSSegmentInterleave=1, PrefetchGlobalReadA=pgrA,
+                       PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is not True
+    assert "TDMFuse=%d puts %s in the other tensor's blocks" % (tdmFuse, rider) in out, out
+
+
+# bf16 without MX scales, the single-buffered tensor on [4,1] (A) or [1,4] (B).
+_UNSCALED_SEGMENT_INTERLEAVE = [(1, 2, [16, 16, 32, 1, 1, 2, 8, 4, 1], "VectorWidthA"),
+                                (2, 1, [16, 16, 32, 1, 1, 8, 2, 1, 4], "VectorWidthB")]
+
+
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+@pytest.mark.parametrize("pgrA, pgrB, mi, vw", _UNSCALED_SEGMENT_INTERLEAVE)
+def test_unscaled_divergent_segment_interleave_opens_at_tdmfuse_2_and_3(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, mi, vw, tdmFuse):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
+        MatrixInstruction=mi, TDMFuse=tdmFuse, LDSSegmentInterleave=1, PrefetchGlobalReadA=pgrA,
+        PrefetchGlobalReadB=pgrB, **{vw: 2}))
+    assert sol.get("Valid") is True and sol["LDSSegmentInterleave"] == 1, out
+    assert sol["LDSSegInterleaveOffsets"]["activeTC"] == ("A" if pgrA < pgrB else "B")
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, errs
+
+
+_TWO_WAVE_PAIRS = [(1, 2, [1, 1], "A"), (1, 2, [2, 1], "A"), (1, 2, [4, 1], "A"),
+                   (2, 1, [1, 1], "B"), (2, 1, [1, 2], "B"), (2, 1, [1, 4], "B")]
+
+
+@pytest.mark.parametrize("scheduleIterAlg", [0, 4])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _TWO_WAVE_PAIRS)
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_two_wave_both_scale_divergent_pair_opens_at_tdmfuse_2_and_3(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB, clusterDim, thin, scheduleIterAlg):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=[16, 16, 128, 1, 1, 2, 4, 2, 1],
+                       WorkGroup=[32, 2, 1], TDMFuse=tdmFuse, ClusterDim=clusterDim, ScheduleIterAlg=scheduleIterAlg,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    expected = None
+    if clusterDim != [1, 1] and thin == "A" and tdmFuse == 3:
+        expected = "at TDMFuse=3 MXSA rides the double-buffered B's descriptor set"
+    elif clusterDim != [1, 1] and thin == "B" and scheduleIterAlg == 4:
+        expected = "on 2 waves at TDMFuse=%d with MX scales on both tensors" % tdmFuse
+    if expected:
+        assert sol.get("Valid") is not True and expected in out, out
+        return
+    assert sol.get("Valid") is True and sol["NumWaves"] == 2, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-3000:])
+    if clusterDim != [1, 1]:
+        assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+
+
+# With both scales TDMFuse 0 takes ScheduleIterAlg 4 only. Under a cluster HalfPLR at TDMFuse 1 needs
+# InitCIterWmma 1 and may halve only the single-buffered side.
+_TWO_WAVE_ARMS = [(0, 4), (1, 0), (1, 4)]
+
+
+@pytest.mark.parametrize("halfPLR, initCIterWmma", list(itertools.product([0, 1, 2, 3], [0, 1])))
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _TWO_WAVE_PAIRS)
+@pytest.mark.parametrize("tdmFuse, scheduleIterAlg", _TWO_WAVE_ARMS)
+def test_two_wave_both_scale_divergent_pair_emits_its_handshake_at_tdmfuse_0_and_1(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, scheduleIterAlg, pgrA, pgrB, clusterDim, thin,
+        halfPLR, initCIterWmma):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=[16, 16, 128, 1, 1, 2, 4, 2, 1],
+                       WorkGroup=[32, 2, 1], TDMFuse=tdmFuse, ClusterDim=clusterDim, ScheduleIterAlg=scheduleIterAlg,
+                       HalfPLR=halfPLR, InitCIterWmma=initCIterWmma, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    thick, expected = "B" if thin == "A" else "A", None
+    if clusterDim != [1, 1] and tdmFuse == 1 and halfPLR:
+        if initCIterWmma != 1:
+            expected = "HalfPLR=%d with InitCIterWmma=%d at TDMFuse=1" % (halfPLR, initCIterWmma)
+        elif halfPLR & (1 if thick == "A" else 2):
+            expected = "HalfPLR=%d halves the double-buffered %s" % (halfPLR, thick)
+    if expected:
+        assert sol.get("Valid") is not True and expected in out, out
+        return
+    assert sol.get("Valid") is True and sol["NumWaves"] == 2, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-3000:])
+    if clusterDim != [1, 1]:
+        assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+    if halfPLR:
+        assert _halfPlrUnmasked(asm) == [] and _halfPlrUnmasked(_withoutLoopMasks(asm))
+
+
+@pytest.mark.parametrize("depthU", [512, 1024])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin, tdmFuse",
+                         [(1, 2, [2, 1], "A", 2), (1, 2, [4, 1], "A", 2), (2, 1, [1, 2], "B", 1), (2, 1, [1, 4], "B", 0)])
+def test_two_wave_both_scale_divergent_pair_emits_its_handshake_at_a_deeper_depthu(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, tdmFuse, depthU):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, MatrixInstruction=[16, 16, 128, 1, 1, 2, 4, 2, 1],
+                       WorkGroup=[32, 2, 1], DepthU=depthU, TDMFuse=tdmFuse, ClusterDim=clusterDim,
+                       ScheduleIterAlg=4, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    assert sol.get("Valid") is True and sol["NumWaves"] == 2, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-3000:])
+    assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+
+
+@pytest.mark.parametrize("clustered", [False, True])
+@pytest.mark.parametrize("pgrA, pgrB, clusterDim, thin", _HANDSHAKE_PAIRS)
+def test_unscaled_divergent_pair_opens_at_tdmfuse_0(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, clusterDim, thin, clustered):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ClusterDim=clusterDim if clustered else [1, 1],
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB, ProblemType=_UNSCALED)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs == [0] and asm, (errs, capsys.readouterr().out[-3000:])
+    if clustered:
+        assert dcpClusterHandshakeViolations(asm, thin, DP.dcpThinSet(sol)) == []
+
+
+# Tiles on which only one divergent pair fits LDS: A single-buffered on 256x128, B on 128x256.
+_AUTO_CLUSTER_WITNESSES = [([16, 16, 32, 1, 1, 8, 4, 2, 2], (1, 2), [2, 1], [1, 2]),
+                           ([16, 16, 32, 1, 1, 4, 8, 2, 2], (2, 1), [1, 2], [2, 1])]
+
+
+@pytest.mark.parametrize("mi, pair, free, peered", _AUTO_CLUSTER_WITNESSES)
+def test_solution_auto_keeps_either_single_buffered_side_off_the_cluster_axes(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, mi, pair, free, peered):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
+        MatrixInstruction=mi, ClusterDim=free, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+    assert sol.get("Valid") is True, out
+    assert (sol["PrefetchGlobalReadA"], sol["PrefetchGlobalReadB"]) == pair, out
+    for clusterDim in (peered, [2, 2]):
+        sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
+            MatrixInstruction=mi, ClusterDim=clusterDim, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        assert sol.get("Valid") is False, out
+        assert ("ClusterDim %s limits auto to pairs whose single-buffered tensor has no cluster peers"
+                % clusterDim) in out, out
