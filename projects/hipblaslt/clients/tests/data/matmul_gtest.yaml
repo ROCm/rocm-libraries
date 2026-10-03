@@ -4671,6 +4671,83 @@ Tests:
   fast_check: 1
   gpu_arch: '950'
 
+###############################################################################
+# fast_check SDC hunt (AIHPBLAS-5021): on demand, in no tier.
+#
+# The Achilles GEMM sizes and data types that reported intermittent silent data
+# corruption (ROCM-31901, ROCM-31905, ROCM-32072), each launched and checked 20
+# times on the heuristic's first 4 solutions. Run them with
+# clients/scripts/sdc_hunt/fast_check_sdc_hunt.py, which repeats them under a
+# concurrent workload and different XNACK settings and records the environment
+# of every run. Category sdc_hunt is deliberately in no tier.
+###############################################################################
+
+- name: matmul_fast_check_sdc_hunt
+  category: sdc_hunt
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+      - *hpa_half_bf16_fp32dst_precision
+  matrix_size:
+    - { M: 4096, N: 8192, K: 4096 }
+    - { M: 8192, N: 16384, K: 8192 }
+    - { M: 12288, N: 20480, K: 12288 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_sdc_hunt_fp8_fnuz
+  category: sdc_hunt
+  function:
+    matmul:
+      - *f8_fnuz_precision_dst_fp32
+      - *f8bf8_fnuz_precision_dst_fp32
+      - *bf8f8_fnuz_precision_dst_fp32
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_sdc_hunt_fp8
+  category: sdc_hunt
+  function:
+    matmul:
+      - *f8_precision_dst_fp32
+      - *f8bf8_precision_dst_fp32
+      - *bf8f8_precision_dst_fp32
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 4
+  fast_check_repeat: 20
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '(950|1250)'
+
 - name: matmul_96_complex
   category: pre_checkin
   function:
