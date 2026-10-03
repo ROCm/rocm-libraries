@@ -76,12 +76,6 @@ class TensileLite:
         entry = state(library)
         if entry["solutions"][0]["kernelName"] != config["CustomKernelName"]:
             raise RuntimeError(f"TensileLite renamed {config['CustomKernelName']}")
-        # The kernel takes no alpha argument; TensileLite derives no predicate for it.
-        for predicate in (
-            entry["solutions"][0]["problemPredicate"],
-            entry["library"]["rows"][0]["predicate"],
-        ):
-            predicate["value"].append({"type": "AlphaValue", "value": "1"})
         return msgpack.packb(entry)
 
 

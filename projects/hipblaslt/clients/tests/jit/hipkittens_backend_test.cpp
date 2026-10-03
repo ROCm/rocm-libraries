@@ -135,6 +135,8 @@ namespace
         {
             std::ostringstream out;
             out << m << 'x' << n << 'x' << k;
+            if(alpha != 1)
+                out << " alpha " << alpha;
             if(beta)
                 out << " beta " << beta << (cIsD ? " C=D" : "");
             return out.str();
@@ -383,7 +385,8 @@ namespace
             return c;
         };
         for(const auto& c : {Case{"beta 1", with([](Config& c) { c.beta = 1; })},
-                             Case{"beta -0.5", with([](Config& c) { c.beta = -0.5f; })}})
+                             Case{"beta -0.5", with([](Config& c) { c.beta = -0.5f; })},
+                             Case{"alpha 1.5", with([](Config& c) { c.alpha = 1.5f; })}})
         {
             status = generate(provider, r.make(c.config), target, solutions);
             require(status.ok() && solutions.size() == 1,
@@ -395,7 +398,7 @@ namespace
             {"NT", with([](Config& c) { c.opA = HIPBLAS_OP_N, c.opB = HIPBLAS_OP_T; })},
             {"fp16 in and out", with([](Config& c) { c.typeAB = c.typeCD = HIP_R_16F; })},
             {"fp32 out", with([](Config& c) { c.typeCD = HIP_R_32F; })},
-            {"alpha 1.5", with([](Config& c) { c.alpha = 1.5f; })},
+            {"alpha 0 (K = 0 in hipBLASLt)", with([](Config& c) { c.alpha = 0; })},
             {"device alpha",
              with([](Config& c) { c.pointerMode = HIPBLASLT_POINTER_MODE_DEVICE; })},
             {"alpha vector",
@@ -462,8 +465,8 @@ namespace
         for(const auto& term : all->value)
             types.insert(term->type());
         require(!types.count("BetaZero"), "The entry still requires beta 0");
-        for(const char* type : {"AlphaValue",
-                                "BatchSizeEqual",
+        require(!types.count("AlphaValue"), "The entry still requires alpha 1");
+        for(const char* type : {"BatchSizeEqual",
                                 "Free0SizeMultiple",
                                 "Free1SizeMultiple",
                                 "BoundSizeMultiple",
@@ -666,6 +669,7 @@ namespace
                 for(int64_t k = 0; k < c.k; ++k)
                     sum += double(fromBf16(hostA[k + row * c.k]))
                            * double(fromBf16(hostB[k + col * c.k]));
+                sum *= c.alpha;
                 if(c.beta)
                     sum += double(c.beta) * fromBf16(hostC[row + col * c.m]);
                 const double got = fromBf16(out[row + col * c.m]);
@@ -708,14 +712,17 @@ namespace
             configs.emplace_back();
             configs.back().m = shape[0], configs.back().n = shape[1], configs.back().k = shape[2];
         }
-        for(const auto& [shape, beta, cIsD] : {std::tuple{shapes[1], 1.0f, false},
-                                               std::tuple{shapes[1], -0.5f, true},
-                                               std::tuple{shapes[2], 2.0f, true},
-                                               std::tuple{shapes[5], 1.0f, false}})
+        for(const auto& [shape, alpha, beta, cIsD] : {std::tuple{shapes[1], 1.0f, 1.0f, false},
+                                                      std::tuple{shapes[1], 1.0f, -0.5f, true},
+                                                      std::tuple{shapes[2], 1.0f, 2.0f, true},
+                                                      std::tuple{shapes[5], 1.0f, 1.0f, false},
+                                                      std::tuple{shapes[1], 1.5f, 0.0f, false},
+                                                      std::tuple{shapes[2], -0.25f, 1.0f, true}})
         {
             configs.emplace_back();
             auto& c = configs.back();
-            c.m = shape[0], c.n = shape[1], c.k = shape[2], c.beta = beta, c.cIsD = cIsD;
+            c.m = shape[0], c.n = shape[1], c.k = shape[2];
+            c.alpha = alpha, c.beta = beta, c.cIsD = cIsD;
         }
         for(const auto& c : configs)
         {
