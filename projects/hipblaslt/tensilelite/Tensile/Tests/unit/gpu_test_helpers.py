@@ -722,6 +722,37 @@ def assemble_and_run(asm, tmp_path, label, output_size, inputs=(), scalars=(), l
 
 
 
+def run_scalar_kernel(writer, instructions, inputs, outputs, tmp_path):
+    """Execute scalar control flow and return each output SGPR from all 64 lanes.
+
+    The caller maps symbolic registers in writer.sgprs and reserves s[0:5]
+    for launch arguments, v0 for the lane ID, and v1/v2 for result export.
+    Inputs map SGPR names to u32 kernel arguments; outputs list SGPR names.
+    """
+    args = [("output", 8, "global_buffer", "u32")]
+    loads = [(4, 2, 0, "output pointer")]
+    for i, name in enumerate(inputs):
+        args.append((f"input_{i}", 4, "by_value", "u32"))
+        loads.append((name, 1, 8 + 4 * i, name))
+    export = []
+    for i, name in enumerate(outputs):
+        export.extend([
+            "s_waitcnt vmcnt(0)",
+            "v_lshlrev_b32 v1, 2, v0",
+            f"v_add_u32 v1, {i * 64 * 4}, v1",
+            f"v_mov_b32 v2, s[sgpr{name}]",
+            "global_store_dword v1, v2, s[4:5]",
+        ])
+    inner = str(generate_load_params(loads)) + "\n" + str(instructions)
+    inner += "\n" + "\n".join(export)
+    asm = generate_kernel_asm(inner, writer, args, num_threads=64)
+    raw = assemble_and_run(asm, tmp_path, "scalar", len(outputs) * 64 * 4,
+                           scalars=tuple(inputs.values()), num_threads=64)
+    words = struct.unpack(f"<{len(outputs) * 64}I", raw)
+    return {name: words[i * 64:(i + 1) * 64] for i, name in enumerate(outputs)}
+
+
+
 # ---- Roundtrip kernel helpers ----
 
 def generate_srd_setup():

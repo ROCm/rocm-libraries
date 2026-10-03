@@ -27,9 +27,9 @@ import re
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import coVersionMap, printExit
-from Tensile.Common.Architectures import architectureMap
-from Tensile.Toolchain.Validators import ToolchainDefaults
+from ..Common import coVersionMap, printExit
+from ..Common.Architectures import architectureMap
+from ..Toolchain.Validators import ToolchainDefaults
 
 
 def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:

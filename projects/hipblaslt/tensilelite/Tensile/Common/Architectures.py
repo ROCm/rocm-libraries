@@ -723,7 +723,7 @@ def detectHostGfxArchs() -> List[str]:
     # Nothing here is worth failing a benchmark-capability question over, so any
     # failure reaching this point is answered the documented way.
     try:
-        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+        from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
 
         archs = _fromEnumerator(validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR))
     except Exception:
