@@ -362,15 +362,29 @@ namespace
         int64_t                     alpha;
         int64_t                     beta;
 
+        // The exact result, saturated to the int64 range: each factor may be close to 2^61, and
+        // a result that does not fit is far beyond every compute type's exact range anyway.
         int64_t exact(int64_t i, int64_t j) const
         {
-            int64_t acc = 0;
+            __int128 acc = 0;
             for(int64_t k = 0; k < K; k++)
-                acc += int64_t(opA.at(i, k)) * int64_t(opB.at(k, j));
-            int64_t v = alpha * scale[size_t(i)] * acc + bias[size_t(i)];
+                acc = mul_add(int64_t(opA.at(i, k)), int64_t(opB.at(k, j)), acc);
+            __int128 v = mul_add(mul_add(alpha, scale[size_t(i)], 0), acc, bias[size_t(i)]);
             if(beta != 0)
-                v += beta * int64_t(C.at(i, j));
-            return v;
+                v = mul_add(beta, int64_t(C.at(i, j)), v);
+            return int64_t(std::clamp<__int128>(v, INT64_MIN, INT64_MAX));
+        }
+
+        // a * b + c, saturating at the int128 limits instead of overflowing.
+        static __int128 mul_add(__int128 a, __int128 b, __int128 c)
+        {
+            constexpr __int128 hi = ~(__int128(1) << 127), lo = -hi - 1;
+            __int128           p;
+            if(__builtin_mul_overflow(a, b, &p))
+                return (a < 0) != (b < 0) ? lo : hi;
+            if(__builtin_add_overflow(p, c, &p))
+                return c < 0 ? lo : hi;
+            return p;
         }
     };
 

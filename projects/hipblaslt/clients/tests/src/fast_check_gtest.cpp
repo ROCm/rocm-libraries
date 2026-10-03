@@ -972,6 +972,18 @@ namespace
         EXPECT_NE(res.message.find("compute type holds"), std::string::npos) << res.message;
     }
 
+    // An alpha near 2^61 makes the exact results overflow 64 bits; fast_check must report the
+    // result as wrong or out of range, not overflow.
+    TEST(FastCheck_pre_checkin, huge_alpha_does_not_overflow)
+    {
+        HostProblem      hp = default_problem();
+        FastCheckProblem p  = hp.problem();
+        p.alpha             = 0x1p60;
+        auto res            = fast_check_gemm(p);
+        EXPECT_FALSE(res.passed);
+        EXPECT_FALSE(res.message.empty());
+    }
+
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
     {
         DeviceMatrix       m;
