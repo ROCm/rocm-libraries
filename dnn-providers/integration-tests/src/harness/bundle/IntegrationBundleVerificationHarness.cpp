@@ -411,7 +411,7 @@ VerificationOutcome
                                            refLabel(type) + " errored (verification-mode="
                                                + refLabel(type) + "): " + result.message);
     case RefStatus::RAN:
-        return compareOutputs(engine.outputs, refOutputs, result.site);
+        return compareOutputs(engine.outputs, refOutputs, result.site, verifierFor(type));
     default:
         return VerificationOutcome::failed(
             VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -439,7 +439,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
             = runReferenceCapturingOutputs(ReferenceExecutorType::GPU, refOutputs);
         if(gpu.status == RefStatus::RAN)
         {
-            return compareOutputs(engine.outputs, refOutputs, gpu.site);
+            return compareOutputs(engine.outputs, refOutputs, gpu.site, Verifier::GPU_REFERENCE);
         }
         if(gpu.status == RefStatus::RUNTIME_ERROR)
         {
@@ -472,7 +472,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
                                                "CPU reference errored (auto mode, last resort): "
                                                    + cpu.message);
         case RefStatus::RAN:
-            return compareOutputs(engine.outputs, refOutputs, cpu.site);
+            return compareOutputs(engine.outputs, refOutputs, cpu.site, Verifier::CPU_REFERENCE);
         default:
             return VerificationOutcome::failed(
                 VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -676,20 +676,25 @@ VerificationOutcome
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
             return *_bundle->tensors->at(uid);
         },
-        ValidationSite::HOST);
+        ValidationSite::HOST,
+        Verifier::GOLDEN);
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::compareOutputs(
-    OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site)
+    OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site, Verifier verifier)
 {
     return compareAgainst(
         engineOutputs,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
-        site);
+        site,
+        verifier);
 }
 
-VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
-    OutputTensors& engineOutputs, const ExpectedTensorLookup& expectedFor, ValidationSite site)
+VerificationOutcome
+    IntegrationBundleVerificationHarness::compareAgainst(OutputTensors& engineOutputs,
+                                                         const ExpectedTensorLookup& expectedFor,
+                                                         ValidationSite site,
+                                                         Verifier verifier)
 {
     auto wrapper = _bundle->graphWrapper();
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
@@ -717,7 +722,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
         ADD_FAILURE() << mismatch.report;
     }
 
-    return comparisonOutcome(mismatches.empty());
+    return comparisonOutcome(mismatches.empty(), verifier);
 }
 
 // ---- reporting helpers -----------------------------------------------------
