@@ -1,0 +1,10 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::adjacent_difference_config<{{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_adjacent_difference_benchmark<value_type, true, common::api_variant::no_alias, config>;
+{% endblock %}
+{% block type_definitions %}
+using value_type = {{ value_type }};
+{% endblock %}
