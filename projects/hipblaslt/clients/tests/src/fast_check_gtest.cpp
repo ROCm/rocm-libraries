@@ -679,6 +679,252 @@ namespace
         EXPECT_NE(res.message.find("element offset 19"), std::string::npos) << res.message;
     }
 
+    // ------------------------------------------------------------------------------------------
+    // Every supported type
+    // ------------------------------------------------------------------------------------------
+
+    struct TypeCase
+    {
+        hipDataType type;
+        size_t      size;
+        const char* name;
+    };
+
+    const TypeCase kTypes[] = {{HIP_R_64F, 8, "f64"},
+                               {HIP_R_32F, 4, "f32"},
+                               {HIP_R_16F, 2, "f16"},
+                               {HIP_R_16BF, 2, "bf16"},
+                               {HIP_R_32I, 4, "i32"},
+                               {HIP_R_8I, 1, "i8"},
+                               {HIP_R_8F_E4M3, 1, "f8"},
+                               {HIP_R_8F_E5M2, 1, "bf8"},
+                               {HIP_R_8F_E4M3_FNUZ, 1, "f8_fnuz"},
+                               {HIP_R_8F_E5M2_FNUZ, 1, "bf8_fnuz"}};
+
+    // Stores v in type t, rounding to nearest even, as the GPU stores a result.
+    void store_as(hipDataType t, double v, void* dst)
+    {
+        auto put = [dst](auto x) { std::memcpy(dst, &x, sizeof(x)); };
+        switch(t)
+        {
+        case HIP_R_64F:
+            return put(v);
+        case HIP_R_32F:
+            return put(float(v));
+        case HIP_R_16F:
+            return put(hipblasLtHalf(float(v)));
+        case HIP_R_16BF:
+            return put(hip_bfloat16(float(v)));
+        case HIP_R_32I:
+            return put(int32_t(v));
+        case HIP_R_8I:
+            return put(int8_t(v));
+        case HIP_R_8F_E4M3:
+            return put(hipblaslt_f8(float(v)));
+        case HIP_R_8F_E5M2:
+            return put(hipblaslt_bf8(float(v)));
+        case HIP_R_8F_E4M3_FNUZ:
+            return put(hipblaslt_f8_fnuz(float(v)));
+        case HIP_R_8F_E5M2_FNUZ:
+            return put(hipblaslt_bf8_fnuz(float(v)));
+        default:
+            FAIL() << "no conversion for type " << int(t);
+        }
+    }
+
+    std::vector<char> convert(const std::vector<float>& v, const TypeCase& t)
+    {
+        std::vector<char> out(v.size() * t.size);
+        for(size_t i = 0; i < v.size(); i++)
+            store_as(t.type, v[i], out.data() + i * t.size);
+        return out;
+    }
+
+    // A, B, C and D all in one type. K = 3 keeps every result within 14, which every type holds,
+    // though E5M2 rounds the ones above 8; D is stored the way the GPU rounds it.
+    struct TypedProblem
+    {
+        TypeCase          t;
+        HostProblem       hp{13, 11, 3, 2, false, true, 1.f, 1.f, false, false};
+        std::vector<char> A, B, C, D;
+
+        explicit TypedProblem(const TypeCase& tc)
+            : t(tc)
+            , A(convert(hp.A, tc))
+            , B(convert(hp.B, tc))
+            , C(convert(hp.C, tc))
+            , D(convert(hp.D, tc))
+        {
+        }
+
+        FastCheckProblem problem()
+        {
+            FastCheckProblem p = hp.problem();
+            p.A.data = A.data(), p.B.data = B.data(), p.C.data = C.data(), p.D.data = D.data();
+            p.A.type = p.B.type = p.C.type = p.D.type = t.type;
+            p.compute_type = t.type == HIP_R_8I || t.type == HIP_R_32I ? HIP_R_32I : HIP_R_32F;
+            return p;
+        }
+
+        char* d(int64_t s, int64_t i, int64_t j)
+        {
+            return D.data() + size_t(s * hp.stride_d() + j * hp.ldd + i) * t.size;
+        }
+    };
+
+    FastCheckResult device_result_bytes(FastCheckProblem p, const std::vector<char>& d_host)
+    {
+        void* d = nullptr;
+        EXPECT_EQ(hipMalloc(&d, d_host.size()), hipSuccess);
+        EXPECT_EQ(hipMemcpy(d, d_host.data(), d_host.size(), hipMemcpyHostToDevice), hipSuccess);
+        auto e   = fast_check_expected(p);
+        p.D.data = d;
+        auto res = fast_check_result_device(p, e, 0);
+        (void)hipFree(d);
+        return res;
+    }
+
+    // In every supported type, a correct D passes the host and device passes, and a wrong
+    // element and an element left holding the sentinel are both located by each.
+    TEST(FastCheckDevice_pre_checkin, every_type_passes_and_locates_faults)
+    {
+        for(const auto& tc : kTypes)
+        {
+            TypedProblem tp(tc);
+            auto         host = fast_check_gemm(tp.problem());
+            EXPECT_TRUE(host.passed) << tc.name << "\n" << host.message;
+            auto device = device_result_bytes(tp.problem(), tp.D);
+            EXPECT_TRUE(device.passed) << tc.name << "\n" << device.message;
+
+            // Exactly 0 and 1 differ in every type.
+            TypedProblem wrong(tc);
+            store_as(tc.type, wrong.hp.d(1, 7, 5) == 0 ? 1 : 0, wrong.d(1, 7, 5));
+            host = fast_check_gemm(wrong.problem());
+            EXPECT_FALSE(host.passed) << tc.name;
+            EXPECT_NE(host.message.find("batch 1, row 7, col 5"), std::string::npos)
+                << tc.name << "\n"
+                << host.message;
+            device = device_result_bytes(wrong.problem(), wrong.D);
+            EXPECT_FALSE(device.passed) << tc.name;
+            EXPECT_NE(device.message.find("batch 1, row 7, col 5"), std::string::npos)
+                << tc.name << "\n"
+                << device.message;
+
+            TypedProblem unwritten(tc);
+            uint64_t     sentinel = fast_check_sentinel_bits(tc.type);
+            std::memcpy(unwritten.d(0, 2, 3), &sentinel, tc.size);
+            host = fast_check_gemm(unwritten.problem());
+            EXPECT_FALSE(host.passed) << tc.name;
+            EXPECT_NE(host.message.find("batch 0, row 2, col 3"), std::string::npos)
+                << tc.name << "\n"
+                << host.message;
+            device = device_result_bytes(unwritten.problem(), unwritten.D);
+            EXPECT_FALSE(device.passed) << tc.name;
+            EXPECT_NE(device.message.find("batch 0, row 2, col 3"), std::string::npos)
+                << tc.name << "\n"
+                << device.message;
+        }
+    }
+
+    // In every supported type, poison covers exactly the padding, the scan passes it and reports
+    // a changed padding element and an unwritten one, and the region copy drops the padding.
+    TEST(FastCheckDevice_pre_checkin, every_type_poisons_scans_and_copies)
+    {
+        using DM = DeviceMatrix;
+        for(const auto& tc : kTypes)
+        {
+            const size_t bytes = DM::total * tc.size;
+            char*        d     = nullptr;
+            ASSERT_EQ(hipMalloc(&d, bytes), hipSuccess);
+            FastCheckMatrix   m{d, tc.type, DM::rows, DM::cols, DM::ld, DM::stride};
+            std::vector<char> one(tc.size), h(bytes);
+            store_as(tc.type, 1, one.data());
+            for(size_t idx = 0; idx < DM::total; idx++)
+                std::memcpy(h.data() + idx * tc.size, one.data(), tc.size);
+            ASSERT_EQ(hipMemcpy(d, h.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+
+            fast_check_poison_padding_device(m, DM::batch, DM::total, 0);
+            auto res = fast_check_scan_padding_device(m, DM::batch, DM::total, true, 0);
+            EXPECT_TRUE(res.passed) << tc.name << "\n" << res.message;
+            ASSERT_EQ(hipMemcpy(d + 36 * tc.size, h.data(), tc.size, hipMemcpyHostToDevice),
+                      hipSuccess);
+            res = fast_check_scan_padding_device(m, DM::batch, DM::total, true, 0);
+            EXPECT_FALSE(res.passed) << tc.name;
+            EXPECT_NE(res.message.find("batch 1, row 6, col 0"), std::string::npos)
+                << tc.name << "\n"
+                << res.message;
+
+            fast_check_fill_sentinel_device(d, tc.type, DM::total, 0);
+            std::vector<char> s(bytes);
+            ASSERT_EQ(hipMemcpy(s.data(), d, bytes, hipMemcpyDeviceToHost), hipSuccess);
+            for(size_t idx = 0; idx < DM::total; idx++)
+                if(DM::in_region(idx) && idx != 33)
+                    std::memcpy(s.data() + idx * tc.size, one.data(), tc.size);
+            ASSERT_EQ(hipMemcpy(d, s.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+            res = fast_check_scan_padding_device(m, DM::batch, DM::total, false, 0);
+            // An integer sentinel is a valid value, so the scan cannot tell it was never
+            // written; the value pass recomputes it exactly instead.
+            if(tc.type == HIP_R_8I || tc.type == HIP_R_32I)
+                EXPECT_TRUE(res.passed) << tc.name << "\n" << res.message;
+            else
+            {
+                EXPECT_FALSE(res.passed) << tc.name;
+                EXPECT_NE(res.message.find("element offset 33"), std::string::npos)
+                    << tc.name << "\n"
+                    << res.message;
+            }
+
+            std::vector<char> compact(size_t(DM::rows * DM::cols * DM::batch) * tc.size);
+            ASSERT_EQ(fast_check_copy_region_to_host(compact.data(), m, DM::batch, 0), hipSuccess);
+            size_t n = 0;
+            for(int64_t b = 0; b < DM::batch; b++)
+                for(int64_t j = 0; j < DM::cols; j++)
+                    for(int64_t i = 0; i < DM::rows; i++, n++)
+                        EXPECT_EQ(std::memcmp(
+                                      compact.data() + n * tc.size,
+                                      s.data() + size_t(b * DM::stride + j * DM::ld + i) * tc.size,
+                                      tc.size),
+                                  0)
+                            << tc.name << " batch " << b << ", row " << i << ", col " << j;
+            (void)hipFree(d);
+        }
+    }
+
+    // Configurations fast_check cannot check exactly are refused with a reason, before any sums.
+    TEST(FastCheck_pre_checkin, unsupported_configurations_are_refused)
+    {
+        auto refused = [](const FastCheckProblem& p, const char* reason) {
+            auto res = fast_check_gemm(p);
+            EXPECT_FALSE(res.passed) << reason;
+            EXPECT_NE(res.message.find(reason), std::string::npos) << res.message;
+        };
+        HostProblem hp = default_problem();
+
+        FastCheckProblem p = hp.problem();
+        p.D.type           = HIP_C_32F;
+        refused(p, "does not support data type");
+
+        p              = hp.problem();
+        p.compute_type = HIP_C_32F;
+        refused(p, "does not support compute type");
+
+        std::vector<float> scale = hp.scale;
+        scale[3]                 = 1.5f;
+        p                        = hp.problem();
+        p.scale_alpha_vec        = scale.data();
+        refused(p, "integer scaleAlpha_vector");
+
+        std::vector<float> bias = hp.bias;
+        bias[4]                 = 0.25f;
+        p                       = hp.problem();
+        p.bias                  = bias.data();
+        refused(p, "integer bias");
+
+        HostProblem fractional = default_problem();
+        fractional.A[0]        = 0.5f;
+        refused(fractional.problem(), "non-integer value in A, B or C");
+    }
+
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
     {
         DeviceMatrix       m;
