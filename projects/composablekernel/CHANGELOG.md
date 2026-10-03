@@ -12,7 +12,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added opt-in raw complete-invocation timing and unique candidate numbering to the grouped-convolution profiler.
 * Added supported-instance selection, listing, and raw complete-invocation timing to the universal GEMM profiler.
 * Added block-diagonal group packing (`GroupsPerWmma`) to the WMMA-v3 grouped forward operation for 2D channels-last convolutions with few channels per group. Packed instances require a workspace and identify themselves with a `GroupsPerWmma` suffix in their type string; other type strings are unchanged.
-* Added a gfx1250 FP16 packed-weight grouped forward instance for four input and output channels per group.
+* Added measured gfx1250 FP16 packed-forward configurations with group packing factors four and eight, including wider packed-channel tiles; expanded poisoned-workspace correctness coverage through sixteen channels per group.
 * Added a gfx1250 BF16 group-local depthwise backward-weight candidate for resource-safe packed 2D channels-last convolutions with runtime filter, stride, dilation, and padding.
 * Added gfx1250 BF16 depthwise backward-weight row-strip candidates with square-filter specializations and runtime convolution geometry, sharing an FP32 partial finalizer.
 

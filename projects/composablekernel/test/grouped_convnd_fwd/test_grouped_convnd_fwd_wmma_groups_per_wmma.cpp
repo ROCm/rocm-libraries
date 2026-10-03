@@ -283,6 +283,71 @@ TEST_F(GroupedConvFwdWmmaGroupsPerWmma, TwoGroupsEightChannels)
     CheckCorrectness<PackedConv<2>>(Problem{4, 8, 8, 3, 1, 2, 0});
 }
 
+template <ck::index_t GroupsPerWmma, ck::index_t Channels>
+void CheckCandidateCorrectness()
+{
+    constexpr ck::index_t AVector = Channels == 2 ? 2 : 4;
+    constexpr ck::index_t BVector = GroupsPerWmma * Channels < 8 ? 4 : 8;
+    constexpr ck::index_t EVector = Channels == 2 ? 2 : 4;
+    constexpr ck::index_t NRepeat = (GroupsPerWmma * Channels + 15) / 16;
+    using Op = PackedConv<GroupsPerWmma, AVector, BVector, EVector, NRepeat>;
+
+    // Two clusters distinguish both neighboring groups and cluster offsets.
+    for(const auto& geometry : std::array<std::array<ck::index_t, 4>, 4>{
+            {{1, 1, 1, 0}, {3, 1, 1, 1}, {3, 2, 1, 0}, {3, 1, 2, 1}}})
+    {
+        SCOPED_TRACE(::testing::Message() << "filter=" << geometry[0] << " stride=" << geometry[1]
+                                          << " dilation=" << geometry[2] << " pad=" << geometry[3]);
+        CheckCorrectness<Op>(Problem{2 * GroupsPerWmma,
+                                     Channels,
+                                     Channels,
+                                     geometry[0],
+                                     geometry[1],
+                                     geometry[2],
+                                     geometry[3]});
+    }
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, TwoGroupsTwoChannels)
+{
+    CheckCandidateCorrectness<2, 2>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, FourGroupsEightChannels)
+{
+    CheckCandidateCorrectness<4, 8>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, TwoGroupsSixteenChannels)
+{
+    CheckCandidateCorrectness<2, 16>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, FourGroupsSixteenChannels)
+{
+    CheckCandidateCorrectness<4, 16>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, EightGroupsTwoChannels)
+{
+    CheckCandidateCorrectness<8, 2>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, EightGroupsFourChannels)
+{
+    CheckCandidateCorrectness<8, 4>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, EightGroupsEightChannels)
+{
+    CheckCandidateCorrectness<8, 8>();
+}
+
+TEST_F(GroupedConvFwdWmmaGroupsPerWmma, EightGroupsSixteenChannels)
+{
+    CheckCandidateCorrectness<8, 16>();
+}
+
 template <ck::index_t GroupsPerWmma>
 void CheckRejections()
 {
@@ -315,6 +380,7 @@ TEST_F(GroupedConvFwdWmmaGroupsPerWmma, RejectsGroupTailStridedWeightsAndNullWor
 {
     CheckRejections<4>();
     CheckRejections<2>();
+    CheckRejections<8>();
 }
 
 } // namespace
