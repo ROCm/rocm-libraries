@@ -729,3 +729,87 @@ def test_brotate_rejects_each_unsupported_knob():
         _brot_rejects(_brot_state(**{key: 1}), key)
     _brot_rejects(_brot_state(LocalSplitU=2), "LocalSplitU")
     _brot_rejects(_brot_state(NumWaveSplitK=2), "NumWaveSplitK")
+
+
+# Divergent decoupled pair: the single-buffered tensor spans the four waves, A on [4,1], B on [1,4].
+_DIVERGENT_SHAPES = {"A": dict(MIWaveGroup=[4, 1], MIWaveTile=[2, 8], VectorWidthA=2),
+                     "B": dict(MIWaveGroup=[1, 4], MIWaveTile=[8, 2], VectorWidthB=2)}
+
+
+def _divergent_state(thin, **ovr):
+    return _vw8_state(DepthU=256, LdsNumElementsAlignedA=66048, LdsNumElementsAlignedMXSA=0,
+                      LdsNumElementsAlignedMXSB=0, **dict(_DIVERGENT_SHAPES[thin], **ovr))
+
+
+@pytest.mark.parametrize("thin", ["A", "B"])
+def test_divergent_single_buffered_comps_take_one_double_buffered_block_as_the_gap(thin):
+    # bf16 MT128 DepthU256: a comp is 32768 + 256 pad; one padded double-buffered block is 66048.
+    fS, block = 33024, 66048
+    r = evaluate(_divergent_state(thin), (thin, block))
+    assert r["applicable"] is True and r["reason"] == "divergent-asym" and r["aligned"] is False
+    expected = {"A": {"ldsBaseA": 0, "ldsBaseMXSB": fS, "ldsBaseB": fS, "ldsBaseMXSA": 2 * fS + block,
+                      "bBaseline": True},
+                "B": {"ldsBaseB": 0, "ldsBaseA": fS, "ldsBaseMXSA": fS + 66048,
+                      "ldsBaseMXSB": 2 * fS + block, "aBaseline": True}}[thin]
+    assert r["offsets"] == dict(expected, writeStrideBytes=fS + block, footprintPacked=True,
+                                activeTC=thin, dcpThickStride=fS + block)
+
+
+@pytest.mark.parametrize("thin, ovr, block, reason", [
+    ("A", dict(MIWaveGroup=[2, 2], MIWaveTile=[4, 8]), 66048, "interleaves both tensors"),
+    ("A", _DIVERGENT_SHAPES["B"], 66048, "the double-buffered B is the active tensor"),
+    ("B", _DIVERGENT_SHAPES["A"], 66048, "the double-buffered A is the active tensor"),
+    ("A", dict(TDMSplit=1), 66048, "TDMSplit"),
+    ("B", dict(TDMSplit=1), 66048, "TDMSplit"),
+    ("A", dict(VectorWidthA=1), 66048, "A active: VW must be WaveTile"),
+    ("B", dict(VectorWidthB=1), 66048, "B active: VW must be WaveTile"),
+    ("A", dict(MIWaveTile=[4, 8], VectorWidthA=4), 66048, "baseline already separates A component 0"),
+    ("B", {}, 16384, "baseline already separates B component 0"),
+    ("A", {}, 16384, "one B block does not push A comp1"),
+    ("B", {}, 8192, "one A block does not push B comp1"),
+])
+def test_divergent_layout_refusals(thin, ovr, block, reason):
+    r = evaluate(_divergent_state(thin, **ovr), (thin, block))
+    assert r["applicable"] is False and reason in r["reason"], r["reason"]
+
+
+@pytest.mark.parametrize("halfPLR", [1, 2, 3])
+@pytest.mark.parametrize("thin", ["A", "B"])
+def test_divergent_layout_does_not_change_under_halfplr(thin, halfPLR):
+    base = evaluate(_divergent_state(thin), (thin, 66048))
+    r = evaluate(_divergent_state(thin, HalfPLR=halfPLR), (thin, 66048))
+    assert r["applicable"] is True and r == base, r
+
+
+@pytest.mark.parametrize("tdmFuse", [0, 1])
+@pytest.mark.parametrize("thin", ["A", "B"])
+def test_divergent_pieces_land_where_the_local_reads_expect_them(tdmFuse, thin):
+    from Tensile.Components.TDMFuse import tdmWavePartition
+
+    state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, DepthU=512, LdsNumElementsAlignedA=0,
+                           LdsNumElementsAlignedMXSA=0, LdsNumElementsAlignedMXSB=0,
+                           **_DIVERGENT_SHAPES[thin])
+    r = evaluate(state, (thin, SEG))
+    assert r["applicable"] is True, r["reason"]
+    state["LDSSegInterleaveOffsets"] = r["offsets"]
+    for tc in ("A", "B"):
+        numComp = tdmWavePartition(state, tc)[0]
+        rows = _tc_mt(state, tc) // numComp
+        expected = [_read_addr(state, r["offsets"], tc, p * rows) for p in range(numComp)]
+        assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)
+
+
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_divergent_pair_refuses_a_shared_scale_set(tdmFuse):
+    from Tensile.SolutionStructs.segment_interleave import _evaluate_divergent
+    res = _evaluate_divergent({"TDMFuse": tdmFuse}, "A", 4096)
+    assert res["applicable"] is False and "TDMFuse=%d" % tdmFuse in res["reason"], res
+
+
+@pytest.mark.parametrize("thin", ["A", "B"])
+def test_divergent_layout_refuses_b_rotate(thin):
+    r = evaluate(_divergent_state(thin), (thin, 66048))
+    assert r["applicable"] is True, r["reason"]
+    state = _divergent_state(thin, LDSSegmentInterleave=1, LDSSegInterleaveOffsets=r["offsets"])
+    other = "b" if thin == "A" else "a"
+    assert b_rotate_reason(state) == "LSI layout '%sBaseline' not supported" % other
