@@ -51,18 +51,42 @@ Set this variable to ``2`` to enable the Origami with Stream-K library or leave 
 Configuring the kernel launch behavior
 =========================================
 
-You can control The Stream-K kernel launch behavior using the environment variables listed in the following table.
-These variables apply to all GEMMs in an application.
+You can control persistent kernel launch behavior using the environment variables listed in the following table.
+These variables apply to persistent kernels, including Stream-K and persistent DataParallel, throughout an application.
 By default, Stream-K uses a model to predict the optimal grid size to use when launching a GEMM kernel at runtime.
-However, you can choose how many workgroups to launch a GEMM kernel with using the Stream-K settings below:
+You can adjust the number of workgroups using the settings below.
+The listed legacy aliases remain supported. If both names are set, the preferred name takes precedence,
+even if its value is invalid; there is no fallback to the legacy value.
 
 .. csv-table::
-   :header: "Environment Variable","Description"
-   :widths: 30, 100
+   :header: "Environment variable","Legacy alias","Description"
+   :widths: 30, 30, 100
 
-   "``TENSILE_STREAMK_DYNAMIC_GRID``","Set this variable to ``6`` to use the default setting. With this setting, the program automatically picks the number of work groups to launch for optimal performance. Set this variable to ``0`` to disable the dynamic grid and always use all available compute units."
-   "``TENSILE_STREAMK_FIXED_GRID``","This variable overrides the default grid size and launches Stream-K GEMM kernels using the specified number of workgroups."
-   "``TENSILE_STREAMK_MAX_CUS``","This variable sets the maximum number of compute units to use for Stream-K kernels. By default, Stream-K kernels are allowed to use all compute units on the device, but this setting lets you limit the number of units that can be used."
+   "``TENSILE_PERSISTENT_DYNAMIC_GRID``","``TENSILE_STREAMK_DYNAMIC_GRID``","Default: ``6`` (automatically select the workgroup count). Set ``0`` to disable dynamic grid selection."
+   "``TENSILE_PERSISTENT_FIXED_GRID``","``TENSILE_STREAMK_FIXED_GRID``","Request a fixed number of workgroups, subject to kernel launch limits. Default: ``0`` (no override)."
+   "``TENSILE_PERSISTENT_MAX_CUS``","``TENSILE_STREAMK_MAX_CUS``","Set the CU budget used for grid sizing. Default: ``0`` (all available CUs). This is a sizing budget, not a constraint on which physical CUs run the workgroups."
+   "``TENSILE_PERSISTENT_GRID_MULTIPLIER``","``TENSILE_STREAMK_GRID_MULTIPLIER``","Multiply the CU count by this factor when dynamic grid selection and the CU cap are disabled and no fixed grid is set. Kernel launch limits still apply. Default: ``1``."
+   "``TENSILE_PERSISTENT_DYNAMIC_WGM``","``TENSILE_STREAMK_DYNAMIC_WGM``","Retained for compatibility; currently has no effect on workgroup mapping. Default: ``0``."
+   "``TENSILE_PERSISTENT_HYBRID_FORCE_MODE``","``TENSILE_STREAMK5_FORCE_MODE``","Debug override for a selected Hybrid kernel: ``-1`` respects normal policy (default), ``0`` forces static assignment, and ``1`` forces dynamic work-queue assignment. Invalid values are ignored."
+
+Hybrid assignment policy
+------------------------
+
+For an already selected Hybrid kernel, ``hipblaslt-bench --hybrid_assignment_policy`` accepts the
+case-sensitive values ``Default``, ``DynamicWorkQueue``, and ``Auto``. ``Default`` preserves existing
+behavior, including heuristic mode selection when ``--sm_count_target`` is positive.
+``DynamicWorkQueue`` forces dynamic assignment; ``Auto`` always asks the Origami heuristic to choose the mode.
+These settings control how the selected kernel assigns work; they do not select the kernel family.
+
+The legacy option ``--streamk_tile_scheduling`` accepts ``off|0``, ``on|1``, and ``auto|2``
+(case-insensitive), respectively. Matching old and new values are accepted; conflicting values are rejected.
+Omitting both options leaves the existing ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
+attribute unset, preserving the library default.
+
+TensileLite benchmark YAML uses the same policy names in ``GlobalParameters.HybridAssignmentPolicy``.
+The legacy ``StreamKHybridMode`` values ``0``, ``1``, and ``2`` remain accepted; if both keys are present,
+their lists must describe the same policies in the same order.
+The Hybrid debug environment override in the table takes precedence over the normal policy.
 
 Recommendations for using Stream-K
 =========================================
@@ -80,19 +104,19 @@ Managing Stream-K resource use
 
 Follow these guidelines to optimize how Stream-K uses resources:
 
-*  **Promoting concurrency**: Use ``TENSILE_STREAMK_FIXED_GRID`` to limit the number of workgroups. This prevents GEMM from monopolizing the
-   GPU resources and allows other kernels to run concurrently.
+*  **Promoting concurrency**: Use ``TENSILE_PERSISTENT_FIXED_GRID`` to limit the number of workgroups and leave
+   resources available for other kernels.
 
    The following example limits the GEMM kernels to 64 workgroups:
 
    .. code-block:: bash
 
-      export TENSILE_STREAMK_FIXED_GRID=64
+      export TENSILE_PERSISTENT_FIXED_GRID=64
 
-*  **Limiting compute units**: Use ``TENSILE_STREAMK_MAX_CUS`` to restrict the number of compute units the Stream-K kernels can use.
+*  **Setting a compute-unit budget**: Use ``TENSILE_PERSISTENT_MAX_CUS`` to limit the CU budget used for grid sizing.
 
-   This example limits the GEMM kernels to 32 compute units:
+   This example requests a grid sized for 32 compute units:
 
    .. code-block:: bash
 
-      export TENSILE_STREAMK_MAX_CUS=32
+      export TENSILE_PERSISTENT_MAX_CUS=32
