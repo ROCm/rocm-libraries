@@ -33,7 +33,6 @@ _GENERATED = [
     ("gfx950", "subtile.yaml"),
     ("gfx1250", "streamk.yaml"),
     ("gfx1250", "streamk_tdm_prefetchgl2.yaml"),
-    ("gfx1250", "mx_f4_nn_umlds0.yaml"),
 ]
 
 
