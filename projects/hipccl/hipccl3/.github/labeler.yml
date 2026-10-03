@@ -1,0 +1,19 @@
+# hipCCL-scoped trim of rocm-libraries' .github/labeler.yml.
+# Paths are relative to this repo's root (no "projects/" prefix, matching the
+# flat hipccl3 layout - see ../README.md).
+
+"project: rocprim":
+- changed-files:
+  - any-glob-to-any-file: 'rocprim/**/*'
+
+"project: hipcub":
+- changed-files:
+  - any-glob-to-any-file: 'hipcub/**/*'
+
+"project: rocthrust":
+- changed-files:
+  - any-glob-to-any-file: 'rocthrust/**/*'
+
+"project: libhipcxx":
+- changed-files:
+  - any-glob-to-any-file: 'libhipcxx/**/*'

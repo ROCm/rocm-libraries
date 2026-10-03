@@ -110,6 +110,15 @@ the on-disk layout, DVC remote layout, and pull/push workflow, and
 [`migration-scripts/README.md`](migration-scripts/README.md) for the exact
 field mapping between the two.
 
+To run against part of the tree, point `--golden-data-dir` (`--gd`) at a directory
+that holds only the pieces you want. They can be copies or directory symlinks into
+an existing tree, e.g. `quick/SdpaFwd -> <install>/lib/integration-test-bundles/quick/SdpaFwd`.
+Discovery follows directory links at any depth. Tests take their names from the
+path through the link, so a linked subtree gets the same test names as a copy. A
+link that would lead the walk back into a directory it is already inside (one of
+the link's own parents, including the parents of `--gd` itself) is skipped with a
+warning, and so is a directory the run is not allowed to list.
+
 ### When to use which
 
 **Default to a template-sweep bundle.** Use a straight single-graph bundle only
@@ -228,6 +237,22 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
 
+Each verification test body prints the oracle that graded it, between its
+`[ RUN ]` and result lines, and the coverage summary totals them:
+
+```
+[ VERIFIER ] gpu_ref: .../quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json
+...
+Verified by: golden 0, gpu_ref 9, cpu_ref 0, none 3
+```
+
+`golden`, `gpu_ref` and `cpu_ref` name what the outputs were compared against,
+whether the comparison passed or failed. `none` means nothing was compared: a skip
+(the engine declined, or no reference could run the op), a failure before the
+comparison, or a bundle whose `enforcement_level` stops short of comparing. With
+`--gtest_repeat=N` the line counts the last iteration, like the Passed, Skipped and
+Failed counts above it.
+
 Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
 runs the bundle graphs without any DVC pull. Bundle registration is on by default;
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
@@ -265,10 +290,12 @@ device. Comparisons run on the host, where the golden data is loaded, unless
 `--validator gpu` moves them to the device — which then makes the CPU suite need a
 device too.
 
-It has no skip path: a test is registered only when the bundle has golden data and
-every node type in its graph is in that reference's required-op set, so a reference
-that cannot run the graph is a failure. Bundles outside the set are absent from the
-suite, and the counts — plus the ops responsible — are printed at registration.
+A registered test has no skip path in its body: a test is registered only when the
+bundle has golden data and every node type in its graph is in that reference's
+required-op set, so a reference that cannot run the graph is a failure. Bundles
+outside a lane's set are absent from that lane, and the counts — plus the ops
+responsible — are printed at registration. With both lanes selected, a golden
+bundle that neither lane registered a test for fails as `<bundle>_Unvalidated`.
 
 Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
 `integration-test-bundles/` registers nothing and says so.
