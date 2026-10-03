@@ -1,9 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-knowledge.hpp"
+#include "hipblaslt-jit-prediction.hpp"
+#include "hipblaslt-jit-problem-type.hpp"
 
+#include <Tensile/ContractionProblem.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +21,13 @@
 
 namespace knowledge = hipblaslt_jit::knowledge;
 namespace fs        = std::filesystem;
+
+// Lowering needs the Tensile host; the requests here are not GEMMs.
+TensileLite::ContractionProblemGemm
+    hipblaslt_jit::lowerForJit(const hipblaslt_ext::experimental::jit::detail::GemmRequest&)
+{
+    throw std::runtime_error("lowerForJit is not linked into this test");
+}
 
 namespace
 {
@@ -164,7 +176,8 @@ namespace
                const std::vector<Group>& groups,
                const std::string&        hash   = "0123456789abcdef",
                uint32_t                  schema = 1,
-               const char*               magic  = "HJKN")
+               const char*               magic  = "HJKN",
+               const std::string&        arch   = "gfx950")
     {
         std::vector<std::vector<char>> blocks;
         for(const auto& g : groups)
@@ -175,8 +188,8 @@ namespace
         p.pack(std::string("generator")), p.pack(std::string("tensilelite-logic-knowledge"));
         p.pack(std::string("source_commit")), p.pack(std::string("fixture"));
         p.pack(std::string("content_hash")), p.pack(hash);
-        p.pack(std::string("arch")), p.pack(std::string("gfx950"));
-        p.pack(std::string("library_arch")), p.pack(std::string("gfx950"));
+        p.pack(std::string("arch")), p.pack(arch);
+        p.pack(std::string("library_arch")), p.pack(arch);
         p.pack(std::string("branches"));
         p.pack_array(4);
         const auto branch = [&](const char* kind, int cu, std::vector<int> ids) {
@@ -387,6 +400,105 @@ namespace
                 "A malformed header");
     }
 
+    void setEnvironment(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        _putenv_s(name, value ? value : "");
+#else
+        value ? setenv(name, value, 1) : unsetenv(name);
+#endif
+    }
+
+    struct NotGemm final : hipblaslt_jit::OperationRequest
+    {
+        std::string_view kind() const noexcept override
+        {
+            return "not-gemm";
+        }
+    };
+
+    std::vector<std::string> loadLines(const fs::path& log)
+    {
+        std::vector<std::string> lines;
+        std::ifstream            in(log);
+        for(std::string line; std::getline(in, line);)
+            if(line.find("\"cat\":\"knowledge\",\"ev\":\"load\"") != std::string::npos)
+                lines.push_back(line);
+        return lines;
+    }
+
+    void expectLine(const std::string& line, const std::vector<std::string>& fields)
+    {
+        for(const auto& field : fields)
+            require(line.find(field) != std::string::npos, "No " + field + " in " + line);
+    }
+
+    // main routes knowledge records to log before any is written.
+    void testLibrary(const fs::path& dir, const fs::path& log)
+    {
+        const auto groups = fixture();
+        const auto tree   = dir / "library";
+        for(const char* arch : {"gfx950", "gfx942", "gfx1250"})
+            fs::create_directories(tree / arch);
+        const auto file = [&](const char* arch) {
+            return tree / arch / ("hipblaslt-jit-knowledge-" + std::string(arch) + ".dat.zlib");
+        };
+        write(file("gfx950"), groups, "aaaa");
+        write(file("gfx942"), groups, "bbbb");
+        write(file("gfx1250"), groups, "cccc", 2, "HJKN", "gfx1250");
+
+        const auto                  catalog = hipblaslt_jit::makeCatalogKnowledge();
+        NotGemm                     request;
+        hipblaslt_jit::DeviceTarget target;
+        target.cuCount     = 256;
+        const auto queries = [&](const hipblaslt_jit::TuningKnowledge& source, const char* arch) {
+            target.libraryArch = arch;
+            for(int i = 0; i < 2; ++i)
+                require(source.seeds(request, target).size()
+                            == catalog->seeds(request, target).size(),
+                        "A request that is not a GEMM has only catalog seeds");
+        };
+
+        const auto installed = hipblaslt_jit::makeTuningLibraryKnowledge(tree, true);
+        require(installed->id() == "tensilelite-logic.v1" && installed->version() == "gfx950=aaaa",
+                "Installed version " + installed->version());
+        for(const char* arch : {"gfx950", "gfx942", "gfx1250", "gfx90a"})
+            queries(*installed, arch);
+        auto lines = loadLines(log);
+        require(lines.size() == 4, "One record per architecture, not " + std::to_string(lines.size()));
+        expectLine(lines[0], {"\"arch\":\"gfx950\"", "\"status\":\"loaded\"",
+                              "\"content_hash\":\"aaaa\"", "\"groups\":10"});
+        expectLine(lines[1], {"\"arch\":\"gfx942\"", "\"status\":\"catalog\"", "holds gfx950 knowledge"});
+        expectLine(lines[2], {"\"arch\":\"gfx1250\"", "\"status\":\"catalog\"", "has schema 2, not 1"});
+        expectLine(lines[3], {"\"arch\":\"gfx90a\"", "\"status\":\"catalog\"", "no file at "});
+
+        write(file("gfx950"), groups, "eeee");
+        require(hipblaslt_jit::makeTuningLibraryKnowledge(tree, true)->version() == "gfx950=eeee",
+                "The version follows the content");
+        fs::create_directories(dir / "flat");
+        fs::copy_file(file("gfx950"),
+                      dir / "flat" / file("gfx950").filename(),
+                      fs::copy_options::overwrite_existing);
+        require(hipblaslt_jit::makeTuningLibraryKnowledge(dir / "flat", false)->version()
+                    == "gfx950=eeee",
+                "A directory that holds the files");
+
+        const auto missing = hipblaslt_jit::makeTuningLibraryKnowledge(dir / "absent", true);
+        require(missing->id() == catalog->id() && missing->version() == catalog->version(),
+                "Without files the catalog's id and version");
+        queries(*missing, "gfx950");
+        setEnvironment("HIPBLASLT_JIT_KNOWLEDGE", "none");
+        const auto off = hipblaslt_jit::makeTuningLibraryKnowledge(tree, true);
+        setEnvironment("HIPBLASLT_JIT_KNOWLEDGE", nullptr);
+        require(off->id() == catalog->id() && off->version() == catalog->version(),
+                "HIPBLASLT_JIT_KNOWLEDGE=none keeps the catalog's id and version");
+        queries(*off, "gfx950");
+        lines = loadLines(log);
+        require(lines.size() == 6, "Two more records, not " + std::to_string(lines.size() - 4));
+        expectLine(lines[4], {"\"status\":\"catalog\"", "no file at "});
+        expectLine(lines[5], {"\"status\":\"catalog\"", "HIPBLASLT_JIT_KNOWLEDGE=none"});
+    }
+
     // Reports the first-use decode of a database's largest block.
     int decode(const fs::path& path)
     {
@@ -442,12 +554,19 @@ int main(int argc, char** argv)
         }
         const fs::path dir = argv[1];
         fs::create_directories(dir);
+        const auto log = dir / "debug.log";
+        fs::remove(log);
+        setEnvironment("HIPBLASLT_JIT", "1");
+        setEnvironment("HIPBLASLT_JIT_DEBUG", "knowledge");
+        setEnvironment("HIPBLASLT_JIT_DEBUG_FILE", log.string().c_str());
+        setEnvironment("HIPBLASLT_JIT_KNOWLEDGE", nullptr);
         write(dir / "fixture.dat.zlib", fixture());
         testOrder(dir / "fixture.dat.zlib");
         testProblemTypes(dir / "fixture.dat.zlib");
         testBranches(dir / "fixture.dat.zlib");
         testLazy(dir / "fixture.dat.zlib");
         testHeaders(dir);
+        testLibrary(dir, log);
         std::cout << "PASS jit-knowledge" << std::endl;
         return 0;
     }

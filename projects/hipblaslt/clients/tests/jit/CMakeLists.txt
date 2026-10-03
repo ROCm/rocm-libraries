@@ -160,14 +160,22 @@ endif()
 
 # Compiles the JIT solution library directly; runs without a GPU.
 if(NOT HIPBLASLT_ENABLE_YAML)
-    # The tuning knowledge reader and matcher, on a fixture database it writes.
+    # The tuning knowledge reader, matcher and library lookup, on fixture databases it writes.
     add_executable(hipblaslt-jit-knowledge-test
         jit_knowledge_test.cpp
-        "${hipblaslt_jit_source}/hipblaslt-jit-knowledge.cpp")
-    target_include_directories(hipblaslt-jit-knowledge-test PRIVATE "${hipblaslt_jit_source}")
-    target_compile_definitions(hipblaslt-jit-knowledge-test PRIVATE TENSILE_MSGPACK)
+        "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-knowledge.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-tuning-knowledge.cpp")
+    target_include_directories(hipblaslt-jit-knowledge-test PRIVATE "${hipblaslt_jit_source}"
+        "${hipblaslt_jit_source}/rocblaslt/include" "${hipblaslt_jit_source}/rocblaslt/src/include")
+    target_compile_definitions(hipblaslt-jit-knowledge-test PRIVATE
+        HIPBLASLT_ENABLE_JIT TENSILE_MSGPACK)
     target_link_libraries(hipblaslt-jit-knowledge-test PRIVATE
-        roc::hipblaslt ${hipblaslt_msgpack_target} ZLIB::ZLIB hip::host)
+        roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} ZLIB::ZLIB hip::device
+        Threads::Threads)
     hipblaslt_jit_test(jit-knowledge jit-cpu $<TARGET_FILE:hipblaslt-jit-knowledge-test>
         "${hipblaslt_jit_scratch}/knowledge")
     hipblaslt_jit_stage(hipblaslt-jit-knowledge-test)

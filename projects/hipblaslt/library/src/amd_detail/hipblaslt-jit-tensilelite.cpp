@@ -531,6 +531,12 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             Options                    m_options;
             hipblaslt_jit::BackendInfo m_info;
         };
+
+        std::shared_ptr<const hipblaslt_jit::TuningKnowledge> libraryKnowledge()
+        {
+            const auto root = findTensileLibraryRoot();
+            return hipblaslt_jit::makeTuningLibraryKnowledge(root.path, !root.fromEnvironment);
+        }
     }
 
     hipblasStatus_t
@@ -550,7 +556,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 std::make_shared<const hipblaslt_jit::Jit>(hipblaslt_jit::Jit::Components{
                     std::make_shared<const TensileLiteBackend>(options),
                     hipblaslt_jit::makeOrigamiPredictor(),
-                    hipblaslt_jit::makeCatalogKnowledge(),
+                    libraryKnowledge(),
                     hipblaslt_jit::makeComgrBuilder(),
                     hipblaslt_jit::makeTensileLoader(),
                     nullptr}));
@@ -611,7 +617,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         made.backend = std::make_shared<const TensileLiteBackend>(options);
         backendPhase.stop();
         made.predictor = hipblaslt_jit::makeOrigamiPredictor();
-        made.knowledge = hipblaslt_jit::makeCatalogKnowledge();
+        made.knowledge = libraryKnowledge();
         return {};
     }
 }
