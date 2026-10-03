@@ -202,7 +202,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
         {
             for(int i = j + 1; i < n; ++i)
             {
-                hA[0][i + j * lda] = sconj(hA[0][j + i * lda]);
+                hA[0][i + rocblas_stride(j) * lda] = sconj(hA[0][j + rocblas_stride(i) * lda]);
             }
         }
     }
@@ -226,7 +226,8 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     {
         for(int k = 0; k < kd + 1 && k + j < n; ++k)
         {
-            hAband[0][k + j * ldab] -= hAbandRes[0][k + idiag + j * ldab];
+            hAband[0][k + rocblas_stride(j) * ldab]
+                -= hAbandRes[0][k + idiag + rocblas_stride(j) * ldab];
         }
     }
     // hTau -= hTauRes
@@ -377,8 +378,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
-    size_t size_Aband = ldab * n;
+    size_t size_A = rocblas_stride(lda) * n;
+    size_t size_Aband = rocblas_stride(ldab) * n;
     size_t size_tau = std::max<I>(n - kd, 0);
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 

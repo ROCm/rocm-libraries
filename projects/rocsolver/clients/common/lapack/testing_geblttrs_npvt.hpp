@@ -203,16 +203,22 @@ void geblttrs_npvt_initData(const rocblas_handle handle,
                     for(rocblas_int j = 0; j < nb; j++)
                     {
                         if(i == j)
-                            M[i + j * n + k * (n + 1) * nb] = hB[b][i + j * ldb + k * ldb * nb] + 400;
+                            M[i + j * n + k * (n + 1) * nb]
+                                = hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb]
+                                + 400;
                         else
-                            M[i + j * n + k * (n + 1) * nb] = hB[b][i + j * ldb + k * ldb * nb] - 4;
+                            M[i + j * n + k * (n + 1) * nb]
+                                = hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb]
+                                - 4;
 
                         if(k < nblocks - 1)
                         {
                             M[(i + nb) + j * n + k * (n + 1) * nb]
-                                = hA[b][i + j * lda + k * lda * nb] - 4;
+                                = hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb]
+                                - 4;
                             M[i + (j + nb) * n + k * (n + 1) * nb]
-                                = hC[b][i + j * ldc + k * ldc * nb] - 4;
+                                = hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k) * ldc * nb]
+                                - 4;
                         }
                     }
                 }
@@ -222,7 +228,8 @@ void geblttrs_npvt_initData(const rocblas_handle handle,
             for(rocblas_int k = 0; k < nblocks; k++)
                 for(rocblas_int i = 0; i < nb; i++)
                     for(rocblas_int j = 0; j < nrhs; j++)
-                        XX[i + j * n + k * nb] = hX[b][i + j * ldx + k * ldx * nrhs];
+                        XX[i + j * n + k * nb]
+                            = hX[b][i + rocblas_stride(j) * ldx + rocblas_stride(k) * ldx * nrhs];
 
             // generate the full matrix of right-hand-side vectors XB by computing M * XX
             cpu_gemm(rocblas_operation_none, rocblas_operation_none, n, nrhs, n, T(1), M.data(), n,
@@ -232,7 +239,8 @@ void geblttrs_npvt_initData(const rocblas_handle handle,
             for(rocblas_int k = 0; k < nblocks; k++)
                 for(rocblas_int i = 0; i < nb; i++)
                     for(rocblas_int j = 0; j < nrhs; j++)
-                        hRHS[b][i + j * ldx + k * ldx * nrhs] = XB[i + j * n + k * nb];
+                        hRHS[b][i + rocblas_stride(j) * ldx + rocblas_stride(k) * ldx * nrhs]
+                            = XB[i + j * n + k * nb];
 
             // factorize M
             cpu_getrf(nb, nb, M.data(), n, ipiv.data(), &info);
@@ -255,13 +263,14 @@ void geblttrs_npvt_initData(const rocblas_handle handle,
                 {
                     for(rocblas_int j = 0; j < nb; j++)
                     {
-                        hB[b][i + j * ldb + k * ldb * nb] = M[i + j * n + k * (n + 1) * nb];
+                        hB[b][i + rocblas_stride(j) * ldb + rocblas_stride(k) * ldb * nb]
+                            = M[i + j * n + k * (n + 1) * nb];
 
                         if(k < nblocks - 1)
                         {
-                            hA[b][i + j * lda + k * lda * nb]
+                            hA[b][i + rocblas_stride(j) * lda + rocblas_stride(k) * lda * nb]
                                 = M[(i + nb) + j * n + k * (n + 1) * nb];
-                            hC[b][i + j * ldc + k * ldc * nb]
+                            hC[b][i + rocblas_stride(j) * ldc + rocblas_stride(k) * ldc * nb]
                                 = M[i + (j + nb) * n + k * (n + 1) * nb];
                         }
                     }
@@ -421,10 +430,10 @@ void testing_geblttrs_npvt(Arguments& argus)
     rocblas_int ldb = argus.get<rocblas_int>("ldb", nb);
     rocblas_int ldc = argus.get<rocblas_int>("ldc", nb);
     rocblas_int ldx = argus.get<rocblas_int>("ldx", nb);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * nb * nblocks);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nb * nblocks);
-    rocblas_stride stC = argus.get<rocblas_stride>("strideC", ldc * nb * nblocks);
-    rocblas_stride stX = argus.get<rocblas_stride>("strideX", ldx * nrhs * nblocks);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * nb * nblocks);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nb * nblocks);
+    rocblas_stride stC = argus.get<rocblas_stride>("strideC", rocblas_stride(ldc) * nb * nblocks);
+    rocblas_stride stX = argus.get<rocblas_stride>("strideX", rocblas_stride(ldx) * nrhs * nblocks);
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

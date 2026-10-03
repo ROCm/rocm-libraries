@@ -245,27 +245,30 @@ void gesvdx_notransv_initData(const rocblas_handle handle,
             {
                 if(i == nn / 4 || i == nn / 2 || i == nn - 1 || i == nn / 7 || i == nn / 5
                    || i == nn / 3)
-                    hA[b][i + i * lda] = 0;
+                    hA[b][i + rocblas_stride(i) * lda] = 0;
 
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = 2 * std::real(hA[b][i + j * lda]) - 21;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = 2 * std::real(hA[b][i + rocblas_stride(j) * lda]) - 21;
                     else
                     {
                         if(m >= n)
                         {
                             if(j == i + 1)
-                                hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
+                                hA[b][i + rocblas_stride(j) * lda]
+                                    = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
                             else
-                                hA[b][i + j * lda] = 0;
+                                hA[b][i + rocblas_stride(j) * lda] = 0;
                         }
                         else
                         {
                             if(i == j + 1)
-                                hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
+                                hA[b][i + rocblas_stride(j) * lda]
+                                    = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
                             else
-                                hA[b][i + j * lda] = 0;
+                                hA[b][i + rocblas_stride(j) * lda] = 0;
                         }
                     }
                 }
@@ -277,7 +280,8 @@ void gesvdx_notransv_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < m; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -392,7 +396,7 @@ void gesvdx_notransv_getError(const rocblas_handle handle,
     rocblas_int minn = std::min(m, n);
 
     // input data initialization
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
     gesvdx_notransv_initData<true, true, T>(handle, left_svect, right_svect, m, n, dA, lda, bc, hA,
                                             A);
 
@@ -535,12 +539,15 @@ void gesvdx_notransv_getError(const rocblas_handle handle,
                 {
                     tmp = 0;
                     for(rocblas_int j = 0; j < n; ++j)
-                        tmp += A[b * lda * n + i + j * lda] * hVres[b][j + k * ldvres];
-                    tmp2 = std::abs(tmp) - std::abs(hSres[b][k] * hUres[b][i + k * ldures]);
+                        tmp += A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            * hVres[b][j + rocblas_stride(k) * ldvres];
+                    tmp2 = std::abs(tmp)
+                        - std::abs(hSres[b][k] * hUres[b][i + rocblas_stride(k) * ldures]);
                     err += tmp2 * tmp2;
                 }
             }
-            err = std::sqrt(err) / double(snorm('F', m, n, A.data() + b * lda * n, lda));
+            err = std::sqrt(err)
+                / double(snorm('F', m, n, A.data() + rocblas_stride(b) * lda * n, lda));
             *max_errv = err > *max_errv ? err : *max_errv;
         }
     }
@@ -618,7 +625,7 @@ void gesvdx_notransv_getPerfData(const rocblas_handle handle,
 
     //  For now we cannot report cpu time
 
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     if(!perf)
     {
@@ -704,11 +711,11 @@ void testing_gesvdx_notransv(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_int ldu = argus.get<rocblas_int>("ldu", m);
     rocblas_int ldv = argus.get<rocblas_int>("ldv", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stS = argus.get<rocblas_stride>("strideS", nsv_max);
     rocblas_stride stF = argus.get<rocblas_stride>("strideF", nn);
-    rocblas_stride stU = argus.get<rocblas_stride>("strideU", ldu * nsv_max);
-    rocblas_stride stV = argus.get<rocblas_stride>("strideV", ldv * nsv_max);
+    rocblas_stride stU = argus.get<rocblas_stride>("strideU", rocblas_stride(ldu) * nsv_max);
+    rocblas_stride stV = argus.get<rocblas_stride>("strideV", rocblas_stride(ldv) * nsv_max);
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

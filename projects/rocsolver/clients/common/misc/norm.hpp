@@ -57,22 +57,22 @@ double norm_error(char norm_type,
     if(lda_comp <= 0)
         lda_comp = lda_gold;
 
-    std::vector<DoublePrecisionType> gold_double(N * lda);
-    std::vector<DoublePrecisionType> comp_double(N * lda);
+    std::vector<DoublePrecisionType> gold_double(rocblas_stride(N) * lda);
+    std::vector<DoublePrecisionType> comp_double(rocblas_stride(N) * lda);
 
     for(rocblas_int j = 0; j < N; j++)
     {
         for(rocblas_int i = 0; i < M; i++)
         {
-            gold_double[i + j * lda] = DoublePrecisionType(gold[i + j * lda_gold]);
-            comp_double[i + j * lda] = DoublePrecisionType(comp[i + j * lda_comp]);
+            gold_double[i + rocblas_stride(j) * lda] = DoublePrecisionType(gold[i + j * lda_gold]);
+            comp_double[i + rocblas_stride(j) * lda] = DoublePrecisionType(comp[i + j * lda_comp]);
         }
     }
 
     std::vector<double> work(M);
     rocblas_int incx = 1;
     DoublePrecisionType alpha = -1.0;
-    rocblas_int size = lda * N;
+    rocblas_int size = rocblas_stride(lda) * N;
 
     double gold_norm = cpu_lange(norm_type, M, N, gold_double.data(), lda, work.data());
     cpu_axpy(size, alpha, gold_double.data(), incx, comp_double.data(), incx);
@@ -92,8 +92,8 @@ double norm_error_upperTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_
         {
             if(i > j)
             {
-                gold[i + j * lda] = T(0);
-                comp[i + j * lda] = T(0);
+                gold[i + rocblas_stride(j) * lda] = T(0);
+                comp[i + rocblas_stride(j) * lda] = T(0);
             }
         }
     }
@@ -109,8 +109,8 @@ double norm_error_lowerTr(char norm_type, rocblas_int M, rocblas_int N, rocblas_
         {
             if(i < j)
             {
-                gold[i + j * lda] = T(0);
-                comp[i + j * lda] = T(0);
+                gold[i + rocblas_stride(j) * lda] = T(0);
+                comp[i + rocblas_stride(j) * lda] = T(0);
             }
         }
     }

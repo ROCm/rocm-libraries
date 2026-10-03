@@ -153,7 +153,8 @@ void potrs_initData(const rocblas_handle handle,
         {
             // scale to ensure positive definiteness
             for(I i = 0; i < n; i++)
-                hA[b][i + i * lda] = hA[b][i + i * lda] * sconj(hA[b][i + i * lda]) * 400;
+                hA[b][i + rocblas_stride(i) * lda] = hA[b][i + rocblas_stride(i) * lda]
+                    * sconj(hA[b][i + rocblas_stride(i) * lda]) * 400;
 
             // do the Cholesky factorization of matrix A w/ the reference LAPACK routine
             cpu_potrf(uplo, n, hA[b], lda, &info);
@@ -294,8 +295,8 @@ void testing_potrs(Arguments& argus)
     I nrhs = argus.get<I>("nrhs", n);
     I lda = argus.get<I>("lda", n);
     I ldb = argus.get<I>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;

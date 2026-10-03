@@ -167,9 +167,9 @@ void getrs_npvt_initData(const rocblas_handle handle,
                 for(I j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -335,8 +335,8 @@ void testing_getrs_npvt(Arguments& argus)
     I nrhs = argus.get<rocblas_int>("nrhs", n);
     I lda = argus.get<rocblas_int>("lda", n);
     I ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
 
     rocblas_operation trans = char2rocblas_operation(transC);
     I bc = argus.batch_count;

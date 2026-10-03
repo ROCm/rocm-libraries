@@ -165,9 +165,9 @@ void stedcx_initData(const rocblas_handle handle,
             for(rocblas_int i = 0; i < n; i++)
             {
                 if(i == j)
-                    hC[0][i + j * ldc] = 1;
+                    hC[0][i + rocblas_stride(j) * ldc] = 1;
                 else
-                    hC[0][i + j * ldc] = 0;
+                    hC[0][i + rocblas_stride(j) * ldc] = 0;
             }
         }
     }
@@ -280,18 +280,19 @@ void stedcx_getError(const rocblas_handle handle,
                 for(int i = 0; i < n; i++)
                 {
                     alpha = hWRes[0][j] - hD[0][i];
-                    hC[0][i + j * ldc] = hCRes[0][i + j * ldc] * alpha;
+                    hC[0][i + rocblas_stride(j) * ldc]
+                        = hCRes[0][i + rocblas_stride(j) * ldc] * alpha;
                 }
-                t1 = hCRes[0][j * ldc];
-                hCRes[0][j * ldc] = hE[0][0] * hCRes[0][1 + j * ldc];
+                t1 = hCRes[0][rocblas_stride(j) * ldc];
+                hCRes[0][rocblas_stride(j) * ldc] = hE[0][0] * hCRes[0][1 + rocblas_stride(j) * ldc];
                 for(int i = 1; i < n - 1; i++)
                 {
-                    t2 = hCRes[0][i + j * ldc];
-                    hCRes[0][i + j * ldc]
-                        = hE[0][i - 1] * t1 + hE[0][i] * hCRes[0][(i + 1) + j * ldc];
+                    t2 = hCRes[0][i + rocblas_stride(j) * ldc];
+                    hCRes[0][i + rocblas_stride(j) * ldc]
+                        = hE[0][i - 1] * t1 + hE[0][i] * hCRes[0][(i + 1) + rocblas_stride(j) * ldc];
                     t1 = t2;
                 }
-                hCRes[0][(n - 1) + j * ldc] = hE[0][n - 2] * t1;
+                hCRes[0][(n - 1) + rocblas_stride(j) * ldc] = hE[0][n - 2] * t1;
             }
 
             // error is then ||hC - hCRes|| / ||hC||
@@ -403,7 +404,7 @@ void testing_stedcx(Arguments& argus)
     size_t size_D = n;
     size_t size_E = n;
     size_t size_W = n;
-    size_t size_C = ldc * n;
+    size_t size_C = rocblas_stride(ldc) * n;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_CRes = (argus.unit_check || argus.norm_check) ? size_C : 0;

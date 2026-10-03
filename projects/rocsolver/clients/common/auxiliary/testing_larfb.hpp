@@ -163,9 +163,9 @@ void larfb_initData(const rocblas_handle handle,
                     for(int j = 0; j < k; ++j)
                     {
                         if(i == j)
-                            hV[0][i + j * ldv] += 400;
+                            hV[0][i + rocblas_stride(j) * ldv] += 400;
                         else
-                            hV[0][i + j * ldv] -= 4;
+                            hV[0][i + rocblas_stride(j) * ldv] -= 4;
                     }
                 }
 
@@ -181,9 +181,9 @@ void larfb_initData(const rocblas_handle handle,
                     for(int j = 0; j < m; ++j)
                     {
                         if(i == j)
-                            hV[0][i + j * ldv] += 400;
+                            hV[0][i + rocblas_stride(j) * ldv] += 400;
                         else
-                            hV[0][i + j * ldv] -= 4;
+                            hV[0][i + rocblas_stride(j) * ldv] -= 4;
                     }
                 }
 
@@ -204,9 +204,9 @@ void larfb_initData(const rocblas_handle handle,
                     for(int j = 0; j < k; ++j)
                     {
                         if(i == j)
-                            hV[0][i + j * ldv] += 400;
+                            hV[0][i + rocblas_stride(j) * ldv] += 400;
                         else
-                            hV[0][i + j * ldv] -= 4;
+                            hV[0][i + rocblas_stride(j) * ldv] -= 4;
                     }
                 }
 
@@ -222,9 +222,9 @@ void larfb_initData(const rocblas_handle handle,
                     for(int j = 0; j < n; ++j)
                     {
                         if(i == j)
-                            hV[0][i + j * ldv] += 400;
+                            hV[0][i + rocblas_stride(j) * ldv] += 400;
                         else
-                            hV[0][i + j * ldv] -= 4;
+                            hV[0][i + rocblas_stride(j) * ldv] -= 4;
                     }
                 }
 
