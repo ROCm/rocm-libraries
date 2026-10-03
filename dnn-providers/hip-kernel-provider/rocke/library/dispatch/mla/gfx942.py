@@ -11,6 +11,7 @@ subset of arch modules.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Tuple
 
 from kernels.mla.mla_prefill_gfx942 import (
@@ -40,16 +41,22 @@ from .common import (
 )
 
 
-def _spec_for(req: MLARequest) -> MlaPrefillSpec:
-    """Build the bring-up spec for ``req``.
+# Heads per workgroup in the shipped layout (one wave per head).
+_HEADS_PER_WG = 4
 
-    Every codegen lever (``block_q``, ``block_k``, ``r_kv_tile``, ``num_warps``)
-    is left at its :class:`MlaPrefillSpec` default. Choosing them per request is
-    a tuning decision that needs a resource model, and there is none yet; a
-    dispatcher that silently picked one would make the shipped configuration
-    depend on the request shape before anything had measured that.
+
+def _spec_for(req: MLARequest) -> MlaPrefillSpec:
+    """Build the spec dispatch ships for ``req``.
+
+    One measured layout choice and nothing else: when the head count divides
+    by ``_HEADS_PER_WG``, the workgroup takes four heads at ``block_q = 16``,
+    one wave per head, staging each key tile once for all four. It measured
+    faster than the single-head default on every DeepSeek-V3 and Kimi-K2 shape
+    in the benchmark set. Otherwise -- or if admission refuses it -- the
+    remaining levers stay at their :class:`MlaPrefillSpec` defaults, the
+    single-head layout. Nothing else is tuned per request.
     """
-    return MlaPrefillSpec(
+    base = MlaPrefillSpec(
         num_heads=req.num_heads,
         d_nope=req.d_nope,
         d_rope=req.d_rope,
@@ -59,6 +66,13 @@ def _spec_for(req: MLARequest) -> MlaPrefillSpec:
         block_k=req.page_block_size,
         dtype=req.dtype.lower(),
     )
+    if req.num_heads % _HEADS_PER_WG == 0:
+        packed = dataclasses.replace(
+            base, heads_per_wg=_HEADS_PER_WG, num_warps=_HEADS_PER_WG, block_q=16
+        )
+        if supports_mla_prefill(packed, arch=req.arch)[0]:
+            return packed
+    return base
 
 
 def _make_gfx942_mla_prefill_candidate() -> KernelCandidate:

@@ -174,7 +174,7 @@ def _bf16_bits(a: np.ndarray) -> np.ndarray:
     preservation is not a concern.
     """
     u = np.ascontiguousarray(a, dtype=np.float32).view(np.uint32)
-    return (((u + 0x7FFF + ((u >> 16) & 1)) >> 16)).astype(np.uint16)
+    return ((u + 0x7FFF + ((u >> 16) & 1)) >> 16).astype(np.uint16)
 
 
 def _bf16(a: np.ndarray) -> np.ndarray:
@@ -764,6 +764,26 @@ def describe_problem(spec: MlaPrefillSpec, p: Problem) -> str:
     return "\n".join(rows)
 
 
+def _dispatched_spec(heads: int, q_lens, k_lens, arch) -> MlaPrefillSpec:
+    """The forward spec the MLA dispatcher selects for this case."""
+    from dispatch.mla import MLARequest, dispatch_mla
+
+    try:
+        return dispatch_mla(
+            MLARequest(
+                num_heads=heads,
+                total_q=int(sum(q_lens)),
+                num_seqs=len(q_lens),
+                max_seqlen_k=int(max(k_lens)),
+                arch=arch or "gfx942",
+            )
+        ).spec
+    except ValueError:
+        # Nothing admits the request; fall back to the default so the
+        # admission check below reports why.
+        return MlaPrefillSpec(num_heads=heads)
+
+
 def run_case(
     name: str,
     heads: int,
@@ -777,7 +797,14 @@ def run_case(
     dry_run: bool,
 ) -> bool:
     """One (shape, heads) case end to end. Returns True on pass."""
-    spec = MlaPrefillSpec(num_heads=heads)
+    # The score probe is single-tile (block_q == 16); the forward kernel runs
+    # the spec dispatch ships for this case, so parity covers the shipped
+    # layout (four heads per workgroup when the head count allows it, the
+    # single-head default otherwise).
+    if mode == "scores":
+        spec = MlaPrefillSpec(num_heads=heads, block_q=16)
+    else:
+        spec = _dispatched_spec(heads, q_lens, k_lens, arch)
     # --dry-run reports problem geometry, which is arch-independent, so it stays
     # runnable on a host with no device.
     if not dry_run:
