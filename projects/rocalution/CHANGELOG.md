@@ -5,15 +5,18 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Added
+* Added support for the `gfx1250-strict` architecture.
 * Added the matrix-matrix based interpolation operators `MMExtPI` and `MMExtPE` to the `InterpolationType` enumeration, selectable through `RugeStuebenAMG::SetInterpolationType()`.
 * Added `RugeStuebenAMG::SetInterpolationTruncationFactor()` and `RugeStuebenAMG::SetInterpolationMaxElmts()` to truncate the interpolation operator, dropping entries that are small relative to the largest entry of their row and capping the number of entries per row.
-* Added support for the `gfx1250-strict` architecture.
+
+### Changed
+* All device memory in the HIP backend, including temporary rocPRIM buffers, is now allocated and released through the rocALUTION allocation layer instead of direct `hipMalloc` and `hipFree` calls.
 
 ### Resolved issues
+* Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
+* Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 * Fixed wrong coarse operators of the AMG preconditioners with MPI on wave32 (RDNA) hardware, caused by `LocalMatrix::CompressAdd()` on the accelerator.
 * Fixed a crash in `LocalMatrix::CompressAdd()` on the accelerator when a row of the interior part exceeds the supported number of entries and the computation falls back to the host.
-* Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
-* Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 

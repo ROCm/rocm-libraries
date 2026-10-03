@@ -28,8 +28,6 @@
 // Why doesn't this header use a namespace?
 
 #pragma once
-#ifndef ROCBLASLT_UTILITY_HPP
-#define ROCBLASLT_UTILITY_HPP
 
 #include "handle.h"
 #include "logging.h"
@@ -563,5 +561,3 @@ struct hipblasltClientPerformanceArgs
     static size_t memWriteBytesD; //! Estimated memory writes D
     static size_t memReadBytes;
 };
-
-#endif // ROCBLASLT_UTILITY_HPP
