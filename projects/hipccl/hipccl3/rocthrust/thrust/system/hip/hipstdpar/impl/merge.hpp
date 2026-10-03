@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -83,29 +83,14 @@ inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using r_t = ::std::decay_t<R>;
 
-  if constexpr (::std::is_trivially_destructible_v<r_t>)
-  {
-    return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
-    O result;
-    try
-    {
-      result = ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar merge: failed to synchronize");
-    guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(fn));
+      },
+      "hipstdpar merge: failed to synchronize",
+      r
+  );
 }
 
 template <

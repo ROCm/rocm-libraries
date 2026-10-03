@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -202,27 +202,14 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using r_t = ::std::decay_t<R>;
 
-  if constexpr (::std::is_trivially_destructible_v<r_t>)
-  {
-    return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
-    try
-    {
-      ::thrust::sort(::thrust::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::sort(::thrust::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -269,27 +256,14 @@ inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using r_t = ::std::decay_t<R>;
 
-  if constexpr (::std::is_trivially_destructible_v<r_t>)
-  {
-    return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
-    try
-    {
-      ::thrust::stable_sort(::thrust::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar stable_sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar stable_sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -340,28 +314,14 @@ partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    ::thrust::__partial_sort(::thrust::device, first, middle, last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      ::thrust::__partial_sort(
-        ::thrust::device, first, middle, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar partial_sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::__partial_sort(::thrust::device, first, middle, last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, typename CompareOp, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
@@ -427,29 +387,14 @@ inline void partial_sort_copy(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      ::thrust::__partial_sort_copy(
-        ::thrust::device, first, last, d_first, d_last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(
-      ::hipDeviceSynchronize(), "hipstdpar partial_sort_copy: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort_copy: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename ForwardIt,
@@ -603,28 +548,14 @@ nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, Ke
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    ::thrust::__nth_element(::thrust::device, first, nth, last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      ::thrust::__nth_element(
-        ::thrust::device, first, nth, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar nth_element: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return ::thrust::__nth_element(::thrust::device, first, nth, last, ::std::move(fn));
+      },
+      "hipstdpar nth_element: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>

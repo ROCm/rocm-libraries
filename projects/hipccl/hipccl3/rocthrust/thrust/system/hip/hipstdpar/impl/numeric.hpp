@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,31 +86,14 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op_t = ::std::decay_t<Op>;
 
-  if constexpr (::std::is_trivially_destructible_v<op_t>)
-  {
-    return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<op_t> guard(::std::move(op));
-    O result;
-    try
-    {
-      result =
-        ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(
-      ::hipDeviceSynchronize(), "hipstdpar adjacent_difference: failed to synchronize");
-    guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+        return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar adjacent_difference: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -177,36 +160,14 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op_t = ::std::decay_t<Op>;
 
-  if constexpr (::std::is_trivially_destructible_v<op_t>)
-  {
-    return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(op));
-  }
-  else
-  {
-    // reduce reads its scalar result back to the host, which already drains the stream, so the
-    // callable is not live past this call.  The guard is still required so that device code never
-    // copy-constructs an owning callable by value: the proxy hands the kernel a pointer, and the
-    // callable is only ever move-constructed once on the host into device-accessible memory.  The
-    // explicit synchronize keeps the release strictly after all device work, matching the async
-    // guarded algorithms and making the ordering contract hold regardless of reduce's internals.
-    ::hipstd::detail::device_callable_guard<op_t> guard(::std::move(op));
-    T result;
-    try
-    {
-      result =
-        ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::hipstd::detail::callable_proxy<op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar reduce: failed to synchronize");
-    guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar reduce: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -257,30 +218,14 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op_t = ::std::decay_t<Op>;
 
-  if constexpr (::std::is_trivially_destructible_v<op_t>)
-  {
-    return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<op_t> guard(::std::move(op));
-    O result;
-    try
-    {
-      result = ::thrust::exclusive_scan(
-        ::thrust::device, fi, li, fo, ::std::move(x), ::hipstd::detail::callable_proxy<op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar exclusive_scan: failed to synchronize");
-    guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar exclusive_scan: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -332,30 +277,14 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op_t = ::std::decay_t<Op>;
 
-  if constexpr (::std::is_trivially_destructible_v<op_t>)
-  {
-    return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<op_t> guard(::std::move(op));
-    O result;
-    try
-    {
-      result =
-        ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
-    guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar inclusive_scan: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -511,45 +440,15 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op0_t = ::std::decay_t<Op0>;
-  using op1_t = ::std::decay_t<Op1>;
 
-  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
-  {
-    return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
-  }
-  else
-  {
-    // inner_product reads its scalar result back to the host, which already drains the stream, so
-    // the callables are not live past this call.  The guard is still required so device code never
-    // copy-constructs an owning callable by value: each proxy hands the kernel a pointer instead.
-    // The explicit synchronize keeps the release strictly after all device work, matching the async
-    // guarded algorithms and making the ordering contract hold regardless of the reduction's
-    // internals.
-    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
-    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
-    T result;
-    try
-    {
-      result = ::thrust::inner_product(
-        ::thrust::device,
-        f0,
-        l0,
-        f1,
-        ::std::move(x),
-        ::hipstd::detail::callable_proxy<op0_t>{op0_guard.get()},
-        ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar transform_reduce: failed to synchronize");
-    op1_guard.destroy_and_free();
-    op0_guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+        return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(fn0), ::std::move(fn1));
+      },
+      "hipstdpar transform_reduce: failed to synchronize",
+      op0,
+      op1
+  );
 }
 
 template <
@@ -584,44 +483,15 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op0_t = ::std::decay_t<Op0>;
-  using op1_t = ::std::decay_t<Op1>;
 
-  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
-  {
-    return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
-  }
-  else
-  {
-    // transform_reduce reads its scalar result back to the host, which already drains the stream,
-    // so the callables are not live past this call.  The guard is still required so device code
-    // never copy-constructs an owning callable by value: each proxy hands the kernel a pointer
-    // instead.  The explicit synchronize keeps the release strictly after all device work, matching
-    // the async guarded algorithms and making the ordering contract hold regardless of the
-    // reduction's internals.
-    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
-    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
-    T result;
-    try
-    {
-      result = ::thrust::transform_reduce(
-        ::thrust::device,
-        f,
-        l,
-        ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()},
-        ::std::move(x),
-        ::hipstd::detail::callable_proxy<op0_t>{op0_guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar transform_reduce: failed to synchronize");
-    op1_guard.destroy_and_free();
-    op0_guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_reduce: failed to synchronize",
+    op0,
+    op1
+  );
 }
 
 template <
@@ -658,41 +528,16 @@ inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op0_t = ::std::decay_t<Op0>;
-  using op1_t = ::std::decay_t<Op1>;
 
-  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
-  {
-    return ::thrust::transform_exclusive_scan(
-      ::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
-    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
-    O result;
-    try
-    {
-      result = ::thrust::transform_exclusive_scan(
-        ::thrust::device,
-        fi,
-        li,
-        fo,
-        ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()},
-        ::std::move(x),
-        ::hipstd::detail::callable_proxy<op0_t>{op0_guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(
-      ::hipDeviceSynchronize(), "hipstdpar transform_exclusive_scan: failed to synchronize");
-    op1_guard.destroy_and_free();
-    op0_guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return ::thrust::transform_exclusive_scan(
+            ::thrust::device, fi, li, fo, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_exclusive_scan: failed to synchronize",
+    op0,
+    op1
+  );
 }
 
 template <
@@ -731,39 +576,15 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using op0_t = ::std::decay_t<Op0>;
-  using op1_t = ::std::decay_t<Op1>;
 
-  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
-  {
-    return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
-    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
-    O result;
-    try
-    {
-      result = ::thrust::transform_inclusive_scan(
-        ::thrust::device,
-        fi,
-        li,
-        fo,
-        ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()},
-        ::hipstd::detail::callable_proxy<op0_t>{op0_guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    ::thrust::hip_rocprim::throw_on_error(
-      ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
-    op1_guard.destroy_and_free();
-    op0_guard.destroy_and_free();
-    return result;
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+          return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(fn1), ::std::move(fn0));
+      },
+      "hipstdpar transform_inclusive_scan: failed to synchronize",
+      op0,
+      op1
+  );
 }
 
 template <
