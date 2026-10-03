@@ -72,7 +72,9 @@ _IMMEDIATES = [
     (2**31 + 5, -(2**31) + 5, 0),
     (2**32 + 3, 3, 1),
     (3 * 2**32 + 7, 7, 3),
-    (-(2**63), 0, -(2**31)),
+    # The largest magnitudes a double carries exactly.
+    (2**53 - 1, -1, 2**21 - 1),
+    (-(2**53 - 1), 1, -(2**21)),
 ]
 
 
@@ -115,6 +117,8 @@ def test_symbolic_immediate_is_rejected(lowered_isa):
         str(SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1="SomeSymbol"))
 
 
-def test_immediate_outside_the_64_bit_range_is_rejected(lowered_isa):
+# A double cannot tell these from a neighbor: 2^53 + 1 and 2^63 - 1 round to 2^53 and 2^63.
+@pytest.mark.parametrize("imm", [2**53, 2**53 + 1, -(2**53), 2**63 - 1, -(2**63), 2**63])
+def test_immediate_a_double_cannot_hold_exactly_is_rejected(lowered_isa, imm):
     with pytest.raises(Exception, match="cannot split"):
-        str(SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1=2**63))
+        str(SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1=imm))

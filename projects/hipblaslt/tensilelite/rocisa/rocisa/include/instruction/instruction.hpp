@@ -124,6 +124,8 @@ namespace rocisa
     // 32 bits, the sign extension for a 32-bit value; copying the immediate into both halves, as
     // splitSrcs does for packed operations, would also add it times 2^32. An immediate above 2^31
     // reaches here as a double holding an integer. A symbol cannot be split and is rejected.
+    // A double is exact only below 2^53 in magnitude; at or beyond that, a Python integer may
+    // have been rounded on its way in, so it is rejected rather than split as another value.
     inline void splitSrcs64(const std::vector<InstructionInput>& srcs,
                             std::vector<InstructionInput>&       srcs1,
                             std::vector<InstructionInput>&       srcs2)
@@ -148,11 +150,11 @@ namespace rocisa
                     }
                     else if constexpr(std::is_same_v<T, double>)
                     {
-                        // The signed 64-bit range is [-2^63, 2^63).
-                        if(arg != std::trunc(arg) || arg < -0x1p63 || arg >= 0x1p63)
+                        if(arg != std::trunc(arg) || std::fabs(arg) >= 0x1p53)
                             throw std::invalid_argument(
                                 "64-bit add: cannot split immediate " + std::to_string(arg)
-                                + ", which is not a 64-bit integer, into 32-bit halves");
+                                + ", which is not an integer below 2^53 in magnitude, into"
+                                  " 32-bit halves");
                         const uint64_t v = static_cast<uint64_t>(static_cast<int64_t>(arg));
                         srcs1.push_back(static_cast<int>(static_cast<uint32_t>(v)));
                         srcs2.push_back(static_cast<int>(static_cast<uint32_t>(v >> 32)));
