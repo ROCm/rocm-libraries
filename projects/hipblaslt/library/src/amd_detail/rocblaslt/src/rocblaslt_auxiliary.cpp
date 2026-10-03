@@ -41,6 +41,7 @@
 #include <cstring>
 #endif
 
+#include "../../hipblaslt-jit-debug.hpp"
 #include "../../hipblaslt-jit-mode.hpp"
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
@@ -56,6 +57,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <utility>
 
@@ -2330,6 +2332,13 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+#ifdef HIPBLASLT_ENABLE_JIT
+    std::optional<hipblaslt_jit::debug::Query> query;
+    if(hipblaslt_jit::debug::categories())
+        query.emplace("c", requestedAlgoCount, [returnAlgoCount] {
+            return static_cast<size_t>(*returnAlgoCount);
+        });
+#endif
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -2376,6 +2385,7 @@ rocblaslt_status
         }
 #endif
 
+        HIPBLASLT_JIT_DEBUG_LAP("prepare");
 #ifdef HIPBLASLT_ENABLE_JIT
         if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Forced)
         {
@@ -2386,6 +2396,8 @@ rocblaslt_status
                              pref->max_workspace_bytes,
                              heuristicResultsArray,
                              returnAlgoCount);
+            HIPBLASLT_JIT_DEBUG_LAP("forced_jit");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.jit", *returnAlgoCount);
             for(int i = *returnAlgoCount; i < requestedAlgoCount; ++i)
                 heuristicResultsArray[i].state = rocblaslt_status_invalid_value;
             if(dummy_bias_address)
@@ -2414,6 +2426,8 @@ rocblaslt_status
                 requestedAlgoCount--;
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
+            HIPBLASLT_JIT_DEBUG_LAP("override");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.override", override_success ? 1 : 0);
         }
         if(requestedAlgoCount > 0)
         {
@@ -2425,6 +2439,8 @@ rocblaslt_status
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
                                       pref->max_workspace_bytes);
+            HIPBLASLT_JIT_DEBUG_LAP("get_best");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.best", *returnAlgoCount);
         }
 
         if(override_success)
@@ -2486,12 +2502,14 @@ rocblaslt_status
                                          required_workspace_size);
                     (*returnAlgoCount)++;
                 }
+                HIPBLASLT_JIT_DEBUG_NOTE("from.all", *returnAlgoCount - oriReturnAlgoCount);
 
                 log_api(__func__, "final returnAlgoCount", *returnAlgoCount);
             }
 
             // reset
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
+            HIPBLASLT_JIT_DEBUG_LAP("get_all");
         }
 
 #ifdef HIPBLASLT_ENABLE_JIT
@@ -2506,6 +2524,8 @@ rocblaslt_status
                              pref->max_workspace_bytes,
                              heuristicResultsArray,
                              returnAlgoCount);
+            HIPBLASLT_JIT_DEBUG_LAP("jit_after");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.jit", *returnAlgoCount - found);
             if(*returnAlgoCount > found)
                 status = rocblaslt_status_success;
             log_api(__func__, "returnAlgoCount with JIT", *returnAlgoCount);
@@ -2691,6 +2711,11 @@ rocblaslt_status
                                gemmType,
                                uniformSummationOrder
                                    || (handle && handle->uniform_summation_order));
+#ifdef HIPBLASLT_ENABLE_JIT
+    std::optional<hipblaslt_jit::debug::Query> query;
+    if(hipblaslt_jit::debug::categories())
+        query.emplace("cpp", requestedAlgoCount, [&results] { return results.size(); });
+#endif
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -2700,6 +2725,8 @@ rocblaslt_status
             results.clear();
             jitHeuristicFill(
                 handle, gemmType, gemmData, requestedAlgoCount, maxWorkspaceBytes, results);
+            HIPBLASLT_JIT_DEBUG_LAP("forced_jit");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.jit", static_cast<int64_t>(results.size()));
             log_api(__func__, "returnAlgoCount", results.size());
             return rocblaslt_status_success;
         }
@@ -2714,9 +2741,12 @@ rocblaslt_status
                 handle, gemmType, gemmData, override_result, override.file_path, maxWorkspaceBytes);
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
+            HIPBLASLT_JIT_DEBUG_LAP("override");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.override", override_success ? 1 : 0);
         }
 
         if(requestedAlgoCount - override_result.size() > 0)
+        {
             status
                 = getBestSolutions(handle,
                                    gemmType,
@@ -2724,6 +2754,9 @@ rocblaslt_status
                                    maxWorkspaceBytes,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
                                    results);
+            HIPBLASLT_JIT_DEBUG_LAP("get_best");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.best", static_cast<int64_t>(results.size()));
+        }
 
         if(override_success)
         {
@@ -2780,12 +2813,15 @@ rocblaslt_status
                     allSolutionsResults[i].workspaceSize = workspaceSizeInBytes;
                     results.push_back(allSolutionsResults[i]);
                 }
+                HIPBLASLT_JIT_DEBUG_NOTE("from.all",
+                                         static_cast<int64_t>(results.size()) - oriReturnAlgoCount);
 
                 log_api(__func__, "final returnAlgoCount", results.size());
             }
 
             // reset
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
+            HIPBLASLT_JIT_DEBUG_LAP("get_all");
         }
 
 #ifdef HIPBLASLT_ENABLE_JIT
@@ -2795,6 +2831,8 @@ rocblaslt_status
             const size_t found = results.size();
             jitHeuristicFill(
                 handle, gemmType, gemmData, requestedAlgoCount, maxWorkspaceBytes, results);
+            HIPBLASLT_JIT_DEBUG_LAP("jit_after");
+            HIPBLASLT_JIT_DEBUG_NOTE("from.jit", static_cast<int64_t>(results.size() - found));
             if(results.size() > found)
                 status = rocblaslt_status_success;
             log_api(__func__, "returnAlgoCount with JIT", results.size());

@@ -1,7 +1,7 @@
 # Validate the JIT implementation
 
-The JIT tests check the Jit stages, the comgr code-object builder, the source
-bundle reader and, through the mock backend, the internal entry points that run
+The JIT tests check the Jit stages, the `HIPBLASLT_JIT_DEBUG` lines, the comgr
+code-object builder, the source bundle reader and, through the mock backend, the internal entry points that run
 JIT solutions with the GEMM APIs, and `HIPBLASLT_JIT` through the public
 heuristic queries and `hipblaslt-bench`. The JIT headers are not installed. The
 tests include them from `library/src/amd_detail`. They build the gfx950 source
@@ -36,7 +36,7 @@ queries rank candidates with Origami and replay the bundles that
 injects the mock's fault, and `record` appends each request to the file that
 `HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
 
-- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object`,
+- `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug`, `jit-code-object`,
   `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-source-bundle` and `jit-disabled`.
 - `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
@@ -59,8 +59,9 @@ replay bundles, because the library entries are MsgPack.
 | CTest test | Behavior under test |
 | --- | --- |
 | `jit-source-bundle` | The source bundle reader: relative paths, symbolic links that escape the bundle, size limits and library formats |
-| `jit-component` | Jit over fake stages, without a GPU: missing components rejected, the generator's units reaching the builder, count limiting, excluded kernels, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, prediction only for backends that consume one and only candidates they transport, contract validation, the composed store version, and the catalog seeds |
-| `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, concurrent builds, and the status and log of each kind of failed build, without a GPU; with `--bundle`, the same for the committed split-K bundle |
+| `jit-component` | Jit over fake stages, without a GPU: missing components rejected, the generator's units reaching the builder, count limiting, excluded kernels, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, prediction only for backends that consume one and only candidates they transport, contract validation, the composed store version, and the catalog seeds; with `HIPBLASLT_JIT_DEBUG=all`, the order of the generation events and the outcome and failure stage of each solution |
+| `jit-debug` | The `HIPBLASLT_JIT_DEBUG` line writer, without a GPU: value parsing and its warning, JSON escaping and truncation, the line size cap, per-process file names, lines from several threads and processes intact in one file, and rate limiting with aggregate lines |
+| `jit-code-object` | comgr assembly, HIP helper compilation and linking for gfx950, build options, the time of each comgr action without a change to the output, concurrent builds, and the status and log of each kind of failed build, without a GPU; with `--bundle`, the same for the committed split-K bundle |
 | `jit-code-object-gpu` | The same code objects loaded and launched on the GPU, with their results checked |
 | `jit-bundle-freshness` | Each committed bundle's layout and code-object versions against this tree, its library entry read by the host library, and its build; a manifest with another layout version must be reported stale |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, a replay after an Origami prediction, rejected mock options, and bundle lifetime |
@@ -79,6 +80,10 @@ replay bundles, because the library entries are MsgPack.
 | `jit-heuristic-unsupported` | A problem the predictor cannot rank (K=0) in modes 1 and 2: exactly one `hipblaslt error: JIT predict failed` line naming the reason across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and nothing is published |
 | `jit-heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
 | `jit-heuristic-report` | In modes 1 and 2, a backend that fails to configure and one that fails to generate each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the log named in the report is kept |
+| `jit-heuristic-debug-timing` | `HIPBLASLT_JIT_DEBUG=timing` in mode 1: one `process` and one `setup` line, no progress lines, a `generation` line whose stage times add up, one `solution` line per published solution with its HIP compile times, and `query` lines whose `from` counts add up to the returned count; the results equal a run without the variable. A second process gets cache hits and no `generation` line, mode 2 queries take every result from JIT, and of two threads that start together the one that waits names the generation it waited for |
+| `jit-heuristic-debug-progress` | `HIPBLASLT_JIT_DEBUG=progress` in mode 1: query, lookup, generation, build and publish events in order, with no timing lines or durations |
+| `jit-heuristic-debug-off` | `HIPBLASLT_JIT_DEBUG` unset, empty or `0`: no lines and the same results; `0` and an unknown name each print one warning and leave the names they accompany in effect; with `HIPBLASLT_JIT=0`, any value leaves the output unchanged |
+| `jit-heuristic-debug-file` | `HIPBLASLT_JIT_DEBUG_FILE` with `%i` writes one owner-only file per process and nothing to stderr; two processes sharing one file leave every line intact; a file that cannot be opened prints one warning and the lines go to stderr |
 | `jit-heuristic-jit-off` | In a build without JIT, `HIPBLASLT_JIT=1` prints one warning across two handles and three queries, leaves the results unchanged, and creates no JIT solution library |
 | `jit-bench-smoke` | `hipblaslt-bench` with `HIPBLASLT_JIT=2` and an empty device library runs and verifies one replayed JIT solution with no JIT report and publishes it; a second run whose backend fails if it generates runs the same kernel from the library |
 | `jit-bench-smoke-jit-off` | `hipblaslt-bench` in a build without JIT prints one warning for `HIPBLASLT_JIT=2` and creates no JIT solution library |
@@ -98,8 +103,9 @@ fault, a replay after an Origami prediction and rejected mock options. With `--l
 itself. That mode refuses to run unless `HIPBLASLT_JIT_LIBRARY_PATH` is set, so
 that it never publishes into the default library.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
-uses as the scratch parent; it needs no GPU. Both are built only with
-`HIPBLASLT_ENABLE_JIT=ON`.
+uses as the scratch parent; it needs no GPU. `hipblaslt-jit-debug-test` takes a
+fresh output directory too, needs no GPU and starts its child processes itself.
+They are built only with `HIPBLASLT_ENABLE_JIT=ON`.
 
 `hipblaslt-jit-api-test --replay BUNDLE` runs the public execution checks on a
 solution the mock backend replays from `BUNDLE`; `--m`, `--n`, `--k`,

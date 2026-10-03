@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-prediction.hpp"
+#include "jit_test_child.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -9,9 +10,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <mutex>
 #include <new>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -729,10 +733,169 @@ namespace
         }
         std::cout << "PASS catalog knowledge seeds 11 tiles with per-architecture cache hints\n";
     }
+
+    // Runs in a child with HIPBLASLT_JIT_DEBUG=all; each scenario's lines follow its name.
+    void debugChild()
+    {
+        std::cerr << "scenario published" << std::endl;
+        {
+            Fixture f({"a", "b", "c"}, {"fake.v1"});
+            f.builder = std::make_shared<Builder>(f.log, std::set<std::string>{"b"});
+            f.store   = std::make_shared<Store>(f.log);
+            require(f.run(3).indices == std::vector<int32_t>{100, 101}, "published: wrong indices");
+        }
+        std::cerr << "scenario loaded" << std::endl;
+        {
+            Fixture f({"a", "b"});
+            f.loader->rejects = {"b"};
+            require(names(f.run(2)) == std::vector<std::string>{"a"}, "loaded: wrong bundles");
+        }
+        std::cerr << "scenario failed" << std::endl;
+        {
+            Fixture f({"a"});
+            f.backend->result = {Code::Failed, Stage::Generate, "no solution"};
+            require(f.run().failures.size() == 1, "failed: no failure");
+        }
+        std::cerr << "scenario end" << std::endl;
+    }
+
+    std::string field(const std::string& line, const std::string& key)
+    {
+        const auto at = line.find("\"" + key + "\":");
+        if(at == std::string::npos)
+            return {};
+        const auto first = at + key.size() + 3;
+        if(line[first] == '"')
+            return line.substr(first + 1, line.find('"', first + 1) - first - 1);
+        return line.substr(first, line.find_first_of(",}", first) - first);
+    }
+
+    void debugLines(const fs::path& parent, const fs::path& self)
+    {
+        const auto tmp = parent / "debug-tmp";
+        fs::create_directory(tmp);
+        const auto log = parent / "debug-child.log";
+        const bool ran = hipblaslt_jit_test::runChild({self.string(), "--debug-child"},
+                                                      {{"HIPBLASLT_JIT", "1"},
+                                                       {"HIPBLASLT_JIT_DEBUG", "all"},
+                                                       {"HIPBLASLT_JIT_DEBUG_FILE", ""},
+                                                       {"TMPDIR", tmp.string()}},
+                                                      parent,
+                                                      log);
+        std::ifstream     in(log);
+        const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        require(ran, "The debug child failed: " + text);
+
+        std::map<std::string, std::vector<std::string>> scenarios;
+        std::string                                     scenario;
+        std::istringstream                              lines(text);
+        for(std::string line; std::getline(lines, line);)
+            if(line.rfind("scenario ", 0) == 0)
+                scenario = line.substr(9);
+            else if(line.rfind("hipblaslt jit-debug {\"v\":1,", 0) == 0)
+                scenarios[scenario].push_back(line);
+        auto events = [&](const std::string& name) {
+            std::vector<std::string> out;
+            for(const auto& line : scenarios[name])
+                out.push_back(field(line, "ev")
+                              + (field(line, "ev") == "solution" || field(line, "ev") == "build.end"
+                                     ? ":" + field(line, "kernel") + ":" + field(line, "outcome")
+                                     : ""));
+            return out;
+        };
+        auto find = [&](const std::string& name, const std::string& event) {
+            for(const auto& line : scenarios[name])
+                if(field(line, "ev") == event)
+                    return line;
+            throw std::runtime_error(name + ": no " + event + " line");
+        };
+        auto has = [](const std::string& line, const std::string& fragment) {
+            return line.find(fragment) != std::string::npos;
+        };
+
+        const std::vector<std::string> published = {"process",
+                                                    "generation.start",
+                                                    "build.start",
+                                                    "build.end:a:built",
+                                                    "build.start",
+                                                    "build.end:b:build_failed",
+                                                    "failure",
+                                                    "build.start",
+                                                    "build.end:c:built",
+                                                    "publish.start",
+                                                    "publish.done",
+                                                    "solution:a:published",
+                                                    "solution:b:build_failed",
+                                                    "solution:c:published",
+                                                    "generation",
+                                                    "generation.end"};
+        require(events("published") == published, "published: wrong events or order");
+        const auto generation = find("published", "generation");
+        require(field(generation, "requested") == "3" && field(generation, "generated") == "3"
+                    && field(generation, "published") == "2"
+                    && field(generation, "failures") == "1"
+                    && field(generation, "candidates") == "1"
+                    && has(generation, "\"ns\":{\"total\":")
+                    && has(generation, "\"predict\":") && has(generation, "\"scratch\":")
+                    && has(generation, "\"backend\":") && has(generation, "\"build\":")
+                    && has(generation, "\"support\":") && has(generation, "\"publish\":")
+                    && has(generation, "\"other\":") && !has(generation, "\"load\":")
+                    && field(generation, "gen") != "" && field(generation, "q") == "null",
+                "published: wrong generation line " + generation);
+        require(field(find("published", "failure"), "stage") == "build"
+                    && field(find("published", "generation.end"), "outcome") == "partial"
+                    && field(find("published", "publish.done"), "solutions") == "2",
+                "published: wrong failure, outcome or publish");
+        for(const auto& line : scenarios["published"])
+            if(field(line, "ev") == "solution" && field(line, "kernel") != "b")
+                require(field(line, "index") == (field(line, "kernel") == "a" ? "100" : "101")
+                            && has(line, "\"build\":") && has(line, "\"support\":"),
+                        "published: wrong solution line " + line);
+
+        const std::vector<std::string> loaded = {"generation.start",
+                                                 "build.start",
+                                                 "build.end:a:built",
+                                                 "build.start",
+                                                 "build.end:b:built",
+                                                 "failure",
+                                                 "load.done",
+                                                 "solution:a:loaded",
+                                                 "solution:b:unsupported",
+                                                 "generation",
+                                                 "generation.end"};
+        require(events("loaded") == loaded, "loaded: wrong events or order");
+        require(has(find("loaded", "generation"), "\"load\":")
+                    && !has(find("loaded", "generation"), "\"predict\":")
+                    && field(find("loaded", "failure"), "stage") == "support"
+                    && field(find("loaded", "generation.end"), "outcome") == "partial"
+                    && field(find("loaded", "generation.end"), "loaded") == "1",
+                "loaded: wrong generation lines");
+
+        const std::vector<std::string> failed
+            = {"generation.start", "failure", "generation", "generation.end"};
+        require(events("failed") == failed
+                    && field(find("failed", "failure"), "stage") == "generate"
+                    && field(find("failed", "generation.end"), "outcome") == "failed",
+                "failed: wrong events");
+        std::cout << "PASS HIPBLASLT_JIT_DEBUG times each stage and reports progress per solution\n";
+    }
 }
 
 int main(int argc, char** argv)
 {
+    if(argc == 2 && std::string(argv[1]) == "--debug-child")
+    {
+        try
+        {
+            debugChild();
+            return 0;
+        }
+        catch(const std::exception& error)
+        {
+            std::cerr << "FAIL: " << error.what() << '\n';
+            return 1;
+        }
+    }
     if(argc != 2)
     {
         std::cerr << "Usage: " << argv[0] << " FRESH_SCRATCH_PARENT\n";
@@ -754,6 +917,9 @@ int main(int argc, char** argv)
         scratch(parent);
         concurrency(parent);
         defaults();
+#ifndef _WIN32
+        debugLines(parent, fs::read_symlink("/proc/self/exe"));
+#endif
         std::cout << "ALL JIT COMPONENT CHECKS PASSED\n";
     }
     catch(const std::exception& error)

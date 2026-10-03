@@ -77,12 +77,28 @@ endif()
 add_executable(hipblaslt-jit-component-test
     jit_component_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-component.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-catalog-knowledge.cpp")
-target_include_directories(hipblaslt-jit-component-test PRIVATE "${hipblaslt_jit_source}")
+target_include_directories(hipblaslt-jit-component-test PRIVATE
+    "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_compile_definitions(hipblaslt-jit-component-test PRIVATE HIPBLASLT_ENABLE_JIT)
 target_link_libraries(hipblaslt-jit-component-test PRIVATE
     roc::hipblaslt hip::host Threads::Threads)
 hipblaslt_jit_test(jit-component jit-cpu
     $<TARGET_FILE:hipblaslt-jit-component-test> "${hipblaslt_jit_scratch}/component")
+
+# Compiles HIPBLASLT_JIT_DEBUG parsing and the line sink directly.
+add_executable(hipblaslt-jit-debug-test
+    jit_debug_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp")
+target_include_directories(hipblaslt-jit-debug-test PRIVATE
+    "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_compile_definitions(hipblaslt-jit-debug-test PRIVATE HIPBLASLT_ENABLE_JIT)
+target_link_libraries(hipblaslt-jit-debug-test PRIVATE Threads::Threads)
+hipblaslt_jit_test(jit-debug jit-cpu
+    $<TARGET_FILE:hipblaslt-jit-debug-test> "${hipblaslt_jit_scratch}/debug")
 
 # Compiles the comgr builder directly; runs without a GPU unless --gpu is given.
 add_executable(hipblaslt-jit-code-object-test
@@ -97,7 +113,8 @@ hipblaslt_jit_test(jit-code-object jit-cpu
 hipblaslt_jit_test(jit-code-object-gpu jit-gpu
     $<TARGET_FILE:hipblaslt-jit-code-object-test>
     --gpu --out "${hipblaslt_jit_scratch}/code-object-gpu" --bundle "${hipblaslt_jit_splitk}")
-hipblaslt_jit_stage(hipblaslt-jit-component-test hipblaslt-jit-code-object-test)
+hipblaslt_jit_stage(hipblaslt-jit-component-test hipblaslt-jit-debug-test
+                    hipblaslt-jit-code-object-test)
 
 if(HIPBLASLT_JIT_TESTING)
     add_executable(hipblaslt-jit-mock-backend-test mock_backend_test.cpp)
@@ -141,7 +158,7 @@ if(HIPBLASLT_JIT_TESTING)
                        --replay "${hipblaslt_jit_data}/gfx950/rank-2"
                        --replay "${hipblaslt_jit_splitk}")
             foreach(route fallback-c fallback-cpp forced cache-hit distinct unsupported
-                          concurrent report)
+                          concurrent report debug-timing debug-progress debug-off debug-file)
                 hipblaslt_jit_python_test(jit-heuristic-${route} jit-gpu test_heuristic.py
                     $<TARGET_FILE:hipblaslt-jit-heuristic-test> ${route}
                     "${hipblaslt_jit_scratch}/heuristic-${route}" ${replay})
@@ -160,8 +177,10 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     add_executable(hipblaslt-jit-library-test
         jit_library_test.cpp
         "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-fs.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-library.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-msgpack.cpp"
         "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp")
     target_include_directories(hipblaslt-jit-library-test PRIVATE
@@ -191,10 +210,13 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     add_executable(hipblaslt-jit-bundle-freshness-test
         jit_bundle_freshness_test.cpp
         "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
-        "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp")
+        "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-debug.cpp"
+        "${hipblaslt_jit_source}/hipblaslt-jit-mode.cpp")
     target_include_directories(hipblaslt-jit-bundle-freshness-test PRIVATE
         "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
     target_compile_definitions(hipblaslt-jit-bundle-freshness-test PRIVATE
+        HIPBLASLT_ENABLE_JIT
         HIPBLASLT_JIT_KERNARGS_VERSION=${KernArgsVersion}
         HIPBLASLT_JIT_PERSISTENT_LOOP_ARGS_VERSION=${PersistentLoopArgsVersion})
     target_link_libraries(hipblaslt-jit-bundle-freshness-test PRIVATE

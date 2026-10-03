@@ -3,8 +3,10 @@
 
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-debug.hpp"
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <system_error>
@@ -132,6 +134,50 @@ namespace hipblaslt_jit
                                    "A generated solution needs a main unit and a kernel name",
                                    {});
 
+                // Copies the comgr timings into the solution's record on every return.
+                struct Report
+                {
+                    debug::Record& record;
+                    size_t         assemblyUnits;
+                    co::Timings    timings;
+                    Report(debug::Record& record, size_t assemblyUnits)
+                        : record(record)
+                        , assemblyUnits(assemblyUnits)
+                    {
+                    }
+                    Report(const Report&) = delete;
+                    ~Report()
+                    {
+                        try
+                        {
+                            record.count("assembly_units", static_cast<int64_t>(assemblyUnits));
+                            if(timings.assemble)
+                                record.add("assemble", timings.assemble);
+                            std::string units;
+                            for(const auto& [name, ns] : timings.compileHip)
+                            {
+                                record.add("compile_hip", ns);
+                                units += std::string(units.empty() ? "[" : ",") + "{\"name\":"
+                                         + debug::Line::quote(name)
+                                         + ",\"ns\":" + std::to_string(ns) + "}";
+                            }
+                            if(!units.empty())
+                                record.set("hip_units", units + "]");
+                            if(timings.link)
+                                record.add("link", timings.link);
+                        }
+                        catch(...)
+                        {
+                        }
+                    }
+                };
+                std::optional<Report> report;
+                if(auto* record = debug::on(debug::Timing) ? debug::innermost() : nullptr)
+                {
+                    report.emplace(*record, assembly.size());
+                    options.timings = &report->timings;
+                }
+
                 std::string                  log;
                 std::vector<co::Relocatable> objects;
                 if(!assembly.empty())
@@ -158,7 +204,9 @@ namespace hipblaslt_jit
                 if(!linked.ok())
                     return failure(request, solution, "comgr could not link", log);
 
-                const auto metadata = co::readMetadata(linked.bytes);
+                debug::Phase phase("metadata");
+                const auto   metadata = co::readMetadata(linked.bytes);
+                phase.stop();
                 if(!metadata.ok())
                     return failure(
                         request, solution, "Cannot read the built code object", log + metadata.log);

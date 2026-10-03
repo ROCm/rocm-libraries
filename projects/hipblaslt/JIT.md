@@ -455,6 +455,105 @@ removed after success and kept after a failure, whose report names the log
 inside it. The heuristic queries take no stream; run them before a HIP stream
 capture and pass the returned algorithm to `hipblasLtMatmul` inside it.
 
+### Diagnostics with `HIPBLASLT_JIT_DEBUG`
+
+In a JIT build with `HIPBLASLT_JIT` set to `1` or `2`, `HIPBLASLT_JIT_DEBUG`
+prints where JIT time goes and what JIT is doing. Its value is a
+comma-separated list of category names, in any case:
+
+| Name | Lines |
+| --- | --- |
+| `timing` | One line when each heuristic query, `hipblasLtMatmul` call with a JIT solution, generation and generated solution finishes, with the duration of each step |
+| `progress` | One line per step as it happens: lookups, waits, generation stages, builds and publication |
+| `knowledge`, `prediction` | Reserved; no lines yet |
+| `all` | Every category, including categories added later |
+
+Unset or empty prints nothing. A number, including `0` and `1`, or an unknown
+name prints `hipblaslt warning: HIPBLASLT_JIT_DEBUG=<value>: ignoring <names>;
+the value is timing, progress, knowledge, prediction or all, comma-separated` once and is ignored; the
+names beside it still apply. hipBLASLt reads the variable once per process.
+With `HIPBLASLT_JIT` off, and in a build without JIT, it prints nothing and no
+warning.
+
+The lines go to stderr. `HIPBLASLT_JIT_DEBUG_FILE` names a file to append them
+to instead, with `%i` replaced by the process ID; the file is created readable
+and writable by its owner only. Each line is written whole, so threads and
+processes that share a file never split a line. A file that cannot be opened
+prints one warning, and the lines go to stderr. The lines are not copied into
+the hipBLASLt log.
+
+Every line is the prefix `hipblaslt jit-debug ` followed by one JSON object,
+so `grep '^hipblaslt jit-debug '` separates the lines and one JSON parser reads
+them. The object starts with these keys:
+
+| Key | Value |
+| --- | --- |
+| `v` | Schema version, `1`. New keys keep the version; a changed meaning increments it |
+| `cat` | `timing` or `progress` |
+| `ev` | The event |
+| `pid`, `tid` | The process ID and a thread number counted from 1 in each process |
+| `t_ms` | Milliseconds on the monotonic clock since the process's first line |
+| `q` | The query the line belongs to, `<pid>.<n>`, or `null` |
+| `gen` | Inside a generation, the generation, `<pid>.g<n>` |
+
+Durations are nanoseconds in an `ns` object, in the order the steps ran, and
+each includes the steps nested in it. A string longer than 512 bytes is cut and
+the line gets `"truncated":true`; most generated kernel names are, and the
+solution index identifies the solution. A line longer than 4 KiB keeps only the
+keys above, with `"truncated":true` and its full size as `oversize`.
+
+`timing` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. It is a `progress` line when only `progress` is on |
+| `setup` | The first JIT use in the process: its `status`, and the time to open the JIT solution library (`store`) and create the components. A backend can add its own fields and steps, such as creating itself |
+| `library.init` | A device's pre-tuned library initialization |
+| `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`, `best` from the pre-tuned query, `all` from the `getAllSolutions` fill and `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
+| `matmul` | `hipblasLtMatmul` with a JIT solution: the first call for each problem and algorithm, and every call that loaded a code object (`loaded` is `now`), with the library lookup, preparation, code-object load and launch durations |
+| `generation` | Each generation: the requested and candidate counts, failures, the problem, the generated, `fresh`, `reused` and published counts, and the durations of prediction, scratch, the backend, building, support checks, publication (lock wait, time holding the lock, refresh) and loading, with `other` the rest. A backend can add its own fields and the durations of its own steps within `backend` |
+| `solution` | One per generated solution: rank, kernel, `outcome` (`built`, `build_failed`, `unsupported`, `published`, `publish_failed`, `loaded` or `load_failed`), index, message, assembly and HIP unit counts with each HIP unit's compile time as `hip_units`, and the metadata, assembly, HIP compile, link, build and support durations |
+| `query.aggregate`, `matmul.aggregate` | At most once per second, and at exit: the calls not printed in full, per API or per problem and algorithm, as `calls`, `ns.sum` and `ns.max` |
+
+`progress` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `query.start`, `query.end` | A heuristic query starts and ends |
+| `lookup` | The JIT solution library lookup: `result` (`hit`, `partial` or `miss`), `found` and `needed` |
+| `generation.wait` | The query waited for another thread's generation of the same problem, named in `waited_on` |
+| `generation.repeated` | The problem fell short in an earlier generation in this process, so it is not generated again |
+| `generation.start`, `generation.end` | A generation starts, with the requested and candidate counts and the problem, and ends, with `outcome` (`ok`, `partial`, `failed` or `empty`) and the generated, published and loaded counts |
+| `build.start`, `build.end` | Each solution's code-object build, with its `outcome` |
+| `publish.start`, `publish.done` | Publication into the JIT solution library, with `fresh` and `reused` entries |
+| `load.done` | Solutions loaded without publication |
+| `failure` | A failed stage and its message |
+
+`query.start`, `query.end`, `lookup` and `query` lines share a budget of 50
+lines that refills at 10 per second. Lines over the budget are counted and
+reported by a `suppressed` line in their category before the next line that is
+written, and a dropped `query` line is added to `query.aggregate`. Repeated
+`matmul` calls go to `matmul.aggregate`. Generation lines are never dropped.
+
+A cache hit with `HIPBLASLT_JIT_DEBUG=timing`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"timing","ev":"query","pid":4242,"tid":1,"t_ms":165.138,"q":"4242.5","api":"cpp","mode":1,"requested":3,"returned":3,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT","from":{"best":0,"jit":3},"jit":{"needed":3,"hits":3,"kept":3,"dropped":0},"ns":{"total":55209,"get_best":1690,"get_all":2540,"jit_target":3130,"lookup_attach":14720,"lookup_refresh":7870,"lookup_scan":11959,"jit_lookup":38069,"jit_support":5070,"jit_after":50709}}
+```
+
+The start of a generation with `HIPBLASLT_JIT_DEBUG=progress`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"lookup","pid":4242,"tid":1,"t_ms":155.350,"q":"4242.1","result":"miss","found":0,"needed":2}
+hipblaslt jit-debug {"v":1,"cat":"progress","ev":"generation.start","pid":4242,"tid":1,"t_ms":155.791,"q":"4242.1","gen":"4242.g1","requested":2,"candidates":72,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT"}
+```
+
+Unset, empty, with `HIPBLASLT_JIT` off, or in a build without JIT, the
+variable adds no lines, files or clock reads. With any
+value, the results, return statuses, JIT solution library contents and the
+other stderr output are the same as without it, and a line that cannot be
+written never fails a call.
+
 ### Building generated sources
 
 Generators emit assembly or HIP source plus metadata only; they do not assemble,

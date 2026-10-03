@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-code-object.hpp"
+#include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-json.hpp"
@@ -509,11 +510,14 @@ namespace hipblaslt_jit
         return staged(Stage::Lookup, [&]() -> Status {
             if(const auto reason = notImplemented(problem))
                 return {Status::Code::NotSupported, Stage::Lookup, reason};
-            Directory* directory = nullptr;
+            Directory*   directory = nullptr;
+            debug::Phase attaching("lookup_attach");
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
+            attaching.stop();
             std::shared_ptr<GemmMaster> master;
             {
+                debug::Phase                refreshing("lookup_refresh");
                 std::lock_guard<std::mutex> lock(directory->mutex);
                 if(auto status = directory->refresh(); !status.ok())
                     return status;
@@ -523,6 +527,7 @@ namespace hipblaslt_jit
                 return {};
             // The stock search cannot list every hit: single solution libraries lack
             // findTopSolutions, and findAllSolutions skips the row predicates.
+            debug::Phase         scanning("lookup_scan");
             std::vector<int32_t> found;
             for(const auto& row : rowsOf(*master)->rows)
             {
@@ -576,9 +581,12 @@ namespace hipblaslt_jit
 
             files::FileLock lock;
             const auto      lockFile = schemaDirectory() / "lock";
+            debug::Phase    waiting("publish_lock_wait");
             if(auto status = files::FileLock::acquire(lockFile, std::chrono::seconds(120), lock);
                !status.ok())
                 return status;
+            waiting.stop();
+            debug::Phase locked("publish_locked");
             reached(PublishStep::Locked);
             if(auto status = directory->checkKey(); !status.ok())
                 return status;
@@ -673,6 +681,8 @@ namespace hipblaslt_jit
 
             const auto fresh = std::count_if(
                 placements.begin(), placements.end(), [](const auto& p) { return p.fresh; });
+            HIPBLASLT_JIT_DEBUG_NOTE("fresh", fresh);
+            HIPBLASLT_JIT_DEBUG_NOTE("reused", static_cast<int64_t>(placements.size()) - fresh);
             if(fresh)
             {
                 if(next + fresh - 1 > INT32_MAX)
@@ -751,9 +761,11 @@ namespace hipblaslt_jit
             }
             reached(PublishStep::Master);
             lock.release();
+            locked.stop();
             reached(PublishStep::Unlocked);
 
             {
+                debug::Phase                refreshing("publish_refresh");
                 std::lock_guard<std::mutex> guard(directory->mutex);
                 if(auto status = directory->refresh(); !status.ok())
                     return status;

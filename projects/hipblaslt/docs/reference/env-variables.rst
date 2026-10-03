@@ -116,6 +116,25 @@ and prints one warning when it is set to a nonzero value.
       - | Path to a directory
         | Default: ``/tmp/hipblaslt-jit-<uid>`` on Linux
 
+    * - | ``HIPBLASLT_JIT_DEBUG``
+        | Prints JIT diagnostic lines while ``HIPBLASLT_JIT`` is 1 or 2. Each line is
+          ``hipblaslt jit-debug`` followed by one JSON object.
+        | Unset or empty prints nothing. A number or an unknown name prints one warning and is
+          ignored.
+      - | Comma-separated category names, in any case:
+        | ``timing``: durations of each heuristic query, ``hipblasLtMatmul`` call with a JIT
+          solution, generation and generated solution
+        | ``progress``: lookups, waits, generation stages, builds and publication as they happen
+        | ``knowledge``, ``prediction``: reserved; no lines yet
+        | ``all``: every category
+
+    * - | ``HIPBLASLT_JIT_DEBUG_FILE``
+        | Appends the ``HIPBLASLT_JIT_DEBUG`` lines to this file instead of stderr. ``%i`` is
+          replaced by the process ID. The file is created readable and writable by its owner only.
+        | A file that cannot be opened prints one warning, and the lines go to stderr.
+      - | Path to a file
+        | Default: unset (stderr)
+
 Origami with Stream-K configuration
 ===================================
 

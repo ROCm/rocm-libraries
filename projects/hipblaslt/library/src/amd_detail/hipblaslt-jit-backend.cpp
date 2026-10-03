@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-library.hpp"
@@ -142,9 +143,19 @@ namespace hipblaslt_jit
     {
         struct Generation
         {
-            std::mutex mutex;
-            bool       fellShort = false;
+            std::mutex  mutex;
+            bool        fellShort = false;
+            std::string lastDebugId; // the holder's generation, for HIPBLASLT_JIT_DEBUG
         };
+
+        void debugFailure(const Status& status)
+        {
+            if(debug::on(debug::Progress))
+                debug::Line(debug::Progress, "failure")
+                    .add("stage", toString(status.stage))
+                    .add("message", status.message)
+                    .write();
+        }
 
         // One per problem this process has tried to generate; never removed.
         Generation& generation(const std::string& key)
@@ -188,38 +199,73 @@ namespace hipblaslt_jit
             const auto   jit = processJit(status);
             DeviceTarget target;
             if(status.ok())
+            {
+                debug::Phase phase("jit_target");
                 status = DeviceTarget::make(device, target);
-            const auto lookup = [&] {
+            }
+            const auto lookup = [&](const char* phase) {
+                debug::Phase timed(phase);
                 status = jit->store()->lookup(
                     request, target, count, workspaceLimit, excludeKernels, fill.indices);
                 if(!status.ok())
                     status.stage = Stage::Lookup;
                 return status.ok();
             };
-            if(!status.ok() || !lookup())
+            if(!status.ok() || !lookup("jit_lookup"))
             {
+                debugFailure(status);
                 fill.failures.push_back(std::move(status));
                 return fill;
             }
+            const auto found = static_cast<int64_t>(fill.indices.size());
+            HIPBLASLT_JIT_DEBUG_NOTE("jit.needed", static_cast<int64_t>(count));
+            HIPBLASLT_JIT_DEBUG_NOTE("jit.hits", found);
+            if(debug::on(debug::Progress))
+                debug::Line(debug::Progress, "lookup")
+                    .add("result",
+                         fill.indices.size() >= count ? "hit" : found ? "partial" : "miss")
+                    .add("found", found)
+                    .add("needed", count)
+                    .write(debug::Rate::Limited);
             if(fill.indices.size() >= count)
                 return fill;
 
-            auto& generating = generation(generationKey(request, target, workspaceLimit));
-            std::lock_guard<std::mutex> lock(generating.mutex);
-            // Another thread may have published this problem while this one waited.
-            if(!lookup())
+            auto&        generating = generation(generationKey(request, target, workspaceLimit));
+            debug::Phase waiting("jit_wait");
+            std::unique_lock<std::mutex> lock(generating.mutex, std::try_to_lock);
+            const bool                   waited = !lock.owns_lock();
+            if(waited)
+                lock.lock();
+            waiting.stop();
+            if(waited && debug::categories())
             {
+                debug::set("jit.waited_on", debug::Line::quote(generating.lastDebugId));
+                if(debug::on(debug::Progress))
+                    debug::Line(debug::Progress, "generation.wait")
+                        .add("waited_on", generating.lastDebugId)
+                        .write();
+            }
+            // Another thread may have published this problem while this one waited.
+            if(!lookup("jit_lookup_after_wait"))
+            {
+                debugFailure(status);
                 fill.failures.push_back(std::move(status));
                 return fill;
             }
+            HIPBLASLT_JIT_DEBUG_NOTE("jit.hits_after_wait",
+                                     static_cast<int64_t>(fill.indices.size()));
             if(fill.indices.size() >= count)
                 return fill;
             if(generating.fellShort)
             {
                 fill.repeated = true;
+                HIPBLASLT_JIT_DEBUG_NOTE("jit.repeated", 1);
+                if(debug::on(debug::Progress))
+                    debug::Line(debug::Progress, "generation.repeated").write();
                 return fill;
             }
-            auto exclude = excludeKernels;
+            debug::Phase excluding("jit_exclude");
+            auto         exclude = excludeKernels;
             for(auto index : fill.indices)
             {
                 Status why;
@@ -227,8 +273,13 @@ namespace hipblaslt_jit
                        device, *target.hardware, index, why))
                     exclude.push_back(solution->kernelName);
             }
-            auto outcome = jit->generate(
+            excluding.stop();
+            debug::Phase generatePhase("jit_generate");
+            auto         outcome = jit->generate(
                 request, target, count - fill.indices.size(), workspaceLimit, exclude);
+            generatePhase.stop();
+            if(debug::categories())
+                generating.lastDebugId = debug::lastGeneration();
             for(auto index : outcome.indices)
                 if(std::find(fill.indices.begin(), fill.indices.end(), index) == fill.indices.end())
                     fill.indices.push_back(index);
@@ -239,6 +290,7 @@ namespace hipblaslt_jit
         catch(const std::exception& e)
         {
             fill.failures.push_back({Status::Code::Failed, Stage::Configure, e.what()});
+            debugFailure(fill.failures.back());
         }
         return fill;
     }

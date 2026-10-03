@@ -19,6 +19,7 @@ if(HIPBLASLT_ENABLE_JIT)
     target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_JIT)
     target_sources(hipblaslt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-debug.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"

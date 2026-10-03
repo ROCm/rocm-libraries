@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-debug.hpp"
 #include "hipblaslt-jit-prediction.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -167,8 +168,13 @@ namespace hipblaslt_jit
         Outcome     outcome;
         if(count == 0)
             return outcome;
+        std::optional<debug::Generation> trace;
+        if(debug::categories())
+            trace.emplace(count);
         auto record = [&](Stage stage, Status status) {
             status.stage = stage;
+            if(trace)
+                trace->failure(toString(stage), status.message);
             outcome.failures.push_back(std::move(status));
         };
 
@@ -176,10 +182,12 @@ namespace hipblaslt_jit
         const bool predicted = !m_contracts.empty();
         if(predicted)
         {
-            auto status = guarded([&] {
+            debug::Phase phase("predict");
+            auto         status = guarded([&] {
                 return c.predictor->predict(
                     {request, target, workspaceLimit}, *c.knowledge, prediction);
             });
+            phase.stop();
             auto& ranked = prediction.ranked;
             ranked.erase(std::remove_if(ranked.begin(),
                                         ranked.end(),
@@ -200,12 +208,16 @@ namespace hipblaslt_jit
                 return outcome;
             }
         }
+        if(trace)
+            trace->started(prediction.ranked.size());
 
         std::optional<Scratch> scratch;
+        debug::Phase           scratchPhase("scratch");
         auto                   status = guarded([&] {
             scratch.emplace();
             return Status{};
         });
+        scratchPhase.stop();
         if(!status.ok())
         {
             record(Stage::Configure, std::move(status));
@@ -219,7 +231,9 @@ namespace hipblaslt_jit
                                            excludeKernels,
                                            scratch->path()};
         std::vector<GeneratedSolution> generated;
+        debug::Phase                   backendPhase("backend");
         status = guarded([&] { return c.backend->generate(generation, generated); });
+        backendPhase.stop();
         if(!status.ok())
         {
             record(status.code == Status::Code::TargetMismatch ? Stage::Configure
@@ -229,40 +243,72 @@ namespace hipblaslt_jit
             return outcome;
         }
         outcome.summary = std::move(status.message);
+        if(trace)
+            trace->record().count("generated", static_cast<int64_t>(generated.size()));
 
         std::vector<BuiltSolution> supported;
-        for(const auto& solution : generated)
+        std::vector<size_t>        ranks; // of supported, in generated
+        for(size_t rank = 0; rank < generated.size(); ++rank)
         {
+            const auto& solution = generated[rank];
             if(supported.size() == count)
                 break;
+            debug::Scope  scope(trace ? &trace->solution(rank, solution.kernelName) : nullptr);
             BuiltSolution built;
+            debug::Phase  buildPhase("build");
             status = guarded([&] { return c.builder->build(solution, generation, built); });
+            buildPhase.stop();
+            if(trace)
+                trace->built(rank, status.ok() ? "built" : "build_failed", status.message);
             if(!status.ok())
             {
                 record(Stage::Build, std::move(status));
                 continue;
             }
+            debug::Phase supportPhase("support");
             status = guarded(
                 [&] { return c.loader->support(built, request, target, workspaceLimit); });
+            supportPhase.stop();
             if(!status.ok())
             {
+                if(trace)
+                    trace->outcome(rank, "unsupported", status.message);
                 record(Stage::Support, std::move(status));
                 continue;
             }
             supported.push_back(std::move(built));
+            ranks.push_back(rank);
         }
 
         bool load = true;
         if(m_store && !supported.empty())
         {
             std::vector<int32_t> indices;
+            if(trace)
+                trace->publishing(supported.size());
+            debug::Phase publishPhase("publish");
             status = guarded([&] { return m_store->publish(request, target, supported, indices); });
+            publishPhase.stop();
             if(status.ok() && indices.size() != supported.size())
                 status = {Status::Code::Failed,
                           Stage::Publish,
                           "Solution store returned " + std::to_string(indices.size())
                               + " indices for " + std::to_string(supported.size())
                               + " solutions"};
+            if(trace)
+            {
+                for(size_t i = 0; i < ranks.size(); ++i)
+                    if(status.ok())
+                    {
+                        trace->outcome(ranks[i], "published");
+                        trace->indexed(ranks[i], indices[i]);
+                    }
+                    else
+                        trace->outcome(ranks[i], "publish_failed", status.message);
+                if(status.ok())
+                    trace->record().count("published", static_cast<int64_t>(indices.size()));
+                trace->published(status.ok() ? "ok" : "failed", status.ok() ? indices.size() : 0);
+            }
             if(status.ok())
             {
                 outcome.indices = std::move(indices);
@@ -273,18 +319,30 @@ namespace hipblaslt_jit
         }
         if(load)
         {
-            for(const auto& built : supported)
+            debug::Phase loadPhase("load");
+            for(size_t i = 0; i < supported.size(); ++i)
             {
+                const auto&                         built = supported[i];
                 std::shared_ptr<const KernelBundle> bundle;
                 status = guarded([&] {
                     return c.loader->load(built, request, target, workspaceLimit, bundle);
                 });
                 if(status.ok() && !bundle)
                     status = {Status::Code::Failed, Stage::Load, "Loader returned no bundle"};
+                if(trace)
+                    trace->outcome(ranks[i],
+                                   status.ok() ? "loaded" : "load_failed",
+                                   status.ok() ? std::string() : status.message);
                 if(status.ok())
                     outcome.unpublished.push_back(std::move(bundle));
                 else
                     record(Stage::Load, std::move(status));
+            }
+            loadPhase.stop();
+            if(trace && !supported.empty())
+            {
+                trace->record().count("loaded", static_cast<int64_t>(outcome.unpublished.size()));
+                trace->loaded(outcome.unpublished.size());
             }
         }
 
