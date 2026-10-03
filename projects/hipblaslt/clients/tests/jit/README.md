@@ -56,7 +56,8 @@ the process if it generates. The CTest tests are:
 - `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
   build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
   `jit-bundle-failures`, `jit-helper-failures` and `jit-api-splitk`,
-  `jit-api-streamk`, `jit-api-amax` and `jit-api-alpha-zero`, and
+  `jit-api-streamk`, `jit-api-streamk-hybrid`, `jit-api-amax` and
+  `jit-api-alpha-zero`, and
   `jit-heuristic-multi-<route>` for each multi-backend route in the table
   below. In a build without a generator backend it also has
   `jit-heuristic-<route>` for each other heuristic route in the table, run
@@ -77,7 +78,7 @@ the process if it generates. The CTest tests are:
 | `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
 | `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `jit-bundle-freshness` | Each committed bundle's manifest records the kernel-argument and persistent-loop layout versions in `GlobalParameters.py` and the builder's code-object version; its library loads in the host library and names its main kernel, and comgr builds it for its target. A copy with either layout version changed is reported stale |
-| `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name |
+| `jit-api-splitk`, `jit-api-streamk`, `jit-api-streamk-hybrid`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name, each run checked against the CPU reference. `streamk-hybrid` is a Hybrid Stream-K kernel whose grid, reduction, hybrid mode, mapping and stagger the runtime chooses at each launch |
 | `jit-api-alpha-zero` | Alpha=0 with nonzero descriptor K and null A/B still computes beta*C and output-amax through both public APIs |
 | `jit-helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
 | `jit-bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
