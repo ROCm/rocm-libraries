@@ -110,6 +110,8 @@ namespace hipblaslt_jit
         std::vector<uint8_t>   entry;
         std::string            kernelName; // the entry's main kernel
         std::vector<BuildUnit> units;
+        // HIP front-end flags for every Hip unit, after the builder's own.
+        std::vector<std::string> hipFlags;
     };
 
     constexpr int jitCodeObjectVersion = 4;
@@ -143,6 +145,12 @@ namespace hipblaslt_jit
         // means the request is outside the backend's domain.
         virtual Status generate(const GenerationRequest&, std::vector<GeneratedSolution>&) const
             = 0;
+        // NotSupported or TargetMismatch when the request is outside the
+        // backend's domain, without generating; heuristic queries then skip it.
+        virtual Status accepts(const OperationRequest&, const DeviceTarget&) const
+        {
+            return {};
+        }
     };
 
     struct CodeObject

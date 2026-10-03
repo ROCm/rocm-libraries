@@ -94,6 +94,9 @@ namespace hipblaslt_jit
                 options.codeObjectVersion = request.codeObjectVersion;
                 options.retargetAssembly  = true;
                 options.compilerFlags     = {"-D__HIP_HCC_COMPAT_MODE__=1"};
+                options.compilerFlags.insert(options.compilerFlags.end(),
+                                             solution.hipFlags.begin(),
+                                             solution.hipFlags.end());
                 options.linkerFlags       = {"-Xlinker", "--build-id=sha1"};
                 options.rocmPath          = co::rocmPath();
 

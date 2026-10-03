@@ -34,6 +34,18 @@ HEURISTIC_ROUTES = (
     "debug-file",
     "debug-killed-child",
 )
+# test_heuristic.py routes on mock backends that replay the committed gfx950 bundles.
+MULTI_ROUTES = (
+    "both",
+    "order",
+    "optin",
+    "unavailable",
+    "count",
+    "domain",
+    "exclude",
+    "fellshort",
+    "capture",
+)
 
 
 def main():
@@ -76,6 +88,12 @@ def main():
             *(f"heuristic-{route}" for route in HEURISTIC_ROUTES),
             "heuristic-knowledge",
             "heuristic-knowledge-install",
+            *(f"heuristic-multi-{route}" for route in MULTI_ROUTES),
+            "hipkittens-backend",
+            "hipkittens-gemm",
+            "hipkittens-bench",
+            "hipkittens-install",
+            "hipkittens-heuristic",
             "disabled-api",
         ),
         help="Run only the selected regression routes (default: all)",
@@ -506,6 +524,93 @@ def main():
             )
         )
 
+    skipped = {}
+    # HIPBLASLT_JIT_TESTING builds read the mock backends; the bundles hold gfx950 code.
+    for route in MULTI_ROUTES:
+        name = f"heuristic-multi-{route}"
+        if not (staging / "hipblaslt-jit-mock-backend-test").exists():
+            skipped[name] = "the build has no mock backends (HIPBLASLT_JIT_TESTING)"
+        elif args.architecture != "gfx950":
+            skipped[name] = "the committed bundles hold gfx950 code"
+        commands.append(
+            (
+                name,
+                [
+                    sys.executable,
+                    str(heuristic_script),
+                    str(heuristic_test),
+                    f"multi-{route}",
+                    str(output / name),
+                ],
+                {},
+                900,
+            )
+        )
+
+    # Built only with HIPBLASLT_JIT_ENABLE_HIPKITTENS; the kernels need gfx950.
+    hipkittens_test = staging / "hipblaslt-jit-hipkittens-test"
+    for name in (
+        "hipkittens-backend",
+        "hipkittens-gemm",
+        "hipkittens-bench",
+        "hipkittens-install",
+        "hipkittens-heuristic",
+    ):
+        if not hipkittens_test.exists():
+            skipped[name] = "the build has no HipKittens backend"
+        elif args.architecture != "gfx950":
+            skipped[name] = f"HipKittens has no {args.architecture} kernel"
+    commands += [
+        (
+            "hipkittens-backend",
+            [str(hipkittens_test), "host", str(output / "hipkittens-backend")],
+            {},
+            300,
+        ),
+        (
+            "hipkittens-gemm",
+            [str(hipkittens_test), "gpu"],
+            {"HIPBLASLT_JIT_LIBRARY_PATH": str(output / "hipkittens-library")},
+            900,
+        ),
+        (
+            "hipkittens-bench",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_bench.py"),
+                str(hipkittens_test),
+                str(build / "clients/hipblaslt-bench"),
+                str(output / "hipkittens-bench"),
+            ],
+            {},
+            900,
+        ),
+        (
+            "hipkittens-install",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_install.py"),
+                str(build),
+                str(hipkittens_test),
+                str(output / "hipkittens-install"),
+            ],
+            {},
+            900,
+        ),
+        (
+            "hipkittens-heuristic",
+            [
+                sys.executable,
+                str(source / "projects/hipblaslt/clients/tests/jit/test_hipkittens_heuristic.py"),
+                str(hipkittens_test),
+                str(build / "clients/hipblaslt-bench"),
+                str(output / "hipkittens-heuristic"),
+            ],
+            {},
+            900,
+        ),
+    ]
+
     bench_script = source / "projects/hipblaslt/clients/bench/test_jit_gemm.py"
     commands.append(
         (
@@ -538,6 +643,9 @@ def main():
                 name == "splitk-api" and any(case in args.case for case in replays)
             )
         ):
+            continue
+        if name in skipped:
+            print(f"SKIP {name}: {skipped[name]}", flush=True)
             continue
         print(f"RUN {name} on native {args.architecture}", flush=True)
         (output / f"{name}-command.json").write_text(json.dumps(command, indent=2))

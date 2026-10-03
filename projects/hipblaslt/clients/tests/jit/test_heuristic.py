@@ -1574,6 +1574,236 @@ def jit_off(run, output):
     print("PASS jit-off: HIPBLASLT_JIT ignored with one warning")
 
 
+# The multi- routes replace the build's backends with mocks that replay the
+# committed gfx950 bundles, which HIPBLASLT_JIT_TESTING builds read from
+# HIPBLASLT_JIT_TEST_BACKENDS.
+DATA = Path(__file__).resolve().parent / "data" / "gfx950"
+A = ("rank-1", "rank-2")
+B = ("splitk",)
+
+
+def mock(name, bundles, *flags):
+    """One HIPBLASLT_JIT_TEST_BACKENDS item: id[+flag...]=bundle[,bundle...]."""
+    return "+".join((name, *flags)) + "=" + ",".join(str(DATA / b) for b in bundles)
+
+
+def mocks(*items, select=None):
+    env = dict(HIPBLASLT_JIT="2", HIPBLASLT_JIT_TEST_BACKENDS=";".join(items))
+    if select is not None:
+        env["HIPBLASLT_JIT_BACKENDS"] = select
+    return env
+
+
+def kernels(*bundles):
+    return [
+        json.loads((DATA / bundle / "manifest.json").read_text())["main_kernel"]["name"]
+        for bundle in bundles
+    ]
+
+
+def returned(records, expected, apis=("c", "cpp")):
+    for api in apis:
+        for record in queries(records, api):
+            require(
+                record["status"] == 0 and record["kernels"] == expected,
+                f"{api} returned {record['kernels']}, not {expected}",
+            )
+
+
+def multi_both(run, output):
+    both = mocks(mock("mock-a", A), mock("mock-b", B), select="mock-a,mock-b")
+    stderr, records = run("both", ["--api", "both", "--requested", "4"], **both)
+    check_jit_results(stderr, records, ("c", "cpp"), 4)
+    returned(records, kernels(*A, *B))
+    (line,) = reports(stderr)
+    require(
+        "returned 3 of 4 requested solutions" in line and "mock-a 2" in line and "mock-b 1" in line,
+        f"The shortfall was not broken down by backend: {line}",
+    )
+    keys = {path.parent for path in entries(output / "lib")}
+    require(len(keys) == 2, f"Expected two key directories, got {keys}")
+    trapped = mocks(
+        mock("mock-a", A, "trap"), mock("mock-b", B, "trap"), select="mock-a,mock-b"
+    )
+    stderr, again = run("reuse", ["--api", "both", "--requested", "3"], **trapped)
+    published = queries(records, "c")[0]["indices"]
+    for api in ("c", "cpp"):
+        require(queries(again, api)[0]["indices"] == published, f"{api} did not reuse {published}")
+    require(not reports(stderr), "The second process reported a JIT problem")
+    print(
+        "PASS heuristic-multi-both: each backend's group in order, in its own key"
+        " directory, and a second process reuses both without generating"
+    )
+
+
+def multi_order(run, output):
+    both = (mock("mock-a", A), mock("mock-b", B))
+    args = ["--api", "both", "--requested", "3", "--no-run"]
+    stderr, records = run("b-a", args, **mocks(*both, select="mock-b,mock-a"))
+    returned(records, kernels(*B, *A))
+    require(not reports(stderr), "Reordering reported a JIT problem")
+    args = ["--api", "both", "--requested", "2", "--handles", "2", "--no-run"]
+    stderr, records = run("a", args, **mocks(*both, select="mock-a"))
+    returned(records, kernels(*A))
+    stderr, records = run("unknown", args, **mocks(*both, select="mock-a,mock-z"))
+    returned(records, kernels(*A))
+    require(
+        reports(stderr)
+        == [
+            "hipblaslt warning: JIT backend mock-z in HIPBLASLT_JIT_BACKENDS is not in this"
+            " build; ignored"
+        ],
+        f"Expected one warning naming mock-z: {reports(stderr)}",
+    )
+    print(
+        "PASS heuristic-multi-order: HIPBLASLT_JIT_BACKENDS orders and selects the"
+        " backends; an unknown one is reported once"
+    )
+
+
+def multi_optin(run, output):
+    two, three = (["--api", "both", "--no-run", "--requested", str(n)] for n in (2, 3))
+    a, b = mock("mock-a", A), mock("mock-b", B, "optin")
+    stderr, records = run("unset", two, **mocks(a, b))
+    returned(records, kernels(*A))
+    stderr, records = run("named", three, **mocks(a, b, select="mock-a,mock-b"))
+    returned(records, kernels(*A, *B))
+    unavailable = mock("mock-b", B, "optin", "unavailable")
+    stderr, records = run("never-configured", two, **mocks(a, unavailable))
+    returned(records, kernels(*A))
+    require(not reports(stderr), f"An unselected backend was configured: {reports(stderr)}")
+    print(
+        "PASS heuristic-multi-optin: an opt-in backend serves only when"
+        " HIPBLASLT_JIT_BACKENDS names it"
+    )
+
+
+def multi_unavailable(run, output):
+    env = mocks(mock("mock-a", A), mock("mock-b", B, "unavailable"), select="mock-a,mock-b")
+    args = ["--api", "both", "--requested", "2", "--handles", "2", "--queries", "2"]
+    stderr, records = run("unavailable", args, **env)
+    returned(records, kernels(*A))
+    lines = reports(stderr)
+    require(
+        len(lines) == 1
+        and lines[0].startswith("hipblaslt warning: JIT configure failed")
+        and "JIT backend mock-b not available" in lines[0],
+        f"Expected one 'not available' warning naming mock-b: {lines}",
+    )
+    print(
+        "PASS heuristic-multi-unavailable: a backend that fails configuration is"
+        " reported once and the others serve"
+    )
+
+
+def multi_count(run, output):
+    both = mocks(mock("mock-a", A), mock("mock-b", B), select="mock-a,mock-b")
+    args = ["--api", "both", "--no-run", "--requested"]
+    stderr, records = run("one", args + ["1"], **both)
+    returned(records, kernels(A[0]))
+    stderr, records = run("two", args + ["2"], **both)
+    returned(records, kernels(A[0], *B))
+    require(not reports(stderr), f"A JIT problem was reported: {reports(stderr)}")
+    failing = mocks(mock("mock-a", A, "generate"), mock("mock-b", B), select="mock-a,mock-b")
+    library = output / "lib-failing"
+    stderr, records = run(
+        "failing", args + ["2"], HIPBLASLT_JIT_LIBRARY_PATH=str(library), **failing
+    )
+    returned(records, kernels(*B))
+    lines = reports(stderr)
+    require(
+        len(lines) == 1
+        and lines[0].startswith("hipblaslt warning: JIT generate failed")
+        and ": mock-a: Mock generation fault" in lines[0],
+        f"Expected one generate warning naming mock-a: {lines}",
+    )
+    print(
+        "PASS heuristic-multi-count: one slot is kept for each later backend, and"
+        " what a failing backend leaves passes on"
+    )
+
+
+def multi_domain(run, output):
+    env = mocks(mock("mock-a", A), mock("mock-b", B, "unsupported"), select="mock-a,mock-b")
+    stderr, records = run("one-rejects", ["--api", "both", "--requested", "2"], **env)
+    check_jit_results(stderr, records, ("c", "cpp"), 2)
+    returned(records, kernels(*A))
+    require(not reports(stderr), f"A rejection was reported: {reports(stderr)}")
+    env = mocks(
+        mock("mock-a", A, "unsupported"), mock("mock-b", B, "unsupported"), select="mock-a,mock-b"
+    )
+    args = ["--api", "both", "--handles", "2", "--queries", "2", "--no-run"]
+    stderr, records = run("both-reject", args, **env)
+    returned(records, [])
+    lines = reports(stderr)
+    require(
+        len(lines) == 1
+        and lines[0].startswith("hipblaslt error: JIT generate failed")
+        and lines[0].endswith(": no enabled JIT backend supports this problem"),
+        f"Expected one 'no enabled JIT backend' error: {lines}",
+    )
+    print(
+        "PASS heuristic-multi-domain: a backend that rejects the problem leaves its"
+        " slot silently; when all reject, one error says so"
+    )
+
+
+def multi_exclude(run, output):
+    env = mocks(mock("mock-a", B), mock("mock-b", B), select="mock-a,mock-b")
+    stderr, records = run("same-bundle", ["--api", "both", "--requested", "2"], **env)
+    check_jit_results(stderr, records, ("c", "cpp"), 2)
+    returned(records, kernels(*B))
+    print("PASS heuristic-multi-exclude: a kernel two backends replay is returned once")
+
+
+def multi_fellshort(run, output):
+    env = mocks(mock("mock-a", A[:1]), mock("mock-b", (A[1], *B)), select="mock-a,mock-b")
+    args = ["--api", "c", "--requested", "3", "--queries", "2", "--no-run"]
+    stderr, records = run("fellshort", args, HIPBLASLT_JIT_DEBUG="progress", **env)
+    returned(records, kernels(*A, *B), apis=("c",))
+    lines = debug_lines(stderr)
+    require(
+        len(events(lines, "generation.start")) == 2
+        and len(events(lines, "generation.repeated")) == 1,
+        "Expected one generation per backend, then one repeat that did not generate",
+    )
+    require(not reports(stderr), f"A JIT problem was reported: {reports(stderr)}")
+    print(
+        "PASS heuristic-multi-fellshort: a backend that fell short is not retried,"
+        " and does not stop the next one"
+    )
+
+
+def multi_capture(run, output):
+    stderr, records = run(
+        "seed",
+        ["--api", "c", "--requested", "1", "--no-run"],
+        **mocks(mock("mock-a", A), mock("mock-b", B), select="mock-b"),
+    )
+    returned(records, kernels(*B), apis=("c",))
+    env = mocks(mock("mock-a", A, "trap"), mock("mock-b", B, "trap"), select="mock-a,mock-b")
+    stderr, records = run(
+        "captured", ["--api", "none", "--null-algo", "--capture", "global"], **env
+    )
+    (record,) = queries(records, "null-algo")
+    require(
+        record["capture"] == "active"
+        and record["ended"] == 0
+        and record["status"] == 0
+        and record["nodes"] > 0,
+        f"The second backend's solution was not captured: {record}",
+    )
+    require(
+        all(f"replay {replay} PASS" in stderr for replay in (0, 1)),
+        "The graph replays were not checked",
+    )
+    require(not reports(stderr), f"A JIT problem was reported: {reports(stderr)}")
+    print(
+        "PASS heuristic-multi-capture: during stream capture no backend generates,"
+        " and a later backend's published solution runs"
+    )
+
+
 ROUTES = {
     "fallback-c": functools.partial(fallback, api="c"),
     "fallback-cpp": functools.partial(fallback, api="cpp"),
@@ -1597,6 +1827,15 @@ ROUTES = {
     "knowledge": knowledge,
     "knowledge-install": knowledge_install,
     "jit-off": jit_off,
+    "multi-both": multi_both,
+    "multi-order": multi_order,
+    "multi-optin": multi_optin,
+    "multi-unavailable": multi_unavailable,
+    "multi-count": multi_count,
+    "multi-domain": multi_domain,
+    "multi-exclude": multi_exclude,
+    "multi-fellshort": multi_fellshort,
+    "multi-capture": multi_capture,
 }
 
 

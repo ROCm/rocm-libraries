@@ -2,8 +2,9 @@
 
 This page holds the approved plan of record for just-in-time (JIT) GEMM
 generation in hipBLASLt and the roadmap that implements it. The
-[JIT guide](JIT.md) describes what the code does today, and the
-[TensileLite backend guide](JIT_TENSILELITE.md) describes the live backend.
+[JIT guide](JIT.md) describes what the code does today, the
+[TensileLite backend guide](JIT_TENSILELITE.md) describes the live backend, and
+the [HipKittens backend guide](JIT_HIPKITTENS.md) the opt-in one.
 
 - [Target design](#target-design) is the approved plan of record. The seven
   roadmap steps implement it; the work listed after the roadmap remains future.
@@ -30,7 +31,7 @@ flowchart RL
 
     subgraph generation["Backends and prediction"]
         TensileLite["TensileLite"]
-        HipKittens["HipKittens (future)"]
+        HipKittens["HipKittens (opt-in)"]
         OtherBackends["OtherBackends (future)"]
         Predictor["Predictor"]
         TuningKnowledge["TuningKnowledge"]
@@ -42,14 +43,14 @@ flowchart RL
     OrigamiLibrary -- "3. what is still missing" --> SolutionLibrary
     SolutionLibrary --> AlgoGetHeuristic
     TensileLite --> Jit
-    HipKittens -.-> Jit
+    HipKittens --> Jit
     OtherBackends -.-> Jit
     Predictor --> Jit
     TuningKnowledge --> Predictor
     Origami --> Predictor
 
     classDef future stroke-dasharray: 5 5
-    class HipKittens,OtherBackends future
+    class OtherBackends future
 ```
 
 Dashed nodes and edges are future backends. Each backend is an independent
@@ -67,7 +68,7 @@ TensileLite.
 | Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. In fallback mode it supplies SolutionLibrary after the Equality results and before the other pre-tuned libraries. |
 | JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the remaining operation description) plus the gfx target. Output: solutions. Each backend implements it. |
 | TensileLite backend | The live backend. It emits assembly, HIP helper source and metadata. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| HipKittens, other backends | Future extension points behind the same interface. A HipKittens backend is planned: it instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It is not implemented. |
+| HipKittens, other backends | Extension points behind the same interface. The HipKittens backend instantiates kernels at run time through comgr, is opt-in and is available in developer builds only. It serves one gfx950 kernel through the internal entry points, and heuristic queries when `HIPBLASLT_JIT_BACKENDS` names it (see the [HipKittens backend guide](JIT_HIPKITTENS.md)). |
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
@@ -80,8 +81,8 @@ TensileLite.
 Jit is the component name; the design does not introduce a `JitInterface`
 type name. Jit passes the algorithm parameters and gfx target to the selected
 backend and receives solutions back. Backend implementations are backend
-specific and independent of one another: TensileLite is live, HipKittens is a
-future extension point, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
+specific and independent of one another: TensileLite is live, HipKittens serves
+the internal entry points, and other generators can implement the same interface. A new in-process mock backend in the tests demonstrates that Jit
 does not depend on TensileLite.
 
 Backends generate code at run time. Prebuilt or handwritten assembly kernels are
@@ -237,6 +238,6 @@ The following work sits outside the seven steps and remains future:
 | --- | --- |
 | Activation specialization | Generated kernels already compile the requested bias (presence, type and source), aux output, scale vectors, amax and gate residual exactly. Only the activation stays generic: each kernel carries every activation kind and selects the requested one at run time. Compiling only the requested kind remains future work; it measured a gain of 0.7% or less on gfx950. This is separate from modeling epilogue cost. |
 | Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
-| HipKittens and other backends | Implement the backend interface. A HipKittens backend is planned: run-time instantiation through comgr, opt-in, in developer builds only. It is not implemented. |
+| HipKittens and other backends | Implement the backend interface. The [HipKittens backend](JIT_HIPKITTENS.md) serves one gfx950 BF16 GEMM kernel through the internal entry points, and heuristic queries after or before TensileLite when `HIPBLASLT_JIT_BACKENDS` names it. More kernels and more targets remain future. |
 | KFA metadata convergence | Complete the KFA metadata that JIT generators emit, then prove argument, launch, helper, workspace and synchronization equivalence before generated kernels share the custom-kernel dispatch path. This reuses the KFA path; it does not make the JIT load prebuilt kernels. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | More operations | Add concrete profiles and adapters after demonstrating their execution contracts. Non-GEMM KFA support, a stable external plugin ABI and dynamic backend discovery remain undefined. |

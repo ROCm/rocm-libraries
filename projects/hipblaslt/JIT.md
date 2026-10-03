@@ -22,7 +22,7 @@ build with `HIPBLASLT_ENABLE_JIT=ON`, the environment variable `HIPBLASLT_JIT`
 lets `hipblasLtMatmulAlgoGetHeuristic`, `GemmInstance::algoGetHeuristic` and
 `hipblasLtMatmul` without an algorithm return solutions from a persistent JIT
 solution library on disk. Solutions that the library lacks are generated
-by the build's JIT backend, built with comgr, published into the library, and
+by the build's JIT backends, built with comgr, published into the library, and
 returned by solution index, so any later process runs them without generating
 again. In fallback mode JIT is
 consulted after the pre-tuned Equality results and before the other pre-tuned
@@ -87,7 +87,7 @@ adaptation token, not a general owning executable object.
 | Loader | `hipblaslt-jit-loader.cpp`. It reads source bundles by directory convention for the backends. The Tensile loader parses the entry, checks support and workspace with TensileLite's predicates, and loads the code object into a `TensileBundle`. |
 | JIT solution library | `hipblaslt-jit-library.cpp`, with `hipblaslt-jit-msgpack.cpp` writing the library files and `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic replacement. It publishes built solutions as a standard lazy TensileLite library on disk, looks them up by exact problem, and resolves their reserved solution indices for `tensile_host.cpp`. See [persistent solution library](#persistent-solution-library). |
 | Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect Jit to existing execution. `hipblaslt-jit-api-test` covers this flow on replayed solutions. |
-| Heuristic integration | `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`. `hipblaslt-jit-process-backend.cpp` configures one Jit per process from the backend, predictor and tuning knowledge that `makeDefaultProcessBackend` returns, with the JIT solution library as its store, and `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates what it lacks. `hipblaslt-jit-report.cpp` prints failures. `rocblaslt_auxiliary.cpp` calls them from both heuristic queries, and `tensile_host.cpp` from `hipblasLtMatmul` without an algorithm. See [heuristic integration](#heuristic-integration). |
+| Heuristic integration | `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`. `hipblaslt-jit-process-backend.cpp` configures one Jit per process for each backend that `HIPBLASLT_JIT_BACKENDS` selects, from the backend, predictor and tuning knowledge that `makeDefaultProcessBackend` or an opt-in provider returns, with the JIT solution library as its store, and `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates what it lacks, backend by backend. `hipblaslt-jit-report.cpp` prints failures. `rocblaslt_auxiliary.cpp` calls them from both heuristic queries, and `tensile_host.cpp` from `hipblasLtMatmul` without an algorithm. See [heuristic integration](#heuristic-integration). |
 | Benchmark | `hipblaslt-bench` has no JIT option. With `HIPBLASLT_JIT=2`, its ordinary heuristic query returns generated solutions, so selection and compilation finish before correctness checks and execution timing. |
 | Mock backend | `hipblaslt-jit-mock-backend.cpp` replays a list of source bundles, without a generator or a subprocess. A generation returns, in list order, up to the requested count of bundles whose predicates accept the device and problem, skipping excluded kernels; the comgr builder still builds them. Its faults fail generation and leave a log in the scratch directory, replace the main kernel assembly with an invalid instruction so the build fails, append the request to a file and fail, or abort the process. Given a modeled contract it consumes the predictions of the predictor for that contract. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`, and builds with `HIPBLASLT_JIT_TESTING=ON` and no generator backend use it for heuristic queries; it is not a production backend. |
 
@@ -98,7 +98,11 @@ built without a JIT generator backend, or, with `HIPBLASLT_JIT_TESTING=ON`,
 from `hipblaslt-jit-test-backend.cpp`, which replays bundles through the mock
 backend; the [JIT test guide](clients/tests/jit/README.md) describes its
 settings. A build that configures a generator backend links that backend's
-definition instead.
+definition instead. A build also links one definition of
+`optInProcessBackends`, the backends that serve heuristic queries only when
+`HIPBLASLT_JIT_BACKENDS` names them: `hipblaslt-jit-no-opt-in-backend.cpp`
+lists none, and a build that configures an opt-in backend links its list
+instead.
 
 ### Origami modeled inputs
 
@@ -487,6 +491,29 @@ In forced mode, the JIT lookup and generation are the whole query. Each JIT
 result passes the same support and workspace checks as a `getAllSolutions`
 result. Its solution index is in the reserved JIT range.
 
+**Backends.** `HIPBLASLT_JIT_BACKENDS` lists the backends that serve the JIT
+step, by identifier and separated by commas, in the order they serve it.
+Unset or empty, the build's default backend serves alone, and opt-in backends
+are not configured. hipBLASLt reads it when the first query reaches the JIT
+step. An identifier the build lacks prints
+`hipblaslt warning: JIT backend <id> in HIPBLASLT_JIT_BACKENDS is not in this build; ignored`
+once; when the list names no backend of the build, every query reports a
+configure failure. Each backend has its own cache key, so its solutions sit in
+their own key directory of the JIT solution library. In the JIT step a
+backend that does not serve the problem or the device is skipped without a
+report. The others serve in turn, each looking up and generating what is still
+missing, less one result kept for each later one, and excluding the kernels of
+the earlier ones; a backend that fails or falls short leaves its share to the
+next. A query therefore returns a result of every such backend only when it
+requests at least as many results as there are backends, and `hipblasLtMatmul`
+without an algorithm runs a solution of the first one that returns one. A
+backend whose
+configuration fails is reported like any other failure, once per problem, and
+the others still serve. When no backend serves the problem, the query reports
+`JIT generate failed for <problem>: no enabled JIT backend supports this problem`.
+With several backends, each failure message names its backend, and a
+shortfall warning lists each backend's count and summary.
+
 **Return count.** `hipblasLtMatmulAlgoGetHeuristic` sets `*returnAlgoCount` to 0
 before it validates the request, so a rejected request also reports no results:
 a `requestedAlgoCount` below 1 returns `HIPBLAS_STATUS_INVALID_VALUE` with a
@@ -523,8 +550,9 @@ hipblaslt error: JIT build failed for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAUL
 A shortfall warning, such as `hipblaslt warning: JIT returned 1 of 2 requested
 solutions for GEMM ...`, ends with the backend's summary of its generation.
 
-Once generation falls short for a problem, later queries for it in the same
-process look it up in the library but do not generate again. Queries for the
+Once a backend's generation falls short for a problem, later queries for it in
+the same process look it up in that backend's entries but do not generate with
+it again. Queries for the
 same problem and workspace limit in one process generate one at a time, so the
 second one finds what the first published. Separate processes can generate the
 same solutions at once; they publish under the library lock, which keeps one
@@ -694,7 +722,12 @@ names a JIT solution, `hipblasLtMatmul` without an algorithm and heuristic
 queries that generate during stream capture in each capture mode, the same
 query from several threads and processes at once, a problem the predictor
 cannot rank, failure reports, and the `HIPBLASLT_JIT_DEBUG` lines: timing that
-adds up, progress in order, no change when it is off, and debug files. The
+adds up, progress in order, no change when it is off, and debug files. In
+any build with `HIPBLASLT_JIT_TESTING=ON`, the multi-backend routes replace
+the backends with mock backends and cover their order and selection, opt-in
+backends, a backend whose configuration fails, the result kept for each later
+backend, a backend that does not serve the problem, kernels two backends share,
+a backend that fell short, and stream capture. The
 [`AlgoErrors` tests](clients/tests/jit/README.md#algorithm-error-status-tests)
 in `hipblaslt-test` check the statuses for an index that names no solution and
 for a rejected heuristic query.

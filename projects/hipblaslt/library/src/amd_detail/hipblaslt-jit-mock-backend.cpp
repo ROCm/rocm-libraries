@@ -51,7 +51,7 @@ namespace hipblaslt_ext::experimental::jit::mock
             explicit MockBackend(const Options& options)
                 : m_fault(options.fault)
                 , m_record(options.record)
-                , m_info{"mock", "mock", options.contracts, ""}
+                , m_info{options.id, options.id, options.contracts, ""}
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The mock backend has no bundle to replay");
@@ -88,6 +88,16 @@ namespace hipblaslt_ext::experimental::jit::mock
             const hipblaslt_jit::BackendInfo& info() const noexcept override
             {
                 return m_info;
+            }
+
+            Status accepts(const hipblaslt_jit::OperationRequest&,
+                           const hipblaslt_jit::DeviceTarget&) const override
+            {
+                if(m_fault == Options::Fault::Unsupported)
+                    return {Status::Code::NotSupported,
+                            Stage::Generate,
+                            "The mock rejects every request"};
+                return {};
             }
 
             Status generate(const hipblaslt_jit::GenerationRequest&        request,

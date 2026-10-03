@@ -239,6 +239,75 @@ namespace hipblaslt_jit::msgpack_io
         });
     }
 
+    Status appendEntryPredicates(const std::vector<uint8_t>&          entry,
+                                 const std::vector<IndexedPredicate>& predicates,
+                                 std::vector<uint8_t>&                appended)
+    {
+        appended.clear();
+        return guarded("Invalid solution library entry", [&] {
+            const auto  handle = parse(entry, "The entry");
+            const auto& root   = handle.get();
+            const auto  parts  = entryParts(root);
+            for(const auto* predicate : {&member(*parts.solution, "problemPredicate", "Its solution"),
+                                         &member(*parts.row, "predicate", "Its row")})
+            {
+                if(text(member(*predicate, "type", "A predicate"), "A predicate type") != "And")
+                    malformed("An entry predicate is not an And");
+                array(member(*predicate, "value", "An And predicate"), "Its terms");
+            }
+            msgpack::sbuffer buffer;
+            Packer           packer(buffer);
+            const auto       withPredicates = [&](const msgpack::object& predicate) {
+                copyMap(packer, predicate, [&](const msgpack::object_kv& field) {
+                    if(!named(field.key, "value"))
+                    {
+                        packer.pack(field.val);
+                        return;
+                    }
+                    const auto& terms = field.val.via.array;
+                    packer.pack_array(static_cast<uint32_t>(terms.size + predicates.size()));
+                    for(uint32_t i = 0; i < terms.size; ++i)
+                        packer.pack(terms.ptr[i]);
+                    for(const auto& added : predicates)
+                    {
+                        packer.pack_map(3);
+                        string(packer, "type");
+                        string(packer, added.type);
+                        string(packer, "index");
+                        packer.pack(added.index);
+                        string(packer, "value");
+                        packer.pack(added.value);
+                    }
+                });
+            };
+            // Copies a map, passing the value of field name to inner.
+            const auto copyWith = [&](const msgpack::object& object, const char* name, auto&& inner) {
+                copyMap(packer, object, [&](const msgpack::object_kv& field) {
+                    if(named(field.key, name))
+                        inner(field.val);
+                    else
+                        packer.pack(field.val);
+                });
+            };
+            const auto withRows = [&](const msgpack::object& rows) {
+                packer.pack_array(1);
+                copyWith(rows.via.array.ptr[0], "predicate", withPredicates);
+            };
+            copyMap(packer, root, [&](const msgpack::object_kv& field) {
+                if(named(field.key, "solutions"))
+                {
+                    packer.pack_array(1);
+                    copyWith(field.val.via.array.ptr[0], "problemPredicate", withPredicates);
+                }
+                else if(named(field.key, "library"))
+                    copyWith(field.val, "rows", withRows);
+                else
+                    packer.pack(field.val);
+            });
+            appended = contents(buffer);
+        });
+    }
+
     Status appendMasterRows(const std::vector<uint8_t>&   master,
                             const std::vector<MasterRow>& rows,
                             std::vector<uint8_t>&         appended)
@@ -390,6 +459,12 @@ namespace hipblaslt_jit::msgpack_io
         return unavailable();
     }
     Status readEntry(const std::vector<uint8_t>&, EntryFields&)
+    {
+        return unavailable();
+    }
+    Status appendEntryPredicates(const std::vector<uint8_t>&,
+                                 const std::vector<IndexedPredicate>&,
+                                 std::vector<uint8_t>&)
     {
         return unavailable();
     }
