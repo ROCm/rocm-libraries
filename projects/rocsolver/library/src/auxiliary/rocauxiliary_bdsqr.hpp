@@ -120,16 +120,27 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             f = (std::abs(D[dk]) - sh) * (S(sgn) + sh / D[dk]);
         g = E[ek];
 
+        // (the entries that the chase updates and reads in the next step are kept in registers:
+        // dcur = D[dk] and ecur = E[ek]; the next ones are read one step ahead)
+        S dcur = D[dk], ecur = E[ek];
+        S dnext = D[dk + dir];
+        S enext = (n > 2 ? E[ek + dir] : S(0));
         for(rocblas_int kk = 0; kk < n - 1; kk++)
         {
+            S dnn = 0, enn = 0;
+            if(kk + 2 <= n - 1)
+                dnn = D[dk + 2 * dir];
+            if(kk + 2 < n - 1)
+                enn = E[ek + 2 * dir];
+
             // first apply rotation by columns (t2b) or rows (b2t)
             lartg(f, g, c, s, r);
             if(kk > 0)
                 E[ek - dir] = r;
-            f = c * D[dk] - s * E[ek];
-            E[ek] = c * E[ek] + s * D[dk];
-            g = -s * D[dk + dir];
-            D[dk + dir] = c * D[dk + dir];
+            f = c * dcur - s * ecur;
+            ecur = c * ecur + s * dcur;
+            g = -s * dnext;
+            dnext = c * dnext;
 
             // save rotations to update singular vectors
             if(t2b && nv)
@@ -146,12 +157,12 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             // then apply rotation by rows (t2b) or columns (b2t)
             lartg(f, g, c, s, r);
             D[dk] = r;
-            f = c * E[ek] - s * D[dk + dir];
-            D[dk + dir] = c * D[dk + dir] + s * E[ek];
+            f = c * ecur - s * dnext;
+            dnext = c * dnext + s * ecur;
             if(kk < n - 2)
             {
-                g = -s * E[ek + dir];
-                E[ek + dir] = c * E[ek + dir];
+                g = -s * enext;
+                enext = c * enext;
             }
 
             // save rotations to update singular vectors
@@ -166,9 +177,14 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
                 rots[ek + nr + n] = s;
             }
 
+            dcur = dnext;
+            ecur = enext;
+            dnext = dnn;
+            enext = enn;
             dk += dir;
             ek += dir;
         }
+        D[dk] = dcur;
 
         ek = (t2b ? n - 2 : 0);
         E[ek] = f;
