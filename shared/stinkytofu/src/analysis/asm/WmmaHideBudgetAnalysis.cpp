@@ -27,6 +27,7 @@
 #include <iostream>
 
 #include "../../transforms/asm/dag/RegionDAG.hpp"
+#include "stinkytofu/analysis/asm/CoexecWindow.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -317,10 +318,13 @@ MatrixCoexecOccupancy measureMatrixCoexecOccupancy(
     int placed = 0;
     int valu = 0;
 
-    auto closeWindow = [&]() {
+    auto closeWindow = [&](const StinkyInstruction& closer) {
         if (openWindow == nullptr) return;
         ++out.windows;
-        if (placed == 0) ++out.emptyWindows;
+        if (placed == 0) {
+            ++out.emptyWindows;
+            if (wmmaToWmmaCoexecOverlap(*openWindow, closer)) ++out.dependentEmptyWindows;
+        }
         const int issuable = issuableWindowCycles(*openWindow);
         out.issuableCycles += issuable;
         out.placedCycles += std::min(placed, issuable);
@@ -332,7 +336,7 @@ MatrixCoexecOccupancy measureMatrixCoexecOccupancy(
     for (StinkyInstruction* inst : instructions) {
         if (inst == nullptr) continue;
         if (isMatrixInstruction(*inst)) {
-            closeWindow();
+            closeWindow(*inst);
             ++out.matrixOps;
             openWindow = inst;
             placed = 0;
@@ -348,10 +352,10 @@ MatrixCoexecOccupancy measureMatrixCoexecOccupancy(
 }
 
 void dumpMatrixCoexecOccupancy(const MatrixCoexecOccupancy& occupancy, const char* label,
-                                std::ostream& os) {
-    const int backToBack = occupancy.emptyWindows;
+                               std::ostream& os) {
     os << "[MatrixCoexec " << label << "] matrixOps=" << occupancy.matrixOps
-       << " windows=" << occupancy.windows << " emptyWindows=" << backToBack
+       << " windows=" << occupancy.windows << " emptyWindows=" << occupancy.emptyWindows
+       << " (dependent=" << occupancy.dependentEmptyWindows << ")"
        << " issueCycles=" << occupancy.placedCycles << "/" << occupancy.issuableCycles
        << " valuSlots=" << occupancy.valuFills << "/" << occupancy.valuSlots << "\n";
 }

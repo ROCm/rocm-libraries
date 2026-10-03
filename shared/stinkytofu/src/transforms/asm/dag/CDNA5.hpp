@@ -42,7 +42,6 @@
 #include <utility>
 #include <vector>
 
-#include "ArchReadyQueue.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
@@ -155,6 +154,16 @@ inline int deriveWarGateWmmas(int wmmaLatency, int wmmaIssueCycles) {
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
 
+// Register-file-aware key for the data-ready (RAW) and elapse-touch maps. These
+// maps were keyed on reg.idx alone, which conflates register files: e.g. a WMMA
+// writing its accumulator v[12:20) would stamp indices 12..19 and falsely gate
+// a later SALU that reads s14/s15 (same indices, different file). Fold the
+// register type into the key so vector, scalar, and accumulator registers of
+// the same index never collide.
+static inline int regDepKey(RegType type, uint32_t idx) {
+    return (static_cast<int>(type) << 20) | static_cast<int>(idx & 0xFFFFF);
+}
+
 // Scheduling rule (2): simulate producer completion over [blockBegin,
 // regionStart) — outstanding data-ready latencies decrease by each
 // instruction's issueCycles; each producer overwrites its dest VGPRs with that
@@ -259,34 +268,6 @@ static bool srcVGPRsOverlap(const StinkyInstruction& inst,
 
 static inline int popcount16(uint16_t v) {
     return __builtin_popcount(static_cast<unsigned>(v));
-}
-
-// Prev WMMA's D feeds next WMMA's A/B (or SWMMAC index).
-static bool wmmaToWmmaCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
-    if (prod.getDestRegs().empty()) return false;
-    const StinkyRegister& d = prod.getDestRegs()[0];
-    const auto& srcs = cons.getSrcRegs();
-    if (srcs.size() > 0 && d.isOverlap(srcs[0])) return true;                   // A
-    if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
-    if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
-    return false;
-}
-
-// WMMA D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst), WAR
-// (prod A/B or SWMMAC index -> cons dst).
-static bool wmmaToValuCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
-    if (prod.getDestRegs().empty()) return false;
-    const StinkyRegister& d = prod.getDestRegs()[0];
-    for (const StinkyRegister& s : cons.getSrcRegs())
-        if (d.isOverlap(s)) return true;  // RAW
-    for (const StinkyRegister& cd : cons.getDestRegs())
-        if (d.isOverlap(cd)) return true;  // WAW
-    const auto& psrc = prod.getSrcRegs();
-    const size_t nWar = isSWMMA(prod) ? 3 : 2;
-    for (size_t i = 0; i < psrc.size() && i < nWar; ++i)
-        for (const StinkyRegister& cd : cons.getDestRegs())
-            if (psrc[i].isOverlap(cd)) return true;  // WAR
-    return false;
 }
 
 struct BarrierTokenEntry {
@@ -607,8 +588,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // construction (runtime, since the rule count is per-arch), indexed by the
     // same ruleIdx the scheduler pre-scan assigns.
     std::vector<std::map<int, int>> hazardGates_;
-    // What the caller asked of this queue; see ArchReadyQueueOptions.
-    ArchReadyQueueOptions options_;
 
     // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers,
     // tracked so decidePromote() doesn't need to scan every queue each pick to
@@ -766,12 +745,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void restoreCrossBBStateFromLoop();
 
    public:
-    explicit CDNA5ReadyQueue(const PassContext& passCtx, ArchReadyQueueOptions options = {})
+    explicit CDNA5ReadyQueue(const PassContext& passCtx)
         : ReadyQueue(passCtx),
           config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
           hw_(passCtx.getHWModel()),
           hazardGates_(hw_.hazards.numRules),
-          options_(options),
           pipeOpGates_(hw_.hazards.numRules),
           pipeOpCount_(hw_.hazards.numRules, 0),
           pipeOpDistance_(hw_.hazards.numRules, 0) {}
@@ -1195,13 +1173,6 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         const int shortfall = slotsPlusOne - nonWmmaFillsSinceActiveWmma_;
         if (shortfall > 0) pendingFillerVNops_ = shortfall;
     }
-
-    // The instructions the caller re-emits ahead of this node issue in the window
-    // that is closing, so they are charged here rather than to the new one. When
-    // the gate above reserved room for them this just consumes cycles the window
-    // close would have consumed anyway; when the window is already full it is real
-    // added time, which is what keeps clock_ honest.
-    if (node->preIssueCycles > 0) advanceTime(node->preIssueCycles);
 
     // consume the time that is not used by the WMMA
     if (!window_.closed()) advanceTime(window_.latency() - window_.position());
@@ -1990,19 +1961,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
-        // Measured in free shadow rather than raw window position, because the
-        // reservation has to be in cycles something can actually issue into: the
-        // timeline skips blocked cycles outright, so comparing positions against
-        // the window end would let a one-cycle reservation be absorbed by the
-        // blocked cycle and change nothing.
-        //
-        // preIssueCycles reserves that much free shadow for instructions the caller
-        // re-emits in front of this candidate (a wait, for the repair pass).
-        // Without it the window fills to its last issuable cycle and those
-        // instructions push the candidate past the close -- over-filling the window
-        // by work the queue never saw.
-        const bool windowHasRoom = freeCoexecSpace() > bestWMMA->preIssueCycles;
-        const bool blockWmmaForActiveWindow = windowHasRoom && (smallestPickable != nullptr);
+        const bool blockWmmaForActiveWindow = !window_.closed() && (smallestPickable != nullptr);
 
         bool blockWmmaForAtLeastOneNonWmmaInterleaving = false;
         if (lastPickedNode_ != nullptr) {
@@ -2019,13 +1978,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
         const int hideBudget = cumulativeWmmaHideBudget_;
         const int dsLoadBudget = cumulativeWmmaDsLoadBudget_;
-        // The budget counts over the region, so unlike the window gate it does not
-        // clear when a window closes: left alone it keeps holding this matrix op and
-        // the fill phases keep stuffing an already-full window. For a caller that is
-        // repairing a schedule which already met the quota, the window is the
-        // authority -- see ArchReadyQueueOptions::fullWindowOverridesHideBudget.
         const bool blockWmmaForHideBudget =
-            hasPickableNonWmma && (windowHasRoom || !options_.fullWindowOverridesHideBudget) &&
+            hasPickableNonWmma &&
             (nonWmmaIssuedThisRegion_ < hideBudget || dsLoadIssuedThisRegion_ < dsLoadBudget);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
                              << " bestLatency=" << bestLatency

@@ -166,10 +166,15 @@ inline bool isBlockedWindowCycle(int pos, int latency, uint16_t blockedMask) {
 struct MatrixCoexecOccupancy {
     int matrixOps = 0;
     int windows = 0;
-    /// Intervals with no instruction at all between two matrix ops. The
-    /// scheduler holds a matrix op back while any non-matrix work is pickable,
-    /// so these are the places that rule is not met.
+    /// Intervals with no instruction at all between two matrix ops.
+    ///
+    /// Not a failure count on its own: two independent matrix ops back to back
+    /// run at full matrix rate. Only a dependent pair stalls, which
+    /// dependentEmptyWindows counts.
     int emptyWindows = 0;
+    /// Empty windows whose closing matrix op depends on the opening one
+    /// (wmmaToWmmaCoexecOverlap).
+    int dependentEmptyWindows = 0;
     /// Issue cycles placed in windows, against what those windows expose.
     int placedCycles = 0;
     int issuableCycles = 0;
@@ -186,7 +191,7 @@ measureMatrixCoexecOccupancy(const std::vector<StinkyInstruction*>& instructions
 /// One line per metric, for PASS_DEBUG output. \p label names the measurement
 /// point so a before and an after can be told apart in one log.
 STINKYTOFU_EXPORT void dumpMatrixCoexecOccupancy(const MatrixCoexecOccupancy& occupancy,
-                                                  const char* label, std::ostream& os);
+                                                 const char* label, std::ostream& os);
 
 /// Analyse \p regionDag using the final barrier placement metadata computed by
 /// the scheduler. A barrier present in both estimators has separate Before and

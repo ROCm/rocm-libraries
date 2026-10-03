@@ -1,0 +1,31 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --debug-pass RepairMatrixCoexecPass --RepairMatrixCoexecPass --print-output 2>&1
+#
+# A window between dependent matrix ops takes VALU work; one between independent
+# ones stays empty.
+#
+# The second matrix op reads the first one's result as its A operand, so
+# InsertCoexecHazardPass would pad the gap between them with v_nops. The v_add
+# just after the second matrix op touches neither one's registers, so it is
+# hoisted into that gap in place of a spacer. The third matrix op is independent
+# of the second, so their window is left as it is.
+#
+# CHECK: [MatrixCoexec before] matrixOps=3 windows=2 emptyWindows=1 (dependent=1)
+# CHECK: [MatrixCoexecReadyQueue] hoist dagId=2 ahead of dependent matrix dagId=1
+# CHECK: [MatrixCoexec after] matrixOps=3 windows=2 emptyWindows=0 (dependent=0)
+# CHECK-LABEL: @repair_matrix_coexec_dependent_hoist
+# CHECK: v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NEXT: v40 = "st.v_add_f32"
+# CHECK-NEXT: v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NEXT: v43 = "st.v_add_f32"
+
+st.func @repair_matrix_coexec_dependent_hoist() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[200:215], v[0:7], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[200:215], v[24:31], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v40 = "st.v_add_f32"(v41, v42) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[132:147], v[200:215], v[16:23], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v43 = "st.v_add_f32"(v44, v45) { issueCycles = 1, latencyCycles = 5 }
+}

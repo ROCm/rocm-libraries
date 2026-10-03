@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --debug-pass RepairMatrixCoexecPass --RepairMatrixCoexecPass 2>&1
+#
+# An empty window is only a stall when the second matrix op depends on the first.
+#
+# Independent matrix ops back to back run at full matrix rate, so an empty
+# window between them is not a stall. The occupancy dump counts both kinds as
+# empty and reports the dependent ones separately.
+#
+# Pairs, in order:
+#   1 -> 2  empty, dependent: 2 reads 1's result as its A operand
+#   2 -> 3  empty, independent
+#   3 -> 4  empty, independent: 4 accumulates into 3's result, and D feeding C
+#           is not a co-execution dependence
+#   4 -> 5  not empty: the wait attached to 5 sits in the window
+#
+# CHECK: [MatrixCoexec before] matrixOps=5 windows=4 emptyWindows=3 (dependent=1)
+# There is no non-matrix work to move, so the repair leaves the counts alone.
+# CHECK: [MatrixCoexec after] matrixOps=5 windows=4 emptyWindows=3 (dependent=1)
+
+st.func @repair_matrix_coexec_occupancy() {
+^entry:
+  v[0:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[400:407], v[0:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:31] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[400:407], v[16:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[216:223], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:47] = "st.v_wmma_f32_16x16x32_bf16"(v[224:231], v[400:407], v[32:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[48:63] = "st.v_wmma_f32_16x16x32_bf16"(v[232:239], v[400:407], v[48:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+}

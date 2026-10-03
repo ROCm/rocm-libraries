@@ -33,6 +33,7 @@
 #define DEBUG_TYPE "InsertCoexecHazardPass"
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/CoexecWindow.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -69,37 +70,6 @@ inline int popcount16(uint16_t v) {
 inline bool isSlotFiller(const StinkyInstruction& inst) {
     return isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst) ||
            inst.getUnifiedOpcode() == GFX::v_nop;
-}
-
-// WMMA producer D feeds a WMMA consumer's A/B (or SWMMAC index). D->C
-// (accumulation) is intentionally NOT a hazard.
-bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
-    if (prod.getDestRegs().empty()) return false;
-    const StinkyRegister& d = prod.getDestRegs()[0];
-    const auto& srcs = cons.getSrcRegs();
-    if (srcs.size() > 0 && d.isOverlap(srcs[0])) return true;                   // A
-    if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
-    if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
-    return false;
-}
-
-// WMMA producer D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst),
-// WAR (producer A/B, or SWMMAC index, -> consumer dst).
-bool wmmaToValuOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
-    if (prod.getDestRegs().empty()) return false;
-    const StinkyRegister& d = prod.getDestRegs()[0];
-    for (const StinkyRegister& s : cons.getSrcRegs())
-        if (d.isOverlap(s)) return true;  // RAW
-    for (const StinkyRegister& cd : cons.getDestRegs())
-        if (d.isOverlap(cd)) return true;  // WAW
-    // WAR: a later VALU overwrites a register the WMMA still reads. Producer
-    // inputs are A (src0), B (src1), and for SWMMAC the index (src2).
-    const auto& psrc = prod.getSrcRegs();
-    const size_t nWar = isSWMMA(prod) ? 3 : 2;
-    for (size_t i = 0; i < psrc.size() && i < nWar; ++i)
-        for (const StinkyRegister& cd : cons.getDestRegs())
-            if (psrc[i].isOverlap(cd)) return true;  // WAR
-    return false;
 }
 
 // TRANS producer vs consumer: RAW/WAW on producer dst, WAR on producer src.
@@ -159,8 +129,8 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     bool matches(const StinkyInstruction& prod, const ConsumerCtx& ctx) const {
         if (ctx.kind == ProducerKind::WMMA) {
             if (!isXDLWMMA(prod)) return false;
-            return ctx.consumerIsWmma ? wmmaToWmmaOverlap(prod, *ctx.consumer)
-                                      : wmmaToValuOverlap(prod, *ctx.consumer);
+            return ctx.consumerIsWmma ? wmmaToWmmaCoexecOverlap(prod, *ctx.consumer)
+                                      : wmmaToValuCoexecOverlap(prod, *ctx.consumer);
         }
         if (ctx.kind == ProducerKind::DGEMM) {
             if (!isDGEMMProducer(prod)) return false;

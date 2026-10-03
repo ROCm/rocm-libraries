@@ -1,0 +1,39 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --debug-pass RepairMatrixCoexecPass --RepairMatrixCoexecPass --print-output 2>&1
+#
+# A segment whose new order would shorten a hazard gap keeps its input order.
+#
+# The first window holds seven SALU ops and the wait in front of the anchor,
+# two cycles more than it has, and the window after the anchor has room, so the
+# queue moves the last two SALU ops past it. But the last one writes s25, which
+# the s_load behind the anchor reads as its address. SaluSgprToMemAddr wants 8
+# cycles between them; the input gives 9 (the wait and the matrix op's shadow)
+# and the move would leave none, so the segment keeps its input order.
+#
+# CHECK: [RepairMatrixCoexec] deferred 0, hoisted 0, kept 1 segment(s) in input order for hazard gaps
+# CHECK-LABEL: @repair_matrix_coexec_hazard_guard
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s10 = "st.s_mov_b32"
+# CHECK-NEXT: s11 = "st.s_mov_b32"
+# CHECK-NEXT: s12 = "st.s_mov_b32"
+# CHECK-NEXT: s13 = "st.s_mov_b32"
+# CHECK-NEXT: s14 = "st.s_mov_b32"
+# CHECK-NEXT: s15 = "st.s_mov_b32"
+# CHECK-NEXT: s25 = "st.s_mov_b32"
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_load_b64
+
+st.func @repair_matrix_coexec_hazard_guard() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[200:215], v[0:7], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  s10 = "st.s_mov_b32"(s30) { issueCycles = 1, latencyCycles = 1 }
+  s11 = "st.s_mov_b32"(s31) { issueCycles = 1, latencyCycles = 1 }
+  s12 = "st.s_mov_b32"(s32) { issueCycles = 1, latencyCycles = 1 }
+  s13 = "st.s_mov_b32"(s33) { issueCycles = 1, latencyCycles = 1 }
+  s14 = "st.s_mov_b32"(s34) { issueCycles = 1, latencyCycles = 1 }
+  s15 = "st.s_mov_b32"(s35) { issueCycles = 1, latencyCycles = 1 }
+  s25 = "st.s_mov_b32"(s36) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1, mod.swaitcnt = { vlcnt = -1, vscnt = -1, dlcnt = 0, dscnt = -1, kmcnt = -1 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[116:131], v[200:215], v[8:15], v20, v21) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  s[40:41] = "st.s_load_b64"(s[24:25], 0)
+}

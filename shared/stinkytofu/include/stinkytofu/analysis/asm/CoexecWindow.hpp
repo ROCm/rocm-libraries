@@ -166,4 +166,38 @@ class CoexecWindow {
     int pos_ = 0;
 };
 
+/// Whether \p cons depends on \p prod for co-execution: \p prod's D feeding
+/// \p cons's A or B, or a SWMMAC's index. D feeding C (accumulation) is
+/// intentionally not a dependence.
+///
+/// Shared by the scheduler, InsertCoexecHazardPass, the occupancy metric and
+/// the repair queue, so they all agree on which pairs are dependent.
+inline bool wmmaToWmmaCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    const auto& srcs = cons.getSrcRegs();
+    if (srcs.size() > 0 && d.isOverlap(srcs[0])) return true;                   // A
+    if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
+    if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
+    return false;
+}
+
+/// A matrix op's D against a co-executable VALU consumer: RAW (D to src), WAW
+/// (D to dst), and WAR -- a later VALU overwriting a register the matrix op
+/// still reads, which is its A, B, or for SWMMAC its index.
+inline bool wmmaToValuCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    for (const StinkyRegister& s : cons.getSrcRegs())
+        if (d.isOverlap(s)) return true;  // RAW
+    for (const StinkyRegister& cd : cons.getDestRegs())
+        if (d.isOverlap(cd)) return true;  // WAW
+    const auto& psrc = prod.getSrcRegs();
+    const size_t nWar = isSWMMA(prod) ? 3 : 2;
+    for (size_t i = 0; i < psrc.size() && i < nWar; ++i)
+        for (const StinkyRegister& cd : cons.getDestRegs())
+            if (psrc[i].isOverlap(cd)) return true;  // WAR
+    return false;
+}
+
 }  // namespace stinkytofu

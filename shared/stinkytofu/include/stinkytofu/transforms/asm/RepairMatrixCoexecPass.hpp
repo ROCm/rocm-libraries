@@ -29,22 +29,23 @@
 namespace stinkytofu {
 class Pass;
 
-/// Restore matrix co-issue after wait insertion, using the scheduler's own rules.
+/// Repair matrix co-execution after wait insertion.
 ///
 /// Later passes insert instructions into a schedule the DAG scheduler built
-/// against a hardware co-issue model, and final waits in particular leave matrix
-/// ops with nothing to issue in their latency shadow. This pass replays each
-/// segment through the same architecture ready queue the scheduler uses, so the
-/// rules live in one place: a new rule, or a new architecture, needs no change
-/// here.
+/// against a hardware co-execution model: final waits in front of their matrix
+/// ops, and later still the s_set_vgpr_msb bank switches. Where that leaves more
+/// work in front of a matrix op than its predecessor's window holds, the excess
+/// delays it. This pass keeps the scheduler's order and moves only that excess,
+/// past the matrix op into the next window, plus VALU work into the window of a
+/// dependent pair, where it replaces spacers.
 ///
 /// The wait contract is preserved exactly. Waits are kept out of the DAG and
 /// re-emitted immediately before their original anchors with their immediates
-/// untouched, and no instruction crosses a segment boundary.
+/// untouched, and no instruction crosses a segment boundary. No hazard gap of
+/// kCdna5HazardRules ends up shorter than both its input and the rule's
+/// distance; a segment that would shorten one keeps its input order.
 ///
-/// Replaced the earlier repair pass, which targeted a slot count measured
-/// against its own input rather than the hardware's capacity; see
-/// docs/developer/repair-matrix-coexec-pass.md.
+/// See docs/developer/repair-matrix-coexec-pass.md.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRepairMatrixCoexecPass();
 
 }  // namespace stinkytofu

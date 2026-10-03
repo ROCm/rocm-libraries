@@ -215,12 +215,11 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
 
-            // The wait insertion above leaves each final wait immediately before the
-            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
-            // it. Repair replays the region through the same arch ready queue the
-            // scheduler used, refilling those co-issue windows without changing any
-            // wait immediate. Gated on runScheduler because there is nothing to
-            // repair in IR that was never scheduled.
+            // The wait insertion above puts each final wait immediately before the
+            // WMMA that consumes its loads, which can leave more work in front of
+            // that WMMA than the window before it holds. Repair moves the excess
+            // past it without changing any wait immediate. Gated on runScheduler
+            // because there is nothing to repair in IR that was never scheduled.
             if (runScheduler) innerPM.addPass(createRepairMatrixCoexecPass());
 
             pm.addPass(createKernelToRegionsPassAdaptor(

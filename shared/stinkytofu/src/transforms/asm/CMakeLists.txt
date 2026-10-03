@@ -24,8 +24,6 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyDAGSchedulerPass.cpp
     dag/RegionDAG.cpp
     dag/SchedulingKnobHeuristics.cpp
-    dag/ArchReadyQueue.cpp
-    dag/RegionScheduling.cpp
     RepairMatrixCoexecPass.cpp
     StinkyMergeBarrierPass.cpp
     SetMatrixReusePass.cpp

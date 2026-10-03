@@ -37,11 +37,6 @@
 
 namespace stinkytofu {
 namespace {
-enum VgprMsbState : int {
-    NOT_REQUIRED = -1,
-    LABEL_BEGIN = -2,
-};
-
 bool isMsbComputableClass(const StinkyInstruction& inst) {
     return !(inst.is(InstFlag::IF_SALU) || inst.is(InstFlag::IF_SMemLoad) ||
              inst.is(InstFlag::IF_SMemStore) || inst.is(InstFlag::IF_SMemAtomic) ||
@@ -66,23 +61,23 @@ void encodeVgprOperands(StinkyInstruction* inst) {
     for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
 }
 
-bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
+bool emitVgprMsbIfNeeded(const StinkyInstruction& inst, int& currentMsb, AsmIRBuilder& irBuilder,
                          GfxArchID archId, IRBase* insertBefore, VgprMsbMode msbMode) {
-    if (!hasVgpr || requiredSetVal == currentMsb) {
-        if (currentMsb == VgprMsbState::LABEL_BEGIN) currentMsb = VgprMsbState::NOT_REQUIRED;
-        return false;
-    }
+    const int previousMsb = currentMsb;
+    const int inserted = vgprMsbInsertionsBefore(inst, currentMsb);
+    if (inserted == 0) return false;
 
-    if (currentMsb == VgprMsbState::LABEL_BEGIN) {
+    if (inserted == 2) {
         StinkyInstruction* nopInst =
             irBuilder.create(getMCIDByUOp(GFX::s_nop, archId), insertBefore);
         nopInst->addSrcReg(StinkyRegister(0));
     }
 
+    const int requiredSetVal = currentMsb;
     int combinedSetVal = requiredSetVal;
-    if (msbMode == VgprMsbMode::Msb16 && currentMsb != VgprMsbState::NOT_REQUIRED &&
-        currentMsb != VgprMsbState::LABEL_BEGIN) {
-        combinedSetVal += (currentMsb << 8);
+    if (msbMode == VgprMsbMode::Msb16 && previousMsb != VgprMsbState::NOT_REQUIRED &&
+        previousMsb != VgprMsbState::LABEL_BEGIN) {
+        combinedSetVal += (previousMsb << 8);
     }
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
@@ -95,7 +90,6 @@ bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmI
                              ", src2: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 2)) +
                              ", dst: " + std::to_string(decodeVgprMsbForSlot(requiredSetVal, 3));
     msbInst->addModifier<CommentData>(CommentData{msbComment});
-    currentMsb = requiredSetVal;
     return true;
 }
 
@@ -169,9 +163,8 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 IRBase* insertBefore = preferredInsertBefore ? preferredInsertBefore : inst;
 
-                auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
-                bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
-                                                          irBuilder, archId, insertBefore, msbMode);
+                bool emittedVgprMsb = emitVgprMsbIfNeeded(*inst, currentMsb, irBuilder, archId,
+                                                          insertBefore, msbMode);
                 encodeVgprOperands(inst);
                 if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
 

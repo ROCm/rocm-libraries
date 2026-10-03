@@ -64,79 +64,24 @@ struct RuleStat {
 };
 
 std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
-    struct Entry {
-        const StinkyInstruction* inst;
-    };
-    std::vector<Entry> instrs;
+    std::vector<const StinkyInstruction*> instrs;
     for (const IRBase& ir : bb) {
         const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst) instrs.push_back({inst});
+        if (inst) instrs.push_back(inst);
     }
 
-    // Prefix-sum of cycle costs for O(1) range sum.
-    std::vector<int> cumCycles(instrs.size() + 1, 0);
-    for (int i = 0; i < (int)instrs.size(); ++i)
-        cumCycles[i + 1] = cumCycles[i] + instCycles(*instrs[i].inst);
-
     std::vector<Violation> results;
-
-    for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
-        const HazardRule& rule = kCdna5HazardRules[ruleIdx];
-        // This pass measures write->read cycle gaps only; other directions/units are
-        // enforced by the scheduler, not measurable as a cycle distance here.
-        if (rule.dir != HazardDir::WriteThenRead || rule.unit != HazardUnit::Cycles) continue;
-
-        // lastWriter[regKey] = the most recent instruction that wrote that reg, plus
-        // whether that writer is a hazard producer. A non-producer write (e.g. a load
-        // dest) still overwrites the register's value, so it must overwrite the entry
-        // too — otherwise a stale earlier producer would be paired against a consumer
-        // that no longer reads the producer's value.
-        struct Writer {
-            int idx;
-            bool isProducer;
-        };
-        std::map<int, Writer> lastWriter;
-
-        for (int ci = 0; ci < (int)instrs.size(); ++ci) {
-            const StinkyInstruction& inst = *instrs[ci].inst;
-
-            // Record the latest writer for every dest reg, producer or not.
-            std::vector<int> destKeys;
-            collectRegKeys(inst.getDestRegs(), rule.regType, destKeys);
-            if (!destKeys.empty()) {
-                bool isProd = rule.isProducer(inst);
-                for (int k : destKeys) lastWriter[k] = {ci, isProd};
-            }
-
-            if (!rule.isConsumer(inst)) continue;
-
-            // Find the latest producer across all matching source regs. A source whose
-            // most recent writer is not a producer contributes no hazard pair.
-            std::vector<int> srcKeys;
-            collectRegKeys(inst.getSrcRegs(), rule.regType, srcKeys);
-            if (srcKeys.empty()) continue;
-
-            int latestProducer = -1;
-            for (int k : srcKeys) {
-                auto it = lastWriter.find(k);
-                if (it != lastWriter.end() && it->second.isProducer)
-                    latestProducer = std::max(latestProducer, it->second.idx);
-            }
-            if (latestProducer < 0) continue;  // no in-block producer feeds this consumer
-
-            // Gap = sum of cycles of instructions strictly between producer and consumer.
-            int gap = cumCycles[ci] - cumCycles[latestProducer + 1];
-
-            Violation v;
-            v.ruleName = rule.name;
-            v.required = rule.distance;
-            v.producerMnemonic = instMnemonic(*instrs[latestProducer].inst);
-            v.producerIdx = latestProducer;
-            v.consumerMnemonic = instMnemonic(inst);
-            v.consumerIdx = ci;
-            v.gap = gap;
-            results.push_back(v);
-        }
+    for (const HazardGap& pair : measureHazardGaps(instrs)) {
+        const HazardRule& rule = kCdna5HazardRules[pair.ruleIdx];
+        Violation v;
+        v.ruleName = rule.name;
+        v.required = rule.distance;
+        v.producerMnemonic = instMnemonic(*instrs[pair.producer]);
+        v.producerIdx = static_cast<int>(pair.producer);
+        v.consumerMnemonic = instMnemonic(*instrs[pair.consumer]);
+        v.consumerIdx = static_cast<int>(pair.consumer);
+        v.gap = pair.gap;
+        results.push_back(v);
     }
     return results;
 }
@@ -203,6 +148,67 @@ class HazardGapAnalysisPass : public StinkyInstPass {
 char HazardGapAnalysisPass::ID = 0;
 
 }  // namespace
+
+std::vector<HazardGap> measureHazardGaps(const std::vector<const StinkyInstruction*>& instrs) {
+    // Prefix-sum of cycle costs for O(1) range sum.
+    std::vector<int> cumCycles(instrs.size() + 1, 0);
+    for (int i = 0; i < (int)instrs.size(); ++i)
+        cumCycles[i + 1] = cumCycles[i] + instCycles(*instrs[i]);
+
+    std::vector<HazardGap> results;
+
+    for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
+        const HazardRule& rule = kCdna5HazardRules[ruleIdx];
+        // This pass measures write->read cycle gaps only; other directions/units are
+        // enforced by the scheduler, not measurable as a cycle distance here.
+        if (rule.dir != HazardDir::WriteThenRead || rule.unit != HazardUnit::Cycles) continue;
+
+        // lastWriter[regKey] = the most recent instruction that wrote that reg, plus
+        // whether that writer is a hazard producer. A non-producer write (e.g. a load
+        // dest) still overwrites the register's value, so it must overwrite the entry
+        // too — otherwise a stale earlier producer would be paired against a consumer
+        // that no longer reads the producer's value.
+        struct Writer {
+            int idx;
+            bool isProducer;
+        };
+        std::map<int, Writer> lastWriter;
+
+        for (int ci = 0; ci < (int)instrs.size(); ++ci) {
+            const StinkyInstruction& inst = *instrs[ci];
+
+            // Record the latest writer for every dest reg, producer or not.
+            std::vector<int> destKeys;
+            collectRegKeys(inst.getDestRegs(), rule.regType, destKeys);
+            if (!destKeys.empty()) {
+                bool isProd = rule.isProducer(inst);
+                for (int k : destKeys) lastWriter[k] = {ci, isProd};
+            }
+
+            if (!rule.isConsumer(inst)) continue;
+
+            // Find the latest producer across all matching source regs. A source whose
+            // most recent writer is not a producer contributes no hazard pair.
+            std::vector<int> srcKeys;
+            collectRegKeys(inst.getSrcRegs(), rule.regType, srcKeys);
+            if (srcKeys.empty()) continue;
+
+            int latestProducer = -1;
+            for (int k : srcKeys) {
+                auto it = lastWriter.find(k);
+                if (it != lastWriter.end() && it->second.isProducer)
+                    latestProducer = std::max(latestProducer, it->second.idx);
+            }
+            if (latestProducer < 0) continue;  // no in-block producer feeds this consumer
+
+            // Gap = sum of cycles of instructions strictly between producer and consumer.
+            const int gap = cumCycles[ci] - cumCycles[latestProducer + 1];
+            results.push_back(
+                {ruleIdx, static_cast<unsigned>(latestProducer), static_cast<unsigned>(ci), gap});
+        }
+    }
+    return results;
+}
 
 std::unique_ptr<Pass> createHazardGapAnalysisPass(bool verbose) {
     return std::make_unique<HazardGapAnalysisPass>(verbose);
