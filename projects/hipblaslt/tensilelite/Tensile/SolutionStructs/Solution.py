@@ -4154,9 +4154,9 @@ class Solution(collections.abc.Mapping):
             ## turn-off padding for directToLds
             if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
               ldsPadM = 0
-            # TDM's pad_amount field is dword-granular
+            # TDM pads must be an even number of dwords (see LDS_PAD_STEP_BYTES).
             if state["TDMInst"] and ldsPadM != 0:
-              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), LDS_PAD_STEP_BYTES)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -4202,7 +4202,7 @@ class Solution(collections.abc.Mapping):
             pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
-            err = ldsPadError(int(val), 4 if tc == "Metadata" else LDS_PAD_STEP_BYTES)
+            err = ldsPadError(int(val), LDS_PAD_STEP_BYTES)
             if err:
               reject(state, printRejectionReason,
                      f"ldsPad{tc}={int(val)}: {err} for the TDM pad_amount field")
