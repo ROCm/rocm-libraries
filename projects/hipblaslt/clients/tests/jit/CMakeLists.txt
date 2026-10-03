@@ -165,7 +165,8 @@ if(HIPBLASLT_JIT_TESTING)
     endif()
 endif()
 
-# Compiles the JIT solution library directly; runs without a GPU.
+# Compiles the JIT solution library directly. TensileLite queries the current device
+# when it reads a library entry, so the library and freshness tests need a GPU.
 if(NOT HIPBLASLT_ENABLE_YAML)
     # The tuning knowledge reader, matcher and library lookup, on fixture databases it
     # writes, and the Origami ranking of the catalog on modeled devices.
@@ -205,9 +206,9 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     target_link_libraries(hipblaslt-jit-library-test PRIVATE
         roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} ZLIB::ZLIB amd_comgr
         hip::device Threads::Threads)
-    hipblaslt_jit_test(jit-library jit-cpu $<TARGET_FILE:hipblaslt-jit-library-test>
+    hipblaslt_jit_test(jit-library jit-gpu $<TARGET_FILE:hipblaslt-jit-library-test>
         "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/library")
-    hipblaslt_jit_test(jit-library-concurrency jit-cpu $<TARGET_FILE:hipblaslt-jit-library-test>
+    hipblaslt_jit_test(jit-library-concurrency jit-gpu $<TARGET_FILE:hipblaslt-jit-library-test>
         "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/library-concurrency"
         --writers 8 --per-writer 4)
 
@@ -236,7 +237,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         HIPBLASLT_JIT_PERSISTENT_LOOP_ARGS_VERSION=${PersistentLoopArgsVersion})
     target_link_libraries(hipblaslt-jit-bundle-freshness-test PRIVATE
         roc::hipblaslt roc::tensilelite-host ZLIB::ZLIB amd_comgr hip::device Threads::Threads)
-    hipblaslt_jit_test(jit-bundle-freshness jit-cpu
+    hipblaslt_jit_test(jit-bundle-freshness jit-gpu
         $<TARGET_FILE:hipblaslt-jit-bundle-freshness-test>
         "${hipblaslt_jit_data}" "${hipblaslt_jit_scratch}/bundle-freshness")
     hipblaslt_jit_stage(hipblaslt-jit-library-test hipblaslt-jit-bundle-freshness-test)

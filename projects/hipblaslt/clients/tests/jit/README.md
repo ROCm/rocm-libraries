@@ -48,13 +48,16 @@ makes it opt-in, `unavailable` fails its configuration, and `unsupported`,
 the process if it generates. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug` and
-  `jit-code-object`, and with `HIPBLASLT_ENABLE_YAML=OFF` also `jit-knowledge`,
-  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. The last fails when
-  the committed bundles no longer match the generator;
-  [their README](data/README.md) says how to regenerate them. A build with
-  `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and `jit-disabled`.
-- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_JIT_TESTING=ON` in a
-  build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
+  `jit-code-object`, and with `HIPBLASLT_ENABLE_YAML=OFF` also `jit-knowledge`.
+  A build with `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and
+  `jit-disabled`.
+- `jit-gpu`: `jit-code-object-gpu`, and with `HIPBLASLT_ENABLE_YAML=OFF` also
+  `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`, which
+  read library entries; TensileLite queries the current device when it reads
+  one. The last fails when the committed bundles no longer match the
+  generator; [their README](data/README.md) says how to regenerate them. With
+  `HIPBLASLT_JIT_TESTING=ON` in a build for gfx950 it also has
+  `jit-mock-backend`, `jit-mock-backend-library`,
   `jit-bundle-failures`, `jit-helper-failures` and `jit-api-splitk`,
   `jit-api-streamk`, `jit-api-streamk-hybrid`, `jit-api-amax` and
   `jit-api-alpha-zero`, and
@@ -75,7 +78,7 @@ the process if it generates. The CTest tests are:
 | `jit-code-object`, `jit-code-object-gpu` | comgr builds, compile-only for gfx950 or loaded and run on the GPU: assembly and HIP relocatables, multi-source and mixed links, code-object versions, linker flags, target rewriting, a missing ROCm path, concurrent builds and malformed inputs, plus the `splitk` bundle's main kernel and 26 helpers assembled, compiled, linked into one code object, and on the GPU loaded and resolved |
 | `jit-mock-backend` | The in-process mock backend replaying the `splitk` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation, build and record faults, a replay after an Origami prediction, rejected mock options, and bundle lifetime |
 | `jit-mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A query for two solutions generates only for the shortfall and skips the published kernel. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
-| `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
+| `jit-library` | The JIT solution library: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |
 | `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `jit-bundle-freshness` | Each committed bundle's manifest records the kernel-argument and persistent-loop layout versions in `GlobalParameters.py` and the builder's code-object version; its library loads in the host library and names its main kernel, and comgr builds it for its target. A copy with either layout version changed is reported stale |
 | `jit-api-splitk`, `jit-api-streamk`, `jit-api-streamk-hybrid`, `jit-api-amax` | Public execution, copied algorithms, workspace rules, repeated calls and state retained after failed preparation, on the replayed bundle of that name, each run checked against the CPU reference. `streamk-hybrid` is a Hybrid Stream-K kernel whose grid, reduction, hybrid mode, mapping and stagger the runtime chooses at each launch |
@@ -138,15 +141,16 @@ damage copies of the bundle and replay them.
 
 ## JIT solution library tests
 
-`hipblaslt-jit-library-test` compiles the JIT solution library directly and
-needs no GPU. It takes a split-K source bundle, `data/gfx950/splitk` in CTest,
+`hipblaslt-jit-library-test` compiles the JIT solution library directly. It
+takes a split-K source bundle, `data/gfx950/splitk` in CTest,
 whose library entry it publishes under several kernel names, and a scratch
 directory for the libraries it creates; it ignores
 `HIPBLASLT_JIT_LIBRARY_PATH`. Adding `--writers N --per-writer M` runs the
 multi-process check instead: N writer processes each publish M entries shared
 by all writers and M of their own, while one reader process looks them up.
 `hipblaslt-jit-bundle-freshness-test` takes the `data` directory and a scratch
-directory.
+directory. Both need a GPU, because TensileLite queries the current device
+when it reads a library entry.
 
 ## Heuristic tests
 

@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Exercises the JIT solution library without a GPU: cache keys, directory
+// Exercises the JIT solution library: cache keys, directory
 // checks, the stock TensileLite loader reading what the library writes,
 // exact-size lookup, index allocation, a crash after every publication step,
 // concurrent publishers in separate processes, and the rejection of fused GEMM
