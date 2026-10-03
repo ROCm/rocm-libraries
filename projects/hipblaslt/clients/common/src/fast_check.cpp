@@ -756,8 +756,24 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         }
         if(non_integer_input)
         {
-            fail("fast_check found a non-integer value in A, B or C; it requires integer_exact "
-                 "initialization");
+            std::string where;
+            auto        find = [&](const View& m, int64_t rows, int64_t cols, const char* name) {
+                for(int64_t c = 0; c < cols && where.empty(); c++)
+                    for(int64_t r = 0; r < rows && where.empty(); r++)
+                        if(!is_exact_integer(m.at(r, c)))
+                        {
+                            std::ostringstream s;
+                            s << " (first: batch " << b << ", " << name << "(" << r << ", " << c
+                              << ") = " << m.at(r, c) << ")";
+                            where = s.str();
+                        }
+            };
+            find(opA, M, K, "op(A)");
+            find(opB, K, N, "op(B)");
+            if(use_c)
+                find(C, M, N, "C");
+            fail("fast_check found a non-integer value in A, B or C" + where
+                 + "; it requires integer_exact initialization");
             return finish();
         }
 

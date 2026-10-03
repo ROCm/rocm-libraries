@@ -125,17 +125,20 @@ inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
 }
 #endif
 
+// FNUZ has no negative zero: 0x80 is NaN, so zero and NaN keep their encoding.
 template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
 {
-    x.__x ^= 0x80;
+    if(x.__x & 0x7f)
+        x.__x ^= 0x80;
     return x;
 }
 
 template <>
 inline __device__ __host__ hipblaslt_bf8_fnuz negate(hipblaslt_bf8_fnuz x)
 {
-    x.__x ^= 0x80;
+    if(x.__x & 0x7f)
+        x.__x ^= 0x80;
     return x;
 }
 

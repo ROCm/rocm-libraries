@@ -15,6 +15,7 @@
 #include "hipBuffer.hpp"
 #include "hip_placement.hpp"
 #include "hipblaslt_init.hpp"
+#include "hipblaslt_math.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -738,6 +739,23 @@ namespace
         EXPECT_GT(counts[0], 0);
         EXPECT_GT(counts[1], 0);
         EXPECT_GT(counts[2], 0);
+    }
+
+    // integer_exact negates half of B. FNUZ fp8 has no negative zero (0x80 is NaN), so negating
+    // zero must leave it zero, and NaN stays NaN.
+    TEST(FastCheck_pre_checkin, fnuz_negate_keeps_zero_and_nan)
+    {
+        for(float v : {0.f, 1.f, 2.f})
+        {
+            EXPECT_EQ(float(static_cast<hipblasLtHalf>(negate(hipblaslt_f8_fnuz(v)))), -v) << v;
+            EXPECT_EQ(float(static_cast<hipblasLtHalf>(negate(hipblaslt_bf8_fnuz(v)))), -v) << v;
+        }
+        hipblaslt_f8_fnuz nan_e4m3(0.f);
+        nan_e4m3.__x = 0x80;
+        EXPECT_EQ(negate(nan_e4m3).__x, 0x80);
+        hipblaslt_bf8_fnuz nan_e5m2(0.f);
+        nan_e5m2.__x = 0x80;
+        EXPECT_EQ(negate(nan_e5m2).__x, 0x80);
     }
 
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
