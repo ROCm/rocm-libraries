@@ -161,7 +161,11 @@ namespace
                 prediction.ranked.push_back({6, 1.0, {{"DepthU", "0"}}, {}});
                 prediction.ranked.back().contract = other;
             }
-            prediction.ranked.push_back({7, 1.0, {{"DepthU", std::to_string(seeds.size())}}, {}});
+            prediction.ranked.push_back({7,
+                                         1.5,
+                                         {{"DepthU", std::to_string(seeds.size())}},
+                                         {{"macro_tile", "[64,64,32]"}}});
+            prediction.ranked.back().seed = 0;
             return {};
         }
     };
@@ -746,9 +750,16 @@ namespace
         std::cerr << "scenario published" << std::endl;
         {
             Fixture f({"a", "b", "c"}, {"fake.v1"});
-            f.builder = std::make_shared<Builder>(f.log, std::set<std::string>{"b"});
-            f.store   = std::make_shared<Store>(f.log);
+            f.builder          = std::make_shared<Builder>(f.log, std::set<std::string>{"b"});
+            f.store            = std::make_shared<Store>(f.log);
+            f.predictor->other = "spare.v1";
             require(f.run(3).indices == std::vector<int32_t>{100, 101}, "published: wrong indices");
+        }
+        std::cerr << "scenario unranked" << std::endl;
+        {
+            Fixture f({"a"}, {"fake.v1"});
+            f.predictor->result = {Code::NotSupported, Stage::Predict, "no ranking"};
+            require(f.run().failures.size() == 1, "unranked: no failure");
         }
         std::cerr << "scenario loaded" << std::endl;
         {
@@ -820,6 +831,7 @@ namespace
         };
 
         const std::vector<std::string> published = {"process",
+                                                    "predict",
                                                     "generation.start",
                                                     "build.start",
                                                     "build.end:a:built",
@@ -857,6 +869,24 @@ namespace
                 require(field(line, "index") == (field(line, "kernel") == "a" ? "100" : "101")
                             && has(line, "\"build\":") && has(line, "\"support\":"),
                         "published: wrong solution line " + line);
+        const auto predict = find("published", "predict");
+        require(has(predict, "\"cat\":\"prediction\"")
+                    && has(predict,
+                           "\"predictor\":\"fake-model\",\"knowledge\":\"fake-knowledge@3\","
+                           "\"arch\":\"gfx950\",\"library_arch\":\"\",\"cu_count\":0,"
+                           "\"workspace_limit\":4096,\"status\":\"ok\","
+                           "\"candidates\":{\"fake.v1\":1,\"spare.v1\":1},\"kept\":1,"
+                           "\"seeds\":[0],\"top\":[{\"id\":7,\"contract\":\"fake.v1\","
+                           "\"seed\":0,\"cycles\":1.5,\"macro_tile\":[64,64,32]}]}"),
+                "published: wrong prediction line " + predict);
+        const auto unranked = find("unranked", "predict");
+        require(events("unranked")
+                        == std::vector<std::string>{
+                            "predict", "failure", "generation", "generation.end"}
+                    && has(unranked,
+                           "\"status\":\"not_supported\",\"message\":\"no ranking\","
+                           "\"candidates\":{},\"kept\":0,\"seeds\":[],\"top\":[]}"),
+                "unranked: wrong prediction line " + unranked);
 
         const std::vector<std::string> loaded = {"generation.start",
                                                  "build.start",
@@ -883,7 +913,8 @@ namespace
                     && field(find("failed", "failure"), "stage") == "generate"
                     && field(find("failed", "generation.end"), "outcome") == "failed",
                 "failed: wrong events");
-        std::cout << "PASS HIPBLASLT_JIT_DEBUG times each stage and reports progress per solution\n";
+        std::cout << "PASS HIPBLASLT_JIT_DEBUG times each stage, reports progress per solution "
+                     "and records each prediction\n";
     }
 }
 

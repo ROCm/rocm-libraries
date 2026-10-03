@@ -3,9 +3,12 @@
 
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-debug.hpp"
+#include "hipblaslt-jit-json.hpp"
 #include "hipblaslt-jit-prediction.hpp"
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
+#include <map>
 #include <new>
 #include <optional>
 #include <stdexcept>
@@ -98,6 +101,82 @@ namespace hipblaslt_jit
                 return {Status::Code::Failed, Stage::Configure, "Unknown exception"};
             }
         }
+
+        // What a prediction ranked, before Jit keeps the contracts the backend
+        // transports, for the prediction line.
+        struct Ranked
+        {
+            std::map<std::string, size_t> contracts; // candidates per contract
+            std::set<int32_t>             seeds;
+        };
+
+        Ranked summarize(const Prediction& prediction)
+        {
+            Ranked result;
+            for(const auto& candidate : prediction.ranked)
+            {
+                ++result.contracts[candidate.contract.empty() ? prediction.modeledContract
+                                                              : candidate.contract];
+                if(candidate.seed >= 0)
+                    result.seeds.insert(candidate.seed);
+            }
+            return result;
+        }
+
+        void writePrediction(const debug::Generation& trace,
+                             const Jit::Components&   c,
+                             const DeviceTarget&      target,
+                             size_t                   workspaceLimit,
+                             const Ranked&            before,
+                             const Prediction&        prediction,
+                             const Status&            status)
+        {
+            debug::Line line(debug::Prediction, "predict");
+            line.add("predictor", std::string(c.predictor->id()))
+                .add("knowledge", std::string(c.knowledge->id()) + "@" + c.knowledge->version());
+            if(!trace.problem().empty())
+                line.add("problem", trace.problem());
+            line.add("arch", target.isa)
+                .add("library_arch", target.libraryArch)
+                .add("cu_count", target.cuCount)
+                .add("workspace_limit", workspaceLimit)
+                .add("status",
+                     status.ok()                                    ? "ok"
+                     : status.code == Status::Code::NotSupported ? "not_supported"
+                                                                 : "failed");
+            if(!status.ok())
+                line.add("message", status.message);
+            json::Members contracts;
+            for(const auto& [contract, count] : before.contracts)
+                contracts.push_back({contract, json::literal(count)});
+            line.json("candidates", json::object(contracts))
+                .add("kept", prediction.ranked.size())
+                .json("seeds", json::array(before.seeds));
+            std::vector<std::string> top;
+            for(const auto& candidate : prediction.ranked)
+            {
+                if(top.size() == 3)
+                    break;
+                json::Members fields{
+                    {"id", json::literal(candidate.id)},
+                    {"contract",
+                     json::quote(candidate.contract.empty() ? prediction.modeledContract
+                                                            : candidate.contract)},
+                    {"seed", json::literal(candidate.seed)},
+                    {"cycles",
+                     std::isfinite(candidate.predictedCycles)
+                         ? json::literal(candidate.predictedCycles)
+                         : "null"}};
+                for(const auto& modeled : candidate.modeled)
+                    if(modeled.name == "macro_tile")
+                        fields.push_back({modeled.name, modeled.json});
+                top.push_back(json::object(fields));
+            }
+            std::string list = "[";
+            for(const auto& candidate : top)
+                list += (list.size() > 1 ? "," : "") + candidate;
+            line.json("top", list + "]").write();
+        }
     }
 
     const char* toString(Stage stage) noexcept
@@ -188,7 +267,9 @@ namespace hipblaslt_jit
                     {request, target, workspaceLimit}, *c.knowledge, prediction);
             });
             phase.stop();
-            auto& ranked = prediction.ranked;
+            const bool report = trace && debug::on(debug::Prediction);
+            const auto before = report ? summarize(prediction) : Ranked{};
+            auto&      ranked = prediction.ranked;
             ranked.erase(std::remove_if(ranked.begin(),
                                         ranked.end(),
                                         [&](const Candidate& candidate) {
@@ -202,6 +283,8 @@ namespace hipblaslt_jit
                 status = {Status::Code::NotSupported,
                           Stage::Predict,
                           "No predicted candidate has a contract the backend transports"};
+            if(report)
+                writePrediction(*trace, c, target, workspaceLimit, before, prediction, status);
             if(!status.ok())
             {
                 record(Stage::Predict, std::move(status));

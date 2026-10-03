@@ -129,7 +129,8 @@ and prints one warning when it is set to a nonzero value.
         | ``timing``: durations of each heuristic query, ``hipblasLtMatmul`` call without an
           algorithm or with a JIT solution, generation and generated solution
         | ``progress``: lookups, waits, generation stages, builds and publication as they happen
-        | ``knowledge``, ``prediction``: reserved; no lines yet
+        | ``knowledge``: which tuning knowledge each architecture uses
+        | ``prediction``: what each prediction ranked and passed to the backend
         | ``all``: every category
 
     * - | ``HIPBLASLT_JIT_DEBUG_FILE``

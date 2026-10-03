@@ -635,7 +635,7 @@ comma-separated list of category names, in any case:
 | `timing` | One line when each heuristic query, `hipblasLtMatmul` call, generation and generated solution finishes, with the duration of each step |
 | `progress` | One line per step as it happens: lookups, waits, generation stages, builds and publication |
 | `knowledge` | Which tuning knowledge each architecture uses |
-| `prediction` | Reserved; no lines yet |
+| `prediction` | What each prediction ranked and passed to the backend |
 | `all` | Every category, including categories added later |
 
 Unset or empty prints nothing. A number, including `0` and `1`, or an unknown
@@ -659,7 +659,7 @@ them. The object starts with these keys:
 | Key | Value |
 | --- | --- |
 | `v` | Schema version, `1`. New keys keep the version; a changed meaning increments it |
-| `cat` | `timing`, `progress` or `knowledge` |
+| `cat` | `timing`, `progress`, `knowledge` or `prediction` |
 | `ev` | The event |
 | `pid`, `tid` | The process ID and a thread number counted from 1 in each process |
 | `t_ms` | Milliseconds on the monotonic clock since the process's first line |
@@ -676,7 +676,7 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 
 | `ev` | When and what |
 | --- | --- |
-| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. Without `timing`, it is a line of the first category on, in the order `progress`, `knowledge` |
+| `process` | First line of the process: the mode, the categories, the destination, the wall-clock time and `AMD_COMGR_CACHE`. Without `timing`, it is a line of the first category on, in the order `progress`, `knowledge`, `prediction` |
 | `setup` | The first JIT use in the process: its `status`, and the time to open the JIT solution library (`store`) and create the components. A backend can add its own fields and steps, such as creating itself |
 | `library.init` | A device's pre-tuned library initialization |
 | `query` | Each heuristic query, `api` `c` or `cpp`: `requested`, `returned`, the problem, `from` (the results each source added: `override`; `best` from the pre-tuned query, split into `equality`, `jit` and `others` when JIT runs between them; `all` from the `getAllSolutions` fill; otherwise `jit` after them; in forced mode only `jit`), `jit` (results `needed` and found as `hits`, `hits_after_wait`, `kept` and `dropped` by the support check, and `waited_on`, the generation another thread ran while this one waited), `gen` when it generated, and the step durations |
@@ -707,6 +707,12 @@ keys above, with `"truncated":true` and its full size as `oversize`.
 | `load` | Once per architecture, at its first request: the `arch`, the file's `path`, and `status`: `loaded` with the file's `content_hash` and number of `groups`, or `catalog` with the `reason` only the catalog applies |
 | `corrupt` | A group's block that cannot be read: the `arch`, `path` and `reason`. That group gives no seeds for the rest of the process |
 
+`prediction` lines:
+
+| `ev` | When and what |
+| --- | --- |
+| `predict` | Once per generation for a backend that consumes a prediction, after the predictor runs: the `predictor` and `knowledge` (with its version), the query's `problem` inside a query, the target's `arch`, `library_arch` and `cu_count`, the `workspace_limit`, `status` (`ok`, `not_supported` or `failed`, with its `message`), the `candidates` ranked per modeled contract, the number `kept` with a contract the backend transports, the indices of the `seeds` the candidates came from, and the first three kept candidates as `top`, each with its `id`, `contract`, `seed`, predicted `cycles` (`null` when not ranked) and `macro_tile` |
+
 `query.start`, `query.end`, `lookup` and `query` lines share a budget of 50
 lines that refills at 10 per second. Lines over the budget are counted and
 reported by a `suppressed` line in their category before the next line that is
@@ -717,6 +723,13 @@ A cache hit with `HIPBLASLT_JIT_DEBUG=timing`:
 
 ```text
 hipblaslt jit-debug {"v":1,"cat":"timing","ev":"query","pid":4242,"tid":1,"t_ms":160.737,"q":"4242.5","api":"cpp","mode":1,"requested":3,"returned":3,"problem":"GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT","from":{"equality":0,"jit":3,"others":0,"best":3},"jit":{"needed":3,"hits":3,"kept":3,"dropped":0},"ns":{"total":55459,"jit_target":3580,"lookup_attach":14910,"lookup_refresh":7870,"lookup_scan":12040,"jit_lookup":38570,"jit_support":3880,"jit":49950,"others":1670,"get_best":54129}}
+```
+
+A prediction for a backend that transports only `origami.gemm.dp.v1`, with
+`HIPBLASLT_JIT_DEBUG=prediction`:
+
+```text
+hipblaslt jit-debug {"v":1,"cat":"prediction","ev":"predict","pid":4242,"tid":1,"t_ms":2152.377,"q":null,"gen":"4242.g8","predictor":"origami","knowledge":"catalog.v1@1","arch":"gfx950","library_arch":"gfx950","cu_count":256,"workspace_limit":524288,"status":"ok","candidates":{"origami.gemm.dp.v1":72,"origami.gemm.persistent.v1":72},"kept":72,"seeds":[0,1,2,3,4,5,6,7,8,9,10],"top":[{"id":135,"contract":"origami.gemm.dp.v1","seed":0,"cycles":17618.547047654916,"macro_tile":[32,32,64]},{"id":69,"contract":"origami.gemm.dp.v1","seed":0,"cycles":17714.598198537737,"macro_tile":[32,32,64]},{"id":141,"contract":"origami.gemm.dp.v1","seed":1,"cycles":18799.840061506544,"macro_tile":[64,32,64]}]}
 ```
 
 The start of a generation with `HIPBLASLT_JIT_DEBUG=progress`:

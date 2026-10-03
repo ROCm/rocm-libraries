@@ -265,6 +265,11 @@ namespace hipblaslt_jit::debug
         {
             return m_record;
         }
+        // The problem of the query it runs in, or empty.
+        const std::string& problem() const noexcept
+        {
+            return m_problem;
+        }
         // Writes generation.start; candidates is 0 without a prediction.
         void started(size_t candidates);
         // The record of the solution at rank, for a Scope around its build and
