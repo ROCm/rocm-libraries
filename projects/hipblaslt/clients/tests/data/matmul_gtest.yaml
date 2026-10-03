@@ -4711,6 +4711,7 @@ Tests:
       - *f8_fnuz_precision_dst_fp32
       - *f8bf8_fnuz_precision_dst_fp32
       - *bf8f8_fnuz_precision_dst_fp32
+      - *bf8_fnuz_precision_dst_fp32
   matrix_size:
     - { M: 2560, N: 16384, K: 2560 }
     - { M: 5120, N: 12288, K: 5120 }
@@ -4733,6 +4734,7 @@ Tests:
       - *f8_precision_dst_fp32
       - *f8bf8_precision_dst_fp32
       - *bf8f8_precision_dst_fp32
+      - *bf8_precision_dst_fp32
   matrix_size:
     - { M: 2560, N: 16384, K: 2560 }
     - { M: 5120, N: 12288, K: 5120 }
