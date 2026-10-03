@@ -137,6 +137,19 @@ To build hipBLASLt, run these commands:
    make -j$(nproc)
    sudo make install # sudo required if installing into system directory such as /opt/rocm
 
+Experimental JIT GEMM solutions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``HIPBLASLT_ENABLE_JIT`` CMake option, ``OFF`` by default, builds experimental support for
+just-in-time (JIT) GEMM solutions, which the ``HIPBLASLT_JIT`` environment variable controls
+(see :ref:`environment-variables`). It requires the host library and the ``amd_comgr`` CMake
+package from ROCm. hipBLASLt does not yet include a JIT generator backend, so this option is
+intended for development.
+
+.. code-block:: bash
+
+   cmake -S [HIPBLASLT_SOURCE] -B [HIPBLASLT_BUILD_DIR] -DHIPBLASLT_ENABLE_JIT=ON
+
 Building the library, tests, benchmarks, and samples manually
 -------------------------------------------------------------
 

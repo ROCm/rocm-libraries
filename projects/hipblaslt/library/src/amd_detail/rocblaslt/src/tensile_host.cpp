@@ -43,8 +43,10 @@
 #include "tensile_host.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
+#include "../../hipblaslt-jit-heuristic.hpp"
 #include "../../hipblaslt-jit-library.hpp"
 #include "../../hipblaslt-jit-loader.hpp"
+#include "../../hipblaslt-jit-mode.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt_internal.hpp"
 namespace jit = hipblaslt_ext::experimental::jit::detail;
@@ -4003,7 +4005,21 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
         gemmCount = 1;
 #ifdef HIPBLASLT_ENABLE_JIT
         auto request = std::make_shared<jit::GemmRequest>(problem);
-        setTensileGemmProblem(problem, gemmData);
+        try
+        {
+            setTensileGemmProblem(problem, gemmData);
+        }
+        catch(const std::exception&)
+        {
+            // An active JIT provider may accept a request that Tensile cannot represent.
+            if(hipblaslt_jit::mode() == hipblaslt_jit::Mode::Off)
+                throw;
+            if(!gemmData)
+                gemmData = std::make_shared<TensileDataGemm>();
+            auto data                  = std::static_pointer_cast<TensileDataGemm>(gemmData);
+            data->needsTensileLowering = true;
+            data->enableEpilogue       = problem.epilogue != ROCBLASLT_EPILOGUE_DEFAULT;
+        }
         auto data        = std::static_pointer_cast<TensileDataGemm>(gemmData);
         data->jitRequest = std::move(request);
         data->jitLaunch.reset();
@@ -4915,6 +4931,22 @@ inline auto getSolutions(
     return solutions;
 }
 
+#ifdef HIPBLASLT_ENABLE_JIT
+namespace
+{
+    template <typename Results>
+    std::vector<std::string>
+        usedKernels(rocblaslt_handle handle, const Results& results, size_t count)
+    {
+        std::vector<std::string> kernels;
+        for(size_t i = 0; i < count; ++i)
+            if(auto name = getKernelNameFromAlgoIndex(handle, results[i].algo); !name.empty())
+                kernels.push_back(std::move(name));
+        return kernels;
+    }
+}
+#endif
+
 std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     getBestRawSolutions(RocblasltContractionProblem const& prob,
                         rocblaslt_handle                   handle,
@@ -5788,6 +5820,145 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
 
     return rocblaslt_status_success;
 }
+
+#ifdef HIPBLASLT_ENABLE_JIT
+namespace
+{
+    std::string describeJitProblem(const RocblasltContractionProblem& prob)
+    {
+        std::ostringstream out;
+        out << "GEMM M=" << prob.m << " N=" << prob.n << " K=" << prob.k
+            << " batch=" << prob.batch_count << " opA=" << hipblasOperation_to_string(prob.trans_a)
+            << " opB=" << hipblasOperation_to_string(prob.trans_b)
+            << " A=" << hipDataType_to_string(prob.a_type)
+            << " B=" << hipDataType_to_string(prob.b_type)
+            << " C=" << hipDataType_to_string(prob.c_type)
+            << " D=" << hipDataType_to_string(prob.d_type)
+            << " compute=" << rocblaslt_compute_type_to_string(prob.compute_type)
+            << " epilogue=" << rocblaslt_epilogue_to_string(prob.epilogue);
+        return out.str();
+    }
+
+    // JIT results for up to needed more solutions, each checked by supported
+    // like the getAllSolutions results.
+    template <typename Supported>
+    std::vector<rocblaslt_matmul_heuristic_result>
+        jitHeuristicResults(rocblaslt_handle                handle,
+                            const jit::GemmRequest&         request,
+                            size_t                          needed,
+                            size_t                          maxWorkSpaceBytes,
+                            const std::vector<std::string>& excludeKernels,
+                            Supported&&                     supported)
+    {
+        std::vector<rocblaslt_matmul_heuristic_result> added;
+        if(needed == 0 || request.problem.m == 0 || request.problem.n == 0)
+            return added;
+        auto fill = hipblaslt_jit::fillHeuristic(
+            request, handle->device, needed, maxWorkSpaceBytes, excludeKernels);
+        for(auto index : fill.indices)
+        {
+            rocblaslt_matmul_heuristic_result result;
+            memset(&result, 0, sizeof(result));
+            memcpy(result.algo.data, &index, sizeof(index));
+            result.algo.max_workspace_bytes = maxWorkSpaceBytes;
+            result.algo.fallback            = false;
+            size_t workspace                = 0;
+            if(supported(result.algo, workspace) != rocblaslt_status_success
+               || workspace > maxWorkSpaceBytes)
+                continue;
+            result.workspaceSize = workspace;
+            result.state         = rocblaslt_status_success;
+            added.push_back(result);
+        }
+
+        const auto problem  = describeJitProblem(request.problem);
+        const auto severity = added.empty() ? hipblaslt_jit::Severity::Error
+                                            : hipblaslt_jit::Severity::Warning;
+        for(const auto& failure : fill.failures)
+            hipblaslt_jit::report(severity, hipblaslt_jit::describe(failure, problem));
+        if(fill.repeated)
+            log_info(__func__, "JIT generation already fell short for", problem);
+        else if(added.size() < needed && fill.failures.empty())
+            hipblaslt_jit::report(hipblaslt_jit::Severity::Warning,
+                                  "returned " + std::to_string(added.size()) + " of "
+                                      + std::to_string(needed) + " requested solutions for "
+                                      + problem
+                                      + (fill.summary.empty() ? "" : ": " + fill.summary));
+        return added;
+    }
+}
+
+void jitHeuristicFill(rocblaslt_handle                  handle,
+                      RocblasltContractionProblem&      prob,
+                      std::shared_ptr<void>             gemmData,
+                      int                               requestedAlgoCount,
+                      size_t                            maxWorkSpaceBytes,
+                      rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                      int*                              returnAlgoCount)
+try
+{
+    if(*returnAlgoCount >= requestedAlgoCount)
+        return;
+    const jit::GemmRequest request(prob);
+    auto                   added = jitHeuristicResults(
+        handle,
+        request,
+        requestedAlgoCount - *returnAlgoCount,
+        maxWorkSpaceBytes,
+        usedKernels(handle, heuristicResultsArray, *returnAlgoCount),
+        [&](rocblaslt_matmul_algo& algo, size_t& workspace) {
+            return isSolutionSupported(handle, prob, gemmData, &algo, &workspace);
+        });
+    for(const auto& result : added)
+        heuristicResultsArray[(*returnAlgoCount)++] = result;
+}
+catch(const std::exception& e)
+{
+    hipblaslt_jit::report(hipblaslt_jit::Severity::Error,
+                          std::string("heuristic query failed: ") + e.what());
+}
+
+void jitHeuristicFill(rocblaslt_handle                                handle,
+                      rocblaslt::RocGemmType                          gemmType,
+                      std::shared_ptr<void>                           gemmData,
+                      int                                             requestedAlgoCount,
+                      size_t                                          maxWorkSpaceBytes,
+                      std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+try
+{
+    if(heuristicResults.size() >= static_cast<size_t>(requestedAlgoCount))
+        return;
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        hipblaslt_jit::report(hipblaslt_jit::Severity::Error, "does not support grouped GEMM");
+        return;
+    }
+    auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    if(!data || !data->jitRequest)
+        return;
+    const auto request = data->jitRequest;
+    auto       added   = jitHeuristicResults(
+        handle,
+        *request,
+        requestedAlgoCount - heuristicResults.size(),
+        maxWorkSpaceBytes,
+        usedKernels(handle, heuristicResults, heuristicResults.size()),
+        [&](rocblaslt_matmul_algo& algo, size_t& workspace) {
+            return isSolutionSupported(handle,
+                                       gemmType,
+                                       gemmData,
+                                       algo,
+                                       static_cast<const rocblaslt::RocTuningV2*>(nullptr),
+                                       workspace);
+        });
+    heuristicResults.insert(heuristicResults.end(), added.begin(), added.end());
+}
+catch(const std::exception& e)
+{
+    hipblaslt_jit::report(hipblaslt_jit::Severity::Error,
+                          std::string("heuristic query failed: ") + e.what());
+}
+#endif
 
 std::string getKernelNameFromData(rocblaslt_handle             handle,
                                   const rocblaslt::RocGemmType gemmType,

@@ -2,9 +2,11 @@
 
 The JIT tests check the Jit stages, the comgr code-object builder, the source
 bundle reader and, through the mock backend, the internal entry points that run
-JIT solutions with the GEMM APIs. The JIT headers are not installed. The tests include them from
-`library/src/amd_detail`. They build the gfx950 source bundles committed in
-[`data`](data/README.md), so they need neither Python nor a generator.
+JIT solutions with the GEMM APIs, and `HIPBLASLT_JIT` through the public
+heuristic queries and `hipblaslt-bench`. The JIT headers are not installed. The
+tests include them from `library/src/amd_detail`. They build the gfx950 source
+bundles committed in [`data`](data/README.md), so they need no generator. The
+Python tests run with the interpreter CMake finds, which needs `msgpack`.
 
 ## Build and run from a checkout
 
@@ -27,7 +29,12 @@ the tests run.
 
 `HIPBLASLT_JIT_TESTING=ON` links the mock backend that
 `hipblaslt-jit-mock-backend-test` and `hipblaslt-jit-api-test` replay bundles
-through. The CTest tests are:
+through. It also makes the test backend the process's JIT backend: heuristic
+queries rank candidates with Origami and replay the bundles that
+`HIPBLASLT_JIT_TEST_REPLAY` lists, separated by `:` (`;` on Windows).
+`HIPBLASLT_JIT_TEST_FAULT` set to `generate`, `build`, `record` or `trap`
+injects the mock's fault, and `record` appends each request to the file that
+`HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-code-object`,
   `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
@@ -36,7 +43,12 @@ through. The CTest tests are:
   build for gfx950 also `jit-mock-backend`, `jit-mock-backend-library`,
   `jit-bundle-failures`,
   `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
-  and `jit-api-alpha-zero`.
+  and `jit-api-alpha-zero`, `jit-heuristic-<route>` for each heuristic route in
+  the table below, run through the test backend replaying the `rank-1`,
+  `rank-2` and `splitk` bundles, and with `HIPBLASLT_ENABLE_CLIENT=ON`
+  `jit-bench-smoke`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
+  `jit-heuristic-jit-off`, and with `HIPBLASLT_ENABLE_CLIENT=ON`
+  `jit-bench-smoke-jit-off`.
 
 A build with `HIPBLASLT_ENABLE_YAML=ON` has no `jit-library`,
 `jit-library-concurrency` or `jit-bundle-freshness` and none of the tests that
@@ -60,6 +72,16 @@ replay bundles, because the library entries are MsgPack.
 | `jit-helper-failures` | A missing helper source or renamed helper symbols are detected before output/workspace writes; an earlier C++ launch remains usable |
 | `jit-bundle-failures` | Damaged source bundles are rejected through the public API: a foreign target, an escaping symbolic link, missing sources or main assembly, an undefined main kernel, invalid assembly or helper source (the message names the comgr log), corrupt or truncated library entries, missing helper source or symbols, and unsupported problems |
 | `jit-disabled` | The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
+| `jit-heuristic-fallback-c`, `jit-heuristic-fallback-cpp` | `HIPBLASLT_JIT=1` with an empty device library: the C or C++ heuristic query returns only JIT indices for one and three requested solutions, each checked through `hipblasLtMatmul` or `Gemm`, publishes them, and reports any shortfall as a warning |
+| `jit-heuristic-forced` | `HIPBLASLT_JIT=2` with an empty and with the build's device library: both queries return only JIT indices with checked numerics |
+| `jit-heuristic-cache-hit` | A second process whose backend fails if it generates gets the first process's published index from both queries, with no JIT report; a third process with `HIPBLASLT_JIT=0` resolves that index through `getAlgosFromIndex` and runs it with checked numerics |
+| `jit-heuristic-distinct` | With one solution already published, a request for three in mode 2 returns that solution first and two new ones, three distinct kernels in all, with no JIT report |
+| `jit-heuristic-unsupported` | A problem the predictor cannot rank (K=0) in modes 1 and 2: exactly one `hipblaslt error: JIT predict failed` line naming the reason across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and nothing is published |
+| `jit-heuristic-concurrent` | In modes 1 and 2, four processes of four threads each start the same query through a file barrier: every query returns the same two distinct solutions with checked numerics and no JIT report, and the library holds exactly those two entries with the allocator just past them |
+| `jit-heuristic-report` | In modes 1 and 2, a backend that fails to configure and one that fails to generate each print exactly one `hipblaslt error: JIT` line across two handles, two queries and both APIs; the queries return no results with the status the mode defines, and the log named in the report is kept |
+| `jit-heuristic-jit-off` | In a build without JIT, `HIPBLASLT_JIT=1` prints one warning across two handles and three queries, leaves the results unchanged, and creates no JIT solution library |
+| `jit-bench-smoke` | `hipblaslt-bench` with `HIPBLASLT_JIT=2` and an empty device library runs and verifies one replayed JIT solution with no JIT report and publishes it; a second run whose backend fails if it generates runs the same kernel from the library |
+| `jit-bench-smoke-jit-off` | `hipblaslt-bench` in a build without JIT prints one warning for `HIPBLASLT_JIT=2` and creates no JIT solution library |
 
 The `GemmPointerCheck` tests in `hipblaslt-test` check that `Gemm::setProblem`
 rejects a null A or B when alpha is nonzero, also with K=0, in builds with and
@@ -96,6 +118,36 @@ directory for the libraries it creates; it ignores
 `HIPBLASLT_JIT_LIBRARY_PATH`. Adding `--writers N --per-writer M` runs the
 multi-process check instead: N writer processes each publish M entries shared
 by all writers and M of their own, while one reader process looks them up.
+
+## Heuristic tests
+
+`hipblaslt-jit-heuristic-test` uses only the public API, so it is built with
+and without JIT. It queries `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` for an FP16 GEMM with FP32 accumulation
+(M=256, N=128, K=512 by default), prints one JSON line per query with the
+status, the returned solution indices, their workspace sizes and kernel names,
+and then runs every returned algorithm and compares the output with a CPU
+reference. `--api c|cpp|both|none`, `--requested`, `--m`, `--n`, `--k`,
+`--handles`, `--queries` and `--workspace` shape the queries,
+`--from-index i,j,...` resolves indices through
+`hipblaslt_ext::getAlgosFromIndex` and runs them, and `--no-run` skips
+execution. `--threads N` runs the whole sequence in N threads, each with its
+own handles; with `--barrier DIR` each thread claims a `ready-<n>` file in
+`DIR` after creating its first handle and waits for `DIR/go` before its first
+query, so that threads in several processes start together.
+
+`test_heuristic.py <binary> <route> <fresh-output> --replay BUNDLE` runs the
+binary for one route in fresh processes, each with its own JIT solution
+library, temporary and cache directories under the output directory, and an
+empty `HIPBLASLT_TENSILE_LIBPATH` unless the route uses the build's device
+library. `--replay` is repeated once per bundle; the `jit-off` route takes
+none. The build's JIT backend must be the test backend: the routes replay
+those bundles, and its record fault stands in for a backend that fails if it
+generates.
+
+`test_bench_smoke.py <hipblaslt-bench> <fresh-output> --replay BUNDLE` runs
+`hipblaslt-bench` the same way, and `--jit-off` instead checks a build without
+JIT.
 
 ## Code-object tests
 

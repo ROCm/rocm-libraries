@@ -84,6 +84,38 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
 
+Just-in-time (JIT) GEMM solutions
+=================================
+
+These variables take effect only in a hipBLASLt build configured with ``HIPBLASLT_ENABLE_JIT=ON``
+and a JIT generator backend. Such a build without a generator backend reports, once per process,
+that it was built without one. A build without ``HIPBLASLT_ENABLE_JIT`` ignores ``HIPBLASLT_JIT``
+and prints one warning when it is set to a nonzero value.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_JIT``
+        | Lets ``hipblasLtMatmulAlgoGetHeuristic`` and ``GemmInstance::algoGetHeuristic`` return
+          JIT solutions. hipBLASLt reads it once, when the first handle is created.
+        | Each JIT solution is published to the JIT solution library and returned by solution index,
+          so later processes run it without generating it again.
+      - | 0 or unset: Off (default)
+        | 1: Pre-tuned solutions first; JIT solutions fill any shortfall
+        | 2: JIT solutions only
+        | Any other value leaves JIT off with one warning.
+
+    * - | ``HIPBLASLT_JIT_LIBRARY_PATH``
+        | Specifies the root directory of the JIT solution library.
+        | hipBLASLt creates it with mode 0700 and refuses a directory that is a symbolic link,
+          owned by another user, or writable by group or others.
+      - | Path to a directory
+        | Default: ``/tmp/hipblaslt-jit-<uid>`` on Linux
+
 Origami with Stream-K configuration
 ===================================
 

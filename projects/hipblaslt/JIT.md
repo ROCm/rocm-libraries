@@ -27,9 +27,14 @@ generate a GEMM solution through a backend and run it with `hipblasLtMatmul`
 or `hipblaslt_ext::Gemm`, or publish generated solutions into a persistent
 JIT solution library on disk, whose solution indices any later process runs
 without generating again. For a backend that consumes a prediction, an Origami
-predictor first ranks candidate configurations. The only backend is a test mock
-that replays pre-generated source bundles. No generator backend is implemented yet, and no
-public API reaches JIT.
+predictor first ranks candidate configurations. In a build with
+`HIPBLASLT_ENABLE_JIT=ON`, the environment variable `HIPBLASLT_JIT` lets
+`hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` return
+solutions from that library and generate the ones it lacks; see
+[heuristic integration](#heuristic-integration). The only backend is a test
+mock that replays pre-generated source bundles. No generator backend is
+implemented yet, so outside the tests those queries report that hipBLASLt was
+built without one.
 
 ## Current behavior
 
@@ -162,6 +167,22 @@ The implementations are:
   consumes the predictions of the Origami predictor and the catalog knowledge.
   Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`. Only builds with
   `HIPBLASLT_JIT_TESTING=ON` compile it; it is not a production backend.
+- Heuristic integration: `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`.
+  `hipblaslt-jit-process-backend.cpp` configures one `Jit` per process from the
+  backend, predictor and tuning knowledge that `makeDefaultProcessBackend`
+  returns, with the JIT solution library as its store, and `fillHeuristic` in
+  `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates
+  what it lacks. `hipblaslt-jit-report.cpp` prints failures, and
+  `rocblaslt_auxiliary.cpp` calls these from both heuristic queries. See
+  [heuristic integration](#heuristic-integration).
+
+Each build links one definition of `makeDefaultProcessBackend`, chosen when
+hipBLASLt is configured. By default it comes from
+`hipblaslt-jit-no-backend.cpp`, whose configure failure says that hipBLASLt was
+built without a JIT generator backend. With `HIPBLASLT_JIT_TESTING=ON` it comes
+from `hipblaslt-jit-test-backend.cpp`, which replays bundles through the mock
+backend after an Origami prediction; the
+[JIT test guide](clients/tests/jit/README.md) describes its settings.
 
 ### Origami modeled inputs
 
@@ -356,6 +377,83 @@ solution already resolved from an earlier master stays valid.
 
 **Clearing.** hipBLASLt never deletes entries. To clear the library, delete
 the root directory, or one key directory, while no process is using it.
+
+### Heuristic integration
+
+`HIPBLASLT_JIT` selects the JIT mode of `hipblasLtMatmulAlgoGetHeuristic` and
+`GemmInstance::algoGetHeuristic` for the process. hipBLASLt reads it once, when
+the first handle is created.
+
+| `HIPBLASLT_JIT` | Mode | Behavior |
+| --- | --- | --- |
+| unset, empty or `0` | Off | Heuristic queries behave as in a build without JIT. |
+| `1` | Fallback | The existing lookup runs to completion first. JIT fills a result that is still shorter than `requestedAlgoCount`. |
+| `2` | Forced | JIT is the only source. The query skips the override file, every pre-tuned library, every other hipBLASLt source and the `getAllSolutions` fill. |
+
+Any other value leaves JIT off and prints
+`hipblaslt warning: HIPBLASLT_JIT=<value> is not 0, 1 or 2; JIT is off` once.
+A build without JIT ignores a nonzero value and prints
+`hipblaslt warning: HIPBLASLT_JIT=<value> is ignored: hipBLASLt was built without HIPBLASLT_ENABLE_JIT`
+once. Privileged processes ignore the variable.
+
+**Order.** In fallback mode, a query first runs the override file,
+`getBestSolutions` (with any hipBLASLt route that answers the problem before
+the Tensile lookup, and the xf32 retry) and the `getAllSolutions` fill. If the
+result is still short, JIT continues:
+
+1. It looks the problem up in the JIT solution library under the process's
+   cache key.
+2. If that is still short, `Jit` generates the rest: the predictor ranks
+   candidates when the backend consumes a prediction, the backend generates
+   solutions, comgr builds them, and the library publishes them. Every kernel
+   that the query has already returned is excluded by name, and the backend
+   returns only kernels it has not already returned for the request, so each
+   new result is a different kernel.
+
+In forced mode, these two steps are the whole query. Each JIT result passes the
+same support and workspace checks as a `getAllSolutions` result and is appended
+after the results already found. Its solution index is in the reserved JIT
+range.
+
+**Return count.** Returning fewer results than requested, including none, is
+success, as it already was for the pre-tuned lookup. In fallback mode, a query
+whose pre-tuned lookup failed, for example because no pre-tuned library could
+be loaded, succeeds when JIT adds a result and otherwise keeps its error. In
+forced mode the query succeeds even when JIT fails; it then returns no results
+and reports the failure.
+
+**Failure reporting.** JIT problems are printed on stderr without any
+`HIPBLASLT_LOG_LEVEL` setting, once per distinct message in a process, and are
+also passed to the existing error or info log. A failure is an error when the
+query gets no JIT result and a warning when JIT still added one. A shortfall
+without a failure is a warning. Each line names the stage (configure, predict,
+generate, build, support, load, lookup or publish), the problem and the cause.
+A generation or build failure names its kept log:
+
+```text
+hipblaslt error: JIT configure failed for GEMM M=256 N=128 K=512 batch=1 opA=OP_N opB=OP_N A=R_16F B=R_16F C=R_16F D=R_16F compute=COMPUTE_32F epilogue=EPILOGUE_DEFAULT: hipBLASLt was built without a JIT generator backend
+hipblaslt error: JIT predict failed for GEMM M=256 N=128 K=0 ... EPILOGUE_DEFAULT: JIT GEMM prediction: No Origami ranking: no finite positive-latency candidates for this request
+hipblaslt error: JIT build failed for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAULT: comgr could not assemble: /tmp/comgr-3939069-4-b17d31/input/0-<kernel>.s:1:1: error: invalid instruction; see /tmp/hipblaslt-jit-Vr6yTk/comgr.log
+```
+
+A shortfall warning, such as `hipblaslt warning: JIT returned 1 of 2 requested
+solutions for GEMM ...`, ends with the backend's summary of its generation.
+
+Once generation falls short for a problem, later queries for it in the same
+process look it up in the library but do not generate again. Queries for the
+same problem and workspace limit in one process generate one at a time, so the
+second one finds what the first published. Separate processes can generate the
+same solutions at once; they publish under the library lock, which keeps one
+entry and one index per solution, so every process returns the same indices.
+An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot
+rank, such as K=0, reports a predict failure. Grouped GEMM is not supported and
+reports an error.
+
+A query that generates waits for the whole generation. Generation runs in a new
+directory under the system temporary directory (`TMPDIR` on Linux). It is
+removed after success and kept after a failure, whose report names the log
+inside it. The heuristic queries take no stream; run them before a HIP stream
+capture and pass the returned algorithm to `hipblasLtMatmul` inside it.
 
 ### Building generated sources
 

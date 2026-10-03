@@ -9,6 +9,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp"
 )
 
 if(HIPBLASLT_ENABLE_JIT)
@@ -27,10 +28,17 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-loader.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-process-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-report.cpp")
+    # Heuristic queries generate with the one makeDefaultProcessBackend provider linked.
+    set(hipblaslt_jit_process_backend hipblaslt-jit-no-backend.cpp)
     if(HIPBLASLT_JIT_TESTING)
         target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mock-backend.cpp")
+        set(hipblaslt_jit_process_backend hipblaslt-jit-test-backend.cpp)
     endif()
+    target_sources(hipblaslt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/${hipblaslt_jit_process_backend}")
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)

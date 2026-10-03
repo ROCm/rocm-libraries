@@ -43,18 +43,33 @@ function(hipblaslt_jit_stage)
     endforeach()
 endfunction()
 
+# Public API only, so it also builds without JIT.
+add_executable(hipblaslt-jit-heuristic-test heuristic_test.cpp)
+target_link_libraries(hipblaslt-jit-heuristic-test
+    PRIVATE roc::hipblaslt hip::device Threads::Threads)
+
 add_executable(hipblaslt-jit-source-bundle-test source_bundle_test.cpp)
 target_include_directories(hipblaslt-jit-source-bundle-test PRIVATE "${hipblaslt_jit_source}")
 target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE ZLIB::ZLIB)
 hipblaslt_jit_test(jit-source-bundle jit-cpu
     $<TARGET_FILE:hipblaslt-jit-source-bundle-test> "${hipblaslt_jit_scratch}/source-bundle")
-hipblaslt_jit_stage(hipblaslt-jit-source-bundle-test)
+hipblaslt_jit_stage(hipblaslt-jit-heuristic-test hipblaslt-jit-source-bundle-test)
 
 if(NOT HIPBLASLT_ENABLE_JIT)
     add_executable(hipblaslt-jit-disabled-test disabled_api_test.cpp)
     target_link_libraries(hipblaslt-jit-disabled-test PRIVATE roc::hipblaslt hip::host)
     hipblaslt_jit_stage(hipblaslt-jit-disabled-test)
     hipblaslt_jit_test(jit-disabled jit-cpu $<TARGET_FILE:hipblaslt-jit-disabled-test>)
+
+    # HIPBLASLT_JIT is ignored with one warning.
+    hipblaslt_jit_python_test(jit-heuristic-jit-off jit-gpu test_heuristic.py
+        $<TARGET_FILE:hipblaslt-jit-heuristic-test> jit-off
+        "${hipblaslt_jit_scratch}/heuristic-jit-off")
+    if(HIPBLASLT_ENABLE_CLIENT)
+        hipblaslt_jit_python_test(jit-bench-smoke-jit-off jit-gpu test_bench_smoke.py
+            $<TARGET_FILE:hipblaslt-bench> "${hipblaslt_jit_scratch}/bench-smoke-jit-off"
+            --jit-off)
+    endif()
     return()
 endif()
 
@@ -119,6 +134,23 @@ if(HIPBLASLT_JIT_TESTING)
             ${api} "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/bundle-failures")
         hipblaslt_jit_python_test(jit-helper-failures jit-gpu test_helper_failures.py
             ${api} "${hipblaslt_jit_splitk}" "${hipblaslt_jit_scratch}/helper-failures")
+
+        # The heuristic routes, on what the test backend replays.
+        if(hipblaslt_jit_process_backend STREQUAL "hipblaslt-jit-test-backend.cpp")
+            set(replay --replay "${hipblaslt_jit_data}/gfx950/rank-1"
+                       --replay "${hipblaslt_jit_data}/gfx950/rank-2"
+                       --replay "${hipblaslt_jit_splitk}")
+            foreach(route fallback-c fallback-cpp forced cache-hit distinct unsupported
+                          concurrent report)
+                hipblaslt_jit_python_test(jit-heuristic-${route} jit-gpu test_heuristic.py
+                    $<TARGET_FILE:hipblaslt-jit-heuristic-test> ${route}
+                    "${hipblaslt_jit_scratch}/heuristic-${route}" ${replay})
+            endforeach()
+            if(HIPBLASLT_ENABLE_CLIENT)
+                hipblaslt_jit_python_test(jit-bench-smoke jit-gpu test_bench_smoke.py
+                    $<TARGET_FILE:hipblaslt-bench> "${hipblaslt_jit_scratch}/bench-smoke" ${replay})
+            endif()
+        endif()
     endif()
 endif()
 
