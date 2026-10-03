@@ -44,7 +44,8 @@ A run is not counted as clean unless its load really ran: the script waits for t
 cotenant's `READY` (up to `--load-ready-seconds`), or gives other loads
 `--load-settle-seconds`, and records a load that exits before the run as
 `load_failed`. A load that stops during the run is recorded as
-`load_ran_throughout: false`. A run in which no test ran, usually a stale binary or
+`load_ran_throughout: false` and fails the run. The cotenant's kernel log is
+kept next to the results when a run fails. A run in which no test ran, usually a stale binary or
 a mistyped `--filter`, also fails.
 
 This is for dedicated hardware, not CI: the runs hold the GPU for a long time, and
