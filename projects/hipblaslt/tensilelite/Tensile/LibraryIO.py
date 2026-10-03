@@ -23,21 +23,22 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from . import __version__
+from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Common.TimingInstrumentation import timing_context
+from .Common.Architectures import gfxToIsa
+from .SolutionStructs import Solution, ProblemSizes
+from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from .Common.GlobalParameters import defaultSolution
+from .SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
 import io
 import os
@@ -114,7 +115,6 @@ try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 
 ###################
@@ -731,10 +731,8 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
-        for key, val in libDefaults.items():
-            if key not in solutionState:
-                solutionState[key] = val
+        # Normalize before global defaults can look like explicit selectors.
+        solutionState = normalize_execution_policy_with_defaults(solutionState, libDefaults)
         for key, val in defaultSolution.items():
             if key not in solutionState:
                 solutionState[key] = val
@@ -768,8 +766,7 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
-            for key, value in customConfig.items():
-                solutionState[key] = value
+            solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")

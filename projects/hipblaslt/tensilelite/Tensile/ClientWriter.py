@@ -32,19 +32,19 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
-from Tensile.Toolchain.Component import Assembler
+from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from .Toolchain.Component import Assembler
 
 import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
-from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
+from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from Tensile.Common.Architectures import archNamesByIsa, isaToGfx
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from .Common.Architectures import archNamesByIsa, isaToGfx
+from .Common.GlobalParameters import globalParameters
+from .Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
@@ -712,13 +712,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
-        # Only emit non-default StreamKHybridMode values to keep
-        # existing tests' INIs byte-identical. The C++ client defaults
-        # to a single-element vector [0], which is the same as omitting
-        # the INI key entirely.
-        if globalParameters["StreamKHybridMode"] not in ([0], (0,)):
-          for v in globalParameters["StreamKHybridMode"]:
-            param('streamk-hybrid-mode', int(v))
+        # Global-parameter ingestion resolves the legacy alias before emission.
+        # Omitting Default preserves the client's existing runtime policy.
+        if globalParameters["HybridAssignmentPolicy"] not in (["Default"], ("Default",)):
+          for policy in globalParameters["HybridAssignmentPolicy"]:
+            param('hybrid-assignment-policy', policy)
 
         param("device-idx",               deviceId)
 
