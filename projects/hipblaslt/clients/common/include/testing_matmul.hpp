@@ -1910,10 +1910,28 @@ void testing_matmul(const Arguments& arg)
         }
         // fast_check models the rounding of large results into 16-bit outputs, so the limit
         // applies only when a host reference comparison runs.
-        // sparse_k keeps every result below 2 * 17 * 4 + 4 = 140 whatever K is.
+        // A misspelled pattern must fail here rather than be hidden by the skip below.
+        IntegerExactPattern pattern = IntegerExactPattern::standard;
+        if(!parse_integer_exact_pattern(arg.integer_exact_pattern, pattern))
+        {
+            std::string why = std::string("unknown integer_exact_pattern '")
+                              + arg.integer_exact_pattern + "'; use ternary or sparse_k";
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+        // sparse_k keeps every result below 2 * 17 * 4 + 4 = 140 whatever K is, as long as alpha
+        // and beta are at most 2 and nothing else scales the result.
         const bool host_reference = arg.unit_check || arg.norm_check || arg.allclose_check;
-        const bool sparse_k       = !strcmp(arg.integer_exact_pattern, "sparse_k");
-        if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k)
+        const bool sparse_k_bounded
+            = pattern == IntegerExactPattern::sparse_k && std::fabs(arg.alpha) <= 2
+              && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
+              && arg.scaleA == hipblaslt_scaling_format::none
+              && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
+        if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
             const int32_t k_limit
