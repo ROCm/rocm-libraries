@@ -15,6 +15,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ### Resolved issues
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
+* Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 
 ## (Unreleased) rocALUTION
 
