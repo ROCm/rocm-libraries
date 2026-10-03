@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -200,6 +200,12 @@ public:
   device_callable_guard(const device_callable_guard&)            = delete;
   device_callable_guard& operator=(const device_callable_guard&) = delete;
 
+  device_callable_guard(device_callable_guard&& other) noexcept : fn_ptr_(other.fn_ptr_)
+  {
+    other.fn_ptr_ = nullptr;
+  }
+  device_callable_guard& operator=(device_callable_guard&&) = delete;
+
   ~device_callable_guard()
   {
     if (fn_ptr_ != nullptr)
@@ -242,6 +248,77 @@ struct callable_proxy
     return (*fn_ptr)(::std::forward<Args>(args)...);
   }
 };
+
+// Owns the guard (if needed) and produces the right callable to pass to Call.
+template <typename Fn>
+struct device_fn_entry
+{
+    using fn_t = ::std::decay_t<Fn>;
+    static constexpr bool is_trivial = ::std::is_trivially_destructible_v<fn_t>;
+
+    ::std::conditional_t<is_trivial, fn_t, device_callable_guard<fn_t>> storage;
+
+    device_fn_entry(Fn fn) : storage(::std::move(fn)) {}
+
+    decltype(auto) get()
+    {
+        if constexpr (is_trivial)
+            return ::std::move(storage);
+        else
+            return callable_proxy<fn_t>{storage.get()};
+    }
+
+    void destroy()
+    {
+        if constexpr (!is_trivial)
+            storage.destroy_and_free();
+    }
+};
+
+template <typename Call, typename... Fns>
+auto with_device_callables(Call call, const char* sync_error, Fns... fns)
+{
+    constexpr bool all_trivial =
+        (::std::is_trivially_destructible_v<::std::decay_t<Fns>> && ...);
+
+    if constexpr (all_trivial)
+    {
+        return call(::std::move(fns)...);
+    }
+    else
+    {
+        auto entries = ::std::make_tuple(device_fn_entry<Fns>(::std::move(fns))...);
+
+        auto invoke = [&]() -> decltype(auto) {
+            try
+            {
+                return ::std::apply(
+                    [&call](auto&... e) -> decltype(auto) { return call(e.get()...); },
+                    entries);
+            }
+            catch (...)
+            {
+                (void) ::hipDeviceSynchronize();
+                throw;
+            }
+        };
+
+        using result_t = decltype(invoke());
+        if constexpr (::std::is_void_v<result_t>)
+        {
+            invoke();
+            ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), sync_error);
+            ::std::apply([](auto&... e) { (e.destroy(), ...); }, entries);
+        }
+        else
+        {
+            auto result = invoke();
+            ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), sync_error);
+            ::std::apply([](auto&... e) { (e.destroy(), ...); }, entries);
+            return result;
+        }
+    }
+}
 
 } // namespace detail
 } // namespace hipstd
