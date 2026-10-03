@@ -10,6 +10,7 @@
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_arch_revision.hpp"
+#include "utility.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
 #include <map>
@@ -192,10 +193,12 @@ namespace hipblaslt_jit
 
         std::string generationKey(const OperationRequest& request,
                                   const DeviceTarget&     target,
-                                  size_t                  workspaceLimit)
+                                  size_t                  workspaceLimit,
+                                  const Jit&              jit)
         {
             using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
-            auto key          = target.targetId + '\n' + std::to_string(workspaceLimit);
+            auto key = jit.components().backend->info().id + ' ' + jit.version() + '\n'
+                       + target.targetId + '\n' + std::to_string(workspaceLimit);
             if(const auto* gemm = dynamic_cast<const GemmRequest*>(&request))
             {
                 const auto problem = lowerForJit(*gemm);
@@ -205,34 +208,34 @@ namespace hipblaslt_jit
             }
             return key;
         }
-    }
 
-    HeuristicFill fillHeuristic(const OperationRequest&         request,
-                                int                             device,
-                                size_t                          count,
-                                size_t                          workspaceLimit,
-                                const std::vector<std::string>& excludeKernels)
-    {
-        HeuristicFill fill;
-        try
+        std::string kernelOf(const DeviceTarget& target, int32_t index)
         {
-            Status       status;
-            const auto   jit = processJit(status);
-            DeviceTarget target;
-            if(status.ok())
-            {
-                debug::Phase phase("jit_target");
-                status = DeviceTarget::make(device, target);
-            }
-            const auto lookup = [&](const char* phase) {
+            Status why;
+            auto   solution = JitLibrary::process().solutionByIndex(
+                target.device, *target.hardware, index, why);
+            return solution ? solution->kernelName : std::string();
+        }
+
+        // What one backend adds to a heuristic query.
+        HeuristicFill fillFrom(const Jit&                      jit,
+                               const OperationRequest&         request,
+                               const DeviceTarget&             target,
+                               size_t                          count,
+                               size_t                          workspaceLimit,
+                               const std::vector<std::string>& excludeKernels)
+        {
+            HeuristicFill fill;
+            Status        status;
+            const auto    lookup = [&](const char* phase) {
                 debug::Phase timed(phase);
-                status = jit->store()->lookup(
+                status = jit.store()->lookup(
                     request, target, count, workspaceLimit, excludeKernels, fill.indices);
                 if(!status.ok())
                     status.stage = Stage::Lookup;
                 return status.ok();
             };
-            if(!status.ok() || !lookup("jit_lookup"))
+            if(!lookup("jit_lookup"))
             {
                 debugFailure(status);
                 fill.failures.push_back(std::move(status));
@@ -263,7 +266,7 @@ namespace hipblaslt_jit
                 return fill;
             }
 
-            auto&        generating = generation(generationKey(request, target, workspaceLimit));
+            auto& generating = generation(generationKey(request, target, workspaceLimit, jit));
             debug::Phase waiting("jit_wait");
             std::unique_lock<std::mutex> lock(generating.mutex, std::try_to_lock);
             const bool                   waited = !lock.owns_lock();
@@ -300,15 +303,11 @@ namespace hipblaslt_jit
             debug::Phase excluding("jit_exclude");
             auto         exclude = excludeKernels;
             for(auto index : fill.indices)
-            {
-                Status why;
-                if(auto solution = JitLibrary::process().solutionByIndex(
-                       device, *target.hardware, index, why))
-                    exclude.push_back(solution->kernelName);
-            }
+                if(auto kernel = kernelOf(target, index); !kernel.empty())
+                    exclude.push_back(std::move(kernel));
             excluding.stop();
             debug::Phase generatePhase("jit_generate");
-            auto         outcome = jit->generate(
+            auto         outcome = jit.generate(
                 request, target, count - fill.indices.size(), workspaceLimit, exclude);
             generatePhase.stop();
             if(debug::categories())
@@ -319,6 +318,102 @@ namespace hipblaslt_jit
             fill.failures        = std::move(outcome.failures);
             fill.summary         = std::move(outcome.summary);
             generating.fellShort = fill.indices.size() < count;
+            return fill;
+        }
+    }
+
+    HeuristicFill fillHeuristic(const OperationRequest&         request,
+                                int                             device,
+                                size_t                          count,
+                                size_t                          workspaceLimit,
+                                const std::vector<std::string>& excludeKernels)
+    {
+        HeuristicFill fill;
+        try
+        {
+            const auto& jits    = processJits();
+            const bool  several = jits.size() > 1;
+            const auto  named   = [&](const ProcessBackendName& backend, Status status) {
+                if(several && status.message.find(backend.name) == std::string::npos)
+                    status.message = backend.name + ": " + status.message;
+                return status;
+            };
+            for(const auto& process : jits)
+                if(!process.jit)
+                {
+                    fill.failures.push_back(named(process.name, process.configured));
+                    debugFailure(fill.failures.back());
+                }
+            if(std::none_of(jits.begin(), jits.end(), [](const ProcessJit& p) { return p.jit; }))
+                return fill;
+            DeviceTarget target;
+            {
+                debug::Phase phase("jit_target");
+                auto         status = DeviceTarget::make(device, target);
+                if(!status.ok())
+                {
+                    debugFailure(status);
+                    fill.failures.push_back(std::move(status));
+                    return fill;
+                }
+            }
+            std::vector<const ProcessJit*> eligible;
+            for(const auto& process : jits)
+                if(process.jit)
+                {
+                    const auto why = process.jit->components().backend->accepts(request, target);
+                    if(why.ok())
+                        eligible.push_back(&process);
+                    else
+                        log_info(__func__, "JIT backend", process.name.name, "skips:", why.message);
+                }
+            if(eligible.empty() && fill.failures.empty())
+                fill.failures.push_back({Status::Code::NotSupported,
+                                         Stage::Generate,
+                                         "no enabled JIT backend supports this problem"});
+
+            // Each backend leaves one slot for each later one; what it does not
+            // fill passes on.
+            auto exclude      = excludeKernels;
+            bool shortfall    = false;
+            bool newShortfall = false;
+            for(size_t i = 0; i < eligible.size() && fill.indices.size() < count; ++i)
+            {
+                const auto  missing = count - fill.indices.size();
+                const auto  later   = eligible.size() - i - 1;
+                const auto  quota   = missing > later ? missing - later : 1;
+                const auto& process = *eligible[i];
+                auto part = fillFrom(*process.jit, request, target, quota, workspaceLimit, exclude);
+                for(auto& failure : part.failures)
+                    fill.failures.push_back(named(process.name, std::move(failure)));
+                for(auto index : part.indices)
+                {
+                    fill.indices.push_back(index);
+                    if(i + 1 < eligible.size())
+                        if(auto kernel = kernelOf(target, index); !kernel.empty())
+                            exclude.push_back(std::move(kernel));
+                }
+                fill.skipped = fill.skipped || part.skipped;
+                if(!several)
+                {
+                    fill.summary  = std::move(part.summary);
+                    fill.repeated = part.repeated;
+                    continue;
+                }
+                if(part.indices.size() < quota)
+                {
+                    shortfall    = true;
+                    newShortfall = newShortfall || !part.repeated;
+                }
+                fill.summary += (fill.summary.empty() ? "" : ", ") + process.name.name + ' '
+                                + std::to_string(part.indices.size());
+                if(part.repeated)
+                    fill.summary += " (fell short before)";
+                else if(!part.summary.empty())
+                    fill.summary += " (" + part.summary + ")";
+            }
+            if(several)
+                fill.repeated = shortfall && !newShortfall;
         }
         catch(const std::exception& e)
         {

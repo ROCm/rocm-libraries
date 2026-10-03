@@ -67,4 +67,9 @@ namespace hipblaslt_jit
         made.backend      = mock::makeBackend(options);
         return {};
     }
+
+    ProcessBackendName defaultProcessBackendName()
+    {
+        return {"test", "test"};
+    }
 }

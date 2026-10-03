@@ -34,7 +34,14 @@ queries rank candidates with Origami and replay the bundles that
 `HIPBLASLT_JIT_TEST_REPLAY` lists, separated by `:` (`;` on Windows).
 `HIPBLASLT_JIT_TEST_FAULT` set to `generate`, `build`, `record` or `trap`
 injects the mock's fault, and `record` appends each request to the file that
-`HIPBLASLT_JIT_TEST_RECORD` names. The CTest tests are:
+`HIPBLASLT_JIT_TEST_RECORD` names. `HIPBLASLT_JIT_TEST_BACKENDS` replaces the
+build's backends with mock backends, without a predictor, for heuristic
+queries. It lists them separated by `;`, each as
+`id[+flag...]=bundle[,bundle...]`; the id also names the backend in
+`HIPBLASLT_JIT_BACKENDS` and in reports. `optin` makes it opt-in,
+`unavailable` fails its configuration, and `unsupported`, `generate` and `trap`
+make it reject every problem, fail generation or abort the process if it
+generates. The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle`, `jit-component`, `jit-debug`, `jit-code-object`,
   `jit-knowledge`, `jit-library`, `jit-library-concurrency` and `jit-bundle-freshness`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
@@ -45,7 +52,8 @@ injects the mock's fault, and `record` appends each request to the file that
   `jit-helper-failures` and `jit-api-splitk`, `jit-api-streamk`, `jit-api-amax`
   and `jit-api-alpha-zero`, `jit-heuristic-<route>` for each heuristic route in
   the table below, run through the test backend replaying the `rank-1`,
-  `rank-2` and `splitk` bundles, and with `HIPBLASLT_ENABLE_CLIENT=ON`
+  `rank-2` and `splitk` bundles or, for the `multi-*` routes, through mock
+  backends, and with `HIPBLASLT_ENABLE_CLIENT=ON`
   `jit-bench-smoke`. A build with `HIPBLASLT_ENABLE_JIT=OFF` has
   `jit-heuristic-jit-off`, and with `HIPBLASLT_ENABLE_CLIENT=ON`
   `jit-bench-smoke-jit-off`.
@@ -94,6 +102,15 @@ replay bundles, because the library entries are MsgPack.
 | `jit-heuristic-debug-progress` | `HIPBLASLT_JIT_DEBUG=progress` in mode 1: query, lookup, generation, build and publish events in order, with no timing lines or durations; inside a stream capture in mode 2 an unpublished size gives `capture.skip` and the unchanged report |
 | `jit-heuristic-debug-off` | `HIPBLASLT_JIT_DEBUG` unset, empty or `0`: no lines and the same results; `0` and an unknown name each print one warning and leave the names they accompany in effect; with `HIPBLASLT_JIT=0`, any value leaves the output unchanged |
 | `jit-heuristic-debug-file` | `HIPBLASLT_JIT_DEBUG_FILE` with `%i` writes one owner-only file per process and nothing to stderr; two processes sharing one file leave every line intact; a file that cannot be opened prints one warning and the lines go to stderr |
+| `jit-heuristic-multi-both` | Two mock backends, A replaying `rank-1` and `rank-2` and B replaying `splitk`, in mode 2: a request for four returns A's two solutions, then B's, with one shortfall warning that lists both backends' counts; each backend publishes under its own key directory, and a second process whose backends abort if they generate returns the same indices with no report |
+| `jit-heuristic-multi-order` | `HIPBLASLT_JIT_BACKENDS` reverses the order, selects one backend, and ignores an identifier the build lacks with exactly one warning |
+| `jit-heuristic-multi-optin` | An opt-in backend serves only when `HIPBLASLT_JIT_BACKENDS` names it, and an unnamed one is not configured, so its configuration failure is not reported |
+| `jit-heuristic-multi-unavailable` | A backend whose configuration fails prints one configure warning naming it, and the other serves |
+| `jit-heuristic-multi-count` | A request for one returns only the first backend's solution, a request for two one of each; when the first fails to generate, the second still serves and the one failure warning names the first |
+| `jit-heuristic-multi-domain` | A backend that rejects the problem is skipped without a report; when both reject it, exactly one error says that no enabled backend supports the problem |
+| `jit-heuristic-multi-exclude` | Two backends replaying the same bundle return its kernel once |
+| `jit-heuristic-multi-fellshort` | Over two queries, a backend that fell short does not generate again and the next backend still serves, with no report |
+| `jit-heuristic-multi-capture` | With only the second backend's solution published, `hipblasLtMatmul` without an algorithm inside a global capture, whose backends abort if they generate, runs that solution and the graph replays with checked numerics and no report |
 | `jit-heuristic-jit-off` | In a build without JIT, `HIPBLASLT_JIT=1` prints one warning across two handles and three queries, leaves the results unchanged, and creates no JIT solution library |
 | `jit-bench-smoke` | `hipblaslt-bench` with `HIPBLASLT_JIT=2` and an empty device library runs and verifies one replayed JIT solution with no JIT report and publishes it; a second run whose backend fails if it generates runs the same kernel from the library |
 | `jit-bench-smoke-jit-off` | `hipblaslt-bench` in a build without JIT prints one warning for `HIPBLASLT_JIT=2` and creates no JIT solution library |
@@ -168,7 +185,9 @@ library. `--replay` is repeated once per bundle; the `jit-off` route takes
 none. The build's JIT backend must be the test backend: the routes replay
 those bundles, and its record fault stands in for a backend that fails if it
 generates. In a build without a device library, `partial-fill` and
-`provider-order` print SKIP, and `capture` skips its pre-tuned part.
+`provider-order` print SKIP, and `capture` skips its pre-tuned part. The
+`multi-*` routes take no `--replay`: they set `HIPBLASLT_JIT_TEST_BACKENDS` to
+the committed bundles.
 
 `test_bench_smoke.py <hipblaslt-bench> <fresh-output> --replay BUNDLE` runs
 `hipblaslt-bench` the same way, and `--jit-off` instead checks a build without

@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Experimental HipKittens JIT backend for gfx950 BF16 and FP16 TN GEMMs, built with `HIPBLASLT_ENABLE_JIT=ON` and the `HIPBLASLT_JIT_ENABLE_HIPKITTENS` CMake option (default `OFF`). With `HIPBLASLT_JIT` set, heuristic queries and `hipblasLtMatmul` without an algorithm use it when the new `HIPBLASLT_JIT_BACKENDS` environment variable names `hipkittens`; `HIPBLASLT_JIT_HIPKITTENS_PATH` sets the directory of its headers.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.

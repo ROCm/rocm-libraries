@@ -143,12 +143,20 @@ Experimental JIT GEMM solutions
 The ``HIPBLASLT_ENABLE_JIT`` CMake option, ``OFF`` by default, builds experimental support for
 just-in-time (JIT) GEMM solutions, which the ``HIPBLASLT_JIT`` environment variable controls
 (see :ref:`environment-variables`). It requires the host library and the ``amd_comgr`` CMake
-package from ROCm. hipBLASLt does not yet include a JIT generator backend, so this option is
-intended for development.
+package from ROCm. The only JIT generator backend is the opt-in HipKittens backend below, so this
+option is intended for development.
 
 .. code-block:: bash
 
    cmake -S [HIPBLASLT_SOURCE] -B [HIPBLASLT_BUILD_DIR] -DHIPBLASLT_ENABLE_JIT=ON
+
+With ``HIPBLASLT_ENABLE_JIT=ON``, the ``HIPBLASLT_JIT_ENABLE_HIPKITTENS`` CMake option, ``OFF`` by
+default, adds the HipKittens backend for gfx950 BF16 and FP16 GEMMs to a build whose
+``GPU_TARGETS`` include gfx950. Configuration downloads HipKittens from GitHub at a pinned commit;
+to build offline, set ``FETCHCONTENT_SOURCE_DIR_HIPKITTENS`` to an unpacked archive of that commit.
+The runtime component installs the HipKittens headers and license. JIT heuristic queries use the
+backend when ``HIPBLASLT_JIT_BACKENDS`` names ``hipkittens``. The ``jit`` CMake preset enables
+both options.
 
 Building the library, tests, benchmarks, and samples manually
 -------------------------------------------------------------

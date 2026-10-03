@@ -11,8 +11,8 @@ them.
 `jit` preset sets the option. Every mode needs a gfx950 device, so the CTest
 tests that run it have the `jit-gpu` label. `jit-hipkittens-install` is
 registered only when install rules are generated (not with
-`CMAKE_SKIP_INSTALL_RULES=ON`), and `jit-hipkittens-bench` only with
-`HIPBLASLT_ENABLE_CLIENT=ON`. From the repository root:
+`CMAKE_SKIP_INSTALL_RULES=ON`), and `jit-hipkittens-bench` and
+`jit-hipkittens-heuristic` only with `HIPBLASLT_ENABLE_CLIENT=ON`. From the repository root:
 
 ```bash
 cmake -S projects/hipblaslt -B "$project_build" \
@@ -30,9 +30,12 @@ The binary takes a mode:
 | `host <fresh-scratch>` | The `jit-hipkittens-backend` checks; needs a device but runs no kernel |
 | `gpu` | The `jit-hipkittens-gemm` checks on gfx950; requires `HIPBLASLT_JIT_LIBRARY_PATH` |
 | `library` | Prints the headers it uses, publishes one solution, runs it, and prints `INDEX <n>`; requires `HIPBLASLT_JIT_LIBRARY_PATH` |
+| `heuristic` | Runs M=1024 N=512 K=768 through `hipblasLtMatmul` without an algorithm, then the first result of `GemmInstance::algoGetHeuristic`, which must be the HipKittens kernel, and checks both against the CPU reference; needs `HIPBLASLT_JIT` and `HIPBLASLT_JIT_BACKENDS` naming `hipkittens` first |
 
 `test_hipkittens_bench.py <test> <hipblaslt-bench> <fresh-output>` runs the
-`jit-hipkittens-bench` test, and
+`jit-hipkittens-bench` test,
+`test_hipkittens_heuristic.py <test> <hipblaslt-bench> <fresh-output>` the
+`jit-hipkittens-heuristic` test, and
 `test_hipkittens_install.py <build> <test> <fresh-output>` the
 `jit-hipkittens-install` test.
 
@@ -44,3 +47,4 @@ The binary takes a mode:
 | `jit-hipkittens-gemm` | On gfx950, `getJitAlgo` through `hipblasLtMatmul` and `Gemm` for seven shapes from 256×256×128 to 8192³ with beta 0 and C filled with NaN, for alpha 1.5 and -0.25 and beta 1, -0.5 and 2, with C separate or C = D, up to 4096³, for two to four batches, packed or with gaps between them, for padded or odd leading dimensions, also with batches and C = D, and for FP16 up to 4096³, with alpha, beta, batches with gaps, padded leading dimensions and C = D, compared with a CPU reference, with canaries around D, in its gaps and in its padding, and repeated runs identical; the shapes the kernel computes wrongly rejected before launch; base offsets of 2 and 16 bytes; and `getLibraryAlgos` publishing an index that also serves and runs ldA ≠ K, refuses an A that spans 4 GiB, and a second process runs with JIT off |
 | `jit-hipkittens-bench` | A published HipKittens index run by `hipblaslt-bench --algo_method index --verify --alpha 2 --beta 1 --batch_count 3` through `hipblasLtMatmul` with JIT off |
 | `jit-hipkittens-install` | `cmake --install --component runtime` installs the headers, their manifest and the license; a HipKittens index published and run against the installed library finds the installed headers, and after the installation is moved it runs again with the same index |
+| `jit-hipkittens-heuristic` | In mode 2, `hipblaslt-bench --verify` for M=1024 N=512 K=768 with `HIPBLASLT_JIT_BACKENDS=hipkittens`: `--api_method mix` with beta 0, through `GemmInstance::algoGetHeuristic`, and `--api_method c --beta 1`, through `hipblasLtMatmulAlgoGetHeuristic`, each return the HipKittens kernel and publish one HipKittens key directory; unset, with the headers missing, no HipKittens solution and no mention of HipKittens; listed, with the headers missing, no HipKittens solution and one configure report naming HipKittens. Then the test's `heuristic` mode with `hipkittens`, after which HipKittens has published |

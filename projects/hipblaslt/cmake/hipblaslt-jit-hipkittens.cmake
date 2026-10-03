@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# The HipKittens backend: a JIT backend that compiles HipKittens kernel
-# templates at run time. Included by the HIPBLASLT_ENABLE_JIT block of
+# The HipKittens backend: HIPBLASLT_JIT can compile HipKittens kernel templates
+# at run time. Included by the HIPBLASLT_ENABLE_JIT block of
 # library/src/amd_detail/CMakeLists.txt. The HipKittens headers the templates
 # include are run-time data: they are staged next to the built library and
 # installed with the runtime under hipblaslt/hipkittens/<commit>. Offline
@@ -120,6 +120,7 @@ target_sources(hipblaslt PRIVATE
     "${_hk_resources}")
 set_source_files_properties("${_hk_resources}" TARGET_DIRECTORY hipblaslt
     PROPERTIES INCLUDE_DIRECTORIES "${_hk_source}")
+set(hipblaslt_jit_opt_in_backends hipblaslt-jit-hipkittens-backend.cpp)
 target_compile_definitions(hipblaslt PRIVATE
     HIPBLASLT_JIT_HIPKITTENS
     HIPBLASLT_JIT_HIPKITTENS_DIR="${_hk_relative}"

@@ -34,9 +34,10 @@ predictor first ranks candidate configurations. In a build with
 generate the ones it lacks; see
 [heuristic integration](#heuristic-integration). The backends are a test mock
 that replays pre-generated source bundles and, in developer builds, the
-[HipKittens backend](JIT_HIPKITTENS.md), which only the JIT tests create.
-Heuristic queries use no generator backend yet, so outside the tests those
-queries report that hipBLASLt was built without one.
+[HipKittens backend](JIT_HIPKITTENS.md) for gfx950. Heuristic queries use
+HipKittens only when `HIPBLASLT_JIT_BACKENDS` names it; otherwise they use the
+build's default backend, and outside the tests there is none, so those queries
+report that hipBLASLt was built without one.
 
 ## Current behavior
 
@@ -180,15 +181,17 @@ The implementations are:
 - HipKittens backend: `hipblaslt-jit-hipkittens.cpp` returns the HIP source of
   a hipBLASLt-owned HipKittens kernel template for gfx950, the HipKittens
   headers it includes, and its library entry. Only builds with
-  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` compile it, and tests reach it through
-  `jit::hipkittens::createBackend`; see the
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON` compile it. Tests reach it through
+  `jit::hipkittens::createBackend`, and heuristic queries when
+  `HIPBLASLT_JIT_BACKENDS` names `hipkittens`; see the
   [HipKittens JIT backend](JIT_HIPKITTENS.md).
 - Heuristic integration: `hipblaslt-jit-mode.cpp` reads `HIPBLASLT_JIT`.
-  `hipblaslt-jit-process-backend.cpp` configures one `Jit` per process from the
-  backend, predictor and tuning knowledge that `makeDefaultProcessBackend`
+  `hipblaslt-jit-process-backend.cpp` configures one `Jit` per process for each
+  backend that `HIPBLASLT_JIT_BACKENDS` selects, from the backend, predictor and
+  tuning knowledge that `makeDefaultProcessBackend` or an opt-in provider
   returns, with the JIT solution library as its store, and `fillHeuristic` in
   `hipblaslt-jit-backend.cpp` looks a problem up in that library and generates
-  what it lacks. `hipblaslt-jit-report.cpp` prints failures, and
+  what it lacks, backend by backend. `hipblaslt-jit-report.cpp` prints failures, and
   `rocblaslt_auxiliary.cpp` calls these from both heuristic queries. See
   [heuristic integration](#heuristic-integration).
 
@@ -200,6 +203,13 @@ from `hipblaslt-jit-test-backend.cpp`, which replays bundles through the mock
 backend after an Origami prediction from the catalog knowledge, transporting
 only `origami.gemm.dp.v1`; the
 [JIT test guide](clients/tests/jit/README.md) describes its settings.
+
+A build also links one definition of `optInProcessBackends`, the backends that
+serve heuristic queries only when `HIPBLASLT_JIT_BACKENDS` names them:
+`hipblaslt-jit-no-opt-in-backend.cpp` lists none, and in builds with the
+HipKittens backend `hipblaslt-jit-hipkittens-backend.cpp` lists `hipkittens`.
+With `HIPBLASLT_JIT_TESTING=ON`, `HIPBLASLT_JIT_TEST_BACKENDS` replaces all of
+them with mock backends; the JIT test guide describes it.
 
 ### Origami modeled inputs
 
@@ -540,6 +550,29 @@ In forced mode, the JIT lookup and generation are the whole query. Each JIT
 result passes the same support and workspace checks as a `getAllSolutions`
 result. Its solution index is in the reserved JIT range.
 
+**Backends.** `HIPBLASLT_JIT_BACKENDS` lists the backends that serve the JIT
+step, by identifier and separated by commas, in the order they serve it.
+Unset or empty, the build's default backend serves alone, and opt-in backends
+such as `hipkittens` are not configured. hipBLASLt reads it when the first
+query reaches the JIT step. An identifier the build lacks prints
+`hipblaslt warning: JIT backend <id> in HIPBLASLT_JIT_BACKENDS is not in this build; ignored`
+once; when the list names no backend of the build, every query reports a
+configure failure. Each backend has its own cache key, so its solutions sit in
+their own key directory of the JIT solution library. In the JIT step a
+backend that does not serve the problem or the device is skipped without a
+report. The others serve in turn, each looking up and generating what is still
+missing, less one result kept for each later one, and excluding the kernels of
+the earlier ones; a backend that fails or falls short leaves its share to the
+next. A query therefore returns a result of every such backend only when it
+requests at least as many results as there are backends, and `hipblasLtMatmul`
+without an algorithm runs a solution of the first one that returns one. A
+backend whose configuration fails is reported like any other failure, once per
+problem, and the others still serve. When no backend serves the problem, the
+query reports
+`JIT generate failed for <problem>: no enabled JIT backend supports this problem`.
+With several backends, each failure message names its backend, and a
+shortfall warning lists each backend's count and summary.
+
 **Return count.** Returning fewer results than requested, including none, is
 success, as it already was for the pre-tuned lookup. In fallback mode, a query
 whose pre-tuned lookup failed, for example because no pre-tuned library could
@@ -571,10 +604,10 @@ hipblaslt error: JIT build failed for GEMM M=256 N=128 K=512 ... EPILOGUE_DEFAUL
 A shortfall warning, such as `hipblaslt warning: JIT returned 1 of 2 requested
 solutions for GEMM ...`, ends with the backend's summary of its generation.
 
-Once generation falls short for a problem, later queries for it in the same
-process look it up in the library but do not generate again. Queries for the
-same problem and workspace limit in one process generate one at a time, so the
-second one finds what the first published. Separate processes can generate the
+Once a backend's generation falls short for a problem, later queries for it in
+the same process look it up in that backend's entries but do not generate with
+it again. Queries for the same problem and workspace limit in one process
+generate one at a time, so the second one finds what the first published. Separate processes can generate the
 same solutions at once; they publish under the library lock, which keeps one
 entry and one index per solution, so every process returns the same indices.
 An empty output (M=0 or N=0) gets no JIT result. A problem that Origami cannot

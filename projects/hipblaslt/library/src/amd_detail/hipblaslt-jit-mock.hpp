@@ -28,12 +28,14 @@ namespace hipblaslt_ext::experimental::jit::mock
             Build, // the main kernel's source does not assemble
             Record, // generation appends its request to record and fails
             Trap, // any generation aborts the process
+            Unsupported, // accepts rejects every request
         } fault = Fault::None;
         std::string record;
         // The modeled contracts whose predictions the mock accepts, or none.
         // createBackend pairs them with the Origami predictor and the catalog
         // knowledge.
         std::set<std::string> contracts;
+        std::string           id = "mock"; // also its name; keys its JIT library entries
     };
 
     // The mock as a Jit backend; throws when a bundle cannot be read.

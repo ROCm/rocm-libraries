@@ -5,6 +5,7 @@
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-hash.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
@@ -209,6 +210,13 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 return m_info;
             }
 
+            Status accepts(const hipblaslt_jit::OperationRequest& request,
+                           const hipblaslt_jit::DeviceTarget&     target) const override
+            {
+                std::vector<Candidate> found;
+                return candidates(request, target, found);
+            }
+
             Status generate(const hipblaslt_jit::GenerationRequest&        request,
                             std::vector<hipblaslt_jit::GeneratedSolution>& solutions) const override
             {
@@ -278,5 +286,14 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             diagnostics.message = e.what();
             return HIPBLAS_STATUS_INTERNAL_ERROR;
         }
+    }
+
+    Status detail::makeProcessBackend(hipblaslt_jit::ProcessBackend& made)
+    {
+        std::vector<hipblaslt_jit::IncludeFile> headers;
+        auto                                    status = readHeaders({}, headers);
+        if(status.ok())
+            made.backend = std::make_shared<const HipKittensBackend>(std::move(headers));
+        return status;
     }
 }

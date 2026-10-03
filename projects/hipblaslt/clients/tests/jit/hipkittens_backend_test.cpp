@@ -728,6 +728,7 @@ namespace
                 std::copy(hostC.begin(), hostC.end(), fill.begin() + guard);
             HIP(hipMemcpy(base(), fill.data(), fill.size() * 2, hipMemcpyHostToDevice));
         }
+        // Without an algorithm, hipblasLtMatmul queries the heuristic itself.
         hipblasStatus_t matmul(const hipblasLtMatmulAlgo_t* algo)
         {
             return hipblasLtMatmul(h.handle,
@@ -1057,6 +1058,43 @@ namespace
         std::cout << "PASS a second process ran the index with JIT off\n";
     }
 
+    // The JIT heuristic, with HIPBLASLT_JIT_BACKENDS naming HipKittens first:
+    // hipblasLtMatmul without an algorithm, then the C++ heuristic's first result.
+    void heuristic()
+    {
+        Gemm g(libraryShape());
+        g.poison();
+        BLAS(g.matmul(nullptr));
+        const auto first = g.verify("hipblasLtMatmul without an algorithm");
+
+        hipblaslt_ext::Gemm cpp(g.h.handle,
+                                g.layout.desc,
+                                &g.c.alpha,
+                                g.a(),
+                                g.layout.la,
+                                g.b(),
+                                g.layout.lb,
+                                &g.c.beta,
+                                g.cIn(),
+                                g.layout.lc,
+                                g.d(),
+                                g.layout.ld);
+        hipblaslt_ext::GemmPreference                 preference;
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        BLAS(cpp.algoGetHeuristic(1, preference, results));
+        require(results.size() == 1, "The heuristic returned no solution");
+        require(hipblaslt_ext::getKernelNameFromAlgo(g.h.handle, results[0].algo)
+                    == variant().kernelName,
+                "The heuristic's first solution is not the HipKittens kernel");
+        g.poison();
+        BLAS(cpp.initialize(results[0].algo, nullptr, true, g.stream));
+        BLAS(cpp.run(g.stream));
+        require(g.verify("Gemm") == first,
+                "The heuristic's solution differs from hipblasLtMatmul's");
+        std::cout << "PASS hipblasLtMatmul without an algorithm and the heuristic run "
+                  << variant().kernelName << '\n';
+    }
+
     bool onGfx950()
     {
         int             device = -1;
@@ -1102,9 +1140,14 @@ int main(int argc, char** argv)
         }
         else if(mode == "library-reader" && argc == 3)
             readIndex(std::stoi(argv[2]));
+        else if(mode == "heuristic" && argc == 2)
+        {
+            require(onGfx950(), "The HipKittens kernels need a gfx950 device");
+            heuristic();
+        }
         else
         {
-            std::cerr << "Usage: " << argv[0] << " host SCRATCH | gpu | library\n";
+            std::cerr << "Usage: " << argv[0] << " host SCRATCH | gpu | library | heuristic\n";
             return 2;
         }
     }

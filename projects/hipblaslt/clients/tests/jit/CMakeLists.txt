@@ -168,6 +168,12 @@ if(HIPBLASLT_JIT_TESTING)
                 hipblaslt_jit_python_test(jit-bench-smoke jit-gpu test_bench_smoke.py
                     $<TARGET_FILE:hipblaslt-bench> "${hipblaslt_jit_scratch}/bench-smoke" ${replay})
             endif()
+            # Several backends: mock backends that replace the build's.
+            foreach(route both order optin unavailable count domain exclude fellshort capture)
+                hipblaslt_jit_python_test(jit-heuristic-multi-${route} jit-gpu test_heuristic.py
+                    $<TARGET_FILE:hipblaslt-jit-heuristic-test> multi-${route}
+                    "${hipblaslt_jit_scratch}/heuristic-multi-${route}")
+            endforeach()
         endif()
     endif()
 endif()
@@ -263,6 +269,9 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt_jit_python_test(jit-hipkittens-bench jit-gpu test_hipkittens_bench.py
                 ${hipkittens} $<TARGET_FILE:hipblaslt-bench> "${hipblaslt_jit_scratch}/hipkittens-bench")
+            hipblaslt_jit_python_test(jit-hipkittens-heuristic jit-gpu test_hipkittens_heuristic.py
+                ${hipkittens} $<TARGET_FILE:hipblaslt-bench>
+                "${hipblaslt_jit_scratch}/hipkittens-heuristic")
         endif()
     endif()
 endif()

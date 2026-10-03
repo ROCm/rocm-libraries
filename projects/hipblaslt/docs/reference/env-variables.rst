@@ -88,8 +88,10 @@ Just-in-time (JIT) GEMM solutions
 =================================
 
 These variables take effect only in a hipBLASLt build configured with ``HIPBLASLT_ENABLE_JIT=ON``
-and a JIT generator backend. Such a build without a generator backend reports, once per process,
-that it was built without one. A build without ``HIPBLASLT_ENABLE_JIT`` ignores ``HIPBLASLT_JIT``
+and a JIT generator backend, such as the HipKittens backend of a gfx950 build with
+``HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON``, which serves only when ``HIPBLASLT_JIT_BACKENDS`` names it.
+A query that reaches no generator backend reports, once per process, that hipBLASLt was built
+without one. A build without ``HIPBLASLT_ENABLE_JIT`` ignores ``HIPBLASLT_JIT``
 and prints one warning when it is set to a nonzero value.
 
 .. list-table::
@@ -119,6 +121,23 @@ and prints one warning when it is set to a nonzero value.
           owned by another user, or writable by group or others.
       - | Path to a directory
         | Default: ``/tmp/hipblaslt-jit-<uid>`` on Linux
+
+    * - | ``HIPBLASLT_JIT_BACKENDS``
+        | Selects the JIT backends that serve heuristic queries, in the order they serve each
+          query. Each backend's solutions are cached separately. hipBLASLt reads it when the first
+          query reaches JIT.
+      - | Comma-separated backend identifiers, such as ``hipkittens`` in a build with
+          ``HIPBLASLT_JIT_ENABLE_HIPKITTENS=ON``
+        | Unset or empty: the build's default backend only (default)
+        | An identifier the build lacks is ignored with one warning.
+
+    * - | ``HIPBLASLT_JIT_HIPKITTENS_PATH``
+        | Specifies the directory of the HipKittens headers that the HipKittens backend compiles
+          its kernels with. Its ``manifest.json`` must match the build's HipKittens commit, and every
+          file it lists must have the listed size and hash.
+      - | Path to a directory
+        | Default: ``hipblaslt/hipkittens/<commit>`` next to the loaded ``libhipblaslt``, then the
+          installation directory
 
     * - | ``HIPBLASLT_JIT_DEBUG``
         | Prints JIT diagnostic lines while ``HIPBLASLT_JIT`` is 1 or 2. Each line is
