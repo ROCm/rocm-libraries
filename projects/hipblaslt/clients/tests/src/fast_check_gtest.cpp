@@ -741,6 +741,23 @@ namespace
         EXPECT_GT(counts[2], 0);
     }
 
+    // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
+    // name is rejected.
+    TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
+    {
+        IntegerExactPattern p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("standard", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        EXPECT_TRUE(parse_integer_exact_pattern("ternary", p));
+        EXPECT_EQ(p, IntegerExactPattern::ternary);
+        EXPECT_TRUE(parse_integer_exact_pattern("sparse_k", p));
+        EXPECT_EQ(p, IntegerExactPattern::sparse_k);
+        EXPECT_FALSE(parse_integer_exact_pattern("sparse", p));
+    }
+
     // integer_exact negates half of B. FNUZ fp8 has no negative zero (0x80 is NaN), so negating
     // zero must leave it zero, and NaN stays NaN.
     TEST(FastCheck_pre_checkin, fnuz_negate_keeps_zero_and_nan)
