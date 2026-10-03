@@ -42,9 +42,9 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
 
 // Translate a MIOpen problem into hipconv's parameter struct.
-static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
+static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
 {
-    hipconv::Conv2dParams par{};
+    hipconv::ConvParams par{};
 
     if(problem.IsDirectionForward())
         par.direction = hipconv::Direction::Fprop;
@@ -71,6 +71,20 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 
     par.p = ProblemInterpreter::GetOutputHeightHo(problem);
     par.q = ProblemInterpreter::GetOutputWidthWo(problem);
+    // Every output extent must be set: ConvParams leaves them at -1 for
+    // "unspecified", and ConvSize multiplies them into a size_t.
+    par.e = 1;
+
+    if(problem.Is3d())
+    {
+        par.dims       = 3;
+        par.d          = ProblemInterpreter::GetInputDepthDi(problem);
+        par.kd         = ProblemInterpreter::GetFilterDepthZ(problem);
+        par.pad_d      = ProblemInterpreter::GetInputLeftPadD(problem);
+        par.stride_d   = ProblemInterpreter::GetAdjustedConvolutionStrideD(problem);
+        par.dilation_d = ProblemInterpreter::GetAdjustedConvolutionDilationD(problem);
+        par.e          = ProblemInterpreter::GetOutputDepthDo(problem);
+    }
 
     if(problem.IsFp16())
     {
@@ -105,7 +119,11 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
     // TensorOrder::NCHW would instead match no kernel at all.
     par.order = hipconv::TensorOrder::NHWC;
 
-    return par;
+    // Fold to 2D once here, so every call site sees the same params.
+    //
+    // unfolded() does not read par.order, and folding depth into the batch is a
+    // reshape only when channels are last.
+    return par.order == hipconv::TensorOrder::NHWC ? par.unfolded() : par;
 }
 
 // ===================== NCHW staging =====================
@@ -251,21 +269,26 @@ GetWorkspaceLayout(const HipConvTransposePlan& plan, size_t cast_sz, size_t hipc
 // transposable) are only defined on problems that pass it.
 static bool IsSupportedProblem(const ProblemDescription& problem)
 {
-    if(!problem.Is2d())
+    if(!problem.Is2d() && !problem.Is3d())
         return false;
     // fp16, bf16, and tf32 (fp32 data with tf32 compute enabled).
     if(!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.UseTF32()))
         return false;
+    // A non-packed tensor has no flat buffer, which neither hipconv nor the transposes
+    // can address.
+    if(problem.HasNonPackedTensors())
+        return false;
 
+    // NDHWC reaches hipconv directly, so 3D needs nothing of the transposes.
     if(problem.IsLayoutNHWC())
         return true;
     if(!problem.IsLayoutDefault())
         return false;
 
-    // NCHW goes through packed NHWC scratch: a non-packed tensor has no flat buffer to
-    // transpose, and the batched-transpose kernels cover only a fixed set of element
-    // types and 32-bit extents.
-    if(problem.HasNonPackedTensors())
+    // NCHW goes through packed NHWC scratch, and MakeTransposePlan() reads four extents
+    // positionally, so 3D would silently lose one. TransposeSolutionDefault2Ndhwc is
+    // what a 3D channels-first path would be built on.
+    if(!problem.Is2d())
         return false;
     return BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
                                                   problem.GetIn().GetLengths()) &&
@@ -275,15 +298,34 @@ static bool IsSupportedProblem(const ProblemDescription& problem)
                                                   problem.GetOut().GetLengths());
 }
 
+static std::string HipConvKernelLabel(hipconv::ConvKernelHandle kernel);
+
+// Resolve `config.descriptor` (arch-neutral name) to `config.index` for this
+// build's config enumeration `cfgs`, by matching kernel labels. No-op when the
+// index is already set (search / heuristic path) or the descriptor is empty.
+static void ResolveIndexFromDescriptor(const std::vector<hipconv::ConvKernelHandle>& cfgs,
+                                       const PerformanceConfigConvHipConv& config)
+{
+    if(config.index >= 0 || config.descriptor.empty())
+        return;
+    for(int i = 0; i < static_cast<int>(cfgs.size()); ++i)
+    {
+        if(HipConvKernelLabel(cfgs[i]) == config.descriptor)
+        {
+            config.index = i;
+            return;
+        }
+    }
+}
+
 // Resolve the kernel handle a perf-config selected.
 static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
-                                               const hipconv::Conv2dParams& par,
+                                               const hipconv::ConvParams& par,
                                                const PerformanceConfigConvHipConv& config)
 {
-    if(config.index < 0)
-        return nullptr;
     const auto cfgs = hipconv::get_valid_configs(arch, par, MAX_CONFIGS);
-    if(config.index >= static_cast<int>(cfgs.size()))
+    ResolveIndexFromDescriptor(cfgs, config);
+    if(config.index < 0 || config.index >= static_cast<int>(cfgs.size()))
         return nullptr;
     return cfgs[config.index];
 }
@@ -367,6 +409,7 @@ void PerformanceConfigConvHipConv::InitFromArch(const void* arch, const ProblemD
         hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par, MAX_CONFIGS);
     config_count = static_cast<int>(cfgs.size());
     index        = cfgs.empty() ? -1 : 0;
+    descriptor   = cfgs.empty() ? std::string{} : HipConvKernelLabel(cfgs[0]);
 }
 
 void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
@@ -391,19 +434,25 @@ bool PerformanceConfigConvHipConv::IsValidValue() const { return index >= 0; }
 bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
                                            const ProblemDescription& problem) const
 {
-    // Size the config list here, on behalf of SetNextValue.
-    //
-    // ComputedIterator (generic_search.hpp) constructs a config, calls IsValid, and only
-    // then calls SetNextValue, which has no ExecutionContext to resolve the arch with.
-    if(config_count < 0)
-    {
-        const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-        if(!arch.has_value())
-            return false;
-        config_count = static_cast<int>(
-            hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS).size());
-    }
-    return IsValidValue() && index < config_count;
+    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
+    if(!arch.has_value())
+        return false;
+    const auto cfgs = hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS);
+    // Also sizes the config list on behalf of SetNextValue, which has no
+    // ExecutionContext to resolve the arch with. ComputedIterator
+    // (generic_search.hpp) calls IsValid before every SetNextValue.
+    config_count = static_cast<int>(cfgs.size());
+
+    // Perf-config-picker / db-load path: resolve the arch-neutral descriptor to
+    // this build's local index by matching kernel labels.
+    ResolveIndexFromDescriptor(cfgs, *this);
+
+    if(!IsValidValue() || index >= config_count)
+        return false;
+    // Search path: keep the serialized descriptor in sync with the index, so a
+    // benchmarked pick is stored (and transfers across arches) by name.
+    descriptor = HipConvKernelLabel(cfgs[index]);
+    return true;
 }
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const

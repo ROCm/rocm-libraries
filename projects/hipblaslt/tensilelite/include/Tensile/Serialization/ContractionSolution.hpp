@@ -68,13 +68,47 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
-                if(!iot::outputting(io) && s.customKernel.name.empty())
-                    s.customKernel.name = s.sizeMapping.customKernelName;
+                iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
+                s.validatePersistentLoopArgs();
                 iot::mapRequired(io, "problemType", s.problemType);
             }
 
             const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomKernel, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomKernel& s)
+            {
+                iot::mapOptional(io, "name", s.name);
+                iot::mapOptional(io, "args", s.args);
+                iot::mapOptional(io, "macrotile", s.macrotile);
+                iot::mapOptional(io, "threads", s.threads);
+                iot::mapOptional(io, "grid", s.grid);
+                iot::mapOptional(io, "workspaceType", s.workspaceType);
+                iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
+                iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
+                iot::mapOptional(io, "generated", s.generated);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomArgDefinition, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomArgDefinition& s)
+            {
+                iot::mapRequired(io, "type", s.type);
+                iot::mapRequired(io, "semantic", s.semantic);
+                iot::mapOptional(io, "padding", s.padding);
+                iot::mapOptional(io, "index", s.index);
+            }
+            const static bool flow = true;
         };
 
         template <typename IO>
@@ -105,9 +139,54 @@ namespace TensileLite
                 iot::mapOptional(io, "packBatchDims", s.packBatchDims);
                 iot::mapOptional(io, "packSummationDims", s.packSummationDims);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
-                iot::mapOptional(io, "streamK", s.streamK);
-                iot::mapOptional(io, "streamKForceDPOnly", s.streamKForceDPOnly);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
+                bool hasStrategy = !iot::outputting(io) && iot::hasKey(io, "tileProcessingStrategy");
+                bool hasAssignment = !iot::outputting(io) && iot::hasKey(io, "workAssignment");
+                std::string strategy = iot::outputting(io) ? toString(s.tileProcessingStrategy) : "None";
+                std::string assignment = iot::outputting(io) ? toString(s.workAssignment) : "StaticGrid";
+                iot::mapOptional(io, "tileProcessingStrategy", strategy);
+                iot::mapOptional(io, "workAssignment", assignment);
+                if(!iot::outputting(io))
+                {
+                    // Validate names before ignoring inactive assignments or
+                    // replacing selectors with their legacy equivalents.
+                    auto parsedStrategy = parseTileProcessingStrategy(strategy);
+                    auto parsedAssignment = parseWorkAssignment(assignment);
+                    // Prebuilt compatibility boundary: preserve names and ABI metadata.
+                    bool hasLegacy = iot::hasKey(io, "streamK") || iot::hasKey(io, "streamKForceDPOnly");
+                    int legacyMode = 0, legacyDP = 0;
+                    iot::mapOptional(io, "streamK", legacyMode);
+                    iot::mapOptional(io, "streamKForceDPOnly", legacyDP);
+                    if(legacyDP != 0 && legacyDP != 1)
+                        throw std::runtime_error("StreamKForceDPOnly must be 0 or 1");
+                    if(legacyDP && (legacyMode != 3 || s.streamKAtomic != 0))
+                        throw std::runtime_error("StreamKForceDPOnly requires non-atomic StreamK=3");
+                    if(hasLegacy)
+                    {
+                        if(legacyMode != 0 && legacyMode != 3 && legacyMode != 4 && legacyMode != 5)
+                            throw std::runtime_error("Unsupported legacy StreamK mode");
+                        if(legacyDP && legacyMode != 3)
+                            throw std::runtime_error("StreamKForceDPOnly requires StreamK=3");
+                        auto expectedStrategy = legacyDP ? TileProcessingStrategy::DataParallel
+                            : legacyMode ? TileProcessingStrategy::StreamK : TileProcessingStrategy::None;
+                        auto expectedAssignment = legacyMode == 4 ? WorkAssignment::DynamicWorkQueue
+                            : legacyMode == 5 ? WorkAssignment::Hybrid : WorkAssignment::StaticGrid;
+                        if((hasStrategy && parsedStrategy != expectedStrategy)
+                           || (hasAssignment && expectedStrategy != TileProcessingStrategy::None
+                               && parsedAssignment != expectedAssignment))
+                            throw std::runtime_error("Conflicting legacy and canonical execution policy");
+                        parsedStrategy = expectedStrategy;
+                        parsedAssignment = expectedAssignment;
+                        // Old nonpersistent records may retain inactive StreamK
+                        // options. Normalize them only at this legacy boundary.
+                        if(legacyMode == 0)
+                            s.streamKAtomic = 0;
+                    }
+                    s.tileProcessingStrategy = parsedStrategy;
+                    s.workAssignment = parsedStrategy == TileProcessingStrategy::None
+                        ? WorkAssignment::StaticGrid : parsedAssignment;
+                    s.validateExecutionPolicy();
+                }
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
                 iot::mapOptional(io, "persistentKernel", s.persistentKernel);
                 iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);
@@ -119,8 +198,6 @@ namespace TensileLite
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 
                 iot::mapOptional(io, "activationFused", s.activationFused);
-
-                iot::mapOptional(io, "CustomKernelName", s.customKernelName);
 
                 iot::mapRequired(io, "workGroupMappingXCC", s.workGroupMappingXCC);
                 iot::mapRequired(io, "workGroupMappingXCCGroup", s.workGroupMappingXCCGroup);
@@ -135,9 +212,13 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapOptional(io, "temporalHintA", s.temporalHintA);
+                iot::mapOptional(io, "temporalHintB", s.temporalHintB);
+                iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
+                iot::mapOptional(io, "SourceSwap", s.SourceSwap);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
                 iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);
@@ -166,6 +247,7 @@ namespace TensileLite
             static void mapping(IO& io, ContractionSolution::InternalArgsSupport& s)
             {
                 iot::mapRequired(io, "version", s.version);
+                iot::mapOptional(io, "persistentLoopArgsVersion", s.persistentLoopArgsVersion);
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
@@ -267,4 +349,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

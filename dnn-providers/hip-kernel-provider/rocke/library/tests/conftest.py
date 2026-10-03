@@ -18,8 +18,14 @@ from pathlib import Path
 import pytest
 
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
-if str(_LIBROOT) not in sys.path:
-    sys.path.insert(0, str(_LIBROOT))
+# Keep the library packages ahead of the CTest working directory. In the
+# standalone install layout that directory is bin/rocke, whose platform
+# `dispatch` subpackage would otherwise shadow the library's top-level package.
+try:
+    sys.path.remove(str(_LIBROOT))
+except ValueError:
+    pass
+sys.path.insert(0, str(_LIBROOT))
 
 _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:

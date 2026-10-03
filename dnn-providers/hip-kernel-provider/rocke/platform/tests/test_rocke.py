@@ -57,6 +57,7 @@ from rocke import (
     select_3d_config,
     use_2d_kernel,
 )
+from rocke.core.backend import resolve_backend
 from rocke.helpers import (
     AsyncTileLoader,
     CoalescedTileLoader,
@@ -1756,6 +1757,41 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         finally:
             comgr_mod.resolved_lib_rocm_version = orig_ver
             comgr_mod.resolved_lib_path = orig_path
+
+    def test_comgr_load_failure_names_every_candidate(self):
+        """A failed comgr load reports every candidate, not just the last.
+
+        Resolution walks a candidate list and falls through on OSError, so when
+        it ends in failure the only way to tell which library was meant to load,
+        and why it did not, is for each candidate to appear in the error.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        candidates = ["/first/libamd_comgr.so", "/second/libamd_comgr.so"]
+        with patch.object(
+            comgr_mod, "_candidate_lib_paths", return_value=candidates
+        ), patch.object(comgr_mod, "_add_dll_dir"), patch.object(
+            comgr_mod.ctypes, "CDLL", side_effect=OSError("cannot open shared object")
+        ):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        message = str(cm.exception)
+        for path in candidates:
+            self.assertIn(path, message)
+        self.assertIn("cannot open shared object", message)
+
+    def test_comgr_load_with_no_candidates_is_distinguishable(self):
+        """No candidate produced is a different fault from every candidate failing.
+
+        The two want different fixes -- nothing to try versus tried and failed --
+        so they must not share a message.
+        """
+        from rocke.runtime import comgr as comgr_mod
+
+        with patch.object(comgr_mod, "_candidate_lib_paths", return_value=[]):
+            with self.assertRaises(comgr_mod.ComgrError) as cm:
+                comgr_mod._load_lib()
+        self.assertIn("no candidate path", str(cm.exception))
 
     def test_no_hand_rolled_flavor_membership_lists(self):
         """Flavor membership must go through :data:`LLVM_FLAVORS`.
@@ -3597,7 +3633,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("av_lds")
         p = b.param("p", PtrType(I32, "lds"), align=16)
         b.av_load_b128(p)
-        with self.assertRaises(ValueError):
+        error_type = RuntimeError if resolve_backend() == "cpp" else ValueError
+        with self.assertRaisesRegex(
+            error_type,
+            r"av_load_b128: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     def test_av_store_b128_requires_v4i32_data(self):
@@ -3696,7 +3737,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("sprefetch_lds")
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
-        with self.assertRaises(ValueError):
+        error_type = RuntimeError if resolve_backend() == "cpp" else ValueError
+        with self.assertRaisesRegex(
+            error_type,
+            r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     # ---- async buffer / global -> LDS ----

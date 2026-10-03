@@ -26,7 +26,7 @@ how it is compiled into a ``.so``.
 """
 
 from __future__ import annotations
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
 import functools
@@ -86,6 +86,26 @@ except Exception:  # noqa: BLE001 - standalone use without dispatcher_common on 
         return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
 
 
+def normalize_gfx_arch(arch: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``"gfx950:sramecc+:xnack-"`` -> ``"gfx950"``. Empty input passes through.
+
+    Delegates to ``codegen_common.normalize_gfx_arch``, the dispatcher tree's
+    single source of truth, whenever it can be imported. It usually cannot be at
+    this point: nothing has put the ``codegen`` dir on ``sys.path`` yet -- only
+    ``ctypes_utils.get_arch_filter_data()`` does that, and it may never be called --
+    so this module has to be able to answer without it, the same way it already
+    falls back for ``_detect_gpu_arch_via_amd_smi``. The two are pinned to identical
+    behaviour by tests/test_gemm_utils.py::TestArchNormalizationMatchesCodegen.
+    """
+    try:
+        from codegen_common import normalize_gfx_arch as _canonical  # noqa: WPS433
+    except ImportError:
+        return arch.split(":", 1)[0]
+    return _canonical(arch)
+
+
 @functools.lru_cache(maxsize=1)
 def _get_arch() -> str:
     """Detect the GPU architecture from rocminfo and validate it.
@@ -118,29 +138,72 @@ def _get_arch() -> str:
             "gfx_arch (one of "
             f"{', '.join(_SUPPORTED_ARCHES)})."
         )
-    if detected not in _SUPPORTED_ARCHES:
+    return _validate_arch(detected)
+
+
+def _validate_arch(arch: str) -> str:
+    """Normalize a gfx target, then check it against ``_SUPPORTED_ARCHES``.
+
+    Normalization comes FIRST, and that ordering is the whole point -- but not
+    because autodetection produces suffixes. It does not. On a real device all
+    three autodetect sources report the BARE target: ``amd-smi``'s
+    ``TARGET_GRAPHICS_VERSION``, ``rocm_agent_enumerator``, and the agent
+    ``Name:`` line that ``_get_arch`` above parses all print ``gfx90a``
+    (measured on a gfx90a device). ``_get_arch`` could not return a suffixed
+    name even if rocminfo offered one: the only suffixed string in that output
+    is the ISA line, ``amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-``, which fails
+    the ``startswith("gfx")`` check after the split.
+
+    Suffixed names get here from CALLERS, not from detection, and they are real:
+
+      * this repository's own CMakeLists.txt sets, on the ASAN branch,
+        ``CK_GPU_TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"``;
+      * ``hipDeviceProp_t::gcnArchName`` returns ``gfx90a:sramecc+:xnack-``
+        (measured on the same device).
+
+    Either is a plausible thing to copy into ``--gfx-arch`` or an explicit
+    ``arch=``, and that value reaches this function unmodified. Validating it raw
+    rejected it:
+
+        gfx950:sramecc+:xnack-  -> ValueError
+
+    Bare targets were never the problem; they passed before this change and pass
+    now (tests/test_gemm_utils.py::test_bare_supported_arches_are_unchanged).
+    Normalizing first costs a supported bare name nothing and makes the suffixed
+    spellings above usable.
+
+    Every caller wants the bare target regardless. It is stamped onto
+    ``GemmKernelConfig.gfx_arch``, handed to ``--offload-arch``, and used as the key
+    into the warp tables, none of which know about suffixes.
+
+    The suffix is dropped, not carried through: ``--offload-arch=gfx90a`` rather
+    than ``gfx90a:xnack+``. That is not a regression -- it is the target string every
+    already-working path used, because a suffixed name could not get past this
+    function at all before. It does mean an xnack+ device is compiled for the bare
+    target; if a caller needs a specific xnack setting it has to pass the flag
+    itself, exactly as it had to before.
+    """
+    base = normalize_gfx_arch(arch)
+    if base not in _SUPPORTED_ARCHES:
         raise ValueError(
-            f"Unsupported GPU architecture {detected!r}; supported: "
-            f"{', '.join(_SUPPORTED_ARCHES)}."
+            f"Unsupported GPU architecture {arch!r}"
+            + (f" (normalized to {base!r})" if base != arch else "")
+            + f"; supported: {', '.join(_SUPPORTED_ARCHES)}."
         )
-    return detected
+    return base
 
 
 def _resolve_arch(arch: Optional[str]) -> str:
     """Resolve a possibly-``None`` arch to a validated, supported ``gfxNNN``.
 
-    ``None``/empty -> detect via :func:`_get_arch`. An explicit value is
-    validated against ``_SUPPORTED_ARCHES`` (raising ``ValueError`` if unknown)
-    so a typo can never silently reach the compiler.
+    ``None``/empty -> detect via :func:`_get_arch`. An explicit value is normalized
+    and then validated against ``_SUPPORTED_ARCHES`` (raising ``ValueError`` if
+    unknown) so a typo can never silently reach the compiler, while the suffixed
+    name a device actually reports resolves to its base.
     """
     if not arch:
         return _get_arch()
-    if arch not in _SUPPORTED_ARCHES:
-        raise ValueError(
-            f"Unsupported GPU architecture {arch!r}; supported: "
-            f"{', '.join(_SUPPORTED_ARCHES)}."
-        )
-    return arch
+    return _validate_arch(arch)
 
 
 def _cshuffle_store_ok(
@@ -597,6 +660,16 @@ class GroupedGemmProblem:
         return cls(groups=[(int(m), int(n), int(k)) for (m, n, k) in d["groups"]])
 
 
+# ctypes run() status codes (see bindings/ctypes/*_ctypes_lib.cpp).
+# STATUS_UNSUPPORTED (-3) is returned only when the selected kernel rejects the
+# problem (IsSupportedArgument throws "... not supported ..." inside run());
+# callers treat it as "not run" (skip, no verification). Every other negative
+# code (-1 host/HIP/launch error, -2 no suitable kernel) is a real failure.
+STATUS_OK = 0
+STATUS_NO_KERNEL = -2
+STATUS_UNSUPPORTED = -3
+
+
 @dataclass
 class GemmResult:
     output: np.ndarray
@@ -612,7 +685,13 @@ class GemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 @dataclass
@@ -628,7 +707,13 @@ class GroupedGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 # ============================================================================
@@ -1355,7 +1440,13 @@ class MultiDGemmResult:
 
     @property
     def success(self) -> bool:
-        return self.status == 0
+        return self.status == STATUS_OK
+
+    @property
+    def unsupported(self) -> bool:
+        """True when the kernel did not run because run() returned
+        STATUS_UNSUPPORTED. success stays False; callers count it as a skip."""
+        return self.status == STATUS_UNSUPPORTED
 
 
 def _multi_d_layout_from_kernel_name(name: str) -> str:
@@ -2004,12 +2095,9 @@ def _build_compile_jobs(
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
         *unified_framework_flags(config.gfx_arch),
-        # Pin the fp8/bf8 encoding so BOTH compiler passes agree. Without this the
-        # device pass of config.hpp sees __gfx950__ and picks OCP while the host
-        # pass falls back to FNUZ -- and the numpy reference, which follows the
-        # arch (see numpy_dtype_for), then disagrees with the kernel by a factor
-        # of two. FNUZ archs need no define; the list is empty for them.
-        *_ocp_arch_defines(config.gfx_arch),
+        # Keep host/device fp8 encodings consistent and enable the target's
+        # WMMA/MX features, matching the CMake build.
+        *arch_feature_defines(config.gfx_arch),
         # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
         # _tile_engine_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
@@ -2063,22 +2151,6 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
-    # Guard the compile path: every config's gfx_arch must be a concrete,
-    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
-    # expand_sweep already resolves this, but a config built directly (gfx_arch
-    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
-    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
-    _shared_arch: Optional[str] = None
-    resolved_configs: List[GemmKernelConfig] = []
-    for c in configs:
-        if c.gfx_arch:
-            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
-        else:
-            if _shared_arch is None:
-                _shared_arch = _get_arch()
-            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
-    configs = resolved_configs
-
     # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
     # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
     # is not yet bridged (it mis-shuffles B -> wrong results; see BRIDGE_PERMUTE_N).
@@ -2096,6 +2168,22 @@ def setup_multiple_gemm_dispatchers(
                     f"that would mis-shuffle B ({c.name}). Flip BRIDGE_PERMUTE_N once "
                     "the permuteN pipeline is emitted in unified_gemm_codegen."
                 )
+
+    # Guard the compile path: every config's gfx_arch must be a concrete,
+    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
+    # expand_sweep already resolves this, but a config built directly (gfx_arch
+    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
+    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    _shared_arch: Optional[str] = None
+    resolved_configs: List[GemmKernelConfig] = []
+    for c in configs:
+        if c.gfx_arch:
+            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+        else:
+            if _shared_arch is None:
+                _shared_arch = _get_arch()
+            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+    configs = resolved_configs
 
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
@@ -2301,6 +2389,73 @@ def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> 
     if not allowed:
         return True
     return [wave_m, wave_n, wave_k] in allowed
+
+
+# --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 are only generated for gfx1250 by
+# unified_gemm_codegen. expand_sweep must drop the same combinations up front,
+# otherwise it hands back configs whose header is never emitted. The rules live
+# in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
+# shared with the codegen and arch_filter); pipelines outside that set are
+# untouched.
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent / "codegen"
+
+
+@functools.lru_cache(maxsize=1)
+def _gfx1250_reject_reason_fn():
+    """codegen_common.gfx1250_pipeline_reject_reason, importable regardless of
+    whether a caller already put the codegen dir on ``sys.path``."""
+    import sys  # noqa: WPS433 (local: only needed for this lazy import)
+
+    codegen_dir = str(_CODEGEN_DIR)
+    if codegen_dir not in sys.path:
+        sys.path.append(codegen_dir)
+    from codegen_common import gfx1250_pipeline_reject_reason  # noqa: WPS433
+
+    return gfx1250_pipeline_reject_reason
+
+
+def _gfx1250_pipeline_supported(
+    pipeline: str,
+    scheduler: str,
+    epilogue: str,
+    persistent: bool,
+    wave_m: int,
+    wave_n: int,
+    wave_k: int,
+    arch: str,
+    variant: str,
+    pad_m: bool = False,
+    pad_n: bool = False,
+    pad_k: bool = False,
+    layout: str = "",
+    dtype: str = "",
+    warp_tile_k: int = 0,
+) -> bool:
+    """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
+    the codegen would reject for this arch/variant/trait.
+
+    ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
+    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    8-bit warp_tile_k rule; an empty dtype skips it."""
+    if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
+        return True
+    reason = _gfx1250_reject_reason_fn()(
+        arch,
+        pipeline,
+        epilogue,
+        scheduler,
+        num_waves=wave_m * wave_n * wave_k,
+        warp_tile_k=warp_tile_k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        layout=layout,
+        variant_supported=variant in ("standard", "batched"),
+        variant_name=variant,
+        persistent=bool(persistent),
+        pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
+    )
+    return not reason
 
 
 def expand_sweep(
@@ -2547,7 +2702,30 @@ def expand_sweep(
         # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
         # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
         # bit-accurate). Gate it off until the pipeline is ported to wave32.
-        if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
+        if (
+            arch == "gfx1250"
+            and pipe == "compv3"
+            and sched == "intrawave"
+            and wm * wn == 8
+        ):
+            continue
+        if not _gfx1250_pipeline_supported(
+            pipe,
+            sched,
+            epi,
+            bool(persist),
+            wm,
+            wn,
+            wk,
+            arch,
+            variant,
+            pad_m=bool(pm),
+            pad_n=bool(pn),
+            pad_k=bool(pk),
+            layout=layout,
+            dtype=dtype,
+            warp_tile_k=wtk,
+        ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn

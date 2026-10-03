@@ -36,6 +36,7 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 import numpy as np  # noqa: E402
+import pytest
 
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
@@ -67,10 +68,18 @@ _CASES = [
     (dt, lay) for dt in (*_FLOAT_DTYPES, *_INT_DTYPES) for lay in _LAYOUTS
 ]
 
-# Padded default algorithm: pad_* all True so M/N need not divide the tile, which
-# is what lets the awkward shape below pass. K must still be a multiple of 8 for
-# the fp16/bf16 vectorized contiguous-reduction load, so every K here is divisible
-# by 8.
+# Padded default algorithm: pad_* all True so M/N/K need not divide the tile,
+# which is what lets the awkward shape below run.
+#
+# Padding only exempts the tile-divisibility checks in ck_tile's
+# IsSupportedArgument. The vector-load/store checks in the same function
+# (M % GetVectorSizeA, N % GetVectorSizeB, N % GetVectorSizeC) are NOT gated on
+# the pad_* flags -- a padded kernel still issues full-width vector accesses
+# along the contiguous dimension, so the extent of that dimension must divide the
+# vector width no matter how the tile is padded. With this 128x128x32 / 256-thread
+# shape the widest access is 16 elements (8-bit A/B operands: 16 bytes / 1 byte);
+# fp16/bf16 operands and every C tensor here are narrower. So M, N and K must all
+# stay multiples of 16 -- see _SHAPES below.
 _ALGO = dict(
     tile_m=128, tile_n=128, tile_k=32,
     wave_m=2, wave_n=2, wave_k=1,
@@ -79,12 +88,12 @@ _ALGO = dict(
     pad_m=True, pad_n=True, pad_k=True,
 )
 
-# (name, M, N, K). 'awkward' deliberately uses M, N that do not divide the 128
-# tile to exercise padding; K stays divisible by 8.
+# (name, M, N, K). 'awkward' is vector-aligned but not block-aligned, exercising
+# padding. Padding does not waive the kernel's vector-load/store alignment.
 _SHAPES = [
     ("square", 512, 512, 512),
     ("rectangular", 1024, 512, 256),
-    ("awkward", 257, 129, 512),
+    ("awkward", 272, 144, 512),
 ]
 
 # Global-relative-error gates. fp16 measured ~3-4e-4 and bf16 ~8e-3 on gfx942.
@@ -165,12 +174,17 @@ def _reference(A, B, dtype):
 
 def _config(dtype: str, layout: str, arch: str) -> GemmKernelConfig:
     la, lb, lc = layout
+    algo = dict(_ALGO)
+    if arch == "gfx1250":
+        # Native WMMA shapes: 16-bit inputs use K=32; 8-bit inputs use K=64.
+        warp_k = 32 if dtype in ("fp16", "bf16") else 64
+        algo.update(warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_k, tile_k=warp_k)
     return GemmKernelConfig(
         dtype_a=dtype, dtype_b=dtype,
         dtype_c=_output_dtype(dtype),
         dtype_acc=("int32" if dtype == "int8" else "fp32"),
         layout_a=_LAYOUT_WORD[la], layout_b=_LAYOUT_WORD[lb], layout_c=_LAYOUT_WORD[lc],
-        gfx_arch=arch, **_ALGO,
+        gfx_arch=arch, **algo,
     )
 
 
@@ -191,6 +205,7 @@ def _gpu_environment_reason():
     return None
 
 
+@pytest.mark.usefixtures("dispatcher_static_lib")
 class GemmBridgeParity(unittest.TestCase):
     """End-to-end GPU-vs-NumPy parity across the bridge's dtype/layout surface."""
 
@@ -212,6 +227,9 @@ class GemmBridgeParity(unittest.TestCase):
                 cls.build_failures[(dt, lay)] = "codegen/hipcc returned no .so"
             else:
                 cls.built[(dt, lay)] = so
+
+        if cls.arch == "gfx1250" and cls.build_failures:
+            raise AssertionError(f"MI400 parity kernels failed to build: {cls.build_failures}")
 
         if not cls.built:
             raise unittest.SkipTest(
@@ -239,6 +257,15 @@ class GemmBridgeParity(unittest.TestCase):
         self.assertEqual(runner.kernel_name, _config(dtype, layout, self.arch).name)
 
         result = runner.run(A, B, problem)
+        # Every shape in _SHAPES is chosen to satisfy the kernel's tile and vector
+        # constraints, so STATUS_UNSUPPORTED here is a real regression, not a case
+        # to skip -- call it out by name rather than leaving a bare status code.
+        if result.unsupported:
+            self.fail(
+                f"{dtype}/{layout} {shape[0]} ({M}x{N}x{K}): kernel rejected the "
+                f"arguments (STATUS_UNSUPPORTED). Check the tile/vector "
+                f"constraints documented above _SHAPES."
+            )
         self.assertTrue(
             result.success,
             f"{dtype}/{layout} {shape[0]} run failed (status {result.status})",
@@ -250,6 +277,16 @@ class GemmBridgeParity(unittest.TestCase):
             max_rel, _TOL[dtype],
             f"{dtype}/{layout} {shape[0]} max_rel={max_rel:.2e} > {_TOL[dtype]:.0e}",
         )
+
+    def test_unaligned_problem_is_rejected(self):
+        """Keep coverage of the old 257x129 shape: vector stores cannot run it."""
+        so = self.built.get(("fp16", "rcr"))
+        if so is None:
+            self.skipTest("fp16/rcr kernel unavailable")
+        M, N, K = 257, 129, 512
+        A, B = _make_inputs("fp16", M, N, K, np.random.default_rng(42))
+        result = GpuGemmRunner(so).run(A, B, GemmProblem(M=M, N=N, K=K))
+        self.assertEqual(result.status, -1)
 
 
 def _add_parity_tests():

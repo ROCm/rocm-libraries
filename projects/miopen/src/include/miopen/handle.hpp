@@ -176,6 +176,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;
     std::size_t GetImage3dMaxWidth() const;
+    std::size_t GetL2CacheSize() const;
+    std::size_t GetClockRateKhz() const;
     virtual std::size_t GetWavefrontWidth() const;
     virtual std::size_t GetMaxComputeUnits() const;
     std::size_t GetMaxHardwareComputeUnits() const
@@ -256,8 +258,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     {
         const auto& target = GetTargetProperties();
         const auto db_id   = target.DbId();
-        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1151" || db_id == "gfx1200" ||
-           db_id == "gfx1201")
+        if(db_id == "gfx1100" || db_id == "gfx1101" || db_id == "gfx1102" || db_id == "gfx1151" ||
+           db_id == "gfx1200" || db_id == "gfx1201")
         {
             std::ostringstream ss;
             ss << db_id << std::hex << GetMaxHardwareComputeUnits();
