@@ -1,23 +1,9 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-
-# Multi-Arch CI ASAN for rocm-libraries
-#
-# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
-#
-# For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
-
+# One-off host-ASan run of develop a41e63db316cce2ebf519a55b6f1439bc2e2fb3e on the requested gfx942 runner.
 name: TheRock Multi-Arch CI ASAN
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -59,7 +45,7 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
     with:
-      build_variant: "asan"
+      build_variant: "host-asan"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
@@ -71,11 +57,30 @@ jobs:
       build_jax: false
       repository: ROCm/TheRock
       ref: 498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      external_repo: '{"repository":"${{ github.repository }}","ref":"a41e63db316cce2ebf519a55b6f1439bc2e2fb3e"}'
+
+  configure_test_runner:
+    name: Configure requested gfx942 test runner
+    needs: setup
+    if: needs.setup.outputs.linux_build_config != ''
+    runs-on: ubuntu-24.04
+    outputs:
+      build_config: ${{ steps.configure.outputs.build_config }}
+    steps:
+      - name: Set requested test runner
+        id: configure
+        env:
+          BUILD_CONFIG: ${{ needs.setup.outputs.linux_build_config }}
+          TEST_RUNNER: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+        run: |
+          config=$(jq -c --arg runner "$TEST_RUNNER" '.per_family_info |= map(."test-runs-on" = $runner)' <<< "$BUILD_CONFIG")
+          jq -e '.build_variant_label == "host-asan" and (.per_family_info | length == 1) and .per_family_info[0].amdgpu_family == "gfx94X-dcgpu"' <<< "$config"
+          echo "build_config=$config" >> "$GITHUB_OUTPUT"
+          echo "$config" | jq .
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: setup
+    needs: [setup, configure_test_runner]
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
@@ -84,7 +89,7 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
     secrets: inherit
     with:
-      build_config: ${{ needs.setup.outputs.linux_build_config }}
+      build_config: ${{ needs.configure_test_runner.outputs.build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
