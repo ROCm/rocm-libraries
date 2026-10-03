@@ -16,6 +16,12 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added `BaseAMG::SetMaxLevels()` to limit the number of levels of an AMG hierarchy. Combined with passing another AMG solver as the coarse grid solver, this allows hybrid hierarchies such as unsmoothed aggregation on the finest levels followed by Ruge-Stueben AMG on the coarser levels.
+* Added the `cg-uaamg-rsamg` sample demonstrating a hybrid unsmoothed aggregation / Ruge-Stueben AMG preconditioner.
+
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
 ### Added
