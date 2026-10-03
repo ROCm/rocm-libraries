@@ -148,10 +148,11 @@ namespace rocisa
                     }
                     else if constexpr(std::is_same_v<T, double>)
                     {
-                        if(arg != std::trunc(arg) || std::fabs(arg) >= 0x1p63)
+                        // The signed 64-bit range is [-2^63, 2^63).
+                        if(arg != std::trunc(arg) || arg < -0x1p63 || arg >= 0x1p63)
                             throw std::invalid_argument(
-                                "64-bit add: cannot split non-integer immediate "
-                                + std::to_string(arg) + " into 32-bit halves");
+                                "64-bit add: cannot split immediate " + std::to_string(arg)
+                                + ", which is not a 64-bit integer, into 32-bit halves");
                         const uint64_t v = static_cast<uint64_t>(static_cast<int64_t>(arg));
                         srcs1.push_back(static_cast<int>(static_cast<uint32_t>(v)));
                         srcs2.push_back(static_cast<int>(static_cast<uint32_t>(v >> 32)));

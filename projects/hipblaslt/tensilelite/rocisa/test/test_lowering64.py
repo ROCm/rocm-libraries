@@ -72,6 +72,7 @@ _IMMEDIATES = [
     (2**31 + 5, -(2**31) + 5, 0),
     (2**32 + 3, 3, 1),
     (3 * 2**32 + 7, 7, 3),
+    (-(2**63), 0, -(2**31)),
 ]
 
 
@@ -112,3 +113,8 @@ def test_vaddncu64_immediate_high_half_is_the_sign_extension(lowered_isa, imm, l
 def test_symbolic_immediate_is_rejected(lowered_isa):
     with pytest.raises(Exception, match="cannot split"):
         str(SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1="SomeSymbol"))
+
+
+def test_immediate_outside_the_64_bit_range_is_rejected(lowered_isa):
+    with pytest.raises(Exception, match="cannot split"):
+        str(SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1=2**63))
