@@ -27,6 +27,8 @@
 #pragma once
 
 #include <algorithm>
+#include <memory>
+#include <type_traits>
 #include <vector>
 
 #include "rocblas.hpp"
@@ -690,6 +692,24 @@ ROCSOLVER_KERNEL void bdsqr_rot_snapshot(const int n,
     }
 }
 
+/** BDSQR_HOST_PTR returns the address of the first matrix of A (shifted), as a host value **/
+template <typename T, typename W>
+T* bdsqr_host_ptr(W A, const rocblas_stride shift, hipStream_t stream)
+{
+    if(!A)
+        return nullptr;
+    if constexpr(std::is_pointer_v<std::remove_pointer_t<W>>)
+    {
+        T* p;
+        if(hipMemcpyAsync(&p, A, sizeof(T*), hipMemcpyDeviceToHost, stream) != hipSuccess
+           || hipStreamSynchronize(stream) != hipSuccess)
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
+        return p + shift;
+    }
+    else
+        return A + shift;
+}
+
 template <typename S, typename T>
 class bdsqr_gpulog
 {
@@ -782,6 +802,25 @@ public:
     int sweeps() const
     {
         return ns;
+    }
+
+    // the log of the rotations of the left (U and C) and the descriptors, for a QR iteration
+    // that records its sweeps itself (as STEQR)
+    S* log_c() const
+    {
+        return lB_c;
+    }
+    S* log_s() const
+    {
+        return lB_s;
+    }
+    bdsqr_rot_desc* desc() const
+    {
+        return ddesc;
+    }
+    int* ndesc() const
+    {
+        return dnd;
     }
 
     // record the blocks rotated in the last sweep (slot = index of the sweep since the last flush)

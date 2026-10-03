@@ -679,6 +679,372 @@ __device__ void run_steqr(const I tid,
     }
 }
 
+// GPU STEQR applies the rotations in accumulated blocks for one problem of at least this order
+#ifndef STEQR_BLOCKED_MIN
+#define STEQR_BLOCKED_MIN 256
+#endif
+
+/** STEQR_CHASE_STATE is the state of the QL/QR iteration of STEQR_CHASE_KERNEL between launches **/
+template <typename S, typename I>
+struct steqr_chase_state
+{
+    I l1, iters, phase, ql, el, lend, lsv_s, lendsv_s, done;
+    S anorm;
+};
+
+/** STEQR_CHASE_KERNEL runs the iteration of RUN_STEQR (one thread, one problem) for at most ns
+    sweeps from its saved state, without updating the eigenvectors: the rotations of each sweep go
+    to a slot of the log of BDSQR_GPULOG (lc/ls, indexed by pair, with the convention of LASR) with
+    a descriptor, and are applied when the kernel returns. **/
+template <typename S, typename I>
+ROCSOLVER_KERNEL void steqr_chase_kernel(const I n,
+                                         S* D,
+                                         S* E,
+                                         steqr_chase_state<S, I>* st,
+                                         const I max_iters,
+                                         const S eps,
+                                         const S ssfmin,
+                                         const S ssfmax,
+                                         const int ns,
+                                         S* lc,
+                                         S* ls,
+                                         bdsqr_rot_desc* desc,
+                                         int* ndesc)
+{
+    I l1 = st->l1, iters = st->iters, phase = st->phase, ql = st->ql, el = st->el, lend = st->lend;
+    I lsv_s = st->lsv_s, lendsv_s = st->lendsv_s;
+    S anorm = st->anorm;
+    int nslot = 0;
+    I m;
+
+    while(true)
+    {
+        if(phase == 0)
+        {
+            if(l1 >= n || iters >= max_iters)
+            {
+                st->done = 1;
+                break;
+            }
+
+            // Determine submatrix indices
+            if(l1 > 0)
+                E[l1 - 1] = 0;
+            for(m = l1; m < n - 1; m++)
+            {
+                if(abs(E[m]) <= sqrt(abs(D[m])) * sqrt(abs(D[m + 1])) * eps)
+                {
+                    E[m] = 0;
+                    break;
+                }
+            }
+            el = l1;
+            lend = m;
+            lsv_s = l1;
+            lendsv_s = m;
+            l1 = m + 1;
+
+            // Choose iteration type (QL or QR)
+            if(abs(D[lend]) < abs(D[el]))
+            {
+                lend = lsv_s;
+                el = lendsv_s;
+            }
+
+            // Get scaling factor
+            anorm = find_max_tridiag(lsv_s, lendsv_s, D, E);
+            if(lend == el || anorm == 0)
+                continue;
+
+            // Scale submatrix
+            if(anorm > ssfmax)
+                scale_tridiag(lsv_s, lendsv_s, D, E, ssfmax / anorm);
+            else if(anorm < ssfmin)
+                scale_tridiag(lsv_s, lendsv_s, D, E, ssfmin / anorm);
+            ql = (lend >= el);
+            phase = 1;
+        }
+
+        if(!((ql ? el <= lend : el >= lend) && iters < max_iters))
+        {
+            // Undo scaling
+            if(anorm > ssfmax)
+                scale_tridiag(lsv_s, lendsv_s, D, E, anorm / ssfmax);
+            if(anorm < ssfmin)
+                scale_tridiag(lsv_s, lendsv_s, D, E, anorm / ssfmin);
+            phase = 0;
+            continue;
+        }
+        if(nslot == ns)
+            break;
+
+        S* wc = lc + size_t(nslot) * n;
+        S* ws = ls + size_t(nslot) * n;
+        I lsv = el;
+        if(ql)
+        {
+            // Find small subdiagonal element
+            for(m = el; m <= lend - 1; m++)
+                if(abs(E[m] * E[m]) <= eps * eps * abs(D[m] * D[m + 1]))
+                    break;
+
+            if(m < lend)
+                E[m] = 0;
+            S p = D[el];
+            if(m == el)
+            {
+                el++;
+                continue;
+            }
+            else if(m == el + 1)
+            {
+                // Use laev2 to compute 2x2 eigenvalues and eigenvectors
+                S rt1, rt2, c, s;
+                laev2(D[el], E[el], D[el + 1], rt1, rt2, c, s);
+                wc[el] = c;
+                ws[el] = s;
+
+                D[el] = rt1;
+                D[el + 1] = rt2;
+                E[el] = 0;
+                el = el + 2;
+            }
+            else
+            {
+                iters++;
+
+                S f, g, c, s, b, r;
+
+                // Form shift
+                g = (D[el + 1] - p) / (2 * E[el]);
+                if(g >= 0)
+                    r = abs(sqrt(1 + g * g));
+                else
+                    r = -abs(sqrt(1 + g * g));
+                g = D[m] - p + (E[el] / (g + r));
+
+                c = 1;
+                s = 1;
+                p = 0;
+
+                for(I i = m - 1; i >= el; i--)
+                {
+                    f = s * E[i];
+                    b = c * E[i];
+                    lartg(g, f, c, s, r);
+                    s = -s; //get the transpose of the rotation
+                    if(i != m - 1)
+                        E[i + 1] = r;
+
+                    g = D[i + 1] - p;
+                    r = (D[i] - g) * s + 2 * c * b;
+                    p = s * r;
+                    D[i + 1] = g + p;
+                    g = c * r - b;
+
+                    // Save rotations
+                    wc[i] = c;
+                    ws[i] = -s;
+                }
+
+                D[el] -= p;
+                E[el] = g;
+            }
+            // (the rotations of the columns lsv..m, backward)
+            const int d = (*ndesc)++;
+            desc[d] = {nslot, -1, int(lsv), int(m)};
+        }
+        else
+        {
+            // Find small subdiagonal element
+            for(m = el; m >= lend + 1; m--)
+                if(abs(E[m - 1] * E[m - 1]) <= eps * eps * abs(D[m] * D[m - 1]))
+                    break;
+
+            if(m > lend)
+                E[m - 1] = 0;
+            S p = D[el];
+            if(m == el)
+            {
+                el--;
+                continue;
+            }
+            else if(m == el - 1)
+            {
+                // Use laev2 to compute 2x2 eigenvalues and eigenvectors
+                S rt1, rt2, c, s;
+                laev2(D[el - 1], E[el - 1], D[el], rt1, rt2, c, s);
+                wc[m] = c;
+                ws[m] = s;
+
+                D[el - 1] = rt1;
+                D[el] = rt2;
+                E[el - 1] = 0;
+                el = el - 2;
+            }
+            else
+            {
+                iters++;
+
+                S f, g, c, s, b, r;
+
+                // Form shift
+                g = (D[el - 1] - p) / (2 * E[el - 1]);
+                if(g >= 0)
+                    r = abs(sqrt(1 + g * g));
+                else
+                    r = -abs(sqrt(1 + g * g));
+                g = D[m] - p + (E[el - 1] / (g + r));
+
+                c = 1;
+                s = 1;
+                p = 0;
+
+                for(I i = m; i <= el - 1; i++)
+                {
+                    f = s * E[i];
+                    b = c * E[i];
+                    lartg(g, f, c, s, r);
+                    s = -s; //get the transpose of the rotation
+                    if(i != m)
+                        E[i - 1] = r;
+
+                    g = D[i] - p;
+                    r = (D[i + 1] - g) * s + 2 * c * b;
+                    p = s * r;
+                    D[i] = g + p;
+                    g = c * r - b;
+
+                    // Save rotations
+                    wc[i] = c;
+                    ws[i] = s;
+                }
+
+                D[el] -= p;
+                E[el - 1] = g;
+            }
+            // (the rotations of the columns m..lsv, forward)
+            const int d = (*ndesc)++;
+            desc[d] = {nslot, 1, int(m), int(lsv)};
+        }
+        nslot++;
+    }
+
+    st->l1 = l1;
+    st->iters = iters;
+    st->phase = phase;
+    st->ql = ql;
+    st->el = el;
+    st->lend = lend;
+    st->lsv_s = lsv_s;
+    st->lendsv_s = lendsv_s;
+    st->anorm = anorm;
+}
+
+/** STEQR_SORT_PERM computes the swaps of the selection sort of RUN_STEQR (sw[i] = index swapped
+    with i), and sorts D; STEQR_APPLY_SWAPS applies them to the columns of C (a thread per row).
+    STEQR_COUNT_INFO sets info to the number of nonzero entries of E. **/
+template <typename S, typename I>
+ROCSOLVER_KERNEL void steqr_sort_perm(const I n, S* D, I* sw)
+{
+    for(I ii = 1; ii < n; ii++)
+    {
+        I el = ii - 1, m = el;
+        S p = D[el];
+        for(I j = ii; j < n; j++)
+        {
+            if(D[j] < p)
+            {
+                m = j;
+                p = D[j];
+            }
+        }
+        if(m != el)
+        {
+            D[m] = D[el];
+            D[el] = p;
+        }
+        sw[el] = m;
+    }
+}
+
+template <typename T, typename I>
+ROCSOLVER_KERNEL void steqr_apply_swaps(const I n, T* C, const I ldc, const I* sw)
+{
+    const I r = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if(r >= n)
+        return;
+    for(I el = 0; el < n - 1; el++)
+    {
+        const I m = sw[el];
+        if(m != el)
+        {
+            const T t = C[r + el * ldc];
+            C[r + el * ldc] = C[r + m * ldc];
+            C[r + m * ldc] = t;
+        }
+    }
+}
+
+template <typename S, typename I>
+ROCSOLVER_KERNEL void steqr_count_info(const I n, const S* E, I* info)
+{
+    for(I i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x; i < n - 1;
+        i += hipGridDim_x * hipBlockDim_x)
+        if(E[i] != 0)
+            atomicAdd(
+                reinterpret_cast<std::conditional_t<sizeof(I) == 4, unsigned int, unsigned long long>*>(
+                    info),
+                1u);
+}
+
+/** RUN_STEQR_BLOCKED runs STEQR on the device for one problem, with the rotations of each
+    BDSQR_ROT_SWEEPS sweeps applied in accumulated blocks (see BDSQR_GPULOG) **/
+template <typename T, typename S, typename U, typename I>
+rocblas_status run_steqr_blocked(rocblas_handle handle,
+                                 const I n,
+                                 S* D,
+                                 S* E,
+                                 U C,
+                                 const rocblas_stride shiftC,
+                                 const I ldc,
+                                 I* info,
+                                 I* sw,
+                                 const I max_iters,
+                                 const S eps,
+                                 const S ssfmin,
+                                 const S ssfmax)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    T* Ch = bdsqr_host_ptr<T>(C, shiftC, stream);
+    bdsqr_gpulog<S, T> glog(handle, int(n), nullptr, 0, 0, Ch, int(ldc), int(n), nullptr, 0, 0);
+    steqr_chase_state<S, I>* st;
+    HIP_CHECK(hipMalloc(&st, sizeof(*st)));
+    // (freed on any return or exception)
+    std::unique_ptr<steqr_chase_state<S, I>, void (*)(steqr_chase_state<S, I>*)> st_guard(
+        st, [](steqr_chase_state<S, I>* p) { (void)hipFree(p); });
+    HIP_CHECK(hipMemsetAsync(st, 0, sizeof(*st), stream));
+    I done = 0;
+    while(!done)
+    {
+        ROCSOLVER_LAUNCH_KERNEL((steqr_chase_kernel<S, I>), dim3(1), dim3(1), 0, stream, n, D, E,
+                                st, max_iters, eps, ssfmin, ssfmax, glog.sweeps(), glog.log_c(),
+                                glog.log_s(), glog.desc(), glog.ndesc());
+        HIP_CHECK(hipMemcpyAsync(&done, &st->done, sizeof(I), hipMemcpyDeviceToHost, stream));
+        glog.flush();
+        HIP_CHECK(hipStreamSynchronize(stream));
+    }
+
+    ROCSOLVER_LAUNCH_KERNEL((steqr_count_info<S, I>), dim3((n - 1) / 256 + 1), dim3(256), 0, stream,
+                            n, E, info);
+    ROCSOLVER_LAUNCH_KERNEL((steqr_sort_perm<S, I>), dim3(1), dim3(1), 0, stream, n, D, sw);
+    ROCSOLVER_LAUNCH_KERNEL((steqr_apply_swaps<T, I>), dim3((n - 1) / 64 + 1), dim3(64), 0, stream,
+                            n, Ch, ldc, sw);
+    return rocblas_status_success;
+}
+
 template <typename T, typename S, typename U, typename I>
 ROCSOLVER_KERNEL void steqr_kernel(const I n,
                                    S* DD,
@@ -836,6 +1202,12 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
             ROCBLAS_CHECK(run_steqr_hybrid<T>(handle, n, D + shiftD, strideD, E + shiftE, strideE,
                                               C, shiftC, ldc, strideC, batch_count, info,
                                               (S*)work_stack, 30 * n, eps, ssfmin, ssfmax));
+        }
+        else if(batch_count == 1 && n >= STEQR_BLOCKED_MIN)
+        {
+            // (sw: the swaps of the final sort, in the workspace)
+            ROCBLAS_CHECK(run_steqr_blocked<T>(handle, n, D + shiftD, E + shiftE, C, shiftC, ldc,
+                                               info, (I*)work_stack, 30 * n, eps, ssfmin, ssfmax));
         }
         else
         {

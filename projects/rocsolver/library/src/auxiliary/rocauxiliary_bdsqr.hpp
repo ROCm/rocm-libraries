@@ -373,24 +373,6 @@ __device__ static void bdsqr_permute_swap(const I n,
         and 2 means the input is invalid. */
 /***************************************************************/
 
-/** BDSQR_HOST_PTR returns the address of the first matrix of A (shifted), as a host value **/
-template <typename T, typename W>
-T* bdsqr_host_ptr(W A, const rocblas_int shift, hipStream_t stream)
-{
-    if(!A)
-        return nullptr;
-    if constexpr(std::is_pointer_v<std::remove_pointer_t<W>>)
-    {
-        T* p;
-        if(hipMemcpyAsync(&p, A, sizeof(T*), hipMemcpyDeviceToHost, stream) != hipSuccess
-           || hipStreamSynchronize(stream) != hipSuccess)
-            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
-        return p + shift;
-    }
-    else
-        return A + shift;
-}
-
 /** BDSQR_MARK_BAD marks the instances with info = n (bad input) as bdsqr_init does, so that
     bdsqr_finalize skips them **/
 ROCSOLVER_KERNEL void bdsqr_mark_bad(const rocblas_int n,
