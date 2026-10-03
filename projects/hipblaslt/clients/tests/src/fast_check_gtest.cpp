@@ -927,6 +927,38 @@ namespace
         }
     }
 
+    // In every supported type, the poison bits are kFastCheckPoisonValue as the type stores it,
+    // and the count of changed poison finds a single changed element.
+    TEST(FastCheckDevice_pre_checkin, every_type_counts_changed_poison)
+    {
+        const size_t elements = 300;
+        for(const auto& tc : kTypes)
+        {
+            std::vector<char> poison(tc.size);
+            store_as(tc.type, kFastCheckPoisonValue, poison.data());
+            uint64_t bits = fast_check_poison_bits(tc.type);
+            EXPECT_EQ(std::memcmp(&bits, poison.data(), tc.size), 0) << tc.name;
+
+            std::vector<char> h(elements * tc.size);
+            for(size_t idx = 0; idx < elements; idx++)
+                std::memcpy(h.data() + idx * tc.size, poison.data(), tc.size);
+            char* d = nullptr;
+            ASSERT_EQ(hipMalloc(&d, h.size()), hipSuccess);
+            ASSERT_EQ(hipMemcpy(d, h.data(), h.size(), hipMemcpyHostToDevice), hipSuccess);
+            auto changed = fast_check_count_changed_device(d, tc.type, elements, 0);
+            EXPECT_TRUE(changed.ok) << tc.name;
+            EXPECT_EQ(changed.count, 0u) << tc.name;
+
+            store_as(tc.type, 1, h.data() + 217 * tc.size);
+            ASSERT_EQ(hipMemcpy(d, h.data(), h.size(), hipMemcpyHostToDevice), hipSuccess);
+            changed = fast_check_count_changed_device(d, tc.type, elements, 0);
+            (void)hipFree(d);
+            EXPECT_TRUE(changed.ok) << tc.name;
+            EXPECT_EQ(changed.count, 1u) << tc.name;
+            EXPECT_EQ(changed.first, 217u) << tc.name;
+        }
+    }
+
     // Configurations fast_check cannot check exactly are refused with a reason, before any sums.
     TEST(FastCheck_pre_checkin, unsupported_configurations_are_refused)
     {
