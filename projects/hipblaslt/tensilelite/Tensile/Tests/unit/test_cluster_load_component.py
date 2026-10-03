@@ -406,5 +406,32 @@ class TestMaskAxisPerGrouping:
         assert _c().usesCombinedMask(_kernel(clusterDim=(2, 4), tdmFuse=1, mx=False))
 
 
+def _divergentKernel(pgrA, pgrB, clusterDim, tdmFuse):
+    return dict(_kernel(clusterDim=clusterDim, tdmFuse=tdmFuse, mx=True), PrefetchGlobalRead=1,
+                PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+
+
+class TestSingleBufferedTensorStaysSelfOnly:
+    @pytest.mark.parametrize("tdmFuse", [0, 1])
+    @pytest.mark.parametrize("pgrA, pgrB, clusterDim, tc", [
+        (1, 2, (1, 2), "A"), (1, 2, (1, 2), "MXSA"), (1, 2, (2, 2), "A"),
+        (2, 1, (2, 1), "B"), (2, 1, (2, 1), "MXSB"), (2, 1, (2, 2), "MXSB"),
+    ])
+    def test_peer_mask_on_the_single_buffered_tensor_asserts(self, pgrA, pgrB, clusterDim, tc,
+                                                              tdmFuse):
+        with pytest.raises(AssertionError, match="single-buffered"):
+            _c().applyToDescriptor(_StubWriter(), _divergentKernel(pgrA, pgrB, clusterDim, tdmFuse),
+                                   "tdmAGroup1", tc, waveSeparated=True)
+
+    @pytest.mark.parametrize("tdmFuse", [0, 1])
+    @pytest.mark.parametrize("pgrA, pgrB, clusterDim", [(1, 2, (2, 1)), (2, 1, (1, 2))])
+    def test_both_tensors_attach_their_masks_on_the_double_buffered_axis(self, pgrA, pgrB,
+                                                                         clusterDim, tdmFuse):
+        k = _divergentKernel(pgrA, pgrB, clusterDim, tdmFuse)
+        for tc in _TENSORS:
+            mod = _c().applyToDescriptor(_StubWriter(), k, "tdmAGroup1", tc, waveSeparated=True)
+            assert "s_or_b32" in str(mod), tc
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

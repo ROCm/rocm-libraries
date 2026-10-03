@@ -78,7 +78,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchLocalRead: [1]
         - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [1, 3]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -94,7 +94,7 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
-        - ClusterDim: [[1, 1], [2, 4], [4, 2], [4, 4]]
+        - ClusterDim: [[1, 1], [2, 4], [4, 2], [4, 4], [2, 1], [4, 1], [1, 2], [1, 4]]
         - LDSSegmentInterleave: [-1, 0, 1]
       BenchmarkForkParameters:
       JoinParameters:
