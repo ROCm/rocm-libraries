@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -284,9 +285,12 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 auto        modeled   = candidate.modeled;
                 if(!candidate.contract.empty() && candidate.contract != prediction.modeledContract)
                     modeled.insert(modeled.begin(), {"contract", json::quote(candidate.contract)});
-                out << (i ? "," : "") << "{\"id\":" << candidate.id
-                    << ",\"predicted_cycles\":" << candidate.predictedCycles
-                    << ",\"parameters\":" << members(candidate.parameters)
+                out << (i ? "," : "") << "{\"id\":" << candidate.id << ",\"predicted_cycles\":";
+                if(std::isfinite(candidate.predictedCycles))
+                    out << candidate.predictedCycles;
+                else
+                    out << "null";
+                out << ",\"parameters\":" << members(candidate.parameters)
                     << ",\"modeled\":" << members(modeled);
                 if(!candidate.provenance.empty())
                     out << ",\"knowledge\":" << candidate.provenance;

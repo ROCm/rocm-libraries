@@ -30,17 +30,58 @@ namespace hipblaslt_jit
         }
 
         constexpr const char* dataParallelContract = "origami.gemm.dp.v1";
+        constexpr const char* tunedContract        = "tensilelite.tuned.v1";
 
         struct Recipe
         {
             std::array<size_t, 9> matrixInstruction;
             origami::config_t     config;
-            int32_t               seed = -1;
+            int32_t               seed  = -1;
+            bool                  fixed = false;
         };
+
+        const char* toString(ExecutionPolicy::Strategy strategy)
+        {
+            using S = ExecutionPolicy::Strategy;
+            return strategy == S::StreamK ? "StreamK" : strategy == S::DataParallel ? "DataParallel"
+                                                                                     : "None";
+        }
+
+        const char* toString(ExecutionPolicy::Assignment assignment)
+        {
+            using A = ExecutionPolicy::Assignment;
+            return assignment == A::Hybrid             ? "Hybrid"
+                   : assignment == A::DynamicWorkQueue ? "DynamicWorkQueue"
+                                                       : "StaticGrid";
+        }
+
+        // Stream-K and a fixed GlobalSplitU above 1 need workspace.
+        bool needsWorkspace(const CandidateSeed& seed)
+        {
+            if(seed.policies.front().strategy == ExecutionPolicy::Strategy::StreamK)
+                return true;
+            for(const auto& parameter : seed.parameters)
+                if(parameter.name == "GlobalSplitU")
+                    return std::atoll(parameter.json.c_str()) > 1;
+            return false;
+        }
+
+        origami::config_t config(size_t m, size_t n, size_t depth, const origami::dim3_t& mi)
+        {
+            origami::config_t config;
+            config.mt              = {m, n, depth};
+            config.mi              = mi;
+            config.occupancy       = 1; // Conservative model input, not WG dimensions.
+            config.stream_k        = 0; // Caller-selected data-parallel candidate domain.
+            config.prediction_mode = origami::prediction_modes_t::estimation;
+            config.target          = origami::target_t::tensilelite;
+            return config;
+        }
 
         std::vector<Recipe> candidates(const origami::hardware_t&        hardware,
                                        origami::data_type_t              dtype,
-                                       const std::vector<CandidateSeed>& seeds)
+                                       const std::vector<CandidateSeed>& seeds,
+                                       size_t                            workspaceLimit)
         {
             // Use the target's instruction catalog for every datatype. Tensile
             // subsequently validates the complete instruction and tile combination.
@@ -49,10 +90,47 @@ namespace hipblaslt_jit
                 return std::array{a.m, a.n, a.k} < std::array{b.m, b.n, b.k};
             });
             std::vector<Recipe> result;
+            // A fixed seed is one candidate, ranked with its own Stream-K choice,
+            // if the target has its instruction.
+            for(size_t index = 0; index < seeds.size(); ++index)
+            {
+                const auto& seed = seeds[index];
+                if(!seed.instruction)
+                    continue;
+                const auto& shape = seed.tile;
+                const auto  mi    = std::find_if(
+                    instructions.begin(), instructions.end(), [&](const auto& candidate) {
+                        return std::array{candidate.m, candidate.n, candidate.k}
+                               == std::array{(*seed.instruction)[0],
+                                             (*seed.instruction)[1],
+                                             (*seed.instruction)[2]};
+                    });
+                if(mi == instructions.end() || seed.policies.size() != 1 || !seed.depthU
+                   || shape[0] % (mi->m * shape[2]) || shape[1] % (mi->n * shape[3])
+                   || (!workspaceLimit && needsWorkspace(seed)))
+                    continue;
+                Recipe candidate;
+                candidate.fixed           = true;
+                candidate.config          = config(shape[0], shape[1], seed.depthU, *mi);
+                candidate.config.stream_k = seed.policies.front().strategy
+                                                    == ExecutionPolicy::Strategy::StreamK
+                                                ? 1
+                                                : 0;
+                if(!seed.cacheHints.empty())
+                {
+                    candidate.config.cache_hints_a = seed.cacheHints.front()[0];
+                    candidate.config.cache_hints_b = seed.cacheHints.front()[1];
+                }
+                candidate.config.index = result.size();
+                candidate.seed         = static_cast<int32_t>(index);
+                result.push_back(candidate);
+            }
             for(const auto& mi : instructions)
                 for(size_t index = 0; index < seeds.size(); ++index)
                 {
                     const auto& seed = seeds[index];
+                    if(seed.instruction)
+                        continue;
                     for(const auto& rule : seed.depthRules)
                         for(const auto& hint : seed.cacheHints)
                         {
@@ -71,17 +149,11 @@ namespace hipblaslt_jit
                                                            shape[1] / (mi.n * shape[3]),
                                                            shape[2],
                                                            shape[3]};
-                            auto& config                = candidate.config;
-                            config.mt                   = {shape[0], shape[1], depth};
-                            config.mi                   = mi;
-                            config.occupancy = 1; // Conservative model input, not WG dimensions.
-                            config.stream_k  = 0; // Caller-selected data-parallel candidate domain.
-                            config.cache_hints_a   = hint[0];
-                            config.cache_hints_b   = hint[1];
-                            config.prediction_mode = origami::prediction_modes_t::estimation;
-                            config.target          = origami::target_t::tensilelite;
-                            config.index           = result.size();
-                            candidate.seed         = static_cast<int32_t>(index);
+                            candidate.config = config(shape[0], shape[1], depth, mi);
+                            candidate.config.cache_hints_a = hint[0];
+                            candidate.config.cache_hints_b = hint[1];
+                            candidate.config.index         = result.size();
+                            candidate.seed                 = static_cast<int32_t>(index);
                             result.push_back(candidate);
                         }
                 }
@@ -92,6 +164,7 @@ namespace hipblaslt_jit
     static Prediction rank(const OperationRequest&                    operation,
                            const TensileLite::ContractionProblemGemm& problem,
                            const DeviceTarget&                        target,
+                           size_t                                     workspaceLimit,
                            const TuningKnowledge&                     knowledge)
     {
         using Type         = rocisa::DataType;
@@ -132,12 +205,12 @@ namespace hipblaslt_jit
         request.b_mx_block_size = problem.mxBlockB();
         // Origami's instruction model describes one MAC input type. Mixed MAC
         // inputs and sparse instructions still go through Tensile validation.
-        const auto                     recipes = m && n && k
-                                     && problem.computeInputTypeA() == problem.computeInputTypeB()
-                                     && !problem.sparse()
-                                                     ? candidates(analytical, request.mi_dtype,
-                                                                  knowledge.seeds(operation, target))
-                                                     : std::vector<Recipe>{};
+        const bool modeled = m && n && k
+                             && problem.computeInputTypeA() == problem.computeInputTypeB()
+                             && !problem.sparse();
+        const auto seeds   = modeled ? knowledge.seeds(operation, target)
+                                     : std::vector<CandidateSeed>{};
+        const auto recipes = candidates(analytical, request.mi_dtype, seeds, workspaceLimit);
         // Both mapping selectors require at least one CU per XCD. Do not let
         // an unsupported budget reach their integer divisions or replace it.
         require(origami::resolve_num_cus(request.num_cus, analytical.N_CU) >= analytical.NUM_XCD,
@@ -157,7 +230,10 @@ namespace hipblaslt_jit
                                                       == std::numeric_limits<double>::max();
                                     }),
                      ranked.end());
-        require(!ranked.empty(),
+        require(!ranked.empty()
+                    || std::any_of(recipes.begin(),
+                                   recipes.end(),
+                                   [](const auto& recipe) { return recipe.fixed; }),
                 "No Origami ranking: no finite positive-latency candidates for this request");
 
         Prediction prediction;
@@ -188,11 +264,40 @@ namespace hipblaslt_jit
                          "reuse gfx950 with gfx1250 overrides; not calibrated for gfx1250"
                        : "Origami native architecture model")},
         };
+        std::vector<Candidate> tuned;
+        std::vector<bool>      placed(recipes.size());
+        // A tuned set travels as it is; only its tile and policy are modeled.
+        const auto addTuned = [&](size_t index, double latency) {
+            const auto& recipe = recipes[index];
+            const auto& config = recipe.config;
+            const auto& seed   = seeds[recipe.seed];
+            const auto& policy = seed.policies.front();
+            Candidate   candidate;
+            candidate.id              = static_cast<uint32_t>(index);
+            candidate.predictedCycles = latency;
+            candidate.contract        = tunedContract;
+            candidate.seed            = recipe.seed;
+            candidate.parameters      = seed.parameters;
+            candidate.provenance      = seed.provenance;
+            candidate.modeled         = {
+                {"macro_tile", json::array(std::array{config.mt.m, config.mt.n, config.mt.k})},
+                {"execution",
+                 json::object({{"strategy", quote(toString(policy.strategy))},
+                               {"assignment", quote(toString(policy.assignment))}})},
+            };
+            tuned.push_back(std::move(candidate));
+            placed[index] = true;
+        };
         for(const auto& result : ranked)
         {
             require(result.config.index < recipes.size(), "Origami returned an unknown candidate");
             const auto& recipe = recipes[result.config.index];
             const auto& config = result.config;
+            if(recipe.fixed)
+            {
+                addTuned(config.index, result.latency);
+                continue;
+            }
             const auto [reduction, grid, activeCUs, timesteps, split]
                 = origami::gemm::compute_launch_parameters(request, analytical, config,
                                                           config.grid_selection);
@@ -235,6 +340,18 @@ namespace hipblaslt_jit
                 candidate.parameters.push_back(std::move(parameter));
             prediction.ranked.push_back(std::move(candidate));
         }
+        // Origami's own rejections do not drop a tuned set: it follows the
+        // ranked sets of its rank, without a latency.
+        for(size_t index = 0; index < recipes.size(); ++index)
+            if(recipes[index].fixed && !placed[index])
+                addTuned(index, std::numeric_limits<double>::quiet_NaN());
+        // Tuned seeds keep the knowledge's order; Origami's latency orders equal ranks.
+        std::stable_sort(tuned.begin(), tuned.end(), [&](const auto& a, const auto& b) {
+            return seeds[a.seed].rank < seeds[b.seed].rank;
+        });
+        prediction.ranked.insert(prediction.ranked.begin(),
+                                 std::make_move_iterator(tuned.begin()),
+                                 std::make_move_iterator(tuned.end()));
         return prediction;
     }
 
@@ -249,7 +366,7 @@ namespace hipblaslt_jit
             }
             std::set<std::string> modeledContracts() const override
             {
-                return {dataParallelContract};
+                return {dataParallelContract, tunedContract};
             }
             Status predict(const PredictionRequest& request,
                            const TuningKnowledge&   knowledge,
@@ -263,8 +380,11 @@ namespace hipblaslt_jit
                             "Origami does not model this operation"};
                 try
                 {
-                    prediction
-                        = rank(request.request, lowerForJit(*gemm), request.target, knowledge);
+                    prediction = rank(request.request,
+                                      lowerForJit(*gemm),
+                                      request.target,
+                                      request.workspaceLimit,
+                                      knowledge);
                     return {};
                 }
                 catch(const std::bad_alloc&)

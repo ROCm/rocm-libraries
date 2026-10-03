@@ -75,6 +75,7 @@ namespace hipblaslt_jit
         size_t                               depthU = 0;
         std::vector<TuningParameter>         parameters; // forwarded verbatim
         std::string                          provenance; // JSON its candidates record
+        size_t rank = 0; // fixed seeds go best rank first; the predictor orders equal ranks
         // The policies to expand; a fixed seed has exactly one.
         std::vector<ExecutionPolicy> policies;
     };
