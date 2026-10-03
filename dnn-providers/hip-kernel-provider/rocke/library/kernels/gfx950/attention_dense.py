@@ -486,6 +486,59 @@ _CODEGEN_KNOB_DEFAULTS = MappingProxyType(
 AttentionDenseSpec = Gfx950AttentionDenseSpec
 
 
+#: gfx950 LDS per workgroup (``ArchTarget("gfx950").lds_capacity_bytes``).
+GFX950_LDS_CAPACITY_BYTES = 163840
+
+
+def gfx950_dense_static_lds_bytes(*, head_size: int, block_n: int) -> int:
+    """Static LDS the non-persistent body allocates for one ``(head_size, block_n)``.
+
+    The K/V slabs at the layout every shipped variant is built with -- ``_NBUF`` = 2
+    buffers, K pad 8 (per row at D128, per packed row-group at D64), V pad 32 at D128
+    and none at D64, 2-byte elements::
+
+        D128: K [2, BN, 128 + 8] + V [2, BN, 128 + 32]   = 1184 * BN bytes
+        D64:  K [2, BN / 2, 2 * 64 + 8] + V [2, BN, 64]  =  528 * BN bytes
+
+    ``block_m`` does not enter it. Returns 0 for any other head size; callers have
+    already required 64 or 128.
+    """
+    buffers, element_bytes, k_pad, v_pad = 2, 2, 8, 32
+    if head_size == 128:
+        return buffers * block_n * ((head_size + k_pad) + (head_size + v_pad)) * element_bytes
+    if head_size == 64:
+        rows_per_group = 2
+        k_bytes = buffers * (block_n // rows_per_group) * (rows_per_group * head_size + k_pad)
+        v_bytes = buffers * block_n * head_size
+        return (k_bytes + v_bytes) * element_bytes
+    return 0
+
+
+def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]:
+    """Every ``(block_m, block_n)`` the gfx950 dense kernel is built with.
+
+    The one place the tile rules are stated, so the catalog generator, the tuning
+    axes and the C++ matcher can all be derived from it rather than restating it.
+    The LDS budget is the rule none of the structural checks imply: D128 block_n
+    256 satisfies every divisibility rule and still needs 303,104 bytes.
+    """
+    if head_size not in (64, 128):
+        return ()
+    legal = []
+    for block_m in (128, 256):
+        # Mirrors AttentionDenseSpec.num_waves: one wave per 32 query rows.
+        num_waves = block_m // 32
+        for block_n in range(32, block_m + 1, 32):
+            if block_m % block_n or block_n % num_waves:
+                continue
+            if gfx950_dense_static_lds_bytes(
+                head_size=head_size, block_n=block_n
+            ) > GFX950_LDS_CAPACITY_BYTES:
+                continue
+            legal.append((block_m, block_n))
+    return tuple(legal)
+
+
 def supports_attention_dense(
     spec: AttentionDenseSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -521,6 +574,19 @@ def supports_attention_dense(
         return False, (
             f"block_n={spec.block_n} must be divisible by num_waves="
             f"{spec.num_waves} so K/V DMA rows distribute evenly"
+        )
+    # Last, because it is the only tile rule the structural checks above do not
+    # imply: D128 block_n 256 divides correctly and still over-allocates. Without
+    # it the spec is accepted here and fails in codegen, so a catalog built from
+    # this predicate would ship a tile that cannot be lowered.
+    lds_bytes = gfx950_dense_static_lds_bytes(
+        head_size=int(spec.head_size), block_n=int(spec.block_n)
+    )
+    if lds_bytes > GFX950_LDS_CAPACITY_BYTES:
+        return False, (
+            f"static LDS {lds_bytes} bytes for head_size={spec.head_size} "
+            f"block_n={spec.block_n} exceeds gfx950's "
+            f"{GFX950_LDS_CAPACITY_BYTES}"
         )
     return True, ""
 

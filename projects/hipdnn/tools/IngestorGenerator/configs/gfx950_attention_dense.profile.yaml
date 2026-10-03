@@ -21,29 +21,39 @@ source: kernels/gfx950/attention_dense.py
 builder: build_attention_dense
 
 dispatch:
-  module: dispatch.attention.gfx950
-  function: dense_spec_for_request
+  module: dispatch.attention
+  function: dispatch_attention
+  # Selection is by PIN. `dispatch_attention` unpinned returns the unified 2D/3D
+  # routing path, which is a different kernel family on a different ABI; the dense
+  # catalog exists only under an explicit algorithm + spec_id.
+  #
+  # `attention_dense_grid` is the NON-persistent arm and the only one this catalog
+  # ships. It is also the only dense arm on the eight-argument signature: the
+  # persistent arms bake batch/seqlen_q/seqlen_kv into the binary and take five
+  # arguments, a different kernel-argument contract this engine's
+  # expectedSignature check would reject.
+  #
+  # Names are post-`ae4db22a5b8`, which split the dense arms into algorithms and
+  # moved the tile out of the spec_id into a knob axis. The pre-refactor spelling
+  # (`algorithm: attention_dense`, `spec_id: gfx950_dense_grid_default`) no longer
+  # resolves to anything.
+  pin:
+    algorithm: attention_dense_grid
+    spec_id: gfx950_dense_grid
+  # `dispatch_attention` returns a DispatchResult, not the builder's spec:
+  # .spec is the AttentionTuningSpec, .spec.kernel_spec the
+  # Gfx950AttentionDenseSpec that hkp_pack hydrates and comgr compiles.
+  result_attr: spec
+  spec_attr: kernel_spec
+  # A pin the dispatcher will not serve for a given shape. Per-shape decline,
+  # counted by --report-gaps -- not a tool failure.
+  refusal_exception: rocke.dispatch.core.PinRefused
 
 request:
   module: dispatch.attention.common
   class: AttentionRequest
   defaults:
     arch: gfx950
-    algorithm: attention_dense
-    # Pins the NON-persistent arm, which is the only one this catalog ships.
-    #
-    # AttentionRequest defaults this field to "auto", and the gfx950 dispatcher then
-    # reads auto as `persistent = work >= dense_num_persistent` (256). B=1,
-    # Sq=Skv=8192, Hq=Hkv=8, D=128 gives work = 32*8*1 = 256, so auto resolves
-    # persistent=True -- and, at D=128 causal bf16/fp16, wide_lds_dma=True with it.
-    # That is a different compiled kernel and a different kernel-argument contract
-    # from the variants here, every one of which is non-persistent on the
-    # eight-argument signature.
-    #
-    # The quotes are mandatory, not style: PyYAML reads a bare `off` as the boolean
-    # False, and the dispatcher calls `.strip().lower()` on this field, so the
-    # unquoted spelling aborts the tool instead of selecting an arm.
-    dense_persistent: "off"
 
 predicate:
   module: kernels.gfx950.attention_dense
@@ -125,14 +135,21 @@ specialization:
 dialect: packaged
 authored_subpath: rocKE/gfx950_attention_dense
 
+# The shipped catalog's own naming, so regeneration reproduces it rather than
+# renaming all 840 kernels. Not cosmetic: hkp_pack derives each kpack `toc_key`
+# and `symbol` from this string, so a changed name is a changed artifact.
+# Matches the `name:` template in gfx950_attention_dense.yaml exactly.
+kernel_name_template: >-
+  attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_c{causal}_bm{block_m}_bn{block_n}.gfx950
+
 engine:
   name: "hipkernel:Gfx950AttentionDense"
   sdk_version: "1.0.0"
+  # The public tuning surface, and exactly what the shipped .ued.json declares.
+  # Only the tile is a knob: the rest of the KMD describes the problem, which a
+  # caller does not get to choose. Listing a problem field here would offer a
+  # knob that cannot be turned without naming a different graph.
   knobs:
-    - head_size
-    - num_query_heads
-    - num_kv_heads
-    - causal
     - block_m
     - block_n
   heuristic: native
@@ -263,7 +280,9 @@ launch_surface:
     guard: >
       attentionDenseKernelSignature() always returns the 8-arg form
       (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). Every variant is
-      non-persistent, which is what request.defaults.dense_persistent: "off"
-      above keeps true. use_sinks=False; no sink_ptr slot. Validated at
-      prepare() time by buildIngestorKernelCode(..., expectedSignature).
+      non-persistent, which is what the dispatch.pin above keeps true by
+      pinning the `attention_dense_grid` algorithm: the persistent arms are a
+      separate algorithm on a five-argument signature. use_sinks=False; no
+      sink_ptr slot. Validated at prepare() time by
+      buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp
