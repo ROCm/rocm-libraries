@@ -121,7 +121,8 @@ if(HIPBLASLT_JIT_TESTING)
     endif()
 endif()
 
-# The library entries are MsgPack, which a YAML build cannot read.
+# The library entries are MsgPack, which a YAML build cannot read. TensileLite
+# queries the current device when it reads one, so the freshness test needs a GPU.
 if(NOT HIPBLASLT_ENABLE_YAML)
     # Compiles the JIT solution library directly; runs without a GPU.
     add_executable(hipblaslt-jit-library-test
@@ -166,7 +167,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         HIPBLASLT_JIT_PERSISTENT_LOOP_ARGS_VERSION=${PersistentLoopArgsVersion})
     target_link_libraries(hipblaslt-jit-bundle-freshness-test PRIVATE
         roc::hipblaslt roc::tensilelite-host ZLIB::ZLIB amd_comgr hip::device Threads::Threads)
-    hipblaslt_jit_test(jit-bundle-freshness jit-cpu
+    hipblaslt_jit_test(jit-bundle-freshness jit-gpu
         $<TARGET_FILE:hipblaslt-jit-bundle-freshness-test>
         "${hipblaslt_jit_data}" "${hipblaslt_jit_scratch}/bundle-freshness")
     hipblaslt_jit_stage(hipblaslt-jit-library-test hipblaslt-jit-bundle-freshness-test)
