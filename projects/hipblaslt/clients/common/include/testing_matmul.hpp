@@ -5108,13 +5108,17 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
-    dWorkspace = new device_vector<unsigned char>(workspace_size * block_count, 1, HMM);
+    // A placed workspace replaces the normal one, which placement runs never use: placement
+    // requires fast_check, and fast_check refuses timing runs.
+    const bool placeWorkspace = !strcmp(arg.placement, "workspace");
+    dWorkspace                = new device_vector<unsigned char>(
+        placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
 
-    // The workspace the checked solutions use. A placed workspace replaces the normal one.
+    // The workspace the checked solutions use.
     std::unique_ptr<PlacedRegion> placedWorkspace;
     void*                         workspacePtr = static_cast<unsigned char*>(*dWorkspace);
-    if(!strcmp(arg.placement, "workspace"))
+    if(placeWorkspace)
     {
         std::string why;
         bool        unsupported = false;
