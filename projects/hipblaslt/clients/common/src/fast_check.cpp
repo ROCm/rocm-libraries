@@ -670,8 +670,23 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         return finish();
 
     const int64_t M = p.M, N = p.N, K = p.K;
-    e.alpha = int64_t(p.alpha) * int64_t(p.scale_d);
-    e.beta  = int64_t(p.beta) * int64_t(p.scale_c) * int64_t(p.scale_d);
+    // Multiplies two integer factors, failing rather than overflowing: a combined factor of 2^61
+    // or more is far outside every compute type's exact range anyway.
+    auto times = [](int64_t a, int64_t b, int64_t& out) {
+        if(std::fabs(double(a) * double(b)) >= 0x1p61)
+            return false;
+        out = a * b;
+        return true;
+    };
+    const char* too_large = "fast_check requires alpha, beta, the scales and the bias to combine "
+                            "to values below 2^61";
+    if(!times(int64_t(p.alpha), int64_t(p.scale_d), e.alpha)
+       || !times(int64_t(p.beta), int64_t(p.scale_c), e.beta)
+       || !times(e.beta, int64_t(p.scale_d), e.beta))
+    {
+        fail(too_large);
+        return finish();
+    }
 
     // Loads entry i of a scale that is one value or a vector, and requires an integer.
     auto load_scale = [&](const void* v, bool vector, int64_t i, int64_t& out) {
@@ -703,7 +718,11 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
                 fail("fast_check requires integer scaleA entries");
                 return finish();
             }
-            e.scale[size_t(i)] *= a;
+            if(!times(e.scale[size_t(i)], a, e.scale[size_t(i)]))
+            {
+                fail(too_large);
+                return finish();
+            }
         }
     e.col_scale.assign(size_t(N), 1);
     if(p.scale_b)
@@ -758,7 +777,11 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
                     fail("fast_check requires integer bias entries");
                     return finish();
                 }
-                bias[size_t(i)] = int64_t(v) * int64_t(p.scale_d);
+                if(!times(int64_t(v), int64_t(p.scale_d), bias[size_t(i)]))
+                {
+                    fail(too_large);
+                    return finish();
+                }
             }
         }
 
@@ -1889,6 +1912,9 @@ double fast_check_amax_device(const FastCheckMatrix& d,
     std::vector<char> hd    = host_region(d, batch_count, stream);
     const double      limit = exact_limit(d.type);
     double            top   = 0;
+    // A failed copy would otherwise look like amaxD 0.
+    if(hd.empty() && d.rows * d.cols * batch_count > 0)
+        return std::numeric_limits<double>::quiet_NaN();
     for(int64_t idx = 0; idx < d.rows * d.cols * batch_count && !hd.empty(); idx++)
         top = std::max(top, std::fabs(load(hd.data(), d.type, size_t(idx))));
     // A rounded D no longer gives the pre-scale value amaxD is computed from.

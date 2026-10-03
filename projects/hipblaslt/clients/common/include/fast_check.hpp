@@ -184,7 +184,8 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                                              double*                amax);
 
 // The largest |element| of a verified device D divided by scale_d, the value amaxD must hold
-// without an activation, or NaN when D holds values outside the range its type stores exactly.
+// without an activation, or NaN when D holds values outside the range its type stores exactly
+// or cannot be copied.
 // Copies D's M x N x batch region to the host.
 double fast_check_amax_device(const FastCheckMatrix& d,
                               int64_t                batch_count,

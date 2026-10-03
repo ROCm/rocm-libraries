@@ -1048,6 +1048,12 @@ namespace
 
         const float v = 5;
         EXPECT_EQ(fast_check_load(&v, HIP_R_32F, 0), 5.0);
+
+        // Factors that each fit but whose product reaches 2^61 are refused, not overflowed.
+        p         = hp.problem();
+        p.beta    = 0x1p40;
+        p.scale_c = 0x1p30;
+        refused(p, "combine to values below 2^61");
     }
 
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
