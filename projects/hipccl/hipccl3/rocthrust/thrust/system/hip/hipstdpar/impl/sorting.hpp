@@ -203,27 +203,14 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using r_t = ::std::decay_t<R>;
 
-  if constexpr (::std::is_trivially_destructible_v<r_t>)
-  {
-    return THRUST_NS_QUALIFIER::sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
-    try
-    {
-      THRUST_NS_QUALIFIER::sort(THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -270,27 +257,14 @@ inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using r_t = ::std::decay_t<R>;
 
-  if constexpr (::std::is_trivially_destructible_v<r_t>)
-  {
-    return THRUST_NS_QUALIFIER::stable_sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
-    try
-    {
-      THRUST_NS_QUALIFIER::stable_sort(THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar stable_sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::stable_sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar stable_sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -341,28 +315,14 @@ partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    THRUST_NS_QUALIFIER::__partial_sort(THRUST_NS_QUALIFIER::device, first, middle, last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      THRUST_NS_QUALIFIER::__partial_sort(
-        THRUST_NS_QUALIFIER::device, first, middle, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar partial_sort: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__partial_sort(THRUST_NS_QUALIFIER::device, first, middle, last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, typename CompareOp, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
@@ -428,29 +388,14 @@ inline void partial_sort_copy(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    THRUST_NS_QUALIFIER::__partial_sort_copy(THRUST_NS_QUALIFIER::device, first, last, d_first, d_last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      THRUST_NS_QUALIFIER::__partial_sort_copy(
-        THRUST_NS_QUALIFIER::device, first, last, d_first, d_last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
-      ::hipDeviceSynchronize(), "hipstdpar partial_sort_copy: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__partial_sort_copy(THRUST_NS_QUALIFIER::device, first, last, d_first, d_last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort_copy: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename ForwardIt,
@@ -604,28 +549,14 @@ nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, Ke
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  using compare_op_t = ::std::decay_t<CompareOp>;
 
-  if constexpr (::std::is_trivially_destructible_v<compare_op_t>)
-  {
-    THRUST_NS_QUALIFIER::__nth_element(THRUST_NS_QUALIFIER::device, first, nth, last, ::std::move(compare_op));
-  }
-  else
-  {
-    ::hipstd::detail::device_callable_guard<compare_op_t> guard(::std::move(compare_op));
-    try
-    {
-      THRUST_NS_QUALIFIER::__nth_element(
-        THRUST_NS_QUALIFIER::device, first, nth, last, ::hipstd::detail::callable_proxy<compare_op_t>{guard.get()});
-    }
-    catch (...)
-    {
-      (void) ::hipDeviceSynchronize();
-      throw;
-    }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar nth_element: failed to synchronize");
-    guard.destroy_and_free();
-  }
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__nth_element(THRUST_NS_QUALIFIER::device, first, nth, last, ::std::move(fn));
+      },
+      "hipstdpar nth_element: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
