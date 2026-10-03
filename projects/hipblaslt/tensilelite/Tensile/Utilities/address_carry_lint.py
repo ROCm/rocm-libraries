@@ -15,10 +15,10 @@ the address pair or saddr of a global or flat access. For each write to such a r
 or subtract, it requires either a carry-producing instruction followed by a carry-consuming write
 to the next register, or a full redefinition of the pair. A scalar carry is followed until SCC
 changes, since the scheduler can move the carry-in far from the carry-out; a vector carry, for a
-short window. Anything else is reported, if the updated value is next used as an address before it
-is overwritten or an unconditional jump. An add of two constants sets the register rather than
-advancing an address, so it is not reported. The scan is otherwise linear, so a finding is a lead
-to read, not a proof.
+short window and only until its carry register is written again. Anything else is reported, if the
+updated value is next used as an address before it is overwritten or an unconditional jump. An add
+of two constants sets the register rather than advancing an address, so it is not reported. The
+scan is otherwise linear, so a finding is a lead to read, not a proof.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated
@@ -134,7 +134,8 @@ def parse(asm: str, first_line: int = 1) -> list[Instruction]:
         text = re.split(r"//|;", raw)[0].strip()
         if not text or text.startswith(".") or text.endswith(":"):
             continue
-        mnemonic, _, rest = text.partition(" ")
+        # Hand-written kernels separate the mnemonic from its operands with a tab.
+        mnemonic, _, rest = text.replace("\t", " ").partition(" ")
         if not re.match(r"^[sv]_|^buffer_|^global_|^flat_|^scratch_", mnemonic):
             continue
         mnemonic = re.sub(r"_e(32|64)$", "", mnemonic)
@@ -251,6 +252,25 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]
         )
 
+    def vector_carried(start: int, low: Reg, high: Reg) -> bool:
+        """Whether a vector carry reaches high: a carry-in to high that reads the carry register
+        the low add wrote, before anything else writes that register."""
+        carry = insts[start].operands[1] if len(insts[start].operands) > 1 else ""
+        for j in range(start + 1, min(len(insts), start + 1 + WINDOW)):
+            ops = insts[j].operands
+            if insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]:
+                return True
+            if insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
+                return bool(ops) and ops[-1] == carry
+            # A carry register is written as the destination of a compare or move, or as the
+            # carry-out of another add.
+            if ops and (
+                ops[0] == carry
+                or (insts[j].mnemonic in CARRY_OUT | CARRY_IN and len(ops) > 1 and ops[1] == carry)
+            ):
+                return False
+        return False
+
     def scalar_carried(start: int, low: Reg, high: Reg) -> bool:
         """Whether a scalar carry reaches high. The scheduler may move the carry-in well away
         from the carry-out, so it is followed until SCC changes rather than for a fixed count.
@@ -284,10 +304,8 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             if inst.mnemonic.startswith("s_"):
                 carried, where = scalar_carried(i, low, high), "before SCC changes"
             else:
-                carried = any(
-                    consumes(j, low, high) for j in range(i + 1, min(len(insts), i + 1 + WINDOW))
-                )
-                where = f"within {WINDOW} instructions"
+                carried = vector_carried(i, low, high)
+                where = f"within {WINDOW} instructions, from the carry it wrote,"
             if not carried and flows_to_address(low, i):
                 findings.append(
                     Finding(

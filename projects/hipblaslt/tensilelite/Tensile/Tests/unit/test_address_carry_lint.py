@@ -4,6 +4,7 @@
 """The address-carry lint must report a 64-bit address update that drops the carry, and stay
 quiet on correct carry chains and on registers that are only reused for other arithmetic."""
 
+import functools
 import os
 
 import pytest
@@ -36,9 +37,22 @@ _GENERATED = [
 ]
 
 
+@functools.lru_cache(maxsize=None)
+def _assembler_supports(arch):
+    from Tensile.Common.Architectures import gfxToIsa
+    from Tensile.Common.Capabilities import makeIsaInfoMap
+    from Tensile.Toolchain.Validators import validateToolchain
+
+    isa = gfxToIsa(arch)
+    return bool(makeIsaInfoMap([isa], validateToolchain("amdclang++"))[isa].asmCaps["SupportedISA"])
+
+
 @pytest.mark.parametrize("arch,config", _GENERATED, ids=lambda x: str(x).replace(".yaml", ""))
 def test_generated_kernels_carry_every_address_update(arch, config):
     from config_harness import emit_kernels_from_config
+
+    if not _assembler_supports(arch):
+        pytest.skip(f"amdclang++ in this environment does not support {arch}")
 
     results = emit_kernels_from_config(
         os.path.join(_DESIGNED, arch, config), limit=4, arch=arch, canonical=False
@@ -182,6 +196,30 @@ def test_findings_keep_their_line_numbers_across_kernels():
     )
     findings = lint(asm)
     assert [f.line for f in findings] == [5]
+
+
+def test_tab_separated_instructions_are_parsed():
+    asm = "\ts_add_i32\ts8, s8, 64\n\ts_load_dwordx2\ts[10:11], s[8:9], 0x0\n"
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "s8" in reasons[0]
+
+
+def test_a_vector_carry_overwritten_before_the_carry_in_is_reported():
+    good = """
+    v_add_co_u32 v4, vcc, v4, v6
+    v_add_co_u32 v10, s[20:21], v10, v12
+    v_addc_co_u32 v5, vcc, v5, 0, vcc
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    bad = """
+    v_add_co_u32 v4, vcc, v4, v6
+    v_add_co_u32 v10, vcc, v10, v12
+    v_addc_co_u32 v5, vcc, v5, 0, vcc
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    assert _reasons(good) == []
+    reasons = _reasons(bad)
+    assert len(reasons) == 1 and "v4" in reasons[0]
 
 
 def test_registers_are_judged_within_their_own_kernel():
