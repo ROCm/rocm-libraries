@@ -121,6 +121,36 @@ typedef struct rocke_gemm_trait_spec
      * and the barrier is elided -> lower small-tile latency, more LDS. Only
      * affects the cshuffle epilogue; False keeps byte-identical output. */
     bool cshuffle_no_alias; /* default false */
+    /* gfx1250 async global->LDS for the WMMA path: one async copy per lane per
+     * vector, so every lane still computes an address. */
+    bool wmma_async_lds; /* default false */
+    /* gfx1250 tensor-DMA (TDM) global->LDS staging for the WMMA path. One
+     * wave-uniform descriptor per operand per K-tile replaces the cooperative
+     * copy; the DMA engine fills the tile, so the per-lane address math and the
+     * copy loop both disappear. Reads past the declared extent return zero (no
+     * tail predication) and the LDS pad is a descriptor field, so lds_k_pad is
+     * reproduced at no instruction cost. */
+    bool tdm_lds; /* default false */
+    /* Force every descriptor word into an SGPR (readfirstlane + pin_sgpr). The
+     * descriptor must be wave-uniform; pin_sgpr lowers to asm volatile, which
+     * LLVM may not hoist out of the K-loop, so this trades a rebuilt descriptor
+     * per tile against leaving LICM free. Which wins is measurable. */
+    bool tdm_scalarize; /* default TRUE */
+    /* Double-buffer the AB LDS and issue tile N+1's descriptor before computing
+     * tile N, so the DMA overlaps the WMMA work. Requires tdm_lds: issued
+     * single-buffered the descriptor is waited on immediately and nothing
+     * overlaps. Carries its own K-loop -- the compv4/DTL prefetch loop waits on
+     * vmcnt, and gfx1250 tracks TDM on a dedicated TENSOR counter. */
+    bool tdm_prefetch; /* default false */
+    /* Tiles kept in flight. 2 = issue N+1 while computing N. 3 keeps two in
+     * flight at the cost of a third AB LDS buffer. Depth > 2 needs a PARTIAL
+     * drain (older tiles landed, newer still in flight). */
+    int tdm_prefetch_depth; /* default 2 */
+    /* Split the per-K-block workgroup barrier so the block's last matrix op can
+     * issue inside the signal->wait window. Requires tdm_prefetch. Only the last
+     * MMA may go in the window: the next tile's TDM issue is a WAR race against
+     * the ring slot it would overwrite. */
+    bool tdm_split_barrier; /* default false */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

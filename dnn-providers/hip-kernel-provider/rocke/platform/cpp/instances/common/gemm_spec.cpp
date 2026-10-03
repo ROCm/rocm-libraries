@@ -202,6 +202,12 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.emit_sched_hints = false;
     s.trait.split_k = 1; /* default 1 (single-K-pass body) */
     s.trait.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+    s.trait.wmma_async_lds = false;
+    s.trait.tdm_lds = false;
+    s.trait.tdm_scalarize = true; /* NOTE: Python default is True, not False */
+    s.trait.tdm_prefetch = false;
+    s.trait.tdm_prefetch_depth = 2; /* default 2 (issue N+1 while computing N) */
+    s.trait.tdm_split_barrier = false;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -627,6 +633,34 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
         }
+    }
+
+    /* Traits the native engine carries on the spec but does not implement.
+     *
+     * The bindings copy these across so a spec round-trips unchanged, and the
+     * builder ignores them -- which, left unchecked, is a silent divergence:
+     * the native engine would accept a spec Python rejects and emit a kernel
+     * with the trait quietly dropped. The WMMA atom gate above happens to catch
+     * the gfx1250 case (its atom is 16x16x32), but it does not fire on the
+     * wave64 MFMA targets, where a TDM spec sailed straight through.
+     *
+     * Declining is the honest answer until the emission path is mirrored: the
+     * caller falls back to the Python engine, which does implement them. */
+    if(spec->trait.tdm_lds)
+    {
+        CK_GEMM_REJECT("tdm_lds is not implemented in the native engine");
+    }
+    if(spec->trait.tdm_prefetch)
+    {
+        CK_GEMM_REJECT("tdm_prefetch is not implemented in the native engine");
+    }
+    if(spec->trait.tdm_split_barrier)
+    {
+        CK_GEMM_REJECT("tdm_split_barrier is not implemented in the native engine");
+    }
+    if(spec->trait.wmma_async_lds)
+    {
+        CK_GEMM_REJECT("wmma_async_lds is not implemented in the native engine");
     }
 
     /* Geometry divisibility. */

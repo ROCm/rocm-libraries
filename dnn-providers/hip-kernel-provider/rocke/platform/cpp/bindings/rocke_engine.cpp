@@ -272,7 +272,13 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "dtl_prefetch",
                               "active_tile_skip",
                               "lds_k_pad",
-                              "lds_swizzle"};
+                              "lds_swizzle",
+                              "wmma_async_lds",
+                              "tdm_lds",
+                              "tdm_scalarize",
+                              "tdm_prefetch",
+                              "tdm_prefetch_depth",
+                              "tdm_split_barrier"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -310,6 +316,13 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
         spec->trait.lds_k_pad = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
         spec->trait.lds_swizzle = dict_bool(tr, "lds_swizzle", spec->trait.lds_swizzle);
+        spec->trait.wmma_async_lds = dict_bool(tr, "wmma_async_lds", spec->trait.wmma_async_lds);
+        spec->trait.tdm_lds = dict_bool(tr, "tdm_lds", spec->trait.tdm_lds);
+        spec->trait.tdm_scalarize = dict_bool(tr, "tdm_scalarize", spec->trait.tdm_scalarize);
+        spec->trait.tdm_prefetch = dict_bool(tr, "tdm_prefetch", spec->trait.tdm_prefetch);
+        spec->trait.tdm_split_barrier = dict_bool(tr, "tdm_split_barrier", spec->trait.tdm_split_barrier);
+        spec->trait.tdm_prefetch_depth
+            = dict_int(tr, "tdm_prefetch_depth", spec->trait.tdm_prefetch_depth);
     }
 
     /* ---- data ---- */
@@ -425,7 +438,13 @@ SpecHolder build_spec(const py::dict& root)
                               "dtl_prefetch",
                               "active_tile_skip",
                               "lds_k_pad",
-                              "lds_swizzle"};
+                              "lds_swizzle",
+                              "wmma_async_lds",
+                              "tdm_lds",
+                              "tdm_scalarize",
+                              "tdm_prefetch",
+                              "tdm_prefetch_depth",
+                              "tdm_split_barrier"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -464,6 +483,13 @@ SpecHolder build_spec(const py::dict& root)
             = dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
         h.spec.trait.lds_k_pad = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);
         h.spec.trait.lds_swizzle = dict_bool(tr, "lds_swizzle", h.spec.trait.lds_swizzle);
+        h.spec.trait.wmma_async_lds = dict_bool(tr, "wmma_async_lds", h.spec.trait.wmma_async_lds);
+        h.spec.trait.tdm_lds = dict_bool(tr, "tdm_lds", h.spec.trait.tdm_lds);
+        h.spec.trait.tdm_scalarize = dict_bool(tr, "tdm_scalarize", h.spec.trait.tdm_scalarize);
+        h.spec.trait.tdm_prefetch = dict_bool(tr, "tdm_prefetch", h.spec.trait.tdm_prefetch);
+        h.spec.trait.tdm_split_barrier = dict_bool(tr, "tdm_split_barrier", h.spec.trait.tdm_split_barrier);
+        h.spec.trait.tdm_prefetch_depth
+            = dict_int(tr, "tdm_prefetch_depth", h.spec.trait.tdm_prefetch_depth);
     }
 
     /* ---- data ---- */

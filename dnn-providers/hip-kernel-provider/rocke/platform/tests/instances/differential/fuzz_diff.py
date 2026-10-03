@@ -200,6 +200,81 @@ def _gemm_build(spec):
     return build_universal_gemm(spec, arch="gfx950")
 
 
+# gfx1250 tensor-DMA GEMM. The `gemm` family above is pinned to gfx950/wave64,
+# so it cannot reach the TDM path at all: tdm_lds is gfx1250-only and the WMMA
+# path is wave32. Without this family the tdm_* traits are invisible to the
+# differential gate -- both engines could disagree and still show GREEN.
+#
+# The knobs are sampled inside the legal surface rather than filtered after the
+# fact: tdm_lds excludes lds_swizzle / direct_to_lds / preshuffle_b /
+# wmma_async_lds / split_k>1, and the descriptor can only reproduce the LDS row
+# pad on a dword grid, so lds_k_pad stays even.
+def _sample_gemm_gfx1250_tdm(rng):
+    from rocke.instances.common.gemm_universal import (
+        DataSpec,
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+    )
+
+    dtype = rng.choice(["fp16", "bf16"])
+    # The gfx1250 WMMA atom. K=32 is the only K the TDM GEMM path emits.
+    wtm, wtn, wtk = 16, 16, 32
+    warp_m, warp_n = rng.choice(_GEMM_WARP_GRID)
+    tile_m = warp_m * wtm * rng.choice(_GEMM_MFMA_MN)
+    tile_n = warp_n * wtn * rng.choice(_GEMM_MFMA_MN)
+    tile_k = wtk * rng.choice([1, 2, 4])
+
+    knobs = {"tdm_lds": True}
+    # lds_k_pad in elements; f16/bf16 storage means even values are the
+    # dword-aligned ones the pad-amount field can encode.
+    knobs["lds_k_pad"] = rng.choice([0, 4, 8])
+    if rng.random() < 0.6:
+        knobs["tdm_prefetch"] = True
+        knobs["tdm_prefetch_depth"] = rng.choice([2, 3, 4])
+        if rng.random() < 0.5:
+            knobs["tdm_split_barrier"] = True
+    if rng.random() < 0.3:
+        knobs["tdm_scalarize"] = False
+
+    trait = TraitSpec(pipeline="mem", epilogue="default", **knobs)
+    spec = UniversalGemmSpec(
+        name="fuzz_gemm_tdm",
+        tile=TileSpec(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_k=1,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+        ),
+        trait=trait,
+        data=DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype),
+        wave_size=32,
+        block_size=warp_m * warp_n * 32,
+    )
+    rep = (
+        f"gemm_tdm dtype={dtype} tile={tile_m}x{tile_n}x{tile_k} "
+        f"warp={warp_m}x{warp_n}x1 wt={wtm}x{wtn}x{wtk} knobs={knobs}"
+    )
+    return spec, rep, "gfx1250"
+
+
+def _gemm_gfx1250_tdm_valid(spec):
+    from rocke.instances.common.gemm_universal import is_valid_spec
+
+    return is_valid_spec(spec, arch="gfx1250")
+
+
+def _gemm_gfx1250_tdm_build(spec):
+    from rocke.instances.common.gemm_universal import build_universal_gemm
+
+    return build_universal_gemm(spec, arch="gfx1250")
+
+
 # Batched GEMM: the same universal geometry surface routed through the batched
 # wrapper (extra batch index + strides), validated by the shared GEMM gate.
 def _sample_batched_gemm(rng):
@@ -348,6 +423,11 @@ def _reduce_build(spec):
 # Family registry. name -> (sampler, validity_gate, builder).
 FAMILIES = {
     "gemm": (_sample_gemm, _gemm_valid, _gemm_build),
+    "gemm_gfx1250_tdm": (
+        _sample_gemm_gfx1250_tdm,
+        _gemm_gfx1250_tdm_valid,
+        _gemm_gfx1250_tdm_build,
+    ),
     "batched_gemm": (_sample_batched_gemm, _batched_gemm_valid, _batched_gemm_build),
     "elementwise": (_sample_elementwise, _elementwise_valid, _elementwise_build),
     "reduce": (_sample_reduce, _reduce_valid, _reduce_build),
