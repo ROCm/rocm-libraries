@@ -6760,6 +6760,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 self.assertFalse(rc._torch_comgr_is_stale())
 
     def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
+        import os
         import sys
         import types
         from unittest import mock
@@ -6771,10 +6772,14 @@ class TestLibDiscoveryOrder(unittest.TestCase):
 
         with mock.patch.dict(sys.modules, {"torch": torch_stub}):
             with mock.patch.object(
-                rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+                rc,
+                "_rocm_root_libdirs",
+                return_value=[os.path.normpath("/opt/rocm/lib")],
             ):
                 with mock.patch.object(
-                    rc.os.path, "realpath", return_value="/opt/rocm-7.2.3/lib"
+                    rc.os.path,
+                    "realpath",
+                    return_value=os.path.normpath("/opt/rocm-7.2.3/lib"),
                 ):
                     self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
                     self.assertTrue(rc._torch_comgr_is_stale())
