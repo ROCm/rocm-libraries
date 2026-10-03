@@ -31,7 +31,12 @@
 - [Third pass — counter-guided levers](#third-pass--counter-guided-levers)
   - [Reading the counters](#reading-the-counters)
   - [Kept — transposed score and PV](#kept--transposed-score-and-pv)
+  - [Kept — two query M tiles per workgroup](#kept--two-query-m-tiles-per-workgroup)
   - [Kept — the smaller VALU levers](#kept--the-smaller-valu-levers)
+- [Fourth pass — parallel lanes](#fourth-pass--parallel-lanes)
+  - [Diagnosis](#diagnosis)
+  - [Kept — four heads per workgroup](#kept--four-heads-per-workgroup)
+  - [Measured and not stacked](#measured-and-not-stacked)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -165,6 +170,11 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 26 | Transposed score and PV (`Sᵀ`, `accᵀ`) | **Kept** | P stays in registers, one barrier per tile fewer, row reduce mostly in-lane; large gain on every shape |
 | 27 | Buffer loads for the k-tile stage | **Kept** | page base in the SGPR offset; no per-tile address math; measured improvement on every shape |
 | 28 | Unmasked main loop, masked tail loop | **Kept** | per-element masks only on the last tile or two; small gain, none clearly slower |
+| 29 | `block_q` 16 → 32, prologue and epilogue staged by column window | **Kept** | each staged key tile feeds two query tiles; pool shrank, VGPR under 256, no spill: still two workgroups per CU; large gain, none slower |
+| 30 | Block-table lookup one tile ahead | **Kept** | the page index is in a register before its tile's loads issue; small gain, none clearly slower |
+| 31 | Four heads per workgroup, one wave per head (`heads_per_wg = 4`, `block_q = 16`), selected by dispatch | **Kept** | each staged key tile feeds four heads; no score split or partial combine; absorbed query never touches LDS; still two workgroups per CU; large gain on every shape |
+| 32 | Permuted-row PV gather on the four-heads path | **Kept** | one `ds_read_b64` of a key row feeds four PV tiles instead of sixteen scalar reads; large gain on every shape |
+| 33 | Occupancy guard tests | **Kept** | CPU tests fail if the shipped or the fallback layout leaves two workgroups per CU |
 
 ### Kept — wt_lds bank-conflict pad
 
@@ -544,6 +554,38 @@ The removed `p_lds` had been the small buffer that kept `kv_lds` below the prolo
 peak (see [Kept — two workgroups per CU](#kept--two-workgroups-per-cu)), so the score
 partials move out of `kv_lds` into their own `s_part` buffer and take that role.
 
+### Kept — two query M tiles per workgroup
+
+At `block_q = 32` every key tile staged into `kv_lds`, and every PV operand
+gathered from it, feeds two M tiles' MFMAs, so the loop's staging, barriers and
+gathers are amortised over twice the queries. The k-loop body itself is the
+same code with `M_TILES = 2`; what had to change is the prologue and epilogue,
+because a full-height `qa_lds` or `accl_lds` would each pass 32 KB on its own.
+
+Both now stage by column window rather than by M tile, so every weight slice is
+staged once and feeds both M tiles:
+
+- **Prologue.** `Q_nope` is read from global straight into the absorb's A
+  fragments, so `q_lds` is gone. `qa_lds` holds both M tiles but only half the
+  absorbed columns, and each half is exactly the score K-steps of two waves:
+  after each half, every wave reads it and keeps the value only if the half is
+  its own (`scf.if` carries no results, so the keep is a `select`).
+- **Epilogue.** `accl_lds` holds both M tiles but one wave's latent columns.
+  Each wave in turn writes its accumulators, and the `W_UV` projection walks
+  only that wave's r-slices.
+
+The pool is smaller than at `block_q = 16`, VGPR stays under 256 and nothing
+spills, so two workgroups still fit per CU.
+
+Two simpler layouts were measured first and lost. With the prologue and
+epilogue simply run once per 16-row M tile, the weights are staged twice and
+the gain is smaller; that version also spilled until each later M tile took its
+weight base through an opaque `pin_sgpr` copy, because LLVM proved the second
+M tile's weight loads identical to the first's and kept every slice live across
+the boundary. With full-height buffers the pool rises past 32 KB, the kernel
+drops to one workgroup per CU, and it is slower than `block_q = 16` on almost
+every shape -- the occupancy, not the tile reuse alone, is what pays.
+
 ### Kept — the smaller VALU levers
 
 - **No AGPRs (24).** Left free, the backend parks the PV accumulators in AGPRs and
@@ -558,6 +600,63 @@ partials move out of `kv_lds` into their own `s_part` buffer and take that role.
   and at or below the causal bound of the tile's first query row. Those tiles run
   in a loop with no per-element masks; the rest run in a masked tail loop that
   continues from the first loop's results.
+
+## Fourth pass — parallel lanes
+
+Levers 29–33 came from a run of independent lanes, each timed back to back
+against the same baseline on one 304-CU MI300X, with GPU access serialized so no
+two timings overlapped. Kept lanes were then stacked one at a time and re-timed.
+
+### Diagnosis
+
+- **Occupancy is observed, not just derived.** Wave-count counters put the
+  kernel near two workgroups per CU while busy on long shapes, a little lower on
+  `s512` from tail imbalance; forcing one workgroup per CU made every shape
+  slower.
+- **Not cache-bandwidth bound.** L2 and L1-to-L2 traffic stay well under peak on
+  long and short shapes. Long shapes are issue-bound with the LDS pipe the most
+  loaded unit; `s512` is latency-bound in the per-workgroup weight staging.
+- **LDS bank conflicts are a small share** of LDS-active cycles.
+- **aiter `mla_prefill_fwd`** (absorb mode) runs the DeepSeek-V3 shapes and is the
+  reference to beat; it does not run the 64-head shapes.
+
+### Kept — four heads per workgroup
+
+Every head of a workgroup reads the same `c_kv` and `k_rope`, so staging a key tile
+once for four heads quadruples its reuse. Each wave owns one head outright: it
+computes the head's full 36-step score (no split-K partials, no combine
+barrier), runs its own softmax, and accumulates all 32 latent tiles.
+
+- **Prologue.** The query absorb runs transposed, `Qaᵀ = W_UK · Q_nopeᵀ`, with
+  both operands read from global. Its C fragment is exactly the score GEMM's B
+  operand, so the absorbed query never touches LDS.
+- **Epilogue.** `accᵀ` feeds `W_UVᵀ · accᵀ` directly as the B operand; only
+  `W_UV` is staged, cooperatively for the four heads.
+- **PV gather (32).** Each PV tile's latent rows are permuted so one 8-byte read
+  of a key row covers four tiles; the epilogue stages `W_UV` through the same
+  permutation. `Q_rope` is parked in LDS to keep VGPR at the two-workgroup line.
+
+The four-heads layout needs `block_q = 16` (at 32 the accumulators spill) and no
+AGPRs (with AGPRs it falls to one workgroup per CU and the rescale copies
+return). Dispatch selects it whenever the head count divides by four and
+admission passes; otherwise it falls back to the single-head spec defaults,
+which the `fwd_*` golden cases pin. The verifier's full mode runs whatever
+dispatch selects.
+
+### Measured and not stacked
+
+- **`block_q = 32` with eight waves at one workgroup per CU**, and **two heads per
+  workgroup with eight waves**: both faster than the single-head base, both
+  superseded by lever 31.
+- **Unfused projections** (absorb and `W_UV` as batched GEMMs outside the kernel,
+  timed end to end): faster, but it changes the kernel signature. Blocked on the
+  provider API.
+- **`iglp_opt(1)` on the main loop** and a **grouped PV gather**: both measured
+  faster on the single-head path only, which dispatch now uses just as a fallback.
+  Neither has been timed on the four-heads path.
+- **`amdgpu-waves-per-eu = 2`**: compiles to identical ISA; nothing to keep.
+- **Other knob re-sweeps** (`SCORE_SGB_GROUP`, `WT_PAD`, `r_kv_tile = 64`): neutral,
+  slower or inadmissible.
 
 ## Method
 
@@ -583,8 +682,6 @@ They are not deliverables and their output does not belong in this repository.
 
 - **The first pass ran on a 228-CU MI300A and the second on a 304-CU MI300X.**
   First-pass verdicts were not re-measured on the 304-CU part.
-- **Two workgroups per CU is derived, not observed.** The occupancy model says two
-  fit; no runtime occupancy counter was read.
 - **`num_warps = 8` was never parity-verified.** It was rejected on measurement
   before adoption, so its functional correctness at 8 warps is untested.
 - **Two-pass latent expansion was not attempted.** The in-loop path re-expands
@@ -596,7 +693,10 @@ They are not deliverables and their output does not belong in this repository.
   covers each load's in-page offset, not the page base in the SGPR offset, so the
   reachable cache size is the same 32-bit byte range as the global loads it
   replaced. No test reaches a cache that large.
-- **Untried next levers.** `block_q = 32` would reuse every key-tile read across
-  two query blocks but needs `qa_lds` staged in halves and its VGPR cost risks
-  occupancy. The PV operand gather still packs bf16 pairs with `v_perm`; the
-  backend did not form `ds_read_u16_d16` for it, even through `half`.
+- **Untried next levers.** The `s512` shapes, where per-workgroup fixed cost
+  dominates, are furthest from aiter; the unfused projections address that
+  directly but need an API change. The four-heads loop still spends a packed
+  multiply per accumulator register per tile on the online-softmax rescale; a
+  lazy rescale would need loop-carried state out of a branch, which `scf.if`
+  cannot carry. `iglp_opt` and the grouped gather have only been timed on the
+  single-head path.
