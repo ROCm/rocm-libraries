@@ -12,6 +12,7 @@ pytest.importorskip("ml_dtypes")
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
     check_result,
     decode_e8m0,
+    decode_fp6,
     make_case_inputs,
     reference_result,
 )
@@ -122,6 +123,55 @@ def test_neutral_and_one_operand_scale_fixtures(case):
     _, _, sa, sb = make_case_inputs(spec, case)
     assert bool(np.all(sa == 127)) == (case in ("neutral", "b-only"))
     assert bool(np.all(sb == 127)) == (case in ("neutral", "a-only"))
+
+
+@pytest.mark.parametrize("dtype", ["fp6", "bf6"])
+@pytest.mark.parametrize("path,bk", [("wmma_scale", 32), ("wmma_scale16", 16)])
+@pytest.mark.parametrize("k", [128, 256])
+@pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
+def test_fp6_isolated_groups_detect_neighbor_scales(dtype, path, bk, k, output_dtype):
+    spec = BlockScaledGemmSpec(
+        name="fp6_groups",
+        M=32,
+        N=48,
+        K=k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        dtype_c=output_dtype,
+        matrix_path=path,
+        block_k=bk,
+        scale_dtype="e8m0",
+    )
+    a, b, _, _ = make_case_inputs(spec, "mixed")
+    a_values, b_values = decode_fp6(a, dtype), decode_fp6(b, dtype)
+    for group in range(k // bk):
+        ga, gb, sa, sb = make_case_inputs(spec, f"group-{group}")
+        sl = slice(group * bk, (group + 1) * bk)
+        outside = (np.arange(k) // bk) != group
+        for packed, original in ((ga, a_values), (gb, b_values)):
+            values = decode_fp6(packed, dtype)
+            np.testing.assert_array_equal(values[:, sl], original[:, sl])
+            assert not np.any(values[:, outside])
+        kwargs = dict(native=True, dtype_a=dtype, dtype_b=dtype, dtype_c=output_dtype)
+        expected = reference_result(ga, gb, sa, sb, bk, **kwargs)
+        assert np.isfinite(expected).all() and np.any(expected)
+        neighbor = (group + 1) % (k // bk)
+        wrong_sa, wrong_sb = sa.copy(), sb.copy()
+        wrong_sa[:, group] = sa[:, neighbor]
+        wrong_sb[group, :] = sb[neighbor, :]
+        for scales in ((wrong_sa, sb), (sa, wrong_sb)):
+            wrong = reference_result(ga, gb, *scales, bk, **kwargs)
+            with pytest.raises(AssertionError, match="bad="):
+                check_result(wrong, expected, exact=True)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_comparison_treats_zero_signs_as_equal(exact):
+    positive = np.array([[0.0]], dtype=np.float32)
+    negative = np.array([[-0.0]], dtype=np.float32)
+    assert not np.signbit(positive).any() and np.signbit(negative).all()
+    check_result(positive, negative, exact=exact)
+    check_result(negative, positive, exact=exact)
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])

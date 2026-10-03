@@ -45,6 +45,8 @@
         "sgprs": 102
       },
       "mma": [
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 16, "n": 16, "k": 8, "op_id": "mfma_f32_16x16x8_xf32"},
+        {"family": "mma", "a": "tf32", "b": "tf32", "c": "fp32", "m": 32, "n": 32, "k": 4, "op_id": "mfma_f32_32x32x4_xf32"},
         {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 16, "n": 16, "k": 4,  "op_id": "mfma_f32_16x16x4_f32"},
         {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 32, "n": 32, "k": 2,  "op_id": "mfma_f32_32x32x2_f32"},
         {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},

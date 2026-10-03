@@ -7,20 +7,31 @@ import pytest
 from rocke.examples.gfx1250.gemm import mixed_scaled_gemm
 
 
-def test_default_pair_and_verification_options(monkeypatch):
+@pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
+def test_default_pair_and_verification_options(monkeypatch, output_dtype):
     seen = []
     monkeypatch.setattr(
         mixed_scaled_gemm, "verify", lambda spec, args: seen.append((spec, args)) or 0
     )
     assert (
         mixed_scaled_gemm.main(
-            ["--matrix-path", "wmma_scale16", "--compile-route", "hip", "--case", "all"]
+            [
+                "--matrix-path",
+                "wmma_scale16",
+                "--compile-route",
+                "hip",
+                "--case",
+                "all",
+                "--output-dtype",
+                output_dtype,
+            ]
         )
         == 0
     )
     spec, args = seen[0]
     assert (spec.dtype_a, spec.dtype_b) == ("fp8e4m3", "fp4e2m1")
     assert spec.block_k == 16 and spec.scale_dtype == "e8m0"
+    assert spec.dtype_c == output_dtype
     assert args.compile_route == "hip" and args.case == "all"
 
 

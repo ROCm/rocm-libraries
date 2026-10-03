@@ -113,6 +113,7 @@ class BlockScaledGemmSpec:
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
+            f"out_{normalize_dtype(self.dtype_c)}",
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",

@@ -6,6 +6,8 @@ The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
 Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use independent FP8/BF8, FP6/BF6, or FP4 operands and
 E8M0 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after output-type rounding.
+Numerical equality treats positive and negative zero as equal; output zero-sign
+and signed-zero accumulation semantics are not verified.
 
 Run on visible HIP device 0 (must be gfx1250), for example::
 
@@ -142,6 +144,8 @@ def reference_result(
     2**22 units of 2**-8, so every FP32 partial sum is exact. Float64 host
     arithmetic and a single output-type rounding provide an independent oracle.
     FP6 all-code fixtures isolate one K element, avoiding accumulation error.
+    Input decoding preserves signed zero, but this reference and its numerical
+    comparison do not establish output zero-sign or accumulation sign semantics.
     FP4 fixtures cover all E2M1 values (magnitude <=6), scales 2**[-2,1],
     and K<=256: absolute partial sums are below 2**22 units of 2**-6,
     so FP32 accumulation is also exact before the final output-type rounding.
@@ -263,7 +267,12 @@ def make_case_inputs(
 def check_result(
     got: np.ndarray, expected: np.ndarray, *, exact: bool, tol: float = 2e-2
 ) -> None:
-    """Fail on incomplete/non-finite output or a numerical mismatch."""
+    """Fail on incomplete/non-finite output or a numerical mismatch.
+
+    Exact mode requires numerical equality after output-type rounding, with
+    positive and negative zero treated as equal. Tolerance applies only to the
+    legacy software-scaled WMMA path.
+    """
     if got.shape != expected.shape:
         raise AssertionError(f"output shape {got.shape} != {expected.shape}")
     if not np.isfinite(expected).all() or not np.isfinite(got).all():

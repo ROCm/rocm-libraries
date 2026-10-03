@@ -40,6 +40,12 @@ from raw byte patterns with the common bit packer.
 Scale-format validation remains separate from matrix alias normalization:
 E5M3 is not BF8 E5M2. Registering a scale dtype does not enable a backend selector.
 
+Logical `tf32` (`xf32` alias) is a distinct 32-bit type carried as I32.
+Fragment loading can reinterpret FP32 storage into I32 without conversion;
+`bitcast` then wraps those bits as logical TF32. Explicit `cvt_f32_to_tf32`
+performs RNE preparation. Packing itself never rounds. See the
+[TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md).
+
 ## Common packing
 
 `BitPacking` / `rocke_bit_packing_t` describes unsigned bit patterns with an
@@ -49,6 +55,7 @@ bit first in a little-endian byte stream.
 
 | Format | Dense group occupying whole 32-bit words |
 |---|---|
+| TF32 | 1 element in 1 word |
 | FP16/BF16 | 2 elements in 1 word |
 | FP8/BF8 | 4 elements in 1 word |
 | FP6/BF6 | 16 elements across 3 words |

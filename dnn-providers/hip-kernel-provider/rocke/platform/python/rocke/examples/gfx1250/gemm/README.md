@@ -20,13 +20,16 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6 --output-dtype fp16
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp4_gemm --compile-route hip --case all
 ```
 
 Each example constructs a family-specific spec and invokes the shared verifier
 to prepare inputs, pack them, compile once, launch, and compare with an
 independent decoded reference. M and N must be positive multiples of 16; the
-bounded correctness fixtures support K=128 and K=256, with BF16 output.
+bounded correctness fixtures support K=128 and K=256. All three examples accept
+`--output-dtype bf16` (the default) or `--output-dtype fp16`, selecting both output
+storage and reference rounding.
 
 The default `wmma_scale` instruction uses one E8M0 scale per 32 K elements.
 `--matrix-path wmma_scale16` explicitly selects the native 16-element block
@@ -35,8 +38,11 @@ per value; [FP6 uses four codes per three bytes](FP6.md);
 [FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
 
 `--case all` checks neutral scales, independent A/B scales, varying scales, and
-every scale group. These bounded exact fixtures do not establish arbitrary-input
-rounding, special-value semantics, or performance. The kernel builders and
+every scale group. Native comparisons require exact numerical equality after
+output-type rounding; positive and negative zero compare equal. They do not
+check output zero-sign or signed-zero accumulation semantics. These bounded
+fixtures do not establish arbitrary-input rounding, E8M0 NaN behavior, or
+performance. The kernel builders and
 runtime/packing utilities are shared; each example exposes one input contract.
 
 The generic `block_scaled_gemm_verify` CLI remains available for regression
