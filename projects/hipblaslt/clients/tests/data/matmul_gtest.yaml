@@ -4553,8 +4553,8 @@ Tests:
   fast_check: 1
 
 # Partial tiles in every dimension, including driftcheck's ragged shape from
-# ROCM-31901, with strided batches.
-# Runtime on gfx90a: 12 cases, about 5 s.
+# ROCM-31901, with two strided batches.
+# Runtime on gfx90a: 12 cases, about 8 s.
 - name: matmul_fast_check_ragged
   category: nightly
   function:
@@ -4571,6 +4571,7 @@ Tests:
   transB: T
   alpha: 2.0
   beta: -2.0
+  batch_count: 2
   integer_exact_pattern: sparse_k
   requested_solution_num: 16
   fast_check_repeat: 3
