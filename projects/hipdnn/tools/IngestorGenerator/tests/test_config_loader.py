@@ -2777,15 +2777,24 @@ class TestHsacoKernelSource:
             "HsacoFixtureAdd",
         )
 
-    @pytest.mark.parametrize("arch", [None, []])
-    def test_a_kernel_without_arch_is_refused(self, tmp_path, arch):
+    def test_a_kernel_and_pack_without_arch_is_refused(self, tmp_path):
+        from codegen.config_loader import _check_kernel_source_fields
+
         raw = self._raw()
-        kernel = raw["packs"][0]["kernels"][0]
-        del kernel["arch"]
-        if arch is not None:
-            kernel["arch"] = arch
-        with pytest.raises(ConfigError, match="states no 'arch'"):
-            self._load(tmp_path, raw)
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        config.packs[0].arch = []
+        with pytest.raises(ConfigError, match="neither the kernel nor its pack"):
+            _check_kernel_source_fields(config)
+
+    def test_a_kernel_inherits_its_packs_arch_into_the_descriptor(self, tmp_path):
+        from codegen.generator import build_kdp, mint_ids
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert kdp["kernelDescriptors"][0]["arch"] == ["gfx942"]
 
     def test_a_missing_symbol_is_refused(self, tmp_path):
         raw = self._raw()

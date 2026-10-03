@@ -446,6 +446,23 @@ def test_symlink_leaving_the_root_is_refused(
 
 
 @pytest.mark.quick
+def test_unresolvable_file_name_is_refused(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir
+):
+    """A NUL byte in `file` is an HkpPackError, not a raw ValueError."""
+
+    def set_file(doc, template):
+        template["kernel_source"] = _hsaco_source(file="bad\x00.co")
+
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_file)
+
+    with pytest.raises(HkpPackError, match="hsaco file cannot be resolved"):
+        compile_intermediate(
+            load_flat_input(root), root, ARCH, NO_HIPCC, tmp_path / "inter"
+        )
+
+
+@pytest.mark.quick
 def test_truncated_code_object_names_the_ukd(
     tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir
 ):
@@ -485,7 +502,7 @@ def test_hsaco_symbol_must_be_ascii(tmp_path, empty_arch_fixture, hsaco_fixture_
 
 
 @pytest.mark.quick
-@pytest.mark.parametrize("arch", ["absent", []])
+@pytest.mark.parametrize("arch", ["absent", pytest.param([], id="empty")])
 def test_hsaco_without_arch_is_refused(
     tmp_path, empty_arch_fixture, hsaco_fixture_dir, arch
 ):
@@ -500,12 +517,3 @@ def test_hsaco_without_arch_is_refused(
 
     with pytest.raises(HkpPackError, match="ukd-solo-add-f32-b64"):
         load_flat_input(root)
-
-
-@pytest.mark.quick
-def test_hsaco_with_explicit_arch_loads(
-    tmp_path, empty_arch_fixture, hsaco_fixture_dir
-):
-    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
-
-    assert load_flat_input(root).kdps()

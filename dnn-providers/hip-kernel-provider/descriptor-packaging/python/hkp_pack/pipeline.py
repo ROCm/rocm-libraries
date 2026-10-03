@@ -126,6 +126,17 @@ class ArchResult:
     skipped: bool = False
 
 
+_EXC_TEXT_LIMIT = 200
+
+
+def _bounded_repr(exc):
+    """repr(exc), cut to a length that keeps one error message readable."""
+    text = repr(exc)
+    if len(text) <= _EXC_TEXT_LIMIT:
+        return text
+    return f"{text[:_EXC_TEXT_LIMIT]}... ({len(text)} chars)"
+
+
 def _sha256(data):
     """Digest of a packed blob, recorded on the shipped UKD.
 
@@ -1274,7 +1285,15 @@ def pack_arch(
             )
         variant_source_build[vk] = sig
         if vk not in variant_bytes:
-            data = inter.variant_co[vk].read_bytes()
+            try:
+                data = inter.variant_co[vk].read_bytes()
+            except OSError as exc:
+                if ukd.origin_kind != "hsaco":
+                    raise
+                raise HkpPackError(
+                    f"UKD '{ukd.id}': cannot read hsaco file "
+                    f"'{ukd.rel_file}': {exc}"
+                ) from exc
             digest = _sha256(data)
             if expected_sha256 and toc_key in expected_sha256:
                 if digest != expected_sha256[toc_key]:
@@ -1308,7 +1327,7 @@ def pack_arch(
                 except Exception as exc:
                     raise HkpPackError(
                         f"UKD '{ukd.id}': cannot read the AMDGPU metadata of "
-                        f"hsaco file '{ukd.rel_file}': {exc!r}"
+                        f"hsaco file '{ukd.rel_file}': {_bounded_repr(exc)}"
                     ) from exc
             else:
                 variant_signature[signature_key] = kernel_signature(

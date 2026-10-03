@@ -67,17 +67,26 @@ def resolve_descriptor_file(source_root, rel_dir, name, label, where=None):
     resolved path must stay inside the root.
 
     Missing file -> '<label> not found'; a path leaving the root -> '<label>
-    escapes the source root'. Both are hard errors, never skips.
+    escapes the source root'; a name the OS cannot resolve (NUL byte, over-long
+    component) -> '<label> cannot be resolved'. All are hard errors, never
+    skips.
     """
     prefix = f"{where}: " if where else ""
     root = Path(source_root).resolve()
-    path = (root / rel_dir / name).resolve()
+    try:
+        path = (root / rel_dir / name).resolve()
+        is_file = path.is_file()
+    except (ValueError, OSError) as exc:
+        raise HkpPackError(
+            f"{prefix}{label} cannot be resolved: {name!r} "
+            f"(from {Path(rel_dir).as_posix()}): {exc}"
+        ) from exc
     if not path.is_relative_to(root):
         raise HkpPackError(
             f"{prefix}{label} escapes the source root: {name} "
             f"(from {Path(rel_dir).as_posix()}, resolved to {path})"
         )
-    if not path.is_file():
+    if not is_file:
         raise HkpPackError(
             f"{prefix}{label} not found: {name} (looked for {path}, "
             f"resolved relative to descriptor folder {Path(rel_dir).as_posix()})"

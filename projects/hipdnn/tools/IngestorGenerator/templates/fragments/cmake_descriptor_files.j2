@@ -21,7 +21,8 @@
 ## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack
 ## and then the engine, so the authored files belong under the shipped source root only.
 {% if config.kernel_source_kind == 'hsaco' %}
-## A prebuilt object must sit beside the descriptor that names it.
+## A prebuilt object must resolve, relative to the descriptor's folder, to a file
+## inside the shipped source root.
 {% endif %}
 ##
 ## Authored subpath (preserved verbatim into the staged and installed trees):

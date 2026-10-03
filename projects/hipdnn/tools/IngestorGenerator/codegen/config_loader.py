@@ -1599,12 +1599,13 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
-            if ks.kind == KERNEL_SOURCE_KIND_HSACO and not kernel.arch:
+            if ks.kind == KERNEL_SOURCE_KIND_HSACO and not (kernel.arch or pack.arch):
                 raise ConfigError(
-                    f"{where} is kind 'hsaco' but the kernel states no 'arch'. "
-                    f"A prebuilt code object targets specific processors, so it "
-                    f"must list the arch(es) it runs on; without one it would "
-                    f"enter every arch shard."
+                    f"{where} is kind 'hsaco' but neither the kernel nor its pack "
+                    f"states an 'arch'. A prebuilt code object targets specific "
+                    f"processors, so it must list the arch(es) it runs on (a "
+                    f"generic-target object lists every arch it runs on); without "
+                    f"one it would enter every arch shard."
                 )
 
 

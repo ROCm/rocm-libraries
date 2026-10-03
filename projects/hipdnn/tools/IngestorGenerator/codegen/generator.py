@@ -254,13 +254,23 @@ def _check_metadata_resolved(
             else "Pin the knob in kernel_source.spec if the binary should carry it, "
             "or write the resolved value in metadata"
         )
+        if prebuilt:
+            tail = (
+                f"so nothing here decides the value. The loader will substitute the "
+                f"KMD default_value as the catalog key, which need not match what "
+                f"the prebuilt object was built with, and the disagreement is "
+                f"silent. {remedy}."
+            )
+        else:
+            tail = (
+                f"so nothing here decides the value. The loader will substitute the "
+                f"KMD default_value as the catalog key while the kernel is compiled "
+                f"from the builder's own default -- two independent defaults that "
+                f"are not required to agree, and whose disagreement is silent. "
+                f"{remedy} if the builder's default is what you mean."
+            )
         raise ValueError(
-            f"kernel {kernel.name!r} states {undeclared} in {where}, so nothing here "
-            f"decides the value. The loader will substitute the KMD default_value as "
-            f"the catalog key while the kernel is compiled from the builder's own "
-            f"default -- two independent defaults that are not required to agree, and "
-            f"whose disagreement is silent. {remedy} if the builder's default is "
-            f"what you mean."
+            f"kernel {kernel.name!r} states {undeclared} in {where}, {tail}"
         )
 
 
@@ -520,7 +530,11 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
-        if kernel.arch:
+        # hkp_pack validates the kernel's own arch for hsaco and rejects a
+        # wildcard, so the inherited pack arch is stated on the descriptor.
+        if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO:
+            entry["arch"] = arch
+        elif kernel.arch:
             entry["arch"] = list(kernel.arch)
         kernel_descriptors.append(entry)
     if duplicates:
