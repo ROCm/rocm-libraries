@@ -1136,6 +1136,14 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
 // tensile_solution_selection_method in a test case has no effect once an earlier test in the
 // same process has run a GEMM. A case that needs the Stream-K solutions therefore needs the variable set when the
 // process starts. On gfx950 the Stream-K library is the only one, and the variable has no effect.
+// TENSILE_SOLUTION_SELECTION_METHOD as the process started, read before any test runs: a case's
+// tensile_solution_selection_method sets the variable per handle, after TensileLite has already
+// read it, so the variable at check time can claim a selection the library is not using.
+inline const bool kStreamKSelectedAtStartup = [] {
+    const char* method = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
+    return method && !strcmp(method, "2");
+}();
+
 inline std::string streamk_unavailable_reason()
 {
     int device = 0;
@@ -1146,8 +1154,7 @@ inline std::string streamk_unavailable_reason()
            && !strncmp(props.gcnArchName, "gfx950", 6))
             return {};
     }
-    const char* method = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
-    if(method && !strcmp(method, "2"))
+    if(kStreamKSelectedAtStartup)
         return {};
     return "this case covers Stream-K solutions, which the library offers only when the process "
            "starts with TENSILE_SOLUTION_SELECTION_METHOD=2";
