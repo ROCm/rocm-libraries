@@ -4188,7 +4188,7 @@ Tests:
 # element index or byte offset at 2^31 or 2^32, a buffer limit at 2 or 4 GiB,
 # or a launch of 2^32 work items (2^24 tiles of 256 threads). Each sweep here
 # puts one shape just below a threshold and one just above it, so a failure
-# brackets the overflow. These need up to about 20 GiB of device memory, so they
+# brackets the overflow. These need up to about 33 GiB of device memory, so they
 # are category stress (the stress tier in test_categories.yaml, for large-memory
 # runners or a weekly run), and a case skips with the amounts when the device or
 # the host does not have the memory. A shape the library offers no solution for

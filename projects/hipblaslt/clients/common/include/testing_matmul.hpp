@@ -2588,7 +2588,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                    + 2 * size_bias[i] * realDataTypeSize(Tbias)
                    + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1);
         }
-        deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count);
+        // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
+        // reference); the device count reuses the host's, which is at least as large.
+        const size_t sideScalars
+            = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
+        deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count)
+                       + size_t(gemm_count) * sideScalars * sizeAlpha;
+        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha;
         std::string why = fast_check_memory_shortfall(deviceBytes, hostBytes);
         if(!why.empty())
         {
