@@ -145,16 +145,18 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             {
                 return {Status::Code::NotSupported, Stage::Generate, e.what()};
             }
-            for(const auto* tensor : {&problem.a(), &problem.b(), &problem.d()})
+            for(const auto* tensor : {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
                 if(tensor->totalAllocatedBytes() >= tensorLimit)
                     return {Status::Code::NotSupported,
                             Stage::Generate,
                             "HipKittens kernels need tensors smaller than 4 GiB"};
-            // The kernels read packed A and B and write packed D; JIT library
-            // rows match only sizes, so the entry also pins the strides.
+            // The kernels read packed A, B and C and write packed D; JIT library
+            // rows match only sizes, so the entry also pins the strides, C's even
+            // for beta 0 because the entry serves every beta.
             const std::vector<hipblaslt_jit::msgpack_io::IndexedPredicate> packed{
                 {"StrideAEqual", 1, shape.k},
                 {"StrideBEqual", 1, shape.k},
+                {"StrideCEqual", 1, shape.m},
                 {"StrideDEqual", 1, shape.m}};
             for(const auto& variant : variants)
             {

@@ -2,10 +2,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""HipKittens in JIT heuristic queries: hipblaslt-bench --api_method mix
---verify returns it after TensileLite when HIPBLASLT_JIT_BACKENDS names it,
-TensileLite alone when it does not or when its headers are missing, and
-hipblasLtMatmul without an algorithm runs it when it comes first."""
+"""HipKittens in JIT heuristic queries: hipblaslt-bench --verify, through
+hipblaslt_ext::Gemm with beta 0 and through the C API with beta 1, returns it
+after TensileLite when HIPBLASLT_JIT_BACKENDS names it, TensileLite alone when
+it does not or when its headers are missing, and hipblasLtMatmul without an
+algorithm runs it when it comes first."""
 
 import argparse
 import json
@@ -18,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bench"))
 from test_jit_gemm import check_numerics, require  # noqa: E402
 
-KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1"
+KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi2"
 MISSING = "JIT backend HipKittens not available"
 
 
@@ -35,19 +36,19 @@ def run(output, name, command, library, **variables):
     return result
 
 
-# M=1024 N=512 K=768 BF16 TN with beta 0; the C heuristic assumes beta 1, which
-# HipKittens does not serve, so the bench queries through hipblaslt_ext::Gemm.
-def bench(args, name, requested, **variables):
+# M=1024 N=512 K=768 BF16 TN; "mix" queries through hipblaslt_ext::Gemm with
+# the bench's beta, "c" through hipblasLtMatmulAlgoGetHeuristic, which assumes beta 1.
+def bench(args, name, requested, api="mix", beta="0", library="jit-library", **variables):
     result = run(
         args.output,
         name,
         [str(args.bench), "-m", "1024", "-n", "512", "-k", "768",
          "--transA", "T", "--transB", "N",
          "--a_type", "bf16_r", "--b_type", "bf16_r", "--c_type", "bf16_r",
-         "--d_type", "bf16_r", "--compute_type", "f32_r", "--alpha", "1", "--beta", "0",
-         "--api_method", "mix", "--requested_solution", str(requested),
+         "--d_type", "bf16_r", "--compute_type", "f32_r", "--alpha", "1", "--beta", beta,
+         "--api_method", api, "--requested_solution", str(requested),
          "--verify", "--iters", "3", "--cold_iters", "1", "--print_kernel_info"],
-        args.output / "jit-library",
+        args.output / library,
         **variables,
     )
     check_numerics(result.stdout)
@@ -84,6 +85,17 @@ def main():
         "Expected one JIT library entry for each backend",
     )
     print(f"PASS mix --verify: {len(tensilelite)} TensileLite solutions, then {KERNEL}")
+
+    kernels, _ = bench(
+        args, "c-api", 4, api="c", beta="1", library="c-api-library",
+        HIPBLASLT_JIT_BACKENDS="tensilelite,hipkittens",
+    )
+    require(
+        kernels[-1:] == [KERNEL] and kernels[:-1]
+        and all(kernel.startswith("Cijk_") for kernel in kernels[:-1]),
+        f"C API with beta 1, expected TensileLite kernels, then {KERNEL}: {kernels}",
+    )
+    print(f"PASS C API beta 1 --verify: {len(kernels) - 1} TensileLite solutions, then {KERNEL}")
 
     kernels, stderr = bench(
         args, "default", len(tensilelite), HIPBLASLT_JIT_HIPKITTENS_PATH=str(no_headers)

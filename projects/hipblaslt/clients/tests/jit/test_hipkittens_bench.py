@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """Publish a HipKittens solution, then run it with hipblaslt-bench --verify
-through hipblasLtMatmul by its solution index, with JIT off."""
+through hipblasLtMatmul by its solution index, with JIT off and beta 1."""
 
 import argparse
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bench"))
 from test_jit_gemm import check_numerics, require  # noqa: E402
 
-KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1"
+KERNEL = "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi2"
 
 
 def main():
@@ -27,7 +27,8 @@ def main():
     args.output.mkdir(parents=True)
     env = dict(os.environ, HIPBLASLT_JIT_LIBRARY_PATH=str(args.output / "jit-library"))
 
-    # The "library" mode publishes M=1024 N=512 K=768.
+    # The "library" mode publishes M=1024 N=512 K=768 with beta 0; the entry
+    # serves every beta.
     published = subprocess.run(
         [str(args.test), "library"], env=env, text=True, capture_output=True, timeout=600
     )
@@ -39,7 +40,7 @@ def main():
         [str(args.bench), "-m", "1024", "-n", "512", "-k", "768",
          "--transA", "T", "--transB", "N",
          "--a_type", "bf16_r", "--b_type", "bf16_r", "--c_type", "bf16_r",
-         "--d_type", "bf16_r", "--compute_type", "f32_r", "--alpha", "1", "--beta", "0",
+         "--d_type", "bf16_r", "--compute_type", "f32_r", "--alpha", "1", "--beta", "1",
          "--algo_method", "index", "--solution_index", index,
          "--verify", "--iters", "3", "--cold_iters", "1", "--print_kernel_info"],
         env=env, text=True, capture_output=True, timeout=600,

@@ -6,7 +6,8 @@
 // be1c91841b817c9690aa3af22ea771f8e3624bf4,
 // kernels/cdna4/gemm/bf16fp32/256_256_64_32_with16x32.cpp
 // (MIT License, Copyright (c) 2024 HazyResearch), made a device function that
-// takes its LDS from the wrapper below; the host dispatch and bindings are removed.
+// takes its LDS from the wrapper below and adds beta times C to the result; the
+// host dispatch and bindings are removed.
 #include "kittens.cuh"
 using namespace kittens;
 
@@ -34,10 +35,26 @@ struct micro_globals {
     _gl_A a;
     _gl_B b;
     _gl_C c;
+    _gl_C c_in; // the C that beta scales; may alias c
 };
 
+// Stores acc + beta * C. C is read in the layout the tile is stored in, so each
+// lane reads only the elements it writes and C may alias the output; beta 0
+// reads no C.
+template <ducks::rt::all RT>
+__device__ __forceinline__ void store_beta(const micro_globals& g, RT& acc, float beta,
+                                           const coord<RT>& idx) {
+    if (beta != 0.0f) {
+        RT c;
+        load(c, g.c_in, idx);
+        mul(c, c, beta);
+        add(acc, acc, c);
+    }
+    store(g.c, acc, idx);
+}
+
 __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int N, int K,
-                                              alignment_dummy* __shm) {
+                                              float beta, alignment_dummy* __shm) {
     shared_allocator al((int*)&__shm[0]);
     using ST_A = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
     using ST_B = st_bf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
@@ -312,16 +329,16 @@ __device__ __forceinline__ void micro_tk_body(const micro_globals& g, int M, int
         __builtin_amdgcn_s_barrier();
     }
 
-    store(g.c, C_accum[0][0], {0, 0,
+    store_beta(g, C_accum[0][0], beta, {0, 0,
         (row * 2) * WARPS_M + warp_row,
         col * 2 * WARPS_N + warp_col});
-    store(g.c, C_accum[0][1], {0, 0,
+    store_beta(g, C_accum[0][1], beta, {0, 0,
         (row * 2) * WARPS_M + warp_row,
         col * 2 * WARPS_N + WARPS_N + warp_col});
-    store(g.c, C_accum[1][0], {0, 0,
+    store_beta(g, C_accum[1][0], beta, {0, 0,
         (row * 2) * WARPS_M + WARPS_M + warp_row,
         col * 2 * WARPS_N + warp_col});
-    store(g.c, C_accum[1][1], {0, 0,
+    store_beta(g, C_accum[1][1], beta, {0, 0,
         (row * 2) * WARPS_M + WARPS_M + warp_row,
         col * 2 * WARPS_N + WARPS_N + warp_col});
 }
@@ -343,18 +360,21 @@ __device__ __forceinline__ GL make_gl(const void* p, size_t b, size_t d, size_t 
 }
 }
 
-// Wrapper ABI 1: the entry's customKernel args are AddressA, AddressB, AddressD,
-// SizeFree0, SizeFree1 and SizeSum. HK's C is row-major [M,N], which is
-// column-major D (m x n) transposed, so hipBLASLt (m, n) = HK (N, M), A = HK b
-// and B = HK a. The grid is one work-group per 256x256 tile of D.
+// Wrapper ABI 2: the entry's customKernel args are AddressA, AddressB, AddressC,
+// AddressD, SizeFree0, SizeFree1, SizeSum and Beta. HK's C is row-major [M,N],
+// which is column-major D (m x n) transposed, so hipBLASLt (m, n) = HK (N, M),
+// A = HK b and B = HK a; hipBLASLt's C has D's layout. The grid is one
+// work-group per 256x256 tile of D.
 extern "C" __global__ __launch_bounds__(512, 2)
-void HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1(const void* A, const void* B, void* D,
-                                                   uint32_t m, uint32_t n, uint32_t k)
+void HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi2(const void* A, const void* B, const void* C,
+                                                   void* D, uint32_t m, uint32_t n, uint32_t k,
+                                                   float beta)
 {
     __shared__ alignment_dummy lds[MAX_SHARED_MEMORY / sizeof(alignment_dummy)];
     const int M = int(n), N = int(m), K = int(k);
     micro_globals g{hk_flat::make_gl<_gl_A>(B, 1, 1, M, K),
                     hk_flat::make_gl<_gl_B>(A, 1, 1, N, K),
-                    hk_flat::make_gl<_gl_C>(D, 1, 1, M, N)};
-    micro_tk_body(g, M, N, K, lds);
+                    hk_flat::make_gl<_gl_C>(D, 1, 1, M, N),
+                    hk_flat::make_gl<_gl_C>(C, 1, 1, M, N)};
+    micro_tk_body(g, M, N, K, beta, lds);
 }

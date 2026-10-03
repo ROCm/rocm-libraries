@@ -19,9 +19,11 @@
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
+#include <tuple>
 #include <unistd.h>
 #include <vector>
 
@@ -98,9 +100,10 @@ namespace
         hipblasOperation_t     opA = HIPBLAS_OP_T, opB = HIPBLAS_OP_N;
         hipDataType            typeAB = HIP_R_16BF, typeCD = HIP_R_16BF;
         int64_t                m = 1024, n = 1024, k = 1024;
-        int64_t                lda = 0, ldb = 0, ldd = 0; // 0 is packed
+        int64_t                lda = 0, ldb = 0, ldc = 0, ldd = 0; // 0 is packed
         int32_t                batch = 1;
         float                  alpha = 1, beta = 0;
+        bool                   cIsD = false; // C aliases D
         hipblasLtPointerMode_t pointerMode = HIPBLASLT_POINTER_MODE_HOST;
         hipblasLtEpilogue_t    epilogue    = HIPBLASLT_EPILOGUE_DEFAULT;
 
@@ -120,13 +123,21 @@ namespace
         {
             return ldb ? ldb : rowsB();
         }
+        int64_t leadC() const
+        {
+            return ldc ? ldc : m;
+        }
         int64_t leadD() const
         {
             return ldd ? ldd : m;
         }
         std::string name() const
         {
-            return std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
+            std::ostringstream out;
+            out << m << 'x' << n << 'x' << k;
+            if(beta)
+                out << " beta " << beta << (cIsD ? " C=D" : "");
+            return out.str();
         }
     };
 
@@ -163,7 +174,7 @@ namespace
             };
             layout(la, c.typeAB, c.rowsA(), c.opA == HIPBLAS_OP_N ? c.k : c.m, c.leadA());
             layout(lb, c.typeAB, c.rowsB(), c.opB == HIPBLAS_OP_N ? c.n : c.k, c.leadB());
-            layout(lc, c.typeCD, c.m, c.n, c.leadD());
+            layout(lc, c.typeCD, c.m, c.n, c.leadC());
             layout(ld, c.typeCD, c.m, c.n, c.leadD());
         }
         ~Descriptors()
@@ -371,6 +382,14 @@ namespace
             change(c);
             return c;
         };
+        for(const auto& c : {Case{"beta 1", with([](Config& c) { c.beta = 1; })},
+                             Case{"beta -0.5", with([](Config& c) { c.beta = -0.5f; })}})
+        {
+            status = generate(provider, r.make(c.config), target, solutions);
+            require(status.ok() && solutions.size() == 1,
+                    std::string(c.label) + ": " + status.message);
+            std::cout << "PASS one solution for " << c.label << '\n';
+        }
         const std::vector<Case> cases{
             {"NN", with([](Config& c) { c.opA = HIPBLAS_OP_N; })},
             {"NT", with([](Config& c) { c.opA = HIPBLAS_OP_N, c.opB = HIPBLAS_OP_T; })},
@@ -383,7 +402,6 @@ namespace
              with([](Config& c) {
                  c.pointerMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
              })},
-            {"beta 1", with([](Config& c) { c.beta = 1; })},
             {"batch 2", with([](Config& c) { c.batch = 2; })},
             {"M = 300", with([](Config& c) { c.m = 300; })},
             {"N = 384", with([](Config& c) { c.n = 384; })},
@@ -391,6 +409,8 @@ namespace
             {"K = 64", with([](Config& c) { c.k = 64; })},
             {"ldA != K", with([](Config& c) { c.lda = c.k + 64; })},
             {"ldB != K", with([](Config& c) { c.ldb = c.k + 64; })},
+            {"ldC != M", with([](Config& c) { c.ldc = c.m + 256; })},
+            {"ldC != M, beta 1", with([](Config& c) { c.ldc = c.m + 256, c.beta = 1; })},
             {"ldD != M", with([](Config& c) { c.ldd = c.m + 256; })},
             {"bias", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_BIAS; })},
             {"ReLU", with([](Config& c) { c.epilogue = HIPBLASLT_EPILOGUE_RELU; })},
@@ -441,8 +461,8 @@ namespace
         std::set<std::string> types;
         for(const auto& term : all->value)
             types.insert(term->type());
+        require(!types.count("BetaZero"), "The entry still requires beta 0");
         for(const char* type : {"AlphaValue",
-                                "BetaZero",
                                 "BatchSizeEqual",
                                 "Free0SizeMultiple",
                                 "Free1SizeMultiple",
@@ -461,6 +481,7 @@ namespace
         using Pin = std::pair<size_t, size_t>;
         require(stride(static_cast<P::StrideAEqual*>(nullptr)) == Pin(1, 384)
                     && stride(static_cast<P::StrideBEqual*>(nullptr)) == Pin(1, 384)
+                    && stride(static_cast<P::StrideCEqual*>(nullptr)) == Pin(1, 512)
                     && stride(static_cast<P::StrideDEqual*>(nullptr)) == Pin(1, 512),
                 "The entry does not pin packed strides");
         std::cout << "PASS entry: handwritten custom kernel, static and stride predicates\n";
@@ -503,7 +524,9 @@ namespace
         std::cout << "PASS build matches the variant's resources\n";
     }
 
-    // One packed GEMM on the device, with canaries around D.
+    // One packed GEMM on the device, with canaries around D. C holds random
+    // values, or NaN for beta 0, which must not read it; with cIsD it is D's
+    // initial content.
     struct Gemm
     {
         static constexpr size_t guard = 4096; // elements on each side of D
@@ -511,8 +534,8 @@ namespace
         size_t                  offset; // bytes added to each base pointer
         Handle                  h;
         Descriptors             layout{c, nullptr};
-        std::vector<uint16_t>   hostA, hostB;
-        DeviceBuffer<char>      A, B, D;
+        std::vector<uint16_t>   hostA, hostB, hostC;
+        DeviceBuffer<char>      A, B, C, D;
         hipStream_t             stream{};
 
         Gemm(const Config& config, size_t offset = 0)
@@ -520,20 +543,26 @@ namespace
             , offset(offset)
             , hostA(size_t(c.k) * c.m)
             , hostB(size_t(c.k) * c.n)
+            , hostC(size_t(c.m) * c.n, canary)
             , A(hostA.size() * 2 + offset)
             , B(hostB.size() * 2 + offset)
+            , C(hostC.size() * 2 + offset)
             , D((size_t(c.m) * c.n + 2 * guard) * 2 + offset)
         {
             HIP(hipStreamCreate(&stream));
             uint32_t seed = 12345;
-            for(auto* host : {&hostA, &hostB})
+            for(auto* host : {&hostA, &hostB, &hostC})
                 for(auto& value : *host)
                 {
+                    if(host == &hostC && !c.beta)
+                        break;
                     seed = seed * 1664525u + 1013904223u;
                     value = toBf16(static_cast<float>(seed >> 8) / float(1 << 23) - 1.0f);
                 }
             HIP(hipMemcpy(a(), hostA.data(), hostA.size() * 2, hipMemcpyHostToDevice));
             HIP(hipMemcpy(b(), hostB.data(), hostB.size() * 2, hipMemcpyHostToDevice));
+            HIP(hipMemcpy(C.pointer + offset, hostC.data(), hostC.size() * 2,
+                          hipMemcpyHostToDevice));
         }
         ~Gemm()
         {
@@ -555,6 +584,10 @@ namespace
         {
             return base() + guard;
         }
+        void* cIn() const
+        {
+            return c.cIsD ? d() : C.pointer + offset;
+        }
         jit::Request request()
         {
             jit::Request     result;
@@ -567,7 +600,7 @@ namespace
                                       b(),
                                       layout.lb,
                                       &c.beta,
-                                      d(),
+                                      cIn(),
                                       layout.lc,
                                       d(),
                                       layout.ld,
@@ -578,6 +611,8 @@ namespace
         void poison()
         {
             std::vector<uint16_t> fill(size_t(c.m) * c.n + 2 * guard, canary);
+            if(c.cIsD)
+                std::copy(hostC.begin(), hostC.end(), fill.begin() + guard);
             HIP(hipMemcpy(base(), fill.data(), fill.size() * 2, hipMemcpyHostToDevice));
         }
         // Without an algorithm, hipblasLtMatmul queries the heuristic itself.
@@ -591,7 +626,7 @@ namespace
                                    b(),
                                    layout.lb,
                                    &c.beta,
-                                   d(),
+                                   cIn(),
                                    layout.lc,
                                    d(),
                                    layout.ld,
@@ -631,6 +666,8 @@ namespace
                 for(int64_t k = 0; k < c.k; ++k)
                     sum += double(fromBf16(hostA[k + row * c.k]))
                            * double(fromBf16(hostB[k + col * c.k]));
+                if(c.beta)
+                    sum += double(c.beta) * fromBf16(hostC[row + col * c.m]);
                 const double got = fromBf16(out[row + col * c.m]);
                 require(std::abs(got - sum) <= bound + 0.01 * std::abs(sum),
                         label + ": D(" + std::to_string(row) + ", " + std::to_string(col)
@@ -665,10 +702,23 @@ namespace
                                      {1280, 512, 512},
                                      {4096, 4096, 4096},
                                      {8192, 8192, 8192}};
+        std::vector<Config> configs;
         for(const auto& shape : shapes)
         {
-            Config c;
-            c.m = shape[0], c.n = shape[1], c.k = shape[2];
+            configs.emplace_back();
+            configs.back().m = shape[0], configs.back().n = shape[1], configs.back().k = shape[2];
+        }
+        for(const auto& [shape, beta, cIsD] : {std::tuple{shapes[1], 1.0f, false},
+                                               std::tuple{shapes[1], -0.5f, true},
+                                               std::tuple{shapes[2], 2.0f, true},
+                                               std::tuple{shapes[5], 1.0f, false}})
+        {
+            configs.emplace_back();
+            auto& c = configs.back();
+            c.m = shape[0], c.n = shape[1], c.k = shape[2], c.beta = beta, c.cIsD = cIsD;
+        }
+        for(const auto& c : configs)
+        {
             Gemm       g(c);
             const auto algo = jitAlgo(g, provider).algo;
             g.poison();
@@ -696,7 +746,7 @@ namespace
                                 g.b(),
                                 g.layout.lb,
                                 &c.beta,
-                                g.d(),
+                                g.cIn(),
                                 g.layout.lc,
                                 g.d(),
                                 g.layout.ld));
@@ -853,7 +903,7 @@ namespace
                                 g.b(),
                                 g.layout.lb,
                                 &g.c.beta,
-                                g.d(),
+                                g.cIn(),
                                 g.layout.lc,
                                 g.d(),
                                 g.layout.ld);

@@ -41,10 +41,10 @@ reports one configure failure:
 hipblaslt warning: JIT configure failed for GEMM M=1024 N=512 K=768 ... EPILOGUE_DEFAULT: JIT backend HipKittens not available: headers not found at /opt/rocm/lib/hipblaslt/hipkittens/be1c91841b81; set HIPBLASLT_JIT_HIPKITTENS_PATH
 ```
 
-`hipblasLtMatmulAlgoGetHeuristic` builds its problem with beta 1, so it never
-returns the HipKittens kernel, which needs beta 0. `GemmInstance::algoGetHeuristic`
-and `hipblasLtMatmul` without an algorithm use the problem's own alpha and
-beta.
+`hipblasLtMatmulAlgoGetHeuristic` builds its problem with beta 1;
+`GemmInstance::algoGetHeuristic` and `hipblasLtMatmul` without an algorithm
+use the problem's own alpha and beta. The kernel serves any beta, so all three
+return it.
 
 ## Build
 
@@ -59,19 +59,20 @@ extension, as the TensileLite backend does.
 ## Kernel
 
 `library/src/amd_detail/hipkittens/` holds one variant,
-`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi1`: the kernel of the HipKittens
-256x256x64 BF16 GEMM, behind a wrapper that takes `A, B, D, m, n, k` (36 bytes
-of kernel arguments) and passes B and A to the kernel in that order: the
-kernel's row-major `C = a·bᵀ` is then hipBLASLt's column-major `D = Aᵀ·B`.
-It uses 160,000 bytes of LDS and 242 VGPRs, and launches
-512 threads per 256x256 output tile. It serves gfx950 problems with:
+`HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi2`: the kernel of the HipKittens
+256x256x64 BF16 GEMM, behind a wrapper that takes `A, B, C, D, m, n, k, beta`
+(48 bytes of kernel arguments) and passes B and A to the kernel in that order:
+the kernel's row-major `C = a·bᵀ` is then hipBLASLt's column-major `D = Aᵀ·B`.
+Its epilogue adds `beta·C` in FP32 before rounding to BF16; with beta 0 it does
+not read C, and C may be D. It uses 160,000 bytes of LDS and 238 VGPRs, and
+launches 512 threads per 256x256 output tile. It serves gfx950 problems with:
 
 - `opA = T` and `opB = N`, BF16 A, B, C and D, and FP32 compute;
-- alpha 1 on the host, beta 0, and no bias, activation or alpha vector;
+- alpha 1 and any beta on the host, and no bias, activation or alpha vector;
 - one batch, M and N multiples of 256, and K a multiple of 128 (the kernel
   computes wrong results when K is an odd multiple of 64);
-- packed leading dimensions (`lda = ldb = K`, `ldd = M`) and tensors under
-  4 GiB.
+- packed leading dimensions (`lda = ldb = K`, `ldc = ldd = M`) and tensors
+  under 4 GiB.
 
 Other problems get `NotSupported`, and other devices `TargetMismatch`.
 
