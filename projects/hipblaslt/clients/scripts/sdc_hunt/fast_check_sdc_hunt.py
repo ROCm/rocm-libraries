@@ -167,44 +167,47 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
 
     background, load_log = None, None
     bg_cmd = load_command(load, args.test_bin)
-    if bg_cmd:
-        load_log = args.results.with_suffix(f".{stem}.load.log")
-        with load_log.open("w") as bg_out:
-            background = subprocess.Popen(
-                bg_cmd, env=env, stdout=bg_out, stderr=subprocess.STDOUT
-            )
-        problem = wait_for_load(background, load, load_log, args)
-        if problem:
-            stop(background)
-            record.update(
-                {
-                    "exit_code": "load_failed",
-                    "load_error": problem,
-                    "load_log": str(load_log),
-                    "seconds": 0.0,
-                }
-            )
-            record.update(parse_run(""))
-            return record
-
-    start = time.monotonic()
+    # The load is stopped however this run ends, including on Ctrl-C while it settles, so it
+    # never carries over into a later combination.
     try:
-        proc = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=args.timeout,
-            check=False,
-        )
-        output, code = proc.stdout + proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as e:
-        output = as_text(e.stdout) + as_text(e.stderr)
-        code = "timeout"
-    finally:
+        if bg_cmd:
+            load_log = args.results.with_suffix(f".{stem}.load.log")
+            with load_log.open("w") as bg_out:
+                background = subprocess.Popen(
+                    bg_cmd, env=env, stdout=bg_out, stderr=subprocess.STDOUT
+                )
+            problem = wait_for_load(background, load, load_log, args)
+            if problem:
+                record.update(
+                    {
+                        "exit_code": "load_failed",
+                        "load_error": problem,
+                        "load_log": str(load_log),
+                        "seconds": 0.0,
+                    }
+                )
+                record.update(parse_run(""))
+                return record
+
+        start = time.monotonic()
+        try:
+            proc = subprocess.run(
+                cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+                check=False,
+            )
+            output, code = proc.stdout + proc.stderr, proc.returncode
+        except subprocess.TimeoutExpired as e:
+            output = as_text(e.stdout) + as_text(e.stderr)
+            code = "timeout"
         if background:
             # A load that stopped early left part of the run uncontended.
             record["load_ran_throughout"] = background.poll() is None
+    finally:
+        if background:
             stop(background)
 
     record.update({"exit_code": code, "seconds": round(time.monotonic() - start, 1)})
@@ -321,6 +324,11 @@ def main(argv: list[str]) -> int:
         help="JSON Lines file to append one record per run to (default: %(default)s)",
     )
     args = parser.parse_args(argv)
+    for name in ("load_settle_seconds", "load_ready_seconds"):
+        if getattr(args, name) < 0:
+            parser.error(f"--{name.replace('_', '-')} must not be negative")
+    if args.timeout <= 0 or args.runs < 1:
+        parser.error("--timeout must be positive and --runs at least 1")
     args.results = args.results.resolve()
     # Names this invocation's logs, so a later invocation appending to the same results file
     # does not overwrite them.
