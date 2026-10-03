@@ -37,6 +37,8 @@
 #include "rocsolver/rocsolver.h"
 
 #include <cmath>
+#include <memory>
+#include <type_traits>
 
 #include "rocauxiliary_bdsqr_hybrid.hpp"
 
@@ -354,6 +356,24 @@ __device__ static void bdsqr_permute_swap(const I n,
         computations. 0 means computations are ongoing, 1 means computations are finished,
         and 2 means the input is invalid. */
 /***************************************************************/
+
+/** BDSQR_HOST_PTR returns the address of the first matrix of A (shifted), as a host value **/
+template <typename T, typename W>
+T* bdsqr_host_ptr(W A, const rocblas_int shift, hipStream_t stream)
+{
+    if(!A)
+        return nullptr;
+    if constexpr(std::is_pointer_v<std::remove_pointer_t<W>>)
+    {
+        T* p;
+        if(hipMemcpyAsync(&p, A, sizeof(T*), hipMemcpyDeviceToHost, stream) != hipSuccess
+           || hipStreamSynchronize(stream) != hipSuccess)
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
+        return p + shift;
+    }
+    else
+        return A + shift;
+}
 
 /** BDSQR_MARK_BAD marks the instances with info = n (bad input) as bdsqr_init does, so that
     bdsqr_finalize skips them **/
@@ -1332,6 +1352,16 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 rocblas_int num_splits;
             } h_params;
 
+            // for one large problem, the rotations of BDSQR_ROT_SWEEPS sweeps are recorded and
+            // applied in accumulated blocks (see BDSQR_GPULOG)
+            std::unique_ptr<bdsqr_gpulog<S, T>> glog;
+            if(batch_count == 1 && nvuc_max > BDSQR_SWITCH_SIZE)
+                glog = std::make_unique<bdsqr_gpulog<S, T>>(
+                    handle, n, bdsqr_host_ptr<T>(V, shiftV, stream), ldv, nv,
+                    bdsqr_host_ptr<T>(U, shiftU, stream), ldu, nu,
+                    bdsqr_host_ptr<T>(C, shiftC, stream), ldc, nc);
+            const rocblas_int sweeps = glog ? glog->sweeps() : BDSQR_ITERS_PER_SYNC;
+
             while(h_iter < maxiter)
             {
                 // if all instances in the batch have finished, exit the loop
@@ -1345,7 +1375,7 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 dim3 gridSplits(1, h_params.num_splits, batch_count);
                 dim3 gridVUC((nvuc_max - 1) / BS1 + 1, h_params.num_splits, batch_count);
 
-                for(rocblas_int inner_iters = 0; inner_iters < BDSQR_ITERS_PER_SYNC; inner_iters++)
+                for(rocblas_int inner_iters = 0; inner_iters < sweeps; inner_iters++)
                 {
                     if(nvuc_max <= BDSQR_SWITCH_SIZE)
                     {
@@ -1367,10 +1397,15 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                                                 splits_map, work, incW, strideW, completed);
 
                         // update singular vectors
-                        ROCSOLVER_LAUNCH_KERNEL((bdsqr_rotate<T>), gridVUC, threadsVUC, 0, stream,
-                                                n, nv, nu, nc, V, shiftV, ldv, strideV, U, shiftU,
-                                                ldu, strideU, C, shiftC, ldc, strideC, maxiter,
-                                                splits_map, work, incW, strideW, completed);
+                        if(glog)
+                            glog->snapshot(inner_iters, h_params.num_splits, maxiter, splits_map,
+                                           work, incW, completed);
+                        else
+                            ROCSOLVER_LAUNCH_KERNEL((bdsqr_rotate<T>), gridVUC, threadsVUC, 0,
+                                                    stream, n, nv, nu, nc, V, shiftV, ldv, strideV,
+                                                    U, shiftU, ldu, strideU, C, shiftC, ldc,
+                                                    strideC, maxiter, splits_map, work, incW,
+                                                    strideW, completed);
                     }
 
                     // update split block endpoints
@@ -1380,9 +1415,11 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 }
 
                 // check for completion
-                h_iter += BDSQR_ITERS_PER_SYNC;
+                h_iter += sweeps;
                 ROCSOLVER_LAUNCH_KERNEL((bdsqr_chk_completed<T>), gridBasic, threadsBasic, 0,
                                         stream, n, maxiter, splits_map, work, strideW, completed);
+                if(glog)
+                    glog->flush();
             }
         }
     }

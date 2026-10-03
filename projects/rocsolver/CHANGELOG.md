@@ -18,6 +18,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 
 * BDSQR (and GESVD) and STEQR (and SYEV/HEEV, SYGV/HEGV) in hybrid mode: the rotations of the QR iteration are applied to the singular vectors or eigenvectors in accumulated blocks with matrix multiplications, instead of one sequence at a time, and GESVD runs the iteration on the host while the vectors are generated on the device (about 7 times faster for GESVD and 10 times for SYEV for matrices of order 4000).
+* BDSQR (and GESVD) on the device: for one problem with more than 512 vectors, the rotations of 64 sweeps of the QR iteration are recorded on the device and applied in accumulated blocks with matrix multiplications.
 
 ### Resolved issues
 

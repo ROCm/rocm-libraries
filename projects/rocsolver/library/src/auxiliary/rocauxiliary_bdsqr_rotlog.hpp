@@ -76,15 +76,24 @@ ROCSOLVER_BEGIN_NAMESPACE
             THROW_IF_ROCBLAS_ERROR(get_rocblas_status_for_hip_status(_e)); \
     }
 
+// a sequence of rotations of the pairs j0..j0+cnt-1, at level lvl of its group (the sequences of a
+// level act on disjoint indices, and are applied after those of the previous levels)
 struct bdsqr_rot_seq
 {
-    int j0, cnt;
+    int j0, cnt, lvl;
     long off;
 };
+// a group of K levels of sequences in the same direction (nseq sequences from seq0, sorted by
+// level), cut into T windows; its accumulated windows are those of win_grp/win_t from win0
 struct bdsqr_rot_grp
 {
-    int fwd, K, seq0, P0, b, T, w;
+    int fwd, K, seq0, nseq, P0, b, T, w, win0, nwin;
     long qoff;
+};
+// block j0..j1 of the bidiagonal matrix, rotated in sweep slot (backward if dir < 0)
+struct bdsqr_rot_desc
+{
+    int slot, dir, j0, j1;
 };
 
 /** BDSQR_ROT_ACCUM accumulates the product of the rotations of each window (one thread-block per
@@ -107,15 +116,16 @@ ROCSOLVER_KERNEL void bdsqr_rot_accum(const int n,
     const bdsqr_rot_grp gp = grps[win_grp[wid]];
     const int t = win_t[wid];
     const int K = gp.K, b = gp.b, w = gp.w, fwd = gp.fwd;
-    T* Qt = Q + gp.qoff + size_t(t) * w * w;
+    T* Qt = Q + gp.qoff + size_t(wid - gp.win0) * w * w;
     for(int idx = hipThreadIdx_x; idx < w * w; idx += hipBlockDim_x)
         Qt[idx] = (idx % w == idx / w) ? T(1) : T(0);
     __syncthreads();
     const int pw0 = gp.P0 + t * b;
     const int base = fwd ? pw0 : n - 1 - (pw0 + w - 1); // first index of the window
-    for(int k = 0; k < K; k++)
+    for(int qi = 0; qi < gp.nseq; qi++)
     {
-        const bdsqr_rot_seq q = seqs[gp.seq0 + k];
+        const bdsqr_rot_seq q = seqs[gp.seq0 + qi];
+        const int k = q.lvl;
         const int plo = fwd ? q.j0 : n - 2 - (q.j0 + q.cnt - 1);
         const int phi = fwd ? q.j0 + q.cnt - 1 : n - 2 - q.j0;
         const int a = max(plo, pw0 + (K - 1 - k));
@@ -193,6 +203,50 @@ ROCSOLVER_KERNEL void bdsqr_rot_negswap(const int L, T* X, const int ldx, const 
         const T t = x(j);
         x(j) = x(k);
         x(k) = t;
+    }
+}
+
+/** BDSQR_ROT_GEMM applies the accumulated window t of group gp (at offset qoff of Q) to the rows
+    (X(lo:hi, :) = Q' X(lo:hi, :)) or the columns (X(:, lo:hi) = X(:, lo:hi) Q) of X, through the
+    temporary dT. The pointer mode of the handle must be host. **/
+template <typename T>
+void bdsqr_rot_gemm(rocblas_handle handle,
+                    const bool rows,
+                    const int n,
+                    const bdsqr_rot_grp& gp,
+                    const int t,
+                    const rocblas_stride qoff_t,
+                    const T* dQ,
+                    T* Xm,
+                    const int ldm,
+                    const int Lm,
+                    T* dT)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    const T one = 1, zero = 0;
+    const int pw0 = gp.P0 + t * gp.b;
+    const int c0 = gp.fwd ? pw0 : n - 1 - (pw0 + gp.w - 1);
+    const int lo = std::max(c0, 0), hi = std::min(c0 + gp.w - 1, n - 1);
+    if(lo > hi)
+        return;
+    const int ww = hi - lo + 1;
+    const rocblas_stride qoff = qoff_t + idx2D(lo - c0, lo - c0, gp.w);
+    if(rows)
+    {
+        (rocblasCall_gemm(handle, rocblas_operation_transpose, rocblas_operation_none, ww, Lm, ww,
+                          &one, dQ, qoff, gp.w, 0, (const T*)Xm, rocblas_stride(lo), ldm, 0, &zero,
+                          dT, 0, ww, 0, 1, (T**)nullptr));
+        BDSQR_ROTLOG_HIP(hipMemcpy2DAsync(Xm + lo, sizeof(T) * ldm, dT, sizeof(T) * ww,
+                                          sizeof(T) * ww, Lm, hipMemcpyDeviceToDevice, stream));
+    }
+    else
+    {
+        (rocblasCall_gemm(handle, rocblas_operation_none, rocblas_operation_none, Lm, ww, ww, &one,
+                          (const T*)Xm, idx2D(0, lo, ldm), ldm, 0, dQ, qoff, gp.w, 0, &zero, dT, 0,
+                          Lm, 0, 1, (T**)nullptr));
+        BDSQR_ROTLOG_HIP(hipMemcpy2DAsync(Xm + idx2D(0, lo, ldm), sizeof(T) * ldm, dT, sizeof(T) * Lm,
+                                          sizeof(T) * Lm, ww, hipMemcpyDeviceToDevice, stream));
     }
 }
 
@@ -423,10 +477,13 @@ public:
                 gp.fwd = cfwd;
                 gp.K = Kg;
                 gp.seq0 = int(seqs.size());
+                gp.nseq = Kg;
+                gp.win0 = int(win_grp.size());
                 gp.P0 = plo - (Kg - 1);
                 gp.b = b;
                 gp.T = (phi - gp.P0) / b + 1;
                 gp.w = b + Kg;
+                gp.nwin = gp.T;
                 gp.qoff = long(qtot);
                 qtot += size_t(gp.T) * gp.w * gp.w;
                 for(int t = 0; t < gp.T; t++)
@@ -449,7 +506,7 @@ public:
                     if(!cur.empty() && (o.fwd != cfwd || int(cur.size()) == K))
                         close();
                     cfwd = o.fwd;
-                    cur.push_back({o.j0, o.cnt, o.off});
+                    cur.push_back({o.j0, o.cnt, int(cur.size()), o.off});
                     continue;
                 }
                 close();
@@ -484,7 +541,6 @@ public:
 
         // the GEMMs and the other operations, in order, for each matrix
         rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
-        const T one = 1, zero = 0;
         for(int mat = 0; mat < 3; mat++)
         {
             const bool rows = (mat != 1);
@@ -538,38 +594,8 @@ public:
                     continue;
                 }
                 for(int t = 0; t < gp.T; t++)
-                {
-                    const int pw0 = gp.P0 + t * gp.b;
-                    const int c0 = gp.fwd ? pw0 : n - 1 - (pw0 + gp.w - 1);
-                    const int lo = std::max(c0, 0), hi = std::min(c0 + gp.w - 1, n - 1);
-                    if(lo > hi)
-                        continue;
-                    const int ww = hi - lo + 1;
-                    const rocblas_stride qoff
-                        = gp.qoff + rocblas_stride(t) * gp.w * gp.w + idx2D(lo - c0, lo - c0, gp.w);
-                    if(rows)
-                    {
-                        // X(lo:hi, :) = Q' X(lo:hi, :)
-                        (rocblasCall_gemm(handle, rocblas_operation_transpose,
-                                          rocblas_operation_none, ww, Lm, ww, &one, (const T*)dQ,
-                                          qoff, gp.w, 0, (const T*)Xm, rocblas_stride(lo), ldm, 0,
-                                          &zero, dT, 0, ww, 0, 1, (T**)nullptr));
-                        BDSQR_ROTLOG_HIP(hipMemcpy2DAsync(Xm + lo, sizeof(T) * ldm, dT,
-                                                          sizeof(T) * ww, sizeof(T) * ww, Lm,
-                                                          hipMemcpyDeviceToDevice, stream));
-                    }
-                    else
-                    {
-                        // X(:, lo:hi) = X(:, lo:hi) Q
-                        (rocblasCall_gemm(handle, rocblas_operation_none, rocblas_operation_none,
-                                          Lm, ww, ww, &one, (const T*)Xm, idx2D(0, lo, ldm), ldm, 0,
-                                          (const T*)dQ, qoff, gp.w, 0, &zero, dT, 0, Lm, 0, 1,
-                                          (T**)nullptr));
-                        BDSQR_ROTLOG_HIP(hipMemcpy2DAsync(Xm + idx2D(0, lo, ldm), sizeof(T) * ldm,
-                                                          dT, sizeof(T) * Lm, sizeof(T) * Lm, ww,
-                                                          hipMemcpyDeviceToDevice, stream));
-                    }
-                }
+                    bdsqr_rot_gemm(handle, rows, n, gp, t,
+                                   gp.qoff + rocblas_stride(t) * gp.w * gp.w, dQ, Xm, ldm, Lm, dT);
             }
         }
         ops.clear();
@@ -586,6 +612,361 @@ public:
     {
         flush();
         BDSQR_ROTLOG_HIP(hipStreamSynchronize(stream));
+    }
+};
+
+/*
+ * ===========================================================================
+ *    BDSQR_GPULOG does the same for the QR iteration of BDSQR on the device
+ *    (one problem): after each sweep, BDSQR_ROT_SNAPSHOT copies the rotations
+ *    of the blocks that were rotated into slot s of a log (one slot per sweep,
+ *    indexed by pair as the matrix), with the convention above, and appends a
+ *    descriptor of each block. Every BDSQR_ROT_SWEEPS sweeps, flush reads the
+ *    descriptors, groups the blocks of consecutive sweeps by direction (the
+ *    blocks of a sweep, disjoint, share a level of their group; a group in one
+ *    direction is closed when a block in the other direction overlaps it) and
+ *    applies the groups with accumulated windows and GEMMs: the rotations of
+ *    the right (VT) and of the left (U and C) give two sets of windows.
+ * ===========================================================================
+ */
+
+#ifndef BDSQR_ROT_SWEEPS
+#define BDSQR_ROT_SWEEPS 64
+#endif
+
+/** BDSQR_ROT_SNAPSHOT copies the rotations of the blocks rotated in the last sweep (as stored by
+    BDSQR_COMPUTE in work, read as BDSQR_ROTATE does) into slot slot of the log. Rotations of the
+    right in lA_c/lA_s (if nv), of the left in lB_c/lB_s (if nuc); the sines of forward sweeps
+    change sign. **/
+template <typename S>
+ROCSOLVER_KERNEL void bdsqr_rot_snapshot(const int n,
+                                         const int nv,
+                                         const int nuc,
+                                         const int maxiter,
+                                         const int slot,
+                                         const int* splits,
+                                         const S* work,
+                                         const int incW,
+                                         S* lA_c,
+                                         S* lA_s,
+                                         S* lB_c,
+                                         S* lB_s,
+                                         bdsqr_rot_desc* desc,
+                                         int* ndesc,
+                                         const int* completed)
+{
+    if(completed[2])
+        return;
+    const int num_splits = int(work[2]);
+    for(int sid = hipBlockIdx_y; sid < num_splits; sid += hipGridDim_y)
+    {
+        const int dir = splits[4 * sid], k0 = splits[4 * sid + 1], k1 = splits[4 * sid + 2];
+        const int iter = splits[4 * sid + 3];
+        if(k0 >= k1 || iter >= maxiter || dir == 0)
+            continue;
+        if(hipThreadIdx_x == 0)
+        {
+            const int d = atomicAdd(ndesc, 1);
+            desc[d] = {slot, dir, k0, k1};
+        }
+        const S* rots = work + 4 + incW * k0;
+        const int nn = k1 - k0 + 1;
+        const int nr = nv ? 2 * nn : 0;
+        const S sg = dir > 0 ? S(-1) : S(1);
+        const size_t o = size_t(slot) * n + k0;
+        for(int r = hipThreadIdx_x; r < nn - 1; r += hipBlockDim_x)
+        {
+            if(nv)
+            {
+                lA_c[o + r] = rots[r];
+                lA_s[o + r] = sg * rots[r + nn];
+            }
+            if(nuc)
+            {
+                lB_c[o + r] = rots[nr + r];
+                lB_s[o + r] = sg * rots[nr + r + nn];
+            }
+        }
+    }
+}
+
+template <typename S, typename T>
+class bdsqr_gpulog
+{
+    rocblas_handle handle;
+    hipStream_t stream;
+    int n, ns;
+    // matrices: 0 = VT (rows), 1 = U (columns), 2 = C (rows)
+    T* X[3];
+    int ld[3], L[3];
+    S *lA_c = nullptr, *lA_s = nullptr, *lB_c = nullptr, *lB_s = nullptr;
+    bdsqr_rot_desc* ddesc = nullptr;
+    int* dnd = nullptr;
+    T *dQA = nullptr, *dQB = nullptr, *dT = nullptr;
+    size_t qacap = 0, qbcap = 0;
+    bdsqr_rot_grp* dgrp = nullptr;
+    bdsqr_rot_seq* dseq = nullptr;
+    int *dwg = nullptr, *dwt = nullptr;
+    size_t gcap = 0, scap = 0, wcap = 0, tcap2 = 0;
+
+    template <typename P>
+    static void grow(P*& p, size_t& capacity, size_t need)
+    {
+        if(need <= capacity)
+            return;
+        if(p)
+            (void)hipFree(p);
+        capacity = std::max(need, capacity * 2);
+        if(hipMalloc(&p, sizeof(P) * capacity) != hipSuccess)
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+    }
+    template <typename P>
+    static void alloc(P*& p, size_t count)
+    {
+        if(hipMalloc(&p, sizeof(P) * std::max(count, size_t(1))) != hipSuccess)
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
+    }
+
+public:
+    bdsqr_gpulog(rocblas_handle h,
+                 int n_,
+                 T* vt,
+                 int ldvt,
+                 int nv,
+                 T* u,
+                 int ldu,
+                 int nu,
+                 T* c,
+                 int ldc,
+                 int nc)
+        : handle(h)
+        , n(n_)
+        , ns(BDSQR_ROT_SWEEPS)
+        , X{vt, u, c}
+        , ld{ldvt, ldu, ldc}
+        , L{vt ? nv : 0, u ? nu : 0, c ? nc : 0}
+    {
+        rocblas_get_stream(handle, &stream);
+        const size_t nlog = size_t(ns) * n;
+        if(L[0])
+        {
+            alloc(lA_c, nlog);
+            alloc(lA_s, nlog);
+        }
+        if(L[1] || L[2])
+        {
+            alloc(lB_c, nlog);
+            alloc(lB_s, nlog);
+        }
+        alloc(ddesc, size_t(ns) * (n / 2 + 1));
+        alloc(dnd, 1);
+        alloc(dT, size_t(std::max({L[0], L[1], L[2], 1})) * (BDSQR_ROT_B + BDSQR_ROT_K));
+        BDSQR_ROTLOG_HIP(hipMemsetAsync(dnd, 0, sizeof(int), stream));
+    }
+    ~bdsqr_gpulog()
+    {
+        (void)hipStreamSynchronize(stream);
+        for(S* p : {lA_c, lA_s, lB_c, lB_s})
+            (void)hipFree(p);
+        (void)hipFree(ddesc);
+        (void)hipFree(dnd);
+        (void)hipFree(dQA);
+        (void)hipFree(dQB);
+        (void)hipFree(dT);
+        (void)hipFree(dgrp);
+        (void)hipFree(dseq);
+        (void)hipFree(dwg);
+        (void)hipFree(dwt);
+    }
+
+    int sweeps() const
+    {
+        return ns;
+    }
+
+    // record the blocks rotated in the last sweep (slot = index of the sweep since the last flush)
+    void snapshot(int slot,
+                  int nsplits,
+                  int maxiter,
+                  const int* splits,
+                  const S* work,
+                  int incW,
+                  const int* completed)
+    {
+        ROCSOLVER_LAUNCH_KERNEL((bdsqr_rot_snapshot<S>), dim3(1, std::max(nsplits, 1)), dim3(64), 0,
+                                stream, n, L[0], L[1] + L[2], maxiter, slot, splits, work, incW,
+                                lA_c, lA_s, lB_c, lB_s, ddesc, dnd, completed);
+    }
+
+    // apply the recorded sweeps (and reset the log)
+    void flush()
+    {
+        int nd = 0;
+        BDSQR_ROTLOG_HIP(hipMemcpyAsync(&nd, dnd, sizeof(int), hipMemcpyDeviceToHost, stream));
+        BDSQR_ROTLOG_HIP(hipStreamSynchronize(stream));
+        if(nd == 0)
+            return;
+        std::vector<bdsqr_rot_desc> desc(nd);
+        BDSQR_ROTLOG_HIP(hipMemcpyAsync(desc.data(), ddesc, sizeof(bdsqr_rot_desc) * nd,
+                                        hipMemcpyDeviceToHost, stream));
+        BDSQR_ROTLOG_HIP(hipMemsetAsync(dnd, 0, sizeof(int), stream));
+        BDSQR_ROTLOG_HIP(hipStreamSynchronize(stream));
+        std::stable_sort(
+            desc.begin(), desc.end(),
+            [](const bdsqr_rot_desc& a, const bdsqr_rot_desc& b) { return a.slot < b.slot; });
+
+        // plan the groups (in the order they must be applied)
+        const int K = BDSQR_ROT_K, b = BDSQR_ROT_B;
+        std::vector<bdsqr_rot_grp> grps;
+        std::vector<bdsqr_rot_seq> seqs;
+        std::vector<int> win_grp, win_t;
+        size_t qtot = 0;
+        struct Pend
+        {
+            std::vector<bdsqr_rot_seq> q;
+            int levels = 0, lastslot = -1;
+        } pend[2]; // 0 = backward, 1 = forward
+        std::vector<char> owner(n, 0); // 1 + direction of the pending group with the index
+        std::vector<char> hit;
+        auto emit = [&](int fwd) {
+            Pend& g = pend[fwd];
+            if(g.q.empty())
+                return;
+            const int Kg = g.levels;
+            int plo = 1 << 30, phi = -1;
+            for(auto& q : g.q)
+            {
+                plo = std::min(plo, fwd ? q.j0 : n - 2 - (q.j0 + q.cnt - 1));
+                phi = std::max(phi, fwd ? q.j0 + q.cnt - 1 : n - 2 - q.j0);
+                for(int i = q.j0; i <= q.j0 + q.cnt; i++)
+                    owner[i] = 0;
+            }
+            bdsqr_rot_grp gp;
+            gp.fwd = fwd;
+            gp.K = Kg;
+            gp.seq0 = int(seqs.size());
+            gp.nseq = int(g.q.size());
+            gp.P0 = plo - (Kg - 1);
+            gp.b = b;
+            gp.T = (phi - gp.P0) / b + 1;
+            gp.w = b + Kg;
+            gp.win0 = int(win_grp.size());
+            // (only the windows with rotations)
+            hit.assign(gp.T, 0);
+            for(auto& q : g.q)
+            {
+                const int a = fwd ? q.j0 : n - 2 - (q.j0 + q.cnt - 1);
+                const int z = fwd ? q.j0 + q.cnt - 1 : n - 2 - q.j0;
+                const int sh = gp.P0 + (Kg - 1 - q.lvl);
+                const int t0 = std::max((a - sh) / b, 0), t1 = std::min((z - sh) / b, gp.T - 1);
+                for(int t = t0; t <= t1; t++)
+                    hit[t] = 1;
+            }
+            for(int t = 0; t < gp.T; t++)
+                if(hit[t])
+                {
+                    win_grp.push_back(int(grps.size()));
+                    win_t.push_back(t);
+                }
+            gp.nwin = int(win_grp.size()) - gp.win0;
+            gp.qoff = long(qtot);
+            if(Kg > 1)
+                qtot += size_t(gp.nwin) * gp.w * gp.w;
+            else
+                win_grp.resize(gp.win0), win_t.resize(gp.win0), gp.nwin = 0;
+            seqs.insert(seqs.end(), g.q.begin(), g.q.end());
+            grps.push_back(gp);
+            g = Pend();
+        };
+        for(const bdsqr_rot_desc& d : desc)
+        {
+            const int fwd = d.dir > 0 ? 1 : 0;
+            bool clash = false;
+            for(int i = d.j0; i <= d.j1 && !clash; i++)
+                clash = (owner[i] == 1 + (1 - fwd));
+            if(clash)
+                emit(1 - fwd);
+            Pend& g = pend[fwd];
+            if(g.lastslot != d.slot)
+            {
+                if(g.levels == K)
+                    emit(fwd);
+                g.levels++;
+                g.lastslot = d.slot;
+            }
+            g.q.push_back({d.j0, d.j1 - d.j0, g.levels - 1, long(d.slot) * n + d.j0});
+            for(int i = d.j0; i <= d.j1; i++)
+                owner[i] = char(1 + fwd);
+        }
+        emit(0);
+        emit(1);
+
+        // accumulate the windows (one launch per set of rotations)
+        grow(dgrp, gcap, grps.size());
+        grow(dseq, scap, seqs.size());
+        BDSQR_ROTLOG_HIP(hipMemcpyAsync(dgrp, grps.data(), sizeof(bdsqr_rot_grp) * grps.size(),
+                                        hipMemcpyHostToDevice, stream));
+        BDSQR_ROTLOG_HIP(hipMemcpyAsync(dseq, seqs.data(), sizeof(bdsqr_rot_seq) * seqs.size(),
+                                        hipMemcpyHostToDevice, stream));
+        if(!win_grp.empty())
+        {
+            grow(dwg, wcap, win_grp.size());
+            grow(dwt, tcap2, win_t.size());
+            BDSQR_ROTLOG_HIP(hipMemcpyAsync(dwg, win_grp.data(), sizeof(int) * win_grp.size(),
+                                            hipMemcpyHostToDevice, stream));
+            BDSQR_ROTLOG_HIP(hipMemcpyAsync(dwt, win_t.data(), sizeof(int) * win_t.size(),
+                                            hipMemcpyHostToDevice, stream));
+            if(L[0])
+            {
+                grow(dQA, qacap, qtot);
+                ROCSOLVER_LAUNCH_KERNEL((bdsqr_rot_accum<T, S>), dim3(int(win_grp.size())), dim3(256),
+                                        0, stream, n, dgrp, dwg, dwt, dseq, lA_c, lA_s, dQA);
+            }
+            if(L[1] || L[2])
+            {
+                grow(dQB, qbcap, qtot);
+                ROCSOLVER_LAUNCH_KERNEL((bdsqr_rot_accum<T, S>), dim3(int(win_grp.size())), dim3(256),
+                                        0, stream, n, dgrp, dwg, dwt, dseq, lB_c, lB_s, dQB);
+            }
+        }
+
+        // the GEMMs (or the sequences of the groups with one level), in order, for each matrix
+        rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
+        for(int mat = 0; mat < 3; mat++)
+        {
+            const int Lm = L[mat];
+            if(Lm == 0)
+                continue;
+            const bool rows = (mat != 1);
+            T* Xm = X[mat];
+            const int ldm = ld[mat];
+            const S* lc = (mat == 0 ? lA_c : lB_c);
+            const S* ls = (mat == 0 ? lA_s : lB_s);
+            const T* dQ = (mat == 0 ? dQA : dQB);
+            const dim3 gr((Lm - 1) / 256 + 1), bl(256);
+            for(const bdsqr_rot_grp& gp : grps)
+            {
+                if(gp.K == 1)
+                {
+                    for(int qi = 0; qi < gp.nseq; qi++)
+                    {
+                        const bdsqr_rot_seq& q = seqs[gp.seq0 + qi];
+                        if(rows)
+                            ROCSOLVER_LAUNCH_KERNEL((bdsqr_rot_apply_seq<true, T, S>), gr, bl, 0,
+                                                    stream, Lm, Xm, ldm, q.j0, q.cnt, gp.fwd,
+                                                    lc + q.off, ls + q.off);
+                        else
+                            ROCSOLVER_LAUNCH_KERNEL((bdsqr_rot_apply_seq<false, T, S>), gr, bl, 0,
+                                                    stream, Lm, Xm, ldm, q.j0, q.cnt, gp.fwd,
+                                                    lc + q.off, ls + q.off);
+                    }
+                    continue;
+                }
+                for(int i = 0; i < gp.nwin; i++)
+                    bdsqr_rot_gemm(handle, rows, n, gp, win_t[gp.win0 + i],
+                                   gp.qoff + rocblas_stride(i) * gp.w * gp.w, dQ, Xm, ldm, Lm, dT);
+            }
+        }
     }
 };
 
