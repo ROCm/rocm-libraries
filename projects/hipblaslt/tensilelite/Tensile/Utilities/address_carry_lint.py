@@ -49,7 +49,10 @@ CARRY_IN = {
     "v_subbrev_co_u32",
     "v_add_co_ci_u32",
     "v_sub_co_ci_u32",
+    "v_subrev_co_ci_u32",
 }
+# A carry-in add sets a carry out as well, so on a low dword it must be carried on too.
+CARRY_SETTERS = CARRY_OUT | CARRY_IN
 # Adds that update one dword and drop any carry.
 NO_CARRY = {
     "s_add_i32",
@@ -126,6 +129,19 @@ def parse_regs(operand: str) -> list[Reg]:
     if hi.base != lo.base or hi.offset < lo.offset:
         return [lo]
     return [lo.plus(i) for i in range(hi.offset - lo.offset + 1)]
+
+
+_VCC_PARTS = {"vcc": {"vcc_lo", "vcc_hi"}, "vcc_lo": {"vcc_lo"}, "vcc_hi": {"vcc_hi"}}
+
+
+def _carry_parts(operand: str) -> set:
+    """What a carry operand occupies: its registers, or the halves of vcc, so that a write to
+    any part of a carry register is seen as changing it."""
+    operand = operand.strip()
+    if operand in _VCC_PARTS:
+        return set(_VCC_PARTS[operand])
+    regs = parse_regs(operand)
+    return set(regs) if regs else ({operand} if operand else set())
 
 
 @dataclass
@@ -260,22 +276,29 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]
         )
 
+    def carry_writes(j: int) -> set:
+        """The carry-register parts instruction j writes: its destination, including vcc, and
+        the carry-out of another add."""
+        ops = insts[j].operands
+        out = set(writes[j])
+        if ops and ops[0] in _VCC_PARTS:
+            out |= _carry_parts(ops[0])
+        if insts[j].mnemonic in CARRY_SETTERS and len(ops) > 1:
+            out |= _carry_parts(ops[1])
+        return out
+
     def vector_carried(start: int, low: Reg, high: Reg) -> bool:
         """Whether a vector carry reaches high: a carry-in to high that reads the carry register
-        the low add wrote, before anything else writes that register."""
-        carry = insts[start].operands[1] if len(insts[start].operands) > 1 else ""
+        the low add wrote, before anything writes any part of that register."""
+        ops = insts[start].operands
+        carry = _carry_parts(ops[1]) if len(ops) > 1 else set()
         for j in range(start + 1, min(len(insts), start + 1 + WINDOW)):
             ops = insts[j].operands
             if insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]:
                 return True
             if insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
-                return bool(ops) and ops[-1] == carry
-            # A carry register is written as the destination of a compare or move, or as the
-            # carry-out of another add.
-            if ops and (
-                ops[0] == carry
-                or (insts[j].mnemonic in CARRY_OUT | CARRY_IN and len(ops) > 1 and ops[1] == carry)
-            ):
+                return bool(ops) and bool(carry) and _carry_parts(ops[-1]) == carry
+            if carry_writes(j) & carry:
                 return False
         return False
 
@@ -308,7 +331,7 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
                         f"carry into {high}",
                     )
                 )
-        elif inst.mnemonic in CARRY_OUT:
+        elif inst.mnemonic in CARRY_SETTERS:
             if inst.mnemonic.startswith("s_"):
                 carried, where = scalar_carried(i, low, high), "before SCC changes"
             else:

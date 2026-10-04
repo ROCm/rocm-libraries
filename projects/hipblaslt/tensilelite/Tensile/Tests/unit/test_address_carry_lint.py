@@ -267,6 +267,48 @@ def test_a_vector_carry_overwritten_before_the_carry_in_is_reported():
     assert len(reasons) == 1 and "v4" in reasons[0]
 
 
+# A carry-in add also sets a carry out, so on a low dword its carry must reach the high dword.
+@pytest.mark.parametrize(
+    "op,carry",
+    [("v_add_co_ci_u32", "vcc_lo"), ("v_sub_co_ci_u32", "vcc_lo"), ("v_addc_co_u32", "vcc")],
+)
+def test_a_carry_in_add_on_a_low_dword_must_carry_on(op, carry):
+    good = f"""
+    {op} v4, {carry}, v4, v6, {carry}
+    v_add_co_ci_u32 v5, {carry}, v5, 0, {carry}
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    bad = f"""
+    {op} v4, {carry}, v4, v6, {carry}
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    assert _reasons(good) == []
+    reasons = _reasons(bad)
+    assert len(reasons) == 1 and op in reasons[0] and "v4" in reasons[0]
+
+
+@pytest.mark.parametrize(
+    "carry,partial",
+    [("s[20:21]", "s_mov_b32 s20, 0"), ("s[20:21]", "s_mov_b32 s21, 0"), ("vcc", "s_mov_b32 vcc_lo, 0")],
+)
+def test_a_partial_write_to_the_carry_register_is_reported(carry, partial):
+    good = f"""
+    v_add_co_u32 v4, {carry}, v4, v6
+    s_mov_b32 s30, 0
+    v_addc_co_u32 v5, {carry}, v5, 0, {carry}
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    bad = f"""
+    v_add_co_u32 v4, {carry}, v4, v6
+    {partial}
+    v_addc_co_u32 v5, {carry}, v5, 0, {carry}
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    assert _reasons(good) == []
+    reasons = _reasons(bad)
+    assert len(reasons) == 1 and "v4" in reasons[0]
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first
