@@ -37,13 +37,15 @@ def _hint(streaming: bool) -> TemporalHint:
     return TemporalHint.STREAMING if streaming else TemporalHint.DEFAULT
 
 
-def _copy_kernel(*, load_nt: bool, store_nt: bool, elem=BF16, n=8, align=None):
+def _copy_kernel(
+    *, load_nt: bool, store_nt: bool, elem=BF16, n=8, align=None, store_align=None
+):
     b = IRBuilder("nt_copy")
     src = b.param("S", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     dst = b.param("D", PtrType(elem, "global"), noalias=True, align=16)
     off = b.mul(b.thread_id_x(), b.const_i32(n))
     v = b.global_load_vN(src, off, elem, n, align=align, temporal_hint=_hint(load_nt))
-    b.global_store_vN(dst, off, v, n, temporal_hint=_hint(store_nt))
+    b.global_store_vN(dst, off, v, n, align=store_align, temporal_hint=_hint(store_nt))
     b.ret()
     return b.kernel
 
@@ -203,6 +205,18 @@ def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
     assert "__builtin_memcpy(" in lower_kernel_to_hip(plain, arch="gfx950")
 
 
+def test_hip_backend_rejects_nontemporal_on_an_under_aligned_store():
+    # align 2 < 16-byte payload: the store's vector-pointer cast would promise
+    # 16-byte alignment the IR does not guarantee, so the hint is refused like
+    # the load's (the LLVM path is unaffected).
+    kernel = _copy_kernel(load_nt=False, store_nt=True, elem=F16, n=8, store_align=2)
+    with pytest.raises(NotImplementedError, match="under-aligned store"):
+        lower_kernel_to_hip(kernel, arch="gfx950")
+    # A naturally aligned streaming store still takes the builtin.
+    aligned = _copy_kernel(load_nt=False, store_nt=True, elem=F16, n=8, store_align=16)
+    assert "__builtin_nontemporal_store(" in lower_kernel_to_hip(aligned, arch="gfx950")
+
+
 @pytest.mark.parametrize("which", ["load", "store"])
 def test_hip_backend_rejects_non_bool_attr(which):
     with pytest.raises(ValueError, match="nontemporal attr must be a bool"):
@@ -216,6 +230,9 @@ _HIP_CASES = {
     "store": dict(load_nt=False, store_nt=True),
     "plain": dict(load_nt=False, store_nt=False),
     "memcpy_plain": dict(load_nt=False, store_nt=False, elem=F16, n=8, align=2),
+    "store_underaligned_plain": dict(
+        load_nt=False, store_nt=False, elem=F16, n=8, store_align=2
+    ),
 }
 
 

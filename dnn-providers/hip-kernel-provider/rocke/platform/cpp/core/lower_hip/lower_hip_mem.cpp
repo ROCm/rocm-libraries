@@ -671,6 +671,14 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
             lw, ROCKE_ERR_VALUE, "memref.global_store_vN: nontemporal attr must be a bool");
     if(nontemporal)
     {
+        /* The vector-pointer cast promises natural alignment; refuse the hint
+         * when the IR guarantees less (as the load's memcpy path does). */
+        const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+        if(mem_attr_int(op, "align", byte_count) < byte_count)
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_NOTIMPL,
+                                "global_store_vN: the HIP backend does not yet lower "
+                                "nontemporal on an under-aligned store");
         rocke_h_emitf(lw,
                       "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
                       rocke_h_name(lw, val),

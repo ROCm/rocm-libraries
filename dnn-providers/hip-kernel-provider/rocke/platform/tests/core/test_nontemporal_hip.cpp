@@ -6,8 +6,9 @@
  *
  * With no arguments it self-checks: a ROCKE_TEMPORAL_STREAMING op lowers to
  * __builtin_nontemporal_load / __builtin_nontemporal_store, a default one
- * does not, the unaligned memcpy load path does not yet lower the hint
- * (ROCKE_ERR_NOTIMPL; it still lowers without it), a non-bool attr is rejected
+ * does not, the unaligned memcpy load path and an under-aligned store do not
+ * yet lower the hint (ROCKE_ERR_NOTIMPL; both still lower without it), a
+ * non-bool attr is rejected
  * rather than coerced, an out-of-range hint or a struct_size of 0 (opts not
  * built with ROCKE_MEM_OPTS_INIT) puts the builder in its error state, a
  * temporal_hint lying past the caller's struct_size (an older, shorter struct)
@@ -59,16 +60,20 @@ struct CopyCase
     int load_align; /* <=0 -> default */
     bool load_streaming;
     bool store_streaming;
+    int store_align; /* <=0 -> default */
 };
 
 const CopyCase CASES[] = {
-    {"both", false, 8, 0, true, true},
-    {"load", false, 8, 0, true, false},
-    {"store", false, 8, 0, false, true},
-    {"plain", false, 8, 0, false, false},
+    {"both", false, 8, 0, true, true, 0},
+    {"load", false, 8, 0, true, false, 0},
+    {"store", false, 8, 0, false, true, 0},
+    {"plain", false, 8, 0, false, false, 0},
     /* align 2 < 16-byte payload: the memcpy load path. */
-    {"memcpy_nt", true, 8, 2, true, false},
-    {"memcpy_plain", true, 8, 2, false, false},
+    {"memcpy_nt", true, 8, 2, true, false, 0},
+    {"memcpy_plain", true, 8, 2, false, false, 0},
+    /* align 2 < 16-byte payload on the store side. */
+    {"store_underaligned_nt", true, 8, 0, false, true, 2},
+    {"store_underaligned_plain", true, 8, 0, false, false, 2},
 };
 
 const CopyCase* find_case(const char* name)
@@ -115,7 +120,7 @@ void build(rocke_ir_builder_t* b, const CopyCase& c, BadAttr bad)
     rocke_value_t* v = rocke_b_global_load_vN_ex(b, src, off, elem, c.n, c.load_align, &load_opts);
     if(bad == BadAttr::load && v && v->op)
         rocke_attr_set_int(b, &v->op->attrs, "nontemporal", 1);
-    rocke_b_global_store_vN_ex(b, dst, off, v, c.n, 0, &store_opts);
+    rocke_b_global_store_vN_ex(b, dst, off, v, c.n, c.store_align, &store_opts);
     if(bad == BadAttr::store)
     {
         /* The store returns no value; find its op in the entry region. */
@@ -373,6 +378,14 @@ void self_check(const char* arch)
     if(lower(*find_case("memcpy_plain"), arch, BadAttr::none, &hip) != ROCKE_OK
        || !has(hip, "__builtin_memcpy("))
         fail("default unaligned load must still take the memcpy path", arch, __LINE__);
+
+    /* An under-aligned streaming store is refused the same way (its vector
+     * pointer cast would over-promise alignment); without the hint it lowers. */
+    if(lower(*find_case("store_underaligned_nt"), arch, BadAttr::none, nullptr)
+       != ROCKE_ERR_NOTIMPL)
+        fail("nontemporal on an under-aligned store must be ROCKE_ERR_NOTIMPL", arch, __LINE__);
+    if(lower(*find_case("store_underaligned_plain"), arch, BadAttr::none, nullptr) != ROCKE_OK)
+        fail("default under-aligned store must still lower", arch, __LINE__);
 
     if(lower(*find_case("load"), arch, BadAttr::load, nullptr) != ROCKE_ERR_VALUE)
         fail("a non-bool nontemporal attr on the load must be ROCKE_ERR_VALUE", arch, __LINE__);

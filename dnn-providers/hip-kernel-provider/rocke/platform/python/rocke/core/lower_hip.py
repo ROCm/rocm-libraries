@@ -1837,6 +1837,15 @@ class _Lowerer:
         prefix = _vec_prefix(elem_name, "global_store_vN")
         dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
         if _nontemporal(op):
+            # The vector-pointer cast promises natural alignment; refuse the
+            # hint when the IR guarantees less (as the load's memcpy path does).
+            byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+            align = int(op.attrs.get("align", byte_count))
+            if align < byte_count:
+                raise NotImplementedError(
+                    "global_store_vN: the HIP backend does not yet lower "
+                    "nontemporal on an under-aligned store"
+                )
             self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
             return
         self._emit(f"*{dst} = {_name(val)};")
