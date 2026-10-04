@@ -1,0 +1,4 @@
+# Temporaries a deploy (training_pipeline stage06) writes next to the models;
+# an interrupted deploy can leave them behind.
+.*.tmp
+.*.bak
