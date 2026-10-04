@@ -57,6 +57,8 @@ function(_hkp_probe_derive_root name from_dir kdp instance out_dir)
             "hkp probe '${name}': deriving the probe root failed (exit "
             "${_derive_rc}).\n${_derive_err}")
     endif()
+    message(STATUS
+        "hkp: probe ${name}: derived root ${out_dir} (instance '${instance}' of ${kdp})")
 endfunction()
 
 # ---------------------------------------------------------------------------
