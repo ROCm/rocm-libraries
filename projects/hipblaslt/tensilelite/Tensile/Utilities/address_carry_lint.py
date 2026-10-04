@@ -10,15 +10,17 @@ the low dword wraps, which happens when the buffer crosses a 4 GiB boundary: the
 lands 4 GiB away (ROCM-32046, class C on AIHPBLAS-4988).
 
 The lint finds the registers used as the low dword of an address: the base of a buffer resource
-descriptor (s[N:N+3] in a buffer instruction), the address pair of a scalar load (s[A:A+1]), and
-the address pair or saddr of a global or flat access. For each write to such a register by an add
-or subtract, it requires either a carry-producing instruction followed by a carry-consuming write
-to the next register, or a full redefinition of the pair. A scalar carry is followed until SCC
-changes, since the scheduler can move the carry-in far from the carry-out; a vector carry, for a
-short window and only until its carry register is written again. Anything else is reported, if the
-updated value is next used as an address before it is overwritten or an unconditional jump. An add
-of two constants sets the register rather than advancing an address, so it is not reported. The
-scan is otherwise linear, so a finding is a lead to read, not a proof.
+descriptor (s[N:N+3] in a buffer instruction), the address pair of a scalar load (s[A:A+1]), the
+address pair or saddr of a global or flat access, and any register copied into one of those. For
+each write to such a register by an add or subtract, it requires either a carry-producing
+instruction followed by a carry-consuming write to the next register, or a full redefinition of
+the pair. A scalar carry is followed until SCC changes, since the scheduler can move the carry-in
+far from the carry-out; a vector carry, until its carry register is written again. Anything else
+is reported if the updated value can reach a use as an address before it is overwritten,
+following branches and loop back-edges for up to FLOW_STEPS instructions. An add of two constants
+sets the register rather than advancing an address, so it is not reported. A finding is a lead to
+read, not a proof, and a clean result is not one either: the lint does not see addresses held in
+other forms, such as TDM descriptor groups.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated
@@ -40,10 +42,21 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 # Low adds that set a carry, and the high adds that must consume it.
-CARRY_OUT = {"s_add_u32", "s_sub_u32", "v_add_co_u32", "v_sub_co_u32", "v_subrev_co_u32"}
+# gfx12 renamed the scalar forms (s_add_co_u32, s_add_co_ci_u32, s_add_co_i32, ...).
+CARRY_OUT = {
+    "s_add_u32",
+    "s_sub_u32",
+    "s_add_co_u32",
+    "s_sub_co_u32",
+    "v_add_co_u32",
+    "v_sub_co_u32",
+    "v_subrev_co_u32",
+}
 CARRY_IN = {
     "s_addc_u32",
     "s_subb_u32",
+    "s_add_co_ci_u32",
+    "s_sub_co_ci_u32",
     "v_addc_co_u32",
     "v_subb_co_u32",
     "v_subbrev_co_u32",
@@ -57,6 +70,8 @@ CARRY_SETTERS = CARRY_OUT | CARRY_IN
 NO_CARRY = {
     "s_add_i32",
     "s_sub_i32",
+    "s_add_co_i32",
+    "s_sub_co_i32",
     "s_addk_i32",
     "v_add_u32",
     "v_sub_u32",
@@ -76,15 +91,17 @@ _ATOMIC_RETURN = re.compile(r"_rtn\b|\bglc\b|\bsc0\b|\bTH_ATOMIC_RETURN\b")
 PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64", "v_add_nc_u64"}
 # Unconditional transfers: the next instruction in the listing is not the next one executed.
 JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
+# 32-bit copies, through which an updated low dword can reach the register used as the address.
+COPIES = {"s_mov_b32", "v_mov_b32"}
 # Scalar instructions that write SCC, which ends a scalar carry chain.
 _SCC_WRITERS = re.compile(
     r"^s_(add|sub|addc|subb|addk|cmp|cmpk|bitcmp|and|or|xor|andn[12]|orn[12]|nand|nor|xnor|not|"
     r"lshl|lshr|ashr|bfe|abs|absdiff|min|max|bcnt|quadmask|wqm)"
 )
 
-WINDOW = 16
-# How far a written low dword is followed to its next use.
-FLOW_WINDOW = 400
+# How many instructions a written low dword, or a carry, is followed through, along every branch
+# and loop back-edge. A main loop body fits comfortably.
+FLOW_STEPS = 4000
 
 _REG = re.compile(r"^(?P<kind>[sv])(?:(?P<num>\d+)|\[(?P<lo>[^\]:]+)(?::(?P<hi>[^\]]+))?\])")
 
@@ -150,13 +167,19 @@ class Instruction:
     text: str
     mnemonic: str
     operands: list[str]
+    labels: tuple[str, ...] = ()  # labels that name this instruction
 
 
 def parse(asm: str, first_line: int = 1) -> list[Instruction]:
     out = []
+    pending: list[str] = []
     for n, raw in enumerate(asm.splitlines(), first_line):
         text = re.split(r"//|;", raw)[0].strip()
-        if not text or text.startswith(".") or text.endswith(":"):
+        if text.endswith(":"):
+            # label_X: in assembly, <label_X>: in disassembly.
+            pending.append(text[:-1].strip().strip("<>"))
+            continue
+        if not text or text.startswith("."):
             continue
         # Hand-written kernels separate the mnemonic from its operands with a tab.
         mnemonic, _, rest = text.replace("\t", " ").partition(" ")
@@ -164,7 +187,8 @@ def parse(asm: str, first_line: int = 1) -> list[Instruction]:
             continue
         mnemonic = re.sub(r"_e(32|64)$", "", mnemonic)
         operands = [o.strip() for o in rest.split(",")] if rest.strip() else []
-        out.append(Instruction(n, text, mnemonic, operands))
+        out.append(Instruction(n, text, mnemonic, operands, tuple(pending)))
+        pending = []
     return out
 
 
@@ -260,14 +284,50 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
     uses = [address_operands(inst) for inst in insts]
     writes = [written(inst) for inst in insts]
     lows = {r for u in uses for r in u}
+    # A register copied into an address's low dword holds an address too (two copies deep).
+    for _ in range(2):
+        lows |= {
+            parse_regs(inst.operands[-1])[0]
+            for inst, w in zip(insts, writes)
+            if inst.mnemonic in COPIES
+            and w[:1]
+            and w[0] in lows
+            and len(parse_regs(inst.operands[-1])) == 1
+        }
 
-    def flows_to_address(low: Reg, start: int) -> bool:
-        """Whether the value written at start is next used as an address, not overwritten."""
-        for j in range(start + 1, min(len(insts), start + 1 + FLOW_WINDOW)):
+    target = {label: k for k, inst in enumerate(insts) for label in inst.labels}
+
+    def successors(j: int) -> list[int]:
+        """The instructions that can run after j: the next one unless j always jumps, and the
+        target of a branch to a label in this kernel."""
+        m = insts[j].mnemonic
+        out = [] if m in JUMPS else [j + 1]
+        if m == "s_branch" or m.startswith("s_cbranch"):
+            dest = target.get(insts[j].operands[0].strip("<>")) if insts[j].operands else None
+            if dest is not None:
+                out.append(dest)
+        return [k for k in out if k < len(insts)]
+
+    def flows_to_address(low: Reg, start: int, depth: int = 0) -> bool:
+        """Whether the value written at start can reach a use as an address before it is
+        overwritten, along any path (loop back-edges included), directly or through a copy."""
+        seen, todo, steps = set(), successors(start), 0
+        while todo and steps < FLOW_STEPS:
+            j = todo.pop()
+            if j in seen:
+                continue
+            seen.add(j)
+            steps += 1
             if low in uses[j]:
                 return True
-            if low in writes[j] or insts[j].mnemonic in JUMPS:
-                return False
+            inst = insts[j]
+            if depth < 2 and inst.mnemonic in COPIES and parse_regs(inst.operands[-1]) == [low]:
+                copy = writes[j][:1]
+                if copy and copy[0] in lows and flows_to_address(copy[0], j, depth + 1):
+                    return True
+            if low in writes[j]:
+                continue
+            todo.extend(successors(j))
         return False
 
     def consumes(j: int, low: Reg, high: Reg) -> bool:
@@ -292,13 +352,13 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
         the low add wrote, before anything writes any part of that register."""
         ops = insts[start].operands
         carry = _carry_parts(ops[1]) if len(ops) > 1 else set()
-        for j in range(start + 1, min(len(insts), start + 1 + WINDOW)):
+        for j in range(start + 1, min(len(insts), start + 1 + FLOW_STEPS)):
             ops = insts[j].operands
             if insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]:
                 return True
             if insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
                 return bool(ops) and bool(carry) and _carry_parts(ops[-1]) == carry
-            if carry_writes(j) & carry:
+            if carry_writes(j) & carry or insts[j].mnemonic in JUMPS:
                 return False
         return False
 
@@ -306,7 +366,7 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
         """Whether a scalar carry reaches high. The scheduler may move the carry-in well away
         from the carry-out, so it is followed until SCC changes rather than for a fixed count.
         """
-        for j in range(start + 1, min(len(insts), start + 1 + FLOW_WINDOW)):
+        for j in range(start + 1, min(len(insts), start + 1 + FLOW_STEPS)):
             if consumes(j, low, high):
                 return True
             if insts[j].mnemonic in JUMPS or _SCC_WRITERS.match(insts[j].mnemonic):
@@ -336,7 +396,7 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
                 carried, where = scalar_carried(i, low, high), "before SCC changes"
             else:
                 carried = vector_carried(i, low, high)
-                where = f"within {WINDOW} instructions, from the carry it wrote,"
+                where = "from the carry it wrote, before that carry changes,"
             if not carried and flows_to_address(low, i):
                 findings.append(
                     Finding(

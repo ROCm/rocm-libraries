@@ -18,9 +18,10 @@ _DESIGNED = os.path.join(
 )
 
 # Generated kernels from designed configs that cover the address arithmetic most at risk: batch
-# and stride address setup, Stream-K and GSU workspace addressing, fp8 and MX scale loads, and
-# TDM descriptors. gfx90a, gfx942 and gfx950 have no native 64-bit add, so every address update
-# is a 32-bit carry chain there.
+# and stride address setup, Stream-K and GSU workspace addressing, and fp8 and MX scale loads. The
+# gfx1250 configs run TDM kernels, whose descriptor addresses the lint does not see; it checks
+# their other address updates. gfx90a, gfx942 and gfx950 have no native 64-bit add, so every
+# address update is a 32-bit carry chain there.
 _GENERATED = [
     ("gfx90a", "rich_gemm.yaml"),
     ("gfx942", "asmaddr_initstrides.yaml"),
@@ -307,6 +308,69 @@ def test_a_partial_write_to_the_carry_register_is_reported(carry, partial):
     assert _reasons(good) == []
     reasons = _reasons(bad)
     assert len(reasons) == 1 and "v4" in reasons[0]
+
+
+_LOOP = """
+label_LoopBeginL:
+    buffer_load_dwordx4 v[0:3], v4, s[sgprSrdA:sgprSrdA+3], 0 offen
+    s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s[sgprGlobalReadIncsA]
+    {carry}
+    s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1
+    s_cmp_eq_u32 s[sgprLoopCounterL], 0
+    s_cbranch_scc1 label_LoopEndL
+    s_branch label_LoopBeginL
+label_LoopEndL:
+    s_endpgm
+"""
+
+
+# A main-loop increment is next used as an address only at the top of the loop, through the
+# back-edge.
+def test_a_dropped_carry_reached_through_a_loop_back_edge_is_reported():
+    assert _reasons(_LOOP.format(carry="s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], 0")) == []
+    reasons = _reasons(_LOOP.format(carry=""))
+    assert len(reasons) == 1 and "sgprSrdA" in reasons[0]
+
+
+def test_a_dropped_carry_used_long_after_is_reported():
+    mfmas = "\n".join(["    v_mfma_f32_32x32x8_f16 v[0:15], v[16:17], v[18:19], v[0:15]"] * 450)
+    asm = f"""
+    s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s[sgprGlobalReadIncsA]
+{mfmas}
+    buffer_load_dwordx4 v[0:3], v4, s[sgprSrdA:sgprSrdA+3], 0 offen
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "sgprSrdA" in reasons[0]
+
+
+# The updated value reaches the descriptor through 32-bit copies.
+def test_a_dropped_carry_copied_into_an_address_is_reported():
+    asm = """
+    s_add_u32 s[sgprAddrA+0], s[sgprAddrA+0], s[sgprInc]
+    {carry}
+    s_mov_b32 s[sgprSrdA+0], s[sgprAddrA+0]
+    s_mov_b32 s[sgprSrdA+1], s[sgprAddrA+1]
+    buffer_load_dwordx4 v[0:3], v4, s[sgprSrdA:sgprSrdA+3], 0 offen
+    """
+    assert _reasons(asm.format(carry="s_addc_u32 s[sgprAddrA+1], s[sgprAddrA+1], 0")) == []
+    reasons = _reasons(asm.format(carry=""))
+    assert len(reasons) == 1 and "sgprAddrA" in reasons[0]
+
+
+# gfx12 names the scalar adds s_add_co_u32, s_add_co_ci_u32 and s_add_co_i32.
+def test_gfx12_scalar_add_names_are_recognized():
+    good = """
+    s_add_co_u32 s8, s8, s12
+    s_add_co_ci_u32 s9, s9, 0
+    s_load_b64 s[10:11], s[8:9], 0x0
+    """
+    assert _reasons(good) == []
+    for op in ("s_add_co_u32", "s_add_co_i32"):
+        reasons = _reasons(f"""
+    {op} s8, s8, s12
+    s_load_b64 s[10:11], s[8:9], 0x0
+    """)
+        assert len(reasons) == 1 and op in reasons[0] and "s8" in reasons[0]
 
 
 def test_registers_are_judged_within_their_own_kernel():
