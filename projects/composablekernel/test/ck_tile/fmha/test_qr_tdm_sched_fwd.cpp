@@ -403,19 +403,21 @@ constexpr std::array<ForwardCase, 14> kAdditionalCases{{
 }};
 
 constexpr auto kVirtualSinkCases = [] {
-    // Include a causal tail to exercise masked finite-sink fallback.
-    std::array<ForwardCase, 7> cases{kCases[0],
+    // Exercise masked and D192 group finite-sink fallback.
+    std::array<ForwardCase, 8> cases{kCases[0],
                                      kCases[4],
                                      kCases[8],
                                      kCases[9],
                                      kCases[10],
+                                     kCases[13],
                                      kAdditionalCases[0],
                                      kAdditionalCases[1]};
-    constexpr std::array<const char*, 7> names{"D64VirtualSink",
+    constexpr std::array<const char*, 8> names{"D64VirtualSink",
                                                "D128VirtualSink",
                                                "D192N64VirtualSink",
                                                "D192N128VirtualSink",
                                                "D192BottomRightVirtualSink",
+                                               "D192GroupVirtualSink",
                                                "D64GroupVirtualSink",
                                                "D128GroupVirtualSink"};
     for(std::size_t i = 0; i < cases.size(); ++i)
