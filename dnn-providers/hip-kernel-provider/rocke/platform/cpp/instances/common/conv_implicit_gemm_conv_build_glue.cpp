@@ -549,23 +549,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
-    ctx->load_vec = rocke_conv_choose_load_vec(spec);
-    /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
-     * power-of-two that divides the per-group channel count (A strides over cpg,
-     * B strides over cpg). For groups==1 cpg==C -> byte-identical. For C=3 this
-     * yields vec=1; without the clamp the tile-geometry picker returns a wider vec
-     * that Python never uses, causing MISMATCH (e.g. ImageNet-stem C3 conv). */
-    {
-        bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
-        int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = rocke_conv_problem_cpg(ctx->p);
-        int max_ab = (c_dim % max_elem == 0) ? max_elem
-                     : (c_dim % 4 == 0)      ? 4
-                     : (c_dim % 2 == 0)      ? 2
-                                             : 1;
-        if(ctx->load_vec > max_ab)
-            ctx->load_vec = max_ab;
-    }
+    ctx->load_vec = rocke_conv_default_load_vec(spec);
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and

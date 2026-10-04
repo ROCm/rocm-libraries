@@ -42,9 +42,12 @@ Usage::
     ws = DeviceMem(ws_nbytes)
     ws.memset(0)                      # REQUIRED: Stage 1 accumulates
 
-    s1_vals = {"A": dY_ptr, "B": X_ptr, "D": dW_ptr,
-               "A_bytes": dY_nb, "B_bytes": X_nb, "D_bytes": dW_nb,
-               "ws_ptr": ws.ptr(), "ws_bytes": ws_nbytes}
+    # The AOT argument block (problem extents, magic numbers, ks/ks_count)
+    # plus the workspace pair; split_k is the degree to launch at.
+    s1_vals = wgrad_stage1_launch_values(
+        spec, dY_ptr=dY_ptr, X_ptr=X_ptr, dW_ptr=dW_ptr,
+        dY_bytes=dY_nb, X_bytes=X_nb, dW_bytes=dW_nb,
+        ws_ptr=ws.ptr(), ws_bytes=ws_nbytes, split_k=4)
     s2_vals = {"ws_ptr": ws.ptr(), "dw_ptr": dw_ptr,
                "wg_M": spec.wg_M, "wg_N": spec.wg_N,
                "ws_bytes": ws_nbytes, "dw_bytes": dw_nb,

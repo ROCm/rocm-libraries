@@ -636,7 +636,7 @@ Constraints (`is_valid_depthwise_spatial_spec`):
 Grid: `(ceil(Wo / block_w), 1, N)` — no channel tile (all channels handled
 within one wavefront via the spatial thread mapping).
 
-Uses the same `_UNROLL_THRESH` / `scf_for_iter` branch logic as
+Streams the input rows through the same runtime `scf_for_iter` as
 `DirectDepthwiseSpec`, but accumulates over a single output W position
 (no `block_w` outer loop). `stride >= 1` supported via `D[N, Ho, Wo, total_k]`.
 

@@ -172,6 +172,32 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         spec->epilogue = "cshuffle";
         *arch = "gfx950";
         return 0;
+    case 18:
+        /* Rejected by both validators: explicit vec 8 on a 16x32 A tile gives
+         * 64 chunks for a 128-thread block (rocke_conv_coalesced_load_ok). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_m = 16;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* unroll_k double-buffered K loop + its "unroll" name tag; K_gemm is
+         * 9 tiles of 64 (odd). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->unroll_k = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

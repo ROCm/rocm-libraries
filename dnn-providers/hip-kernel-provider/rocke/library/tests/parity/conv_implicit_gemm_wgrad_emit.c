@@ -232,6 +232,16 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->two_stage = true;
         *arch = "gfx950";
         return 0;
+    case 20:
+        /* K-outer + async_dma + split-K=2, fp16 cshuffle atomic epilogue; 3 K
+         * tiles per slice, so phase B's prefetch takes the zero-fill redirect. */
+        spec->problem = rocke_conv_problem_default(10, 8, 8, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

@@ -835,13 +835,32 @@ static bool rocke_i_apply_unmerge_magic_dynamic(rocke_ir_builder_t* b,
         rocke_value_t* rem;
         rocke_coord_var_t cv;
 
-        quot = rocke_i_do_magic_division_dynamic(
-            b, tmp, t->triples_mult_v[tri], t->triples_shift_v[tri]);
-        if(quot == NULL)
+        /* Python _v(): a Value as is, an int as a fresh const, built in the
+         * order mult, shift, dim before the dim == 1 check. */
+        rocke_value_t* mult_v = t->triples_mult_v[tri] != NULL
+                                    ? t->triples_mult_v[tri]
+                                    : rocke_b_const_i32(b, t->triples_mult_c[tri]);
+        rocke_value_t* shift_v = t->triples_shift_v[tri] != NULL
+                                     ? t->triples_shift_v[tri]
+                                     : rocke_b_const_i32(b, t->triples_shift_c[tri]);
+        rocke_value_t* dim_v = t->triples_dim_v[tri] != NULL
+                                   ? t->triples_dim_v[tri]
+                                   : rocke_b_const_i32(b, t->triples_dim_c[tri]);
+        if(t->triples_dim_v[tri] == NULL && t->triples_dim_c[tri] == 1)
         {
-            return false;
+            /* A literal dim of 1: no division, remainder 0. */
+            rem = rocke_b_const_i32(b, 0);
+            quot = tmp;
         }
-        rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, t->triples_dim_v[tri]));
+        else
+        {
+            quot = rocke_i_do_magic_division_dynamic(b, tmp, mult_v, shift_v);
+            if(quot == NULL)
+            {
+                return false;
+            }
+            rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, dim_v));
+        }
         cv.name = t->lower[i];
         cv.value = rem;
         cv.valid = u->valid;
@@ -1818,6 +1837,10 @@ rocke_transform_t* rocke_unmerge_magic_dynamic(rocke_ir_builder_t* b,
         t->triples_mult_v[i] = triples[i].mult;
         t->triples_shift_v[i] = triples[i].shift;
         t->triples_dim_v[i] = triples[i].dim;
+        /* Only read where the matching Value is NULL. */
+        t->triples_mult_c[i] = triples[i].mult == NULL ? triples[i].mult_c : 0;
+        t->triples_shift_c[i] = triples[i].shift == NULL ? triples[i].shift_c : 0;
+        t->triples_dim_c[i] = triples[i].dim == NULL ? triples[i].dim_c : 0;
     }
     if(t->upper == NULL || t->lower == NULL)
     {

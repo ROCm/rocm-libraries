@@ -168,8 +168,16 @@ def _wgrad_arg_names(
         group = z // ks_count ;  slice = z % ks_count
         k_lo  = slice * ks    ;  k_hi  = k_lo + ks
 
-    An unsplit launch passes ``ks_count = 1`` and ``ks = wg_K``, which
-    collapses that to ``group = z``, ``k_lo = 0``, ``k_hi = wg_K``. Making the
+    ``ks`` is the slice width: ``wg_K`` split ``ks_count`` ways and rounded
+    up to a whole number of ``tile_k`` tiles (``ConvArgs`` computes it). With
+    ``ks_count > 1`` it must be a multiple of ``tile_k``: the K loop steps a
+    tile at a time from ``k_lo``, so a ragged ``ks`` would run each slice's
+    last tile into the next slice and count those elements twice. The tail
+    past ``wg_K`` reads zero through the descriptor bounds.
+
+    An unsplit launch passes ``ks_count = 1`` and ``ks`` = ``wg_K`` rounded
+    up to ``tile_k``, which collapses that to ``group = z``, ``k_lo = 0``,
+    ``k_hi`` = the padded ``wg_K``. Making the
     two cases one removes the pair of ABI flags that used to select between
     them -- and with them the chance of building a kernel against one variant
     and launching it with the other.

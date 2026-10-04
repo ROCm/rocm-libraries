@@ -531,6 +531,11 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
 /* _choose_load_vec(spec) -> width. Thin adapter over rocke_choose_load_vec. */
 int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
 
+/* The default sync-path load width: rocke_conv_choose_load_vec clamped by the
+ * per-group channel count (Python _sync_load_vecs without an explicit
+ * vector_size_*). 0 when the tile admits no width. */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
+
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     const rocke_mfma_atom_t* atom,

@@ -30,10 +30,11 @@
 #   17 -- gfx1250 wave32 WMMA 16x16x32 K-outer (ds_load_tr16_b128 transpose reads)
 #   18 -- unroll_k double-buffered loop under split-K=4 (odd-tail prefetch guard), gfx950
 #   19 -- split-K (degree at launch) + two_stage, odd wg_N (C=3), fp16, gfx950
+#   20 -- K-outer + async_dma + split-K=2 with the fp16 cshuffle atomic epilogue,
+#         3 K tiles per slice (odd: the phase-B prefetch is redirected to the
+#         zero-fill offset), gfx950
 #   (no grouped or bf16 case: the C++ engine does not build grouped wgrad, and
 #    its tile loader has no elem_dtype, so bf16 operands load as half)
-#   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
-#    override, so it would produce different IR and break the byte-identity gate)
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
@@ -326,10 +327,9 @@ def _spec(idx: int):
                 warp_tile_n=32,
                 warp_tile_k=16,
                 pipeline="mem",
-                # fp32 output + the direct-store epilogue. split-K with the
-                # cshuffle atomic epilogue is separately divergent between the
-                # engines (reproducible with neither async nor K-outer), so this
-                # config isolates the async / K-outer path under split-K.
+                # fp32 output + the direct-store epilogue: the async / K-outer
+                # path under split-K on its own. Config 20 covers the same path
+                # with the 16-bit cshuffle atomic epilogue.
                 epilogue="default",
                 data=ConvDataSpec(dtype_d="fp32"),
                 lds_k_outer=True,
@@ -490,6 +490,30 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 20:
+        # wg_K = 10*6*6 = 360; at tile_k 64 and split_k 2 each slice is 3
+        # tiles, so the ping-pong's last phase B lies past the slice end and
+        # its prefetch takes the k_zero_fill redirect.
+        p = ConvProblem(N=10, Hi=8, Wi=8, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                async_dma=True,
+                split_k=2,
+            ),
+            "gfx950",
+        )
     if idx == 19:
         # Runtime split-K degree with the two-stage scratch: one binary for
         # every degree > 1. wg_N = 3*3*3 = 27 is odd, which the packed 16-bit

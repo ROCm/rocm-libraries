@@ -591,6 +591,28 @@ def _choose_load_vec_for(
     return choose_load_vec(tile_m, tile_n, tile_k, block_size, elem_bytes=elem_bytes)
 
 
+def coalesced_load_reason(
+    operand: str, tile_rows: int, tile_cols: int, block_size: int, load_vec: int
+) -> Optional[str]:
+    """Why a ``CoalescedTileLoader`` with an exact ``load_vec`` cannot copy
+    this tile, or ``None`` if it can.
+
+    The loader gives every thread the same number of ``load_vec``-wide chunks
+    (``CoalescedTileLoader.vecs_per_thread``), so the chunk count must divide
+    by the block size. A width chosen by the loader itself always does; an
+    explicit ``vector_size_*`` is used verbatim and may not, which the builder
+    only discovers mid-build. Validators call this so such a spec is rejected
+    up front. C++ twin: ``rocke_conv_coalesced_load_reason``.
+    """
+    chunks = (tile_rows * tile_cols) // load_vec
+    if chunks % block_size:
+        return (
+            f"{operand} load: tile {tile_rows}x{tile_cols} / {load_vec} = {chunks} "
+            f"not divisible by block_size {block_size}"
+        )
+    return None
+
+
 # ---------------------------------------------------------------------
 # Wavelet pipeline helpers (gfx1250/WMMA load/math wave specialization)
 # ---------------------------------------------------------------------

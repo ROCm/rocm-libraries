@@ -479,7 +479,11 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     )
 
     def _sweep(self, **knobs) -> None:
-        ran = 0
+        # Both loops are MFMA-only (WMMA conv rejects async_dma and unroll_k).
+        # On MFMA every case must build and run: a skip -- a build error
+        # included -- is a failure, not a quiet pass.
+        if not _IS_MFMA:
+            self.skipTest(f"{knobs} fwd is MFMA-only; running on {GPU_ARCH}")
         for shape in self._CASES:
             for dtype in _DTYPES:
                 for epilogue in _EPILOGUES:
@@ -487,12 +491,12 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
                         ok, why = _run_one(
                             GPU_ARCH, shape, dtype, "mem", epilogue, **knobs
                         )
-                        if why.startswith("skip"):
-                            continue
-                        ran += 1
-                        self.assertTrue(ok, f"{shape.id} {dtype} {epilogue}: {why}")
-        if ran == 0:
-            self.skipTest(f"no {knobs} fwd config builds on {GPU_ARCH}")
+                        label = f"{shape.id} {dtype} {epilogue}"
+                        self.assertTrue(ok, f"{label}: {why}")
+                        self.assertFalse(
+                            why.startswith("skip"),
+                            f"{label}: case was skipped rather than run: {why}",
+                        )
 
     def test_async_dma_odd_tiles(self):
         self._sweep(async_dma=True)

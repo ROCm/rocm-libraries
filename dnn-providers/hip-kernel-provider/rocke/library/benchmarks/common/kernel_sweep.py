@@ -29,6 +29,9 @@ Shared tile geometry, every direction::
     warp_m, warp_n   1, 2, 4, 8   (warp_m * warp_tile must divide tile_m, same for n)
     warp_tile_m/n    16, 32       (square; warp_tile_k = the widest MMA atom
                                    for the dtype, which must divide tile_k)
+    accumulator      (tile_m/warp_m) * (tile_n/warp_n) / wave_size <= 256
+                     f32 registers per lane (CACHE_MAX_ACC_REGS; above that
+                     the kernel spills and is the slowest to compile)
     epilogue         default, cshuffle
     pipeline         mem, compv3, compv4, wavelet (wavelet: gfx1250 WMMA only;
                      "basic" is never cached -- it emits mem's code)
@@ -38,20 +41,24 @@ Per direction, on top of that:
 * **fwd** -- vector widths: a = b in {1, 2, 4, 8} (X and W run along cpg),
   c in {1, 2, 4, 8} (Y along kpg). K loop: plain, ``unroll_k`` (double-
   buffered 2x loop), and ``async_dma`` (direct-to-LDS; built once per
-  geometry, under pipeline "mem", since it ignores the pipeline). grouped:
-  no / yes.
+  geometry, under pipeline "mem", since it ignores the pipeline).
 * **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
-  {1, 2, 4, 8} (X and dW along cpg). pipeline "wavelet" is not cached (wgrad
+  {1, 2, 4, 8} (X and dW along cpg); with the default epilogue (all
+  two-stage kernels) c = 1 and b in {1, 2, 4, 8}. pipeline "wavelet" is not cached (wgrad
   builds it as mem). Only the split-K kernel is cached (``split_k`` > 1,
   recorded as 2; the degree is a kernarg and the benchmark sweeps it at
   launch), as atomic or two-stage (f32 scratch + Stage-2 reduce,
-  ``ws_replicas`` = 8). grouped: no / yes. Plus group-merged depthwise kernels
+  ``ws_replicas`` = 8). Plus group-merged depthwise kernels
   (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
   served only to depthwise problems whose merged GEMM fits the tile.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
-  {1, 2, 4, 8} (W and dX along cpg). stride and dilation are baked into the
+  {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
+  {1, 2, 4, 8}. stride and dilation are baked into the
   tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
-  in {1, 2}; up to 64 sub-GEMMs. grouped: no / yes.
+  in {1, 2}; up to 64 sub-GEMMs.
+
+Every direction builds the grouped kernel only: it serves groups == 1 as well
+(``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
 Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
 needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
@@ -109,6 +116,13 @@ CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
+# Cap on the f32 accumulator registers each lane holds:
+# (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
+# accumulators no longer fit the 256 AGPRs MFMA accumulates into, so the
+# kernel spills -- it is not a contender, and those are the slowest kernels in
+# the grid to compile (several seconds each, against a fraction of a second
+# for the rest). Not a validity rule: the JIT sweep still builds them.
+CACHE_MAX_ACC_REGS = 256
 CACHE_VECS: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_PIPELINES: Tuple[str, ...] = ("mem", "compv3", "compv4", "wavelet", "basic")
 CACHE_EPILOGUES: Tuple[str, ...] = ("default", "cshuffle")
@@ -131,11 +145,14 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # ---- capability axes ------------------------------------------------------
 # These are NOT tuning knobs: they change which problems a binary can serve.
 # Grouped convolution takes a different code path in every direction (the
-# contraction index only spans one group), and implicit-GEMM dgrad folds the
-# stride and dilation into its tilde decomposition. A binary built one way
-# produces wrong numbers -- not an error -- on the other, so each value needs
-# its own binary and its own identity.
-CACHE_GROUPED: Tuple[bool, ...] = (False, True)
+# contraction index only spans one group). An ungrouped binary gives wrong
+# numbers -- not an error -- on a grouped problem, but the grouped binary
+# computes groups == 1 correctly too (group index 0, cpg == C), so the cache
+# builds the grouped one only and offers it to both; KernelCache keeps
+# honouring ungrouped entries of older caches for ungrouped problems only.
+# Implicit-GEMM dgrad folds the stride and dilation into its tilde
+# decomposition, so those need a binary per value.
+CACHE_GROUPED: Tuple[bool, ...] = (True,)
 CACHE_DGRAD_STRIDES: Tuple[int, ...] = (1, 2)
 CACHE_DGRAD_DILATIONS: Tuple[int, ...] = (1, 2)
 # wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
@@ -161,6 +178,7 @@ _TILE_MN = CACHE_TILE_MN
 _TILE_K = CACHE_TILE_K
 _WARP_MN = CACHE_WARP_MN
 _WARP_TILE_MN = CACHE_WARP_TILE_MN
+_MAX_ACC_REGS = CACHE_MAX_ACC_REGS
 _VECS = CACHE_VECS
 _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
@@ -191,8 +209,9 @@ def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
     """The tile/warp/atom geometries every direction's generator walks.
 
     Yields ``(tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue,
-    atom)`` for each combination whose warp tiling fits the block tile and
-    whose K tile is a multiple of the selected MMA atom. Shared by the
+    atom)`` for each combination whose warp tiling fits the block tile, whose
+    K tile is a multiple of the selected MMA atom, and whose per-lane
+    accumulator stays within :data:`CACHE_MAX_ACC_REGS`. Shared by the
     generators and :func:`count_jobs`, so the progress total cannot drift from
     what the generators actually yield.
     """
@@ -218,6 +237,9 @@ def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
         if warp_m * wt > tile_m or warp_n * wt > tile_n:
             continue
         if tile_m % (warp_m * wt) or tile_n % (warp_n * wt):
+            continue
+        acc_regs = (tile_m // warp_m) * (tile_n // warp_n) // target.wave_size
+        if acc_regs > _MAX_ACC_REGS:
             continue
         atom = target.mma.select_largest_k(
             family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=wt, n=wt
@@ -421,8 +443,11 @@ def _wgrad_jobs(
         if not _aot_pipeline("wgrad", pipeline):
             continue
         # wgrad's B (X) and D (dW) are both contiguous along cpg, so they
-        # share one width; A (dY) runs along kpg.
+        # share one width; A (dY) runs along kpg. The default epilogue (and so
+        # every two-stage kernel) stores scalar, so there D is 1 and B takes
+        # its own width -- tied to D it could only ever load scalar.
         for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
+            vec_c = 1 if epilogue == "default" else vec_bc
             for two_stage, caps in itertools.product(
                 _wgrad_two_stages(split_k), _layout_caps()
             ):
@@ -441,7 +466,7 @@ def _wgrad_jobs(
                     wave_size=wave_size,
                     vector_size_a=vec_a,
                     vector_size_b=vec_bc,
-                    vector_size_c=vec_bc,
+                    vector_size_c=vec_c,
                     split_k=split_k,
                     two_stage=two_stage,
                 )
@@ -543,8 +568,10 @@ def _dgrad_jobs(
         # dgrad folds the stride and dilation into its tilde decomposition,
         # so those are capabilities here, not launch parameters.
         # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
-        # they share one width; A (dY) runs along kpg.
+        # they share one width; A (dY) runs along kpg. The default epilogue
+        # stores scalar, so there D is 1 and B takes its own width.
         for vec_a, vec_bc, caps in itertools.product(_VECS, _VECS, _dgrad_caps()):
+            vec_c = 1 if epilogue == "default" else vec_bc
             grouped, stride, dilation = (
                 caps["grouped"],
                 caps["stride"],
@@ -564,7 +591,7 @@ def _dgrad_jobs(
                 wave_size=wave_size,
                 vector_size_a=vec_a,
                 vector_size_b=vec_bc,
-                vector_size_c=vec_bc,
+                vector_size_c=vec_c,
                 max_sub_gemms=max_sub_gemms,
             )
             yield BuildJob(
@@ -1377,13 +1404,19 @@ def describe_cache(cache: KernelCache, log=print) -> int:
     if not by_direction:
         log("AOT cache is empty.")
         return 2
+    stale_by_direction = {}
     for direction, count in sorted(by_direction.items()):
-        log(f"  {direction:8s} {count} kernels")
-    stale = cache.stale_entries()
-    if stale:
+        stale = cache.stale_entries(direction)
+        stale_by_direction[direction] = stale
+        note = f" ({stale} from older emitter sources)" if stale else ""
+        log(f"  {direction:8s} {count} kernels{note}")
+    stale_dirs = [d for d, n in stale_by_direction.items() if n]
+    if stale_dirs:
         log(
-            f"  [warn] {stale} entries were built from different emitter sources "
-            f"than this checkout; rerun --compile-all to refresh them (only "
-            f"kernels whose code changed are recompiled)"
+            f"  [warn] {sum(stale_by_direction.values())} entries "
+            f"({', '.join(stale_dirs)}) were built from different emitter sources "
+            f"than this checkout -- built before a code change and not rebuilt "
+            f"since. They still run; rerun --compile-all for those directions to "
+            f"refresh them (only kernels whose code changed are recompiled)"
         )
     return 0

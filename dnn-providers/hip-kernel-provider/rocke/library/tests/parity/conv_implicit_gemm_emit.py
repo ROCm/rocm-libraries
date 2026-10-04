@@ -364,6 +364,51 @@ def _spec_raw(idx: int):
             ),
             "gfx950",
         )
+    if idx == 19:
+        # unroll_k: the double-buffered 2x K loop over a runtime extent, and its
+        # "unroll" name tag. K_gemm = 3*3*64 = 576 is 9 tiles of 64 -- odd, so
+        # the last step's second tile reads past K_gemm and must read zero.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                unroll_k=True,
+            ),
+            "gfx950",
+        )
+    if idx == 18:
+        # Rejected by both validators: an explicit vector_size_a/b of 8 on a
+        # 16x32 A tile gives 64 chunks for a 128-thread block, which the loader
+        # cannot split evenly (coalesced_load_reason).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=16,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+                vector_size_a=8,
+                vector_size_b=8,
+            ),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

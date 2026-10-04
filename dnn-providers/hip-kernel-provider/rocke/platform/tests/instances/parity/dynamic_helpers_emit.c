@@ -282,6 +282,59 @@ static void build_unmerge_embed(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* Python build_unmerge_mixed: int and Value triple members mixed, plus a
+ * dim-1 triple (no division). */
+static void build_unmerge_mixed(rocke_ir_builder_t* b)
+{
+    rocke_value_t* x = ptr_param(b, "X", rocke_f16(), true);
+    rocke_value_t* y = ptr_param(b, "Y", rocke_f16(), false);
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* p_sn = rocke_b_param(b, "p_sN", rocke_i32(), NULL);
+    rocke_value_t* p_sh = rocke_b_param(b, "p_sH", rocke_i32(), NULL);
+    rocke_value_t* p_sw = rocke_b_param(b, "p_sW", rocke_i32(), NULL);
+    rocke_value_t* p_mult = rocke_b_param(b, "p_w_mult", rocke_i32(), NULL);
+    rocke_value_t* p_w = rocke_b_param(b, "p_W", rocke_i32(), NULL);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+
+    const char* base_names[3] = {"n", "h", "w"};
+    rocke_value_t* base_strides[3] = {p_sn, p_sh, p_sw};
+    rocke_dynamic_tensor_descriptor_t* desc
+        = rocke_tensor_descriptor_naive_dynamic(b, "x_nhw", base_names, 3, base_strides);
+    if(desc == NULL)
+        return;
+
+    /* unmerge_magic_dynamic("m", ("n","h","w"), [(7, 2, 1), (p_mult, 5, p_W)]) */
+    const char* um_into[3] = {"n", "h", "w"};
+    rocke_magic_triple_t triples[2];
+    memset(triples, 0, sizeof(triples));
+    triples[0].mult_c = 7;
+    triples[0].shift_c = 2;
+    triples[0].dim_c = 1;
+    triples[1].mult = p_mult;
+    triples[1].shift_c = 5;
+    triples[1].dim = p_w;
+
+    const rocke_transform_t* xforms[2];
+    xforms[0] = rocke_unmerge_magic_dynamic(b, "m", um_into, 3, triples);
+    xforms[1] = rocke_pad_dynamic(b, "w", NULL, p_w);
+    if(xforms[0] == NULL || xforms[1] == NULL)
+        return;
+    rocke_tensor_descriptor_t* chained
+        = rocke_tensor_descriptor_transform(b, &desc->base, xforms, 2);
+    if(chained == NULL)
+        return;
+
+    const char* in_names[1] = {"m"};
+    rocke_value_t* in_values[1] = {tid};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    if(!rocke_transforms_descriptor_offset(b, chained, in_names, in_values, 1, &off, &valid))
+        return;
+    rocke_b_global_store(b, o, tid, off, 1);
+    store_through_valid(b, x, y, tid, off, valid);
+    rocke_b_ret(b);
+}
+
 static void build_pad_dynamic(rocke_ir_builder_t* b)
 {
     rocke_value_t* x = ptr_param(b, "X", rocke_f16(), true);
@@ -346,6 +399,7 @@ static const build_fn_t CONFIGS[] = {
     build_pad_dynamic,
     build_pingpong_mask,
     build_pingpong_mask_split_k,
+    build_unmerge_mixed,
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

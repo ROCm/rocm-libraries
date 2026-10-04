@@ -88,6 +88,7 @@ from kernels.common._conv_implicit_gemm_common import (
     ConvProblem,
     _apply_accumulator_epilogue,
     _choose_load_vec_for,
+    coalesced_load_reason,
     _emit_frag_smem_load,
     _emit_mfma,
     _emit_smem_load,
@@ -957,12 +958,15 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"block_size {spec.block_size} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
         )
+    # The default epilogue stores scalar. Where a path happens to ignore
+    # vector_size_c (split-K atomic, the strided tilde store) the width is
+    # still rejected rather than silently dropped, so a spec never names a
+    # store width its kernel does not use -- and the AOT cache never holds two
+    # binaries that differ only in an ignored width.
     if (
         spec.vector_size_c is not None
         and spec.vector_size_c > 1
         and spec.epilogue == "default"
-        and spec.split_k <= 1  # atomic (split_k>1) ignores vector_size_c
-        and not spec.is_strided  # tilde non-atomic also uses scalar direct — vec_c ignored
     ):
         return False, (
             f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
@@ -1126,6 +1130,22 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         ):
             if flag:
                 return False, f"WMMA dgrad does not support {label} on {arch}"
+
+    # The dY tile loader. An explicit vector_size_a is used verbatim (split_k
+    # <= 1; the split path loads scalar) and has to split the tile evenly over
+    # the block's threads, or the builder only finds out halfway through a
+    # build. B's width is chosen by the loader itself, and the wavelet loaders
+    # pick their own, so neither can fail this way.
+    if (
+        spec.pipeline != "wavelet"
+        and spec.split_k <= 1
+        and spec.vector_size_a is not None
+    ):
+        why = coalesced_load_reason(
+            "A", spec.tile_m, spec.tile_k, spec.block_size, spec.vector_size_a
+        )
+        if why is not None:
+            return False, why
 
     return True, "ok"
 

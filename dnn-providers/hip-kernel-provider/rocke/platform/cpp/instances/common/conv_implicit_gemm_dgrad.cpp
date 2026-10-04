@@ -306,12 +306,11 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    /* vector_size_c > 1 incompatible with default epilogue — except when
-     * split_k > 1 (atomic) or stride > 1 (tilde non-atomic direct) ignores it. */
+    /* vector_size_c > 1 incompatible with the default (scalar) epilogue,
+     * including the paths that would ignore it (split-K atomic, strided
+     * tilde). Mirrors Python is_valid_dgrad_spec. */
     {
-        bool is_strided = rocke_dgrad_conv_spec_is_strided(s);
-        if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0 && s->split_k <= 1
-           && !is_strided)
+        if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0)
         {
             snprintf(reason,
                      reason_cap,
@@ -606,6 +605,23 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "allocation)");
             return false;
         }
+    }
+
+    /* The dY tile loader (Python: the coalesced_load_reason check at the end
+     * of is_valid_dgrad_spec). An explicit vector_size_a is used verbatim at
+     * split_k <= 1 and has to split the tile evenly over the block's threads;
+     * B's width and the wavelet loaders' are chosen by the loader itself. */
+    if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0) && s->split_k <= 1
+       && s->has_vector_size_a)
+    {
+        if(!rocke_conv_coalesced_load_ok("A",
+                                         s->tile_m,
+                                         s->tile_k,
+                                         rocke_dgrad_conv_spec_block_size(s),
+                                         s->vector_size_a,
+                                         reason,
+                                         reason_cap))
+            return false;
     }
 
     snprintf(reason, reason_cap, "ok");

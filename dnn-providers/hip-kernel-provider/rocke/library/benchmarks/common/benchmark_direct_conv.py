@@ -34,6 +34,7 @@ from typing import List
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
+from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
 from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
@@ -587,6 +588,7 @@ def _run_depthwise_sweep(
             flush=True,
         )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, kernel in pending:
         block_w, block_waves = combo
@@ -642,12 +644,15 @@ def _run_depthwise_sweep(
                 return 1, []
             rt.memset(D_dev, 0, D_t.nbytes)
 
-        ms = time_launches(
+        ms = _stop.measure(
             lambda: launcher(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -791,6 +796,7 @@ def _run_sweep(
             flush=True,
         )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, kernel in pending:
         block_q, block_groups, double_buffer = combo
@@ -846,12 +852,15 @@ def _run_sweep(
                 return 1, []
             rt.memset(D_dev, 0, D_t.nbytes)
 
-        ms = time_launches(
+        ms = _stop.measure(
             lambda: launcher(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -1029,6 +1038,7 @@ def _run_wgrad_sweep(
             flush=True,
         )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, kernel in pending:
         waves_k, waves_c, waves_q, hpb, mk = combo
@@ -1080,12 +1090,15 @@ def _run_wgrad_sweep(
             rt.memset(dW_dev, 0, dW_t.nbytes)
 
         cfg_wg = LaunchConfig(grid=grid, block=block_dim)
-        ms = time_launches(
+        ms = _stop.measure(
             lambda: launcher(values, config=cfg_wg),
             warmup=args.warmup,
             iters=args.iters,
             stream=0,
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(0)
         tflops = flop / ms / 1e9
         gbps = bytes_xfer / ms / 1e6
@@ -1445,6 +1458,7 @@ def _run_dgrad_sweep(
             flush=True,
         )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, kernel_or_pair in pending:
         is_mfma_pair = isinstance(kernel_or_pair, tuple)
@@ -1652,7 +1666,7 @@ def _run_dgrad_sweep(
                 rt.memset(dX_dev, 0, dX_t.nbytes)
 
         if is_mfma_pair:
-            ms = time_launches(
+            ms = _stop.measure(
                 run_mfma_dgrad,
                 warmup=args.warmup,
                 iters=args.iters,
@@ -1660,12 +1674,15 @@ def _run_dgrad_sweep(
             )
         else:
             cfg = LaunchConfig(grid=grid, block=block_dim)
-            ms = time_launches(
+            ms = _stop.measure(
                 lambda: launcher(values, config=cfg),
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=0,
             )
+        if ms is None:
+            _stop.report(label)
+            continue
         synchronize_and_release(0)
         tflops = flop / ms / 1e9
         gbps = bytes_xfer / ms / 1e6
@@ -1797,7 +1814,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     import torch
 
     from benchmarks.common.direct_kernel_sweep import direct_plans, launch_values
-    from rocke.runtime import synchronize_and_release, time_launches
+    from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
@@ -1877,6 +1894,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             flop = float(p.flops)
             bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
             results = []
+            _stop = EarlyStop(args.early_stop, args.early_stop_after)
             for plan in plans:
                 try:
                     launches = [
@@ -1920,11 +1938,14 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                         )
 
                 try:
-                    ms = time_launches(
+                    ms = _stop.measure(
                         run, warmup=args.warmup, iters=args.iters, stream=0
                     )
                 except (HipError, RuntimeError) as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
+                    continue
+                if ms is None:
+                    _stop.report(plan.label)
                     continue
                 synchronize_and_release(0)
                 results.append(
@@ -1994,6 +2015,7 @@ def main() -> int:
     parser.add_argument(
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
+    add_early_stop_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )

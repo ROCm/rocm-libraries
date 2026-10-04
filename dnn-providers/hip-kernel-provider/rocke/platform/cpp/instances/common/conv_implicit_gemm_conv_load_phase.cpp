@@ -32,6 +32,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h> /* strcmp */
 
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
@@ -57,6 +58,29 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     if(st != ROCKE_OK)
         return out_vec;
     return out_vec;
+}
+
+/* ===================================================================== *
+ *  The default sync load width (Python _sync_load_vecs without an explicit
+ *  vector_size_*): the tile-geometry width clamped by the largest power of two
+ *  dividing the per-group channel count (A and B both stride over cpg). For
+ *  groups==1 cpg==C. For C=3 this yields 1; without the clamp the tile picker
+ *  returns a wider width Python never uses (e.g. the ImageNet-stem C3 conv).
+ *  Returns 0 when the tile admits no width at all.
+ * ===================================================================== */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    int load_vec = rocke_conv_choose_load_vec(spec);
+    bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+    int max_elem = is_fp32 ? 4 : 8;
+    int c_dim = rocke_conv_problem_cpg(&spec->problem);
+    int max_ab = (c_dim % max_elem == 0) ? max_elem
+                 : (c_dim % 4 == 0)      ? 4
+                 : (c_dim % 2 == 0)      ? 2
+                                         : 1;
+    if(load_vec > max_ab)
+        load_vec = max_ab;
+    return load_vec;
 }
 
 /* ===================================================================== *

@@ -176,6 +176,36 @@ def build_unmerge_embed(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_unmerge_mixed(b: IRBuilder) -> None:
+    """unmerge_magic_dynamic with int and Value triple members mixed.
+
+    m -> (n, h, w): the h triple is all ints with dim 1 (no division: the
+    remainder is a const 0 and the quotient passes through, though its int
+    members are still materialised); the w triple mixes a Value multiplier and
+    dim with an int shift. pad_dynamic on w supplies the validity.
+    """
+    x = _ptr(b, "X", F16, readonly=True)
+    y = _ptr(b, "Y", F16)
+    o = _ptr(b, "O", I32)
+    p_sn = b.param("p_sN", I32)
+    p_sh = b.param("p_sH", I32)
+    p_sw = b.param("p_sW", I32)
+    p_mult = b.param("p_w_mult", I32)
+    p_w = b.param("p_W", I32)
+    tid = b.thread_id_x()
+    desc = DynamicTensorDescriptor.create(
+        "x_nhw", coord_names=("n", "h", "w"), strides=(p_sn, p_sh, p_sw)
+    )
+    desc = desc.transform(
+        unmerge_magic_dynamic("m", ("n", "h", "w"), [(7, 2, 1), (p_mult, 5, p_w)]),
+        pad_dynamic("w", hi=p_w),
+    )
+    off, valid = desc.offset(b, m=tid)
+    b.global_store(o, tid, off)
+    _store_through_valid(b, x, y, tid, off, valid)
+    b.ret()
+
+
 def build_pad_dynamic(b: IRBuilder) -> None:
     """embed_dynamic with every argument a Value, plus pad_dynamic variants.
 
@@ -262,6 +292,8 @@ CONFIGS = [
         schedule=None,
         mask=True,
     ),
+    # 7: unmerge_magic_dynamic with mixed int/Value triples and a dim-1 triple.
+    build_unmerge_mixed,
 ]
 
 

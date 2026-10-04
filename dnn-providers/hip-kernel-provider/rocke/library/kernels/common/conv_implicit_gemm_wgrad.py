@@ -1686,6 +1686,12 @@ def build_implicit_gemm_conv_wgrad(
     slice_v = None
     if grouped:
         c_kpg = p_kpg  # runtime Value — dY output-channel slab stride
+        if spec.group_merge > 1:
+            # The load side reads the MERGED problem: Gm groups' output
+            # channels form one slab of kpg*Gm, indexed by the merged group.
+            # The kernargs describe the true problem, so scale in-kernel (Gm
+            # is a build-time knob). The epilogue keeps the true kpg.
+            c_kpg = b.mul(p_kpg, b.const_i32(spec.group_merge))
 
     # Split-K K-slice bounds. The degree is a launch parameter (``ks_count``),
     # never a compile-time constant, so there is exactly one shape of decode:
@@ -1861,8 +1867,26 @@ def build_implicit_gemm_conv_wgrad(
         _c_wgK_ir = p_wg_K
     else:
         dY_desc = make_dy_descriptor_dynamic(b, params, is_3d=p.is_3d)
+        x_params = params
+        if spec.group_merge > 1:
+            # X's channel decode must run over the merged per-group channel run
+            # (cpg*Gm) and the merged group's slab -- not the true cpg the host
+            # packed. Merging is depthwise-only (wgrad_group_merge_available),
+            # so that run is exactly Gm, a build-time constant: fold it and its
+            # magic pair here instead of reading the kernargs. The epilogue
+            # keeps the true cpg through ``params``.
+            from rocke.helpers.transforms import calculate_magic_numbers
+
+            _merged_cpg = p_load.cpg
+            _mult, _shift = calculate_magic_numbers(_merged_cpg)
+            x_params = dict(
+                params,
+                p_cpg=_merged_cpg,
+                p_magic_n_cpg_mult=_mult,
+                p_magic_n_cpg_shift=_shift,
+            )
         X_desc = make_x_wgrad_descriptor_dynamic(
-            b, params, is_3d=p.is_3d, grouped=_grouped
+            b, x_params, is_3d=p.is_3d, grouped=_grouped
         )
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 

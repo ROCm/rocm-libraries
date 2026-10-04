@@ -73,6 +73,10 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # validators on other targets.
 # ---------------------------------------------------------------------------
 
+from benchmarks.common.early_stop import (  # noqa: E402
+    EarlyStop,
+    add_early_stop_arg,
+)
 from benchmarks.common.kernel_sweep import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
@@ -806,6 +810,7 @@ def main() -> int:
     parser.add_argument(
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
+    add_early_stop_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -820,6 +825,15 @@ def main() -> int:
             "libamd_comgr in its own process, bypassing the GIL. "
             "Set to 0 to use os.cpu_count() workers."
         ),
+    )
+    parser.add_argument(
+        "--all-vector-sizes",
+        action="store_true",
+        dest="all_vector_sizes",
+        help="--run-from-cache: run every cached vector-width combination. By "
+        "default only kernels using the widest widths the problem admits are "
+        "run (one combination per configuration; configurations whose tile "
+        "cannot reach those widths are skipped).",
     )
     parser.add_argument(
         "--sample",
@@ -891,6 +905,7 @@ def main() -> int:
         help=(
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce): "
             "auto = enable when C/groups is odd (atomics require even channel count); "
+            "also applies to --run-from-cache; "
             "always = force two-stage for all split_k>1 configs; "
             "never = skip two-stage entirely (default: auto)"
         ),
@@ -1887,7 +1902,9 @@ def _build_dgrad_one(args_tuple):
         split_k=resolved_split_k,
         vector_size_a=vec_a,
         vector_size_b=vec_b,
-        vector_size_c=vec_c,
+        # The default epilogue stores scalar; the validator rejects any wider
+        # vector_size_c with it.
+        vector_size_c=1 if epilogue == "default" else vec_c,
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
     if not ok:
@@ -2269,6 +2286,7 @@ def _run_sweep(
                 flush=True,
             )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, artifact in pending:
         tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
@@ -2335,12 +2353,15 @@ def _run_sweep(
                 return 1, []
             rt.memset(D_dev, 0, D_t.nbytes)
 
-        ms = time_launches(
+        ms = _stop.measure(
             lambda: launcher(values, config=cfg),
             warmup=args.warmup,
             iters=args.iters,
             stream=stream,
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -2737,6 +2758,7 @@ def _run_wgrad_sweep(
     # Set of config keys that have been pruned (skip remaining split-K degrees).
     _pruned_configs: set = set()
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_run = 0
     for combo, spec, resolved_split_k, artifact in pending:
         (
@@ -2864,12 +2886,15 @@ def _run_wgrad_sweep(
                 _cfg_snap = cfg
                 timed_fn = lambda _v=_vals_snap, _c=_cfg_snap: launcher(_v, config=_c)
 
-            ms = time_launches(
+            ms = _stop.measure(
                 timed_fn,
                 warmup=args.warmup,
                 iters=args.iters,
                 stream=stream,
             )
+            if ms is None:
+                _stop.report(f"{artifact.kernel_name} spk{_launch_sk}")
+                continue
             synchronize_and_release(stream)
 
             cur_tflops = (flop / ms) * 1e-9
@@ -3106,12 +3131,15 @@ def _run_wgrad_sweep(
                         rt2.free(dW_dev2)
                         return 1, []
 
-                ms = time_launches(
+                ms = _stop.measure(
                     _launch_two_stage,
                     warmup=args.warmup,
                     iters=args.iters,
                     stream=0,
                 )
+                if ms is None:
+                    _stop.report(f"{s1_art.kernel_name} spk{_launch_sk}")
+                    continue
                 synchronize_and_release(0)
 
                 cur_tflops = (flop / ms) * 1e-9
@@ -3372,6 +3400,7 @@ def _run_dgrad_sweep(
                 flush=True,
             )
 
+    _stop = EarlyStop(args.early_stop, args.early_stop_after)
     n_measured = 0
     for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
@@ -3448,9 +3477,12 @@ def _run_dgrad_sweep(
         else:
             timed_fn = lambda: launcher(values, config=cfg)
 
-        ms = time_launches(
+        ms = _stop.measure(
             timed_fn, warmup=args.warmup, iters=args.iters, stream=stream
         )
+        if ms is None:
+            _stop.report(artifact.kernel_name)
+            continue
         synchronize_and_release(stream)
 
         cur_tflops = (flop / ms) * 1e-9
@@ -3594,7 +3626,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
 
     import torch
 
-    from rocke.runtime import synchronize_and_release, time_launches
+    from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
     from benchmarks.common.kernel_sweep import _launch_values_for
@@ -3633,9 +3665,55 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
+            if direction == "wgrad" and args.two_stage != "always":
+                # Same rule as the JIT sweep's --two-stage: by default the
+                # two-stage (scratch + reduce) kernels only run when C/groups
+                # is odd -- the case the packed-atomic epilogue cannot cover;
+                # "never" drops them outright.
+                odd = (problem.C // max(1, problem.groups)) % 2 != 0
+                if args.two_stage == "never" or not odd:
+                    candidates = [c for c in candidates if not c[0].two_stage]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel ("
+                        + (
+                            "two-stage disabled by --two-stage never"
+                            if args.two_stage == "never"
+                            else "two-stage kernels only run for odd C/groups; "
+                            "see --two-stage"
+                        )
+                        + ")",
+                        flush=True,
+                    )
+                    continue
+            n_compatible = len(candidates)
+            n_vec_pruned = 0
+            if not args.all_vector_sizes:
+                kept = _widest_vector_sizes(candidates)
+                n_vec_pruned = len(candidates) - len(kept)
+                candidates = kept
+            if args.sample is not None:
+                # Same sampling as the JIT sweep: a fixed-seed subset, so a
+                # cache holding tens of thousands of kernels for one shape can
+                # be surveyed in minutes rather than hours.
+                candidates = _sample_combos(
+                    candidates, args.sample, args.seed + case_idx
+                )
             print(
                 f"\nCase {case_idx}: {problem.short()} {case_dtype} {direction} — "
-                f"{len(candidates)} compatible kernels",
+                f"{n_compatible} compatible kernels"
+                + (
+                    f", {n_compatible - n_vec_pruned} with the widest vector "
+                    f"sizes (--all-vector-sizes keeps them all)"
+                    if n_vec_pruned
+                    else ""
+                )
+                + (
+                    f", sampled {len(candidates)} (--sample {args.sample})"
+                    if args.sample is not None
+                    else ""
+                ),
                 flush=True,
             )
 
@@ -3669,8 +3747,18 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             flop = float(problem.flops)
             bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
             results = []
+            # --verify / --dump-fail: one reference per case and direction;
+            # every cached kernel is checked against it before it is timed.
+            ref_out = (
+                _cache_reference(direction, problem, A_t, B_t, torch_dt, arch)
+                if args.verify or args.dump_fail
+                else None
+            )
+            _stop = EarlyStop(args.early_stop, args.early_stop_after)
+            n_failed = 0
 
-            for ident, hsaco_path, meta in candidates:
+            n_cand = len(candidates)
+            for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
                     print(
@@ -3774,8 +3862,34 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             launcher(values, config=cfg)
                             s2_launcher(s2_values, config=s2_cfg)
 
+                    label = ident.short_label()
+                    if split_k is not None:
+                        label += f" @split_k={split_k}"
+                    if ref_out is not None:
+                        # The output is zeroed first: the atomic split-K
+                        # epilogues accumulate into it. A kernel that fails is
+                        # reported and not timed, so it can never rank.
+                        stopped, passed = _verify_kernel(
+                            rt=rt,
+                            launch_fn=run,
+                            out_dev=D_dev,
+                            out_t=D_t,
+                            zero_init_out=True,
+                            ref_out=ref_out,
+                            kernel_name=label,
+                            dump_fail=args.dump_fail,
+                            u8=_u8,
+                            arch=arch,
+                            compute_dtype=case_dtype,
+                        )
+                        if stopped:
+                            return 1
+                        if not passed:
+                            n_failed += 1
+                            overall_rc = 1
+                            continue
                     try:
-                        ms = time_launches(
+                        ms = _stop.measure(
                             run,
                             warmup=args.warmup,
                             iters=args.iters,
@@ -3784,14 +3898,26 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     except (HipError, RuntimeError) as e:
                         print(f"  [skip] {ident.short_label()}: {e}", flush=True)
                         continue
-                    label = ident.short_label()
-                    if split_k is not None:
-                        label += f" @split_k={split_k}"
+                    if ms is None:
+                        _stop.report(label)
+                        continue
                     results.append(
                         (flop / (ms * 1e9), bytes_xfer / (ms * 1e6), ms, label)
                     )
+                    # One line per measured launch, as the JIT sweep prints,
+                    # so a long run shows its progress and partial results.
+                    print(
+                        f"  [{cand_idx:>{len(str(n_cand))}}/{n_cand}] "
+                        f"{results[-1][0]:7.1f} TFLOPS  {ms:8.3f} ms  {label}",
+                        flush=True,
+                    )
 
             synchronize_and_release()
+            if ref_out is not None:
+                print(
+                    f"  verify: {n_failed} of the launched kernels failed",
+                    flush=True,
+                )
             if not results:
                 print("  No successful launches.", flush=True)
                 overall_rc = 1
@@ -3808,6 +3934,97 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
 
     return overall_rc
+
+
+def _widest_vector_sizes(candidates):
+    """Keep only the kernels that use the widest vector widths the problem admits.
+
+    The cache holds a binary per (vector_size_a, vector_size_b,
+    vector_size_c) of every configuration, so a problem whose channel runs
+    allow 8-wide access is offered the 8-, 4-, 2- and 1-wide copies of each
+    kernel -- and tiles too small for 8-wide loads (too few elements per
+    thread) only in narrower copies. Narrower access does not win, so only the
+    kernels at the problem's widest combination are run.
+
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
+    group merging -- because the kind caps some widths regardless of the
+    problem: the default epilogue stores scalar (c = 1), and a group-merged
+    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    kernels are dropped altogether where a kernel of the same kind can store
+    wider than 1 for this problem.
+    ``supports_problem`` has already dropped widths the problem cannot take,
+    so the widest combination present in a kind is the problem's maximum;
+    configurations that cannot reach it are dropped, and every configuration
+    left runs exactly one combination. Widest = greatest (sum, a, b, c).
+    """
+
+    def kind(ident):
+        return (
+            ident.direction,
+            ident.epilogue,
+            ident.split_k,
+            ident.two_stage,
+            ident.group_merge,
+        )
+
+    def rank(ident):
+        return (
+            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
+            ident.vector_size_a,
+            ident.vector_size_b,
+            ident.vector_size_c,
+        )
+
+    # The default epilogue stores scalar (c = 1) straight from the MMA
+    # accumulators. Where the same kind of kernel can store wider -- a
+    # cshuffle variant reaching c > 1 for this problem -- the default-epilogue
+    # kernels are dropped. Where nothing stores wider (two-stage wgrad is
+    # default-only, or the problem's output run is odd) they stay.
+    def store_kind(ident):
+        return (ident.direction, ident.split_k, ident.two_stage, ident.group_merge)
+
+    widest_store = {}
+    for ident, *_ in candidates:
+        k = store_kind(ident)
+        widest_store[k] = max(widest_store.get(k, 0), ident.vector_size_c)
+    candidates = [
+        c
+        for c in candidates
+        if not (c[0].epilogue == "default" and widest_store[store_kind(c[0])] > 1)
+    ]
+
+    best = {}
+    for ident, *_ in candidates:
+        k = kind(ident)
+        if k not in best or rank(ident) > best[k]:
+            best[k] = rank(ident)
+    return [c for c in candidates if rank(c[0]) == best[kind(c[0])]]
+
+
+def _cache_reference(direction, problem, A_t, B_t, torch_dt, arch):
+    """Reference output for --run-from-cache --verify.
+
+    ``A_t`` / ``B_t`` are the operands bound to the A / B kernarg slots: X / W
+    (fwd), dY / X (wgrad), dY / W (dgrad). Same references as the JIT sweeps,
+    on the device _verify_kernel compares on (host for gfx1250).
+    """
+    from builders.common import conv_reference as cr
+
+    if arch == "gfx1250":
+        if direction == "wgrad":
+            return cr.wgrad_reference_gfx1250(
+                B_t.float(), A_t.float(), problem, out_dtype=torch_dt
+            )
+        if direction == "dgrad":
+            return cr.dgrad_reference_gfx1250(
+                A_t.float(), B_t.float(), problem, out_dtype=torch_dt
+            )
+        return cr.conv_reference_gfx1250(A_t, B_t, problem, out_dtype=torch_dt)
+    if direction == "wgrad":
+        return cr.wgrad_reference(B_t.float().cuda(), A_t.float().cuda(), problem)
+    if direction == "dgrad":
+        return cr.dgrad_reference(A_t.float().cuda(), B_t.float().cuda(), problem)
+    return cr.conv_reference(A_t.cuda(), B_t.cuda(), problem, out_dtype=torch_dt)
 
 
 def _signature_for_identity(ident, dtype):

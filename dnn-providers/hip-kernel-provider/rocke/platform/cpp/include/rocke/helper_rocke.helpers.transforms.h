@@ -189,6 +189,10 @@ typedef struct rocke_transform
     rocke_value_t* triples_mult_v[7]; /* max 8 lowers -> 7 triples */
     rocke_value_t* triples_shift_v[7];
     rocke_value_t* triples_dim_v[7];
+    /* The compile-time member used where the matching *_v is NULL. */
+    int triples_mult_c[7];
+    int triples_shift_c[7];
+    int triples_dim_c[7];
     int n_triples; /* = n_lower - 1 */
 } rocke_transform_t;
 
@@ -293,16 +297,23 @@ rocke_transform_t* rocke_pad_dynamic(rocke_ir_builder_t* b,
 
 /* Python: unmerge_magic_dynamic(upper, into, magic_triples) -> UnmergeMagicDynamic.
  *
- * Like rocke_unmerge_magic() but (multiplier, shift, dim) are i32 SSA Values
- * instead of compile-time integers. `magic_triples` is an array of n_lower-1
- * struct rocke_magic_triple_t (each with mult/shift/dim as rocke_value_t*).
- * The leading lower coord gets the final quotient (no triple needed for it).
- * Mirrors transforms.UnmergeMagicDynamic.apply. */
+ * Like rocke_unmerge_magic() but (multiplier, shift, dim) may be i32 SSA
+ * Values. `magic_triples` is an array of n_lower-1 struct
+ * rocke_magic_triple_t; the leading lower coord gets the final quotient (no
+ * triple needed for it). As in Python each member is either a Value or an int:
+ * a non-NULL `mult` / `shift` / `dim` Value wins, otherwise the matching
+ * `*_c` constant is materialised at apply time (in the order mult, shift,
+ * dim, exactly as Python builds them). A constant `dim` of 1 skips the
+ * division: remainder const 0, quotient unchanged. Callers that set all three
+ * Values never read the constants. Mirrors transforms.UnmergeMagicDynamic.apply. */
 typedef struct rocke_magic_triple
 {
-    rocke_value_t* mult; /* magic multiplier (i32 SSA) */
-    rocke_value_t* shift; /* magic shift      (i32 SSA) */
-    rocke_value_t* dim; /* dimension value  (i32 SSA) -- used for remainder */
+    rocke_value_t* mult; /* magic multiplier (i32 SSA), or NULL -> mult_c */
+    rocke_value_t* shift; /* magic shift      (i32 SSA), or NULL -> shift_c */
+    rocke_value_t* dim; /* dimension value  (i32 SSA), or NULL -> dim_c */
+    int mult_c;
+    int shift_c;
+    int dim_c;
 } rocke_magic_triple_t;
 
 rocke_transform_t* rocke_unmerge_magic_dynamic(rocke_ir_builder_t* b,

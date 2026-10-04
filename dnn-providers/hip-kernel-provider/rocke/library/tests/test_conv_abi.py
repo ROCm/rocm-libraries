@@ -724,7 +724,8 @@ def test_cache_rejects_capability_mismatches():
     assert cache.supports_problem(ungrouped_fwd, plain)[0]
     assert cache.supports_problem(grouped_fwd, grouped)[0]
     assert not cache.supports_problem(ungrouped_fwd, grouped)[0]
-    assert not cache.supports_problem(grouped_fwd, plain)[0]
+    # The grouped path computes groups == 1 too, so it serves both.
+    assert cache.supports_problem(grouped_fwd, plain)[0]
 
     assert cache.supports_problem(dgrad_s1, plain)[0]
     assert not cache.supports_problem(dgrad_s1, strided)[0]
@@ -1366,6 +1367,8 @@ def test_aot_grid_capability_axes(monkeypatch):
         arch=_ARCH, dtype="fp16", target=target, directions=("fwd", "wgrad", "dgrad")
     )
     assert not any(j.identity.is_pointwise for j in jobs)
+    # Only grouped binaries: they serve groups == 1 as well.
+    assert all(j.identity.grouped for j in jobs)
     merged = [j for j in jobs if j.identity.group_merge > 1]
     assert merged and all(j.direction == "wgrad" for j in merged)
     for j in merged:
@@ -1432,3 +1435,81 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
         n = sum(j.direction == direction for j in jobs)
         assert f"  {direction}: {n} kernels" in lines
     assert "k-loop:" in text and "split-K:" in text and "stride x dilation:" in text
+
+
+def test_aot_grid_caps_accumulator_registers(monkeypatch):
+    """No cached kernel holds more f32 accumulators per lane than the cap."""
+    from rocke.core.arch import ArchTarget
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    monkeypatch.setattr(ks, "_TILE_MN", (64, 128, 256))
+    target = ArchTarget.from_gfx(_ARCH)
+    jobs = ks.enumerate_jobs(
+        arch=_ARCH, dtype="fp16", target=target, directions=("fwd", "wgrad", "dgrad")
+    )
+
+    def acc(i):
+        return (i.tile_m // i.warp_m) * (i.tile_n // i.warp_n) // target.wave_size
+
+    assert jobs
+    assert max(acc(j.identity) for j in jobs) <= ks.CACHE_MAX_ACC_REGS
+    # The cap is what removed them: the shrunk grid does reach past it.
+    monkeypatch.setattr(ks, "_MAX_ACC_REGS", 10**6)
+    uncapped = ks.enumerate_jobs(
+        arch=_ARCH, dtype="fp16", target=target, directions=("fwd",)
+    )
+    assert max(acc(j.identity) for j in uncapped) > ks.CACHE_MAX_ACC_REGS
+
+
+def test_cache_applies_runtime_launch_limits(tmp_path):
+    """Rules that depend on the launch-time problem, not on the binary:
+    the per-axis grid cap and implicit dgrad's missing depthwise path."""
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    cache = KernelCache(tmp_path, _ARCH)
+    common = dict(
+        arch=_ARCH,
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_k=32,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        vector_size_a=1,
+        vector_size_b=1,
+        vector_size_c=1,
+        grouped=True,
+    )
+    shape = dict(C=128, K=128, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1)
+    small = ConvProblem(N=2, Hi=16, Wi=16, **shape)
+    huge = ConvProblem(N=128, Hi=120, Wi=160, **shape)  # M / 16 > 65535
+    fwd16 = KernelIdentity(direction="fwd", tile_m=16, tile_n=64, **common)
+    fwd256 = KernelIdentity(direction="fwd", tile_m=256, tile_n=64, **common)
+    assert cache.supports_problem(fwd16, small)[0]
+    ok, why = cache.supports_problem(fwd16, huge)
+    assert not ok and "65535" in why
+    assert cache.supports_problem(fwd256, huge)[0]
+
+    dgrad = KernelIdentity(
+        direction="dgrad",
+        tile_m=64,
+        tile_n=64,
+        stride_h=1,
+        stride_w=1,
+        dilation_h=1,
+        dilation_w=1,
+        max_sub_gemms=64,
+        **common,
+    )
+    grouped = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=4)
+    depthwise = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=64)
+    assert cache.supports_problem(dgrad, grouped)[0]
+    ok, why = cache.supports_problem(dgrad, depthwise)
+    assert not ok and "depthwise" in why

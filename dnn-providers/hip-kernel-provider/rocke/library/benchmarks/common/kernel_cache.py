@@ -37,8 +37,24 @@ from typing import Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 
+# The per-axis workgroup-count cap the validators enforce (gridDim y/z on
+# AMD; x is capped the same way for symmetry with is_valid_spec_for_problem).
+_MAX_GRID_DIM = 65535
+
+
 def current_llvm_flavor() -> str:
-    """LLVM IR flavor this process lowers to (the one ``compile_kernel`` uses)."""
+    """LLVM IR flavor this process lowers to (the one ``compile_kernel`` uses).
+
+    Memoised per ``ROCKE_LLVM_FLAVOR`` value: without the override the flavor
+    is detected from the COMGR library, and resolving that path globs the
+    filesystem -- per cache entry, it was most of a --run-from-cache startup.
+    The library does not change within a process.
+    """
+    return _llvm_flavor_for(os.environ.get("ROCKE_LLVM_FLAVOR", ""))
+
+
+@functools.lru_cache(maxsize=None)
+def _llvm_flavor_for(env_override: str) -> str:
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -294,6 +310,8 @@ class KernelIdentity:
             bits.append(f"sk{self.split_k}")
         if self.two_stage:
             bits.append("2stage")
+        if self.group_merge > 1:
+            bits.append(f"gm{self.group_merge}")
         if self.filter_h:
             bits.append(f"f{self.filter_h}x{self.filter_w}")
         if self.cpg:
@@ -401,6 +419,10 @@ class KernelCache:
         self._root = Path(root)
         self._arch = arch
         self._base = self._root / arch
+        # Entries read so far, per direction subdirectory: a run reads the
+        # whole cache several times (describe, stale check, compatible), and
+        # each pass parses every metadata file. Dropped on every write.
+        self._loaded: Dict[str, list] = {}
 
     def _dir_for(self, identity: KernelIdentity) -> Path:
         subdir = _DIRECTION_DIRS.get(identity.direction, identity.direction)
@@ -461,6 +483,7 @@ class KernelCache:
             self._meta_path(identity),
             json.dumps(full_meta, indent=2, sort_keys=True).encode("utf-8"),
         )
+        self._loaded.clear()
 
     def put(
         self,
@@ -525,18 +548,31 @@ class KernelCache:
         else:
             subdirs = list(_DIRECTION_DIRS.values())
         for subdir in subdirs:
-            d = self._base / subdir
-            if not d.is_dir():
+            if subdir not in self._loaded:
+                self._loaded[subdir] = self._load(subdir)
+            yield from self._loaded[subdir]
+
+    def _load(self, subdir: str) -> list:
+        """Parse one direction's entries: those whose binary is present."""
+        d = self._base / subdir
+        if not d.is_dir():
+            return []
+        out = []
+        # Most entries share a binary with others; stat each one once.
+        blob_ok: Dict[Path, bool] = {}
+        for meta_path in sorted(d.glob("*.meta.json")):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                ident = KernelIdentity.from_dict(meta["identity"])
+            except (OSError, KeyError, TypeError, json.JSONDecodeError):
                 continue
-            for meta_path in sorted(d.glob("*.meta.json")):
-                try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                    ident = KernelIdentity.from_dict(meta["identity"])
-                except (OSError, KeyError, TypeError, json.JSONDecodeError):
-                    continue
-                path = self._resolve(meta_path, meta)
-                if path.exists() and path.stat().st_size > 0:
-                    yield ident, path, meta
+            path = self._resolve(meta_path, meta)
+            ok = blob_ok.get(path)
+            if ok is None:
+                ok = blob_ok[path] = path.exists() and path.stat().st_size > 0
+            if ok:
+                out.append((ident, path, meta))
+        return out
 
     def list_all(
         self, direction: Optional[str] = None
@@ -599,8 +635,12 @@ class KernelCache:
         Returns ``(ok, reason)``; the reason makes an empty candidate list
         diagnosable instead of just "no compatible kernels".
 
-        Provenance is checked first: a binary from another emitter version or
-        LLVM flavor is never offered. Then two classes of constraint:
+        Provenance is checked first: a binary lowered for another LLVM flavor
+        is never offered. A binary built from other emitter sources *is*
+        offered -- most emitter changes leave most kernels' code alone, and only
+        a ``--compile-all`` can tell which, by re-emitting and comparing content
+        keys; :meth:`stale_entries` counts them so the run side can warn. Then
+        two classes of constraint:
 
         * **Vector alignment.** The load/store widths are baked into the ISA,
           so each operand's contiguous per-group extent has to stay divisible
@@ -652,16 +692,17 @@ class KernelCache:
         if identity.is_pointwise and not bool(getattr(problem, "is_pointwise", False)):
             return False, "kernel is pointwise-only"
 
-        # Grouped convolution is a different code path in every direction, and
-        # the mismatch is silent at launch (wrong numbers, no error), so it is
-        # checked before anything else that could mask it.
+        # Grouped convolution is a different code path in every direction. An
+        # ungrouped binary on a grouped problem gives wrong numbers with no
+        # error, so it is checked before anything else that could mask it. The
+        # grouped path computes groups == 1 too (group 0, cpg == C), so a
+        # grouped binary serves both; the AOT grid only builds those, and
+        # ungrouped entries of older caches still serve ungrouped problems.
         # Direct kernels take the group count as a kernarg and index channels
         # per group in every variant, so they carry no grouped/ungrouped split.
         problem_grouped = int(getattr(problem, "groups", 1)) > 1
-        if not identity.is_direct and identity.grouped != problem_grouped:
-            want = "grouped" if problem_grouped else "ungrouped"
-            have = "grouped" if identity.grouped else "ungrouped"
-            return False, f"kernel is {have}, problem is {want}"
+        if not identity.is_direct and problem_grouped and not identity.grouped:
+            return False, "kernel is ungrouped, problem is grouped"
 
         # Split-K wgrad without two-stage atomic-adds straight into dW. For a
         # 16-bit dW that is a packed <2 x dtype> atomic, which needs an even
@@ -742,7 +783,62 @@ class KernelCache:
                     f"problem needs {n_sub} tilde sub-GEMMs, kernel unrolled "
                     f"for {bound}"
                 )
+            # Mirrors is_valid_dgrad_spec: the grouped implicit-GEMM dgrad has
+            # no depthwise (cpg == 1) path, and the grouped binary is offered
+            # to every grouped problem otherwise.
+            if int(getattr(problem, "groups", 1)) > 1 and cpg == 1:
+                return False, (
+                    "depthwise dgrad (cpg == 1) is not supported by the "
+                    "implicit-GEMM grouped path"
+                )
 
+        if not identity.is_direct:
+            ok, why = self._grid_fits(identity, problem)
+            if not ok:
+                return False, why
+
+        return True, "ok"
+
+    @staticmethod
+    def _grid_fits(identity: KernelIdentity, problem: object) -> Tuple[bool, str]:
+        """Does the launch grid for ``problem`` fit the hardware limits?
+
+        The tile counts are runtime values of an AOT kernel, so a small tile on
+        a large problem can need more workgroups along y (or x) than the
+        65535 cap -- the launch then fails or leaves tiles unwritten. Mirrors
+        the grid check of ``is_valid_spec_for_problem``; split-K degrees, the
+        third axis of wgrad, are capped where the benchmark picks them.
+        """
+        cap = _MAX_GRID_DIM
+        groups = max(1, int(getattr(problem, "groups", 1)))
+        cpg = int(getattr(problem, "cpg", 0))
+        kpg = int(getattr(problem, "kpg", 0))
+        tm, tn = max(1, identity.tile_m), max(1, identity.tile_n)
+        if identity.direction == "fwd":
+            gy = -(-int(getattr(problem, "M", 0)) // tm)
+            gx = -(-kpg // tn)
+            axes = (
+                ("y", gy, f"M={getattr(problem, 'M', 0)} tile_m={tm}"),
+                ("x", gx, f"kpg={kpg} tile_n={tn}"),
+                ("z", groups, f"groups={groups}"),
+            )
+        elif identity.direction == "wgrad":
+            gm = max(1, identity.group_merge)
+            spatial = int(getattr(problem, "Y", 1)) * int(getattr(problem, "X", 1))
+            if bool(getattr(problem, "is_3d", False)):
+                spatial *= int(getattr(problem, "Z", 1))
+            gy = -(-(kpg * gm) // tm)
+            gx = -(-(spatial * cpg * gm) // tn)
+            axes = (
+                ("y", gy, f"wg_M={kpg * gm} tile_m={tm}"),
+                ("x", gx, f"wg_N={spatial * cpg * gm} tile_n={tn}"),
+                ("z", groups // gm, f"groups/Gm={groups // gm}"),
+            )
+        else:
+            axes = (("y", groups, f"groups={groups}"),)
+        for axis, extent, what in axes:
+            if extent > cap:
+                return False, f"grid {axis} {extent} > {cap} (hardware cap): {what}"
         return True, "ok"
 
     def compatible(

@@ -56,7 +56,7 @@ This module re-exports the shared helpers to keep existing callers stable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dc_replace
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
     BF16,
@@ -81,6 +81,7 @@ from rocke.helpers.tensor_view import (
 )
 from rocke.helpers.transforms import (
     TensorDescriptor,
+    do_magic_division_dynamic,
     pad,
     unmerge_magic,
 )
@@ -91,6 +92,7 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     ConvProblem,
     _apply_accumulator_epilogue,
     _choose_load_vec_for,
+    coalesced_load_reason,
     _emit_frag_smem_load,
     _emit_mfma,
     _emit_smem_load,
@@ -112,6 +114,28 @@ def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
     return _choose_load_vec_for(
         spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size, spec.data.dtype_a
     )
+
+
+def _sync_load_vecs(spec: "ImplicitGemmConvSpec") -> Tuple[int, int]:
+    """``(load_vec_a, load_vec_b)`` of the sync (CoalescedTileLoader) path.
+
+    An explicit ``vector_size_a`` / ``vector_size_b`` is used verbatim;
+    otherwise the per-group channel default, clamped by the tile-geometry
+    maximum so the loader's ``(tile_rows * tile_cols / vec) % block_size == 0``
+    invariant holds (e.g. when tile_n is small relative to block_size). Shared
+    by the builder and :func:`is_valid_spec`, which rejects an explicit width
+    that breaks that invariant.
+    """
+    p = spec.problem
+    _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
+        p.cpg, p.kpg, spec.data.dtype_a
+    )
+    _tile_vec = _choose_load_vec(spec)
+    _def_vec_a = min(_def_vec_a, _tile_vec)
+    _def_vec_b = min(_def_vec_b, _tile_vec)
+    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
+    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
+    return load_vec_a, load_vec_b
 
 
 @dataclass(frozen=True)
@@ -603,6 +627,36 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
+    # The tile loaders. An explicit vector width (or the async chunk width the
+    # tile admits) has to split the tile evenly over the block's threads; the
+    # builder would otherwise only find out halfway through a build. The
+    # wavelet loaders pick their own width, so they cannot fail this way.
+    if spec.async_dma:
+        try:
+            async_tile_loaders(spec)
+        except ValueError:
+            return False, (
+                f"async_dma: no usable chunk width for the A/B tiles with "
+                f"block_size {spec.block_size}"
+            )
+    elif spec.pipeline != "wavelet":
+        try:
+            load_vec_a, load_vec_b = _sync_load_vecs(spec)
+        except ValueError:
+            return False, (
+                f"no usable load width for tile {spec.tile_m}x{spec.tile_n}x"
+                f"{spec.tile_k} with block_size {spec.block_size}"
+            )
+        for operand, rows, vec in (
+            ("A", spec.tile_m, load_vec_a),
+            ("B", spec.tile_n, load_vec_b),
+        ):
+            why = coalesced_load_reason(
+                operand, rows, spec.tile_k, spec.block_size, vec
+            )
+            if why is not None:
+                return False, why
+
     return True, "ok"
 
 
@@ -1047,17 +1101,7 @@ def _build_implicit_gemm_conv_impl(
     ]
 
     threads = spec.block_size
-    _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
-        p.cpg, p.kpg, spec.data.dtype_a
-    )
-    # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
-    # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
-    # is always satisfied (e.g. when tile_n is small relative to block_size).
-    _tile_vec = _choose_load_vec(spec)
-    _def_vec_a = min(_def_vec_a, _tile_vec)
-    _def_vec_b = min(_def_vec_b, _tile_vec)
-    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
-    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
+    load_vec_a, load_vec_b = _sync_load_vecs(spec)
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1208,6 +1252,99 @@ def _build_implicit_gemm_conv_impl(
             a_wavelet_loader = None
             b_wavelet_loader = None
 
+    # ---- K-invariant address math, hoisted out of the K loop ----
+    # A loader chunk's row fixes its output position m -> (n, ho, wo), its
+    # input base offset and its (hi, wi) origin; only the filter/channel
+    # coordinates (y, x, c) move with k. Computing the row part once here
+    # keeps the magic divisions by Ho/Wo, the n/hi/wi stride products and
+    # the kernargs they read out of the loop body.
+    _a_rows: Dict[int, Tuple[Value, Value, Value]] = {}
+    _b_rows: Dict[int, Value] = {}
+    a_chunks = b_chunks = None
+    import os as _os
+
+    _hoist = (
+        _os.environ.get("ROCKE_NO_HOIST") is None
+        and not spec.async_dma
+        and spec.pipeline != "wavelet"
+        and a_load_override is None
+        and m_index_fn is None
+        and a_mhw_index_fn is None
+        and not p.is_pointwise
+        and not p.is_3d
+    )
+    if _hoist:
+        a_chunks = a_sync_loader.chunks(b, tid=tid)
+        b_chunks = b_sync_loader.chunks(b, tid=tid)
+        _shi = params["p_A_stride_hi"]
+        _swi = params["p_A_stride_wi"]
+        _neg_pH = b.sub(b.const_i32(0), p_pH)
+        _neg_pW = b.sub(b.const_i32(0), p_pW)
+        for row, _ in a_chunks:
+            m_val = b.add(block_m_off_v, row)
+            q_wo = do_magic_division_dynamic(
+                b, m_val, params["p_magic_m_Wo_mult"], params["p_magic_m_Wo_shift"]
+            )
+            wo = b.sub(m_val, b.mul(q_wo, p_Wo))
+            n = do_magic_division_dynamic(
+                b, q_wo, params["p_magic_m_Ho_mult"], params["p_magic_m_Ho_shift"]
+            )
+            ho = b.sub(q_wo, b.mul(n, p_Ho))
+            hi0 = b.add(b.mul(ho, p_sH), _neg_pH)
+            wi0 = b.add(b.mul(wo, p_sW), _neg_pW)
+            base = b.add(
+                b.add(b.mul(n, params["p_A_stride_n"]), b.mul(hi0, _shi)),
+                b.mul(wi0, _swi),
+            )
+            if grouped:
+                base = b.add(base, b.mul(group_idx, p_cpg))
+            _a_rows[id(row)] = (base, hi0, wi0)
+        for row, _ in b_chunks:
+            k_out = b.add(block_n_off_v, row)
+            if grouped:
+                k_out = b.add(k_out_group_base, k_out)
+            _b_rows[id(row)] = b.mul(k_out, params["p_B_stride_k"])
+        # K-step strides: one filter row / column step in A.
+        _a_ystep = b.mul(p_dH, _shi)
+        _a_xstep = b.mul(p_dW, _swi)
+
+    def _k_decode(b_: IRBuilder, k_val: Value):
+        """k -> (y, x, c) with the runtime magic pairs for cpg and X."""
+        q_c = do_magic_division_dynamic(
+            b_, k_val, params["p_magic_k_cpg_mult"], params["p_magic_k_cpg_shift"]
+        )
+        c = b_.sub(k_val, b_.mul(q_c, p_cpg))
+        y = do_magic_division_dynamic(
+            b_, q_c, params["p_magic_k_X_mult"], params["p_magic_k_X_shift"]
+        )
+        x = b_.sub(q_c, b_.mul(y, p_X))
+        return y, x, c
+
+    def a_descriptor_hoisted(b_: IRBuilder, row: Value, col: Value):
+        base, hi0, wi0 = _a_rows[id(row)]
+        y, x, c = _k_decode(b_, b_.add(k_off_capture[0], col))
+        hi = b_.add(hi0, b_.mul(y, p_dH))
+        wi = b_.add(wi0, b_.mul(x, p_dW))
+        ok = b_.land(
+            b_.land(b_.cmp_ge(hi, c0), b_.cmp_lt(hi, p_Hi)),
+            b_.land(b_.cmp_ge(wi, c0), b_.cmp_lt(wi, p_Wi)),
+        )
+        ok = b_.land(ok, b_.cmp_lt(y, p_Y))
+        off = b_.add(b_.add(b_.add(base, b_.mul(y, _a_ystep)), b_.mul(x, _a_xstep)), c)
+        return off, ok
+
+    def b_descriptor_hoisted(b_: IRBuilder, row: Value, col: Value):
+        base = _b_rows[id(row)]
+        y, x, c = _k_decode(b_, b_.add(k_off_capture[0], col))
+        off = b_.add(
+            b_.add(
+                b_.add(base, b_.mul(y, params["p_B_stride_y"])),
+                b_.mul(x, params["p_B_stride_x"]),
+            ),
+            c,
+        )
+        return off, b_.cmp_lt(y, p_Y)
+
     schedule = SchedulePolicy.for_pipeline(
         "async_dma" if spec.async_dma else spec.pipeline
     )
@@ -1276,15 +1413,17 @@ def _build_implicit_gemm_conv_impl(
                 b,
                 tid=tid,
                 smem_dst=A_dst,
-                descriptor=a_descriptor,
+                descriptor=a_descriptor_hoisted if _hoist else a_descriptor,
                 rsrc=a_rsrc,
+                chunks=a_chunks,
             )
         b_sync_loader.load(
             b,
             tid=tid,
             smem_dst=B_dst,
-            descriptor=b_descriptor,
+            descriptor=b_descriptor_hoisted if _hoist else b_descriptor,
             rsrc=b_rsrc,
+            chunks=b_chunks,
         )
 
     def emit_wmma_phase(

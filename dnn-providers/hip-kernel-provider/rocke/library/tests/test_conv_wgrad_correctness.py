@@ -2146,7 +2146,11 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
     )
 
     def _sweep(self, **knobs) -> None:
-        ran = 0
+        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
+        # unroll_k). On MFMA every case must build and run: a skip -- a
+        # build error included -- is a failure, not a quiet pass.
+        if not _IS_MFMA:
+            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
         for shape in self._CASES:
             for dtype in _DTYPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -2159,12 +2163,7 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
                         split_k=2,
                         **knobs,
                     )
-                    if why.startswith("skip"):
-                        continue
-                    ran += 1
-                    self.assertTrue(ok, f"{shape.id} {dtype} {knobs}: {why}")
-        if ran == 0:
-            self.skipTest(f"no {knobs} split-K wgrad config builds on {GPU_ARCH}")
+                    _assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
 
     def test_async_dma_odd_slice(self):
         self._sweep(async_dma=True, lds_k_outer=True)

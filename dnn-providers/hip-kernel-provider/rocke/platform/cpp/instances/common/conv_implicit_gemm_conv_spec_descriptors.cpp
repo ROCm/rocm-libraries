@@ -885,6 +885,48 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
+    /* The tile loaders (Python: the async_tile_loaders / _sync_load_vecs block
+     * at the end of is_valid_spec). An explicit vector width, or the async
+     * chunk width the tile admits, has to split the tile evenly over the
+     * block's threads. The wavelet loaders pick their own width. */
+    if(s->async_dma)
+    {
+        const int cpg = rocke_conv_problem_cpg(&s->problem);
+        rocke_async_tile_loader_t al;
+        if(rocke_async_tile_loader_from_tile(
+               s->tile_m, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+               != ROCKE_OK
+           || rocke_async_tile_loader_from_tile(
+                  s->tile_n, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+                  != ROCKE_OK)
+        {
+            ROCKE_CONVVS_REJECT(
+                "async_dma: no usable chunk width for the A/B tiles with block_size %d",
+                block_size);
+        }
+    }
+    else if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
+    {
+        const int def_vec = rocke_conv_default_load_vec(s);
+        if(def_vec <= 0)
+        {
+            ROCKE_CONVVS_REJECT("no usable load width for tile %dx%dx%d with block_size %d",
+                                s->tile_m,
+                                s->tile_n,
+                                s->tile_k,
+                                block_size);
+        }
+        const int vec_a = s->has_vector_size_a ? s->vector_size_a : def_vec;
+        const int vec_b = s->has_vector_size_b ? s->vector_size_b : def_vec;
+        if(!rocke_conv_coalesced_load_ok(
+               "A", s->tile_m, s->tile_k, block_size, vec_a, reason, reason_cap)
+           || !rocke_conv_coalesced_load_ok(
+               "B", s->tile_n, s->tile_k, block_size, vec_b, reason, reason_cap))
+        {
+            return false;
+        }
+    }
+
     if(reason != NULL && reason_cap > 0)
     {
         snprintf(reason, reason_cap, "ok");
