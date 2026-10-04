@@ -136,7 +136,7 @@ def _parse_type(s: str) -> Type:
         shape_str = inner[lb + 1 : rb].strip()
         shape = tuple(int(x) for x in shape_str.split("x")) if shape_str else ()
         return SmemType(elem, shape)
-    return Type(s)
+    return Type("fp8e4m3" if s == "e4m3" else s)
 
 
 # --------------------------------------------------------------------------

@@ -249,9 +249,10 @@ class TestCliEndToEnd:
 
 # Real-bundle regressions: everything above runs against a purpose-built fixture,
 # these against every git-tracked bundle the repository carries -- no pack, no
-# hipcc, no GPU. Both roots `_EXAMPLES` wires are read. The engine root ships no
-# bundle today, so its parametrizations skip; authoring one closes that with no
-# change here, since the roots are globbed.
+# hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
+# documented sample tree, and the engine root is what a consumer loads. A producer
+# subtree a root does not carry skips with a named reason. New bundles need no change
+# here, since the roots are globbed.
 _HIP_EXAMPLE = [root / "hip" for root in _EXAMPLES]
 
 

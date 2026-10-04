@@ -28,7 +28,7 @@ ENGINE=<your-bundle-engine-id>
 
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
 as `--expect-engine` below. A gfx942 dense attention bundle would spell it
-`hipkernel:Gfx942AttentionDense`; this tree ships no such engine.
+`hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
 profile's rocKE library environment; production packaging uses its own selected
@@ -529,11 +529,11 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
-The production descriptor root ships no bundle, so no dense-attention target is
-registered. Replace `<your-bundle-ctest-target>` with the name your own registration
-creates — a gfx942 dense bundle would be shaped like
-`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which exists
-nowhere in this tree:
+Other bundles in the production root may register their own targets; they are not
+evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
+registration creates. A gfx942 dense bundle would be shaped like
+`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`; treat it as an
+illustration, not a name to copy:
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"

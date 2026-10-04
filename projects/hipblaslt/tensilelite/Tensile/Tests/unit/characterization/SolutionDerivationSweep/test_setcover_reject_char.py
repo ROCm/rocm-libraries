@@ -32,33 +32,33 @@ pytestmark = pytest.mark.unit
 # nested ProblemType.* fields. Base labels resolve via the base_states fixture.
 _TRIPS = {
     "sk_cluster_maxviol": ("gfx950_SK", {
-        "StreamK": 4, "ClusterDim": [2, 2],
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue", "ClusterDim": [2, 2],
     }),
     "sk_schedule_maxviol": ("gfx950_SK", {
-        "StreamK": 1, "EnableMatrixInstruction": False, "KernelLanguage": "Source",
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "EnableMatrixInstruction": False, "KernelLanguage": "Source",
         "ProblemType.StridedBatched": False, "ProblemType.GroupedGemm": True,
         "ScheduleGlobalRead": 0, "ScheduleLocalWrite": 0, "BufferStore": False,
     }),
     "sk_atomic_maxviol": ("gfx942_BBS", {
-        "StreamK": 3, "StreamKAtomic": 1, "LocalSplitU": 2,
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "StreamKAtomic": 1, "LocalSplitU": 2,
     }),
     "sk_pap_maxviol": ("gfx950_SK", {
-        "StreamK": 3, "PrefetchAcrossPersistent": 1, "BufferLoad": False,
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "PrefetchAcrossPersistent": 1, "BufferLoad": False,
         "PrefetchGlobalRead": 0, "DirectToVgprA": True, "BufferStore": False,
         "StoreRemapVectorWidth": 4, "ProblemType.NumIndicesSummation": 2,
         "ProblemType.Sparse": 1,
     }),
     "sk_debugloop": ("gfx950_SK", {
-        "StreamK": 4, "DebugPersistentKernelLoopForever": True,
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue", "DebugPersistentKernelLoopForever": True,
     }),
     "sk_ws_maxviol": ("gfx950_SK", {
-        "StreamK": 3, "StreamKWorkStealing": True, "StreamKAtomic": 1,
+        "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid", "WorkQueueStealing": True, "StreamKAtomic": 1,
         "DebugStreamK": 1,
     }),
 }
 
 _KEYS = [
-    "Valid", "StreamK", "StreamKAtomic", "StreamKWorkStealing",
+    "Valid", "TileProcessingStrategy", "WorkAssignment", "StreamKAtomic", "WorkQueueStealing",
     "GlobalSplitU", "BufferStore", "EnableMatrixInstruction",
 ]
 

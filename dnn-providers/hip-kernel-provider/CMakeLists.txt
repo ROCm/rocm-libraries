@@ -256,6 +256,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 # Setup testing dependencies
 include(Dependencies)
@@ -423,13 +424,10 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # TheRock's test setup activates a virtual environment and installs the
-    # staged rocKE wheels before invoking CTest, so the focused installed Python
-    # checks can resolve both `python` and the rocKE packages. Defer the full
-    # platform pytest suite until the pinned TheRock supplies rocKE's NumPy and
-    # ml_dtypes component requirements.
+    # The pinned TheRock supplies NumPy and ml_dtypes and installs the staged
+    # rocKE wheels before invoking CTest, so the platform GPU tests can run.
     set(ROCKE_INSTALL_PYTHON_TESTS ON)
-    set(ROCKE_INSTALL_PLATFORM_PYTEST OFF)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
 
     add_subdirectory(rocke)
 else()
