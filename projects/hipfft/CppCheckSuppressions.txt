@@ -1,3 +1,0 @@
-// has some false positives and isn't hard to run manually for periodic
-// dead code sweeps
-unusedFunction

@@ -1,1 +1,0 @@
-../../hipdnn-superbuild/scripts/windows_rocm_setup.py

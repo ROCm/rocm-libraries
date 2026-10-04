@@ -1,9 +1,0 @@
-// Insert into backend/src/descriptors/DescriptorFactory.cpp
-
-// Add #include at top:
-// #include "{{ op.class_name }}.hpp"
-
-// Add case in DescriptorFactory::create() switch:
-    case {{ op.descriptor_type_enum }}:
-        privateDesc = std::make_shared<{{ op.class_name }}>();
-        break;

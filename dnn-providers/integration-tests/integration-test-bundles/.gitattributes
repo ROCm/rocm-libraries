@@ -1,3 +1,0 @@
-*.bin binary
-*.support.json text eol=lf
-support.json   text eol=lf

@@ -1,4 +1,0 @@
-interface:
-  display_name: "RFC Review"
-  short_description: "Review an RFC across structured lenses"
-  default_prompt: "Use $rfc-review to review a technical RFC across framing, design correctness, change management, operational, and sustainability lenses, then produce a written review report."

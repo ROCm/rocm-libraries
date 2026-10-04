@@ -1,4 +1,0 @@
--r ./requirements.txt
--r ./requirements-test.txt
-./rocisa
-memory_profiler

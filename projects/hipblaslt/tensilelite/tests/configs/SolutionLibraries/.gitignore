@@ -1,3 +1,0 @@
-# Only commit compressed files in this directory
-*.dat
-*.yaml

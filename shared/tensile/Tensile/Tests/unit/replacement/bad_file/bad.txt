@@ -1,1 +1,0 @@
-No kernel name = bad

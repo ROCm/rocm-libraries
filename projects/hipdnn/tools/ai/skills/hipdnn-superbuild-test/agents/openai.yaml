@@ -1,4 +1,0 @@
-interface:
-  display_name: "hipDNN Superbuild Test"
-  short_description: "Run hipDNN superbuild tests"
-  default_prompt: "Use $hipdnn-superbuild-test to run unit or integration tests against an existing hipDNN superbuild."
