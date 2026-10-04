@@ -222,73 +222,69 @@ Key semantics:
   ([`fuzz_diff.py`](platform/tests/instances/differential/fuzz_diff.py)) feeds the
   differential oracle with generated `(spec, arch)` inputs rather than a fixed list.
 
-### 4.4 Is the emitted IR legal? (the toolchain gate)
+### 4.4 Emitted-IR validity
 
-§4.2 and §4.3 both compare rocKE's output against *another copy of rocKE's
-output* — a golden sha, or the other engine. Neither asks the AMDGPU toolchain
-whether the IR is valid at all, so an illegal construct that is emitted stably
-and by both engines is green in both. The **emitted-IR validity gate**,
-[`check_ir_validity.py`](platform/tools/check_ir_validity.py), asks the external
-question: it lowers every case in the representative corpus
-([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
-the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
-hsaco.
+[`check_ir_validity.py`](platform/tools/check_ir_validity.py) lowers selected
+cases from the representative corpus
+([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py))
+and compiles and links each module with clang at `-O0 -nogpulib`.
+Verification with `opt` is optional. Golden and byte-identity checks compare
+rocKE output with stored output or another engine; this gate checks whether
+the selected compiler accepts the emitted modules.
 
-Three design points, each of them load-bearing:
+Linking detects unresolved intrinsic names that can survive verification
+and assembly generation as external calls. `-O0` limits optimizations that
+could remove a call before instruction selection. Each compilation runs in
+a subprocess so a compiler failure does not terminate the runner.
 
-- **The oracle is a LINK, not a verify and not a codegen.** A `declare` for an
-  intrinsic that does not exist passes `opt -passes=verify`, *and* passes
-  `clang -S` — the backend silently treats the unknown `llvm.*` name as an
-  ordinary external function and emits a GOT-relative call. The undefined symbol
-  appears only when the relocatable is linked. Stopping anywhere earlier makes
-  the gate blind to the whole *fictional-intrinsic* bug class.
-- **Every compile is a subprocess.** A backend failure is a
-  `report_fatal_error`, not an exception: it takes the process down. Compiling
-  in-process (via comgr, which is otherwise faster) means one bad module kills
-  the run and emits no report. The isolation is a correctness requirement, and
-  it makes the per-module diagnostic free.
-- **Only the host's own LLVM flavor can be validated.** Modules lower at any
-  flavor, but there is no local compiler for the others; those report
-  `UNVALIDATED`, never green. On a host with no LLVM tools at all the gate
-  self-skips loudly — pass `--strict` to make that a failure instead.
+Each invocation validates one selected compiler/flavor pair. Set
+`ROCKE_LLVM_BIN` and `ROCKE_LLVM_FLAVOR` to select a matching toolchain and
+supported flavor. A machine with multiple installations can validate them
+in separate runs. Missing or mismatched toolchains, unsupported targets,
+and cases requiring a newer flavor are reported as `UNVALIDATED` and are
+excluded from pass and failure counts. `--strict` treats unvalidated
+results as failures. An unrecognized clang version banner is printed but
+does not establish that its version matches the selected flavor.
 
-Failures that are known and owned live in a `KNOWN_BAD` allowlist, same
-convention and same rule as `KNOWN_VIOLATIONS` in
-[`test_library_layering.py`](library/tests/test_library_layering.py): **it only
-shrinks.** An entry that starts compiling is itself reported as a failure, so a
-fix cannot leave dead weight behind.
+The `KNOWN_BAD` allowlist records existing failures. A selected entry that
+starts compiling is reported as stale and must be removed. New failures
+must be investigated. Compile/link success does not establish GPU numerical
+correctness.
+
+The developer runner invokes this gate by default. Its `--only-ir` option
+filters validity case IDs; `--only` independently filters byte-identity
+families. `--no-ir-validity` skips the validity gate.
 
 ---
 
 ## 5. Execution tiers & gating
 
-Four distinct things run here; **do not conflate them**:
+The developer runner and installed CI use different entrypoints:
 
-| Tier | What | Gated? |
-|---|---|---|
-| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
-| **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
-| **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
-| **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
+| Execution path | Checks |
+|---|---|
+| Developer `run_all.py` | Relative-path guard, byte identity, emitted-IR validity, pytest, optional differential pytest, and ctest when built test binaries are available. |
+| Installed CI | CTest-registered tests and the installed pytest tree, subject to CMake installation exclusions. |
+| Opt-in diagnostics | IR-canonical diff, fuzz diff, and per-config golden checks. |
+| GPU numerical validation | Reference comparisons on a compatible device; skipped when required runtime support is unavailable. |
 
-**Two entrypoints, one gated scope.** [`run_all.py`](platform/tests/run_all.py) is
-the **developer** runner (guard → gate → IR validity → pytest → ctest). **CI does not run
-`run_all.py`** — it runs
-**ctest** (wired from TheRock; project selection via `get_changed_projects.py`),
-whose registered pytest targets the **`platform/tests`** tree only. The exact
-CTest-registered targets are authoritative in
+[`run_all.py`](platform/tests/run_all.py) is the developer entrypoint.
+CI invokes ctest through TheRock; its registered tests are defined in
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt) — read them there rather than
-trusting a copy here.
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt).
 
-**The tree/gating reality (a second axis, orthogonal to the two questions).**
-*Where* a test lives currently decides *whether it runs at all*. Both the dev
-pytest step and the CI ctest pytest target `platform/tests`, so every test outside
-that tree is in no gated tier — the byte-identity gate is the one exception, since
-its parity corpus reaches `library/`. This is the **emerging platform/library
-modularity boundary**, and it is why the orphaned-`library` and
-orphaned-`platform/python` suites are gaps ([§7](#7-current-state-vs-target-the-gap-registry-wip)),
-not just untidy: they answer real quality questions but run nowhere.
+The source-tree arch-domain test imports `tools/gen_arch_domain.py` and is
+excluded from installed pytest. The new JSON artifacts are installed as
+package data, but installing them does not enable either the regeneration
+gate or the developer runner's emitted-IR validity gate in CI.
+
+Test discovery is also limited by location. The developer pytest step
+selects `platform/tests`; installed pytest runs the subset copied by CMake.
+Tests elsewhere need an explicit entrypoint or registration. The
+byte-identity and emitted-IR validity corpora include library kernels;
+that coverage does not imply that every library test is executed. See the
+[gap registry](#7-current-state-vs-target-the-gap-registry-wip) for remaining
+coverage work.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read

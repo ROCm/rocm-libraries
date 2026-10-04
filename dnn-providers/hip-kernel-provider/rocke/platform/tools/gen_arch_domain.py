@@ -1,74 +1,27 @@
 #!/usr/bin/env python3
-"""Generate the intrinsic availability table (the "arch domain") by probing the
-installed toolchain.
+"""Measure intrinsic declaration acceptance by LLVM flavor and target.
 
-# Why this exists
+Stage A uses an opt text round-trip to distinguish recognized intrinsics
+from ordinary external declarations. Failed name checks stop generation.
+Stage B compiles and links a probe for each recognized key and target at
+-O0 -nogpulib. Operand retries can resolve probe-construction errors;
+persistent probe errors prevent an artifact write.
 
-rocke resolves an intrinsic `declare` on ONE axis: the LLVM flavor. The target
-arch is consumed only to pick an ISA backend (`lower_llvm.py`, `backend_for(arch
-or "gfx950")`) and never reaches the decl table -- so "is this intrinsic
-available on this GPU" is checked nowhere at build time. See
-`dsl_docs/development/arch_axis_proposal.md`.
-
-This tool measures the missing axis instead of hand-maintaining it, and commits
-the result as a data file. Nothing consumes the artifact yet; landing the data
-first is deliberate (it cannot break anything, and it surfaces the defects that
-justify the rest).
-
-# Two stages, because the two axes are answered by different tools
-
-Stage A -- the flavor axis -- asks whether this LLVM knows the name at all. It
-is arch-free, so it runs once per key rather than once per (key, arch), and it
-uses `opt -S`: LLVM resolves a recognised `llvm.*` declare on parse, attaching
-the intrinsic's attributes and remangling overloads, while an unrecognised name
-round-trips verbatim as an ordinary external function. See `_name_exists`.
-
-Stage B -- the arch axis -- compiles AND LINKS a probe module per (key, arch),
-for names that survived stage A. It is a link for the same reason
-`check_ir_validity.py` is: a `declare` for a nonexistent intrinsic is accepted
-by `opt -passes=verify` AND by `clang -S` -- to the backend it is an ordinary
-external call, emitted as a GOT-relative `s_swappc_b64` -- and only the link
-forces the symbol to resolve. It runs in a subprocess because an intrinsic that
-exists but is unsupported on the target reaches `report_fatal_error`, which
-kills the process.
-
-The split is what makes this cheap: we do not need a hand-written compatibility
-matrix, we can read each answer off its own oracle.
-
-    stage A resolves      -> continue to stage B
-    stage A verbatim      -> "name_absent"   this SPELLING is not an intrinsic
-                                             in this LLVM (flavor axis)
-    link OK               -> "ok"            available here
-    Cannot select / fatal -> "arch_absent"   the name is real, this target
-                                             cannot lower it (arch axis)
-
-Three more buckets exist so that a non-answer is never recorded as a negative:
-
-    invalid target ID     -> "target_unsupported"  this clang cannot target this
-                                                   arch at all; it has no opinion
-    clang crashed         -> "toolchain_crash"     asking the question killed the
-                                                   compiler; we did not get an
-                                                   answer, only a bug report
-    anything else         -> "probe_error"         OUR module was malformed
-
-`name_absent` deserves care when reading results: it means the exact mangled
-string rocke emits is not a known intrinsic. A genuinely nonexistent operation
-and a merely mis-mangled overload suffix are indistinguishable here -- both are
-bugs in the decl table, but they are different bugs.
-
-# Provenance is not optional
-
-A result is only meaningful against the toolchain that produced it, and a host
-can only ever validate its own flavor. The artifact therefore records the clang
-identity and the flavor rocke resolved, and the generator refuses to run when
-those two disagree -- an artifact labelled with the wrong LLVM vintage is worse
-than no artifact, because it looks authoritative.
+Each artifact records the selected flavor, clang identity, probe configuration,
+and per-target results. These are compiler/probe measurements, not hardware
+capability or GPU numerical validation. The lowering engines do not consume
+the artifacts yet. See dsl_docs/development/arch_axis_proposal.md for the
+status definitions, evidence limits, and proposed consumers.
 
 Usage:
-  python rocke/platform/tools/gen_arch_domain.py            # write the artifact
-  python rocke/platform/tools/gen_arch_domain.py --check    # CI: regen is a no-op
-  python rocke/platform/tools/gen_arch_domain.py --only mfma --verbose
+  python rocke/platform/tools/gen_arch_domain.py
+  python rocke/platform/tools/gen_arch_domain.py --check
+  python rocke/platform/tools/gen_arch_domain.py --only mfma --out mfma-probes.json
   python rocke/platform/tools/gen_arch_domain.py --keep-ir DIR
+
+Filtered runs require an explicit output path to protect the full committed
+column. --check compares measurements and configuration, allowing a different
+clang build banner when the other fields agree.
 """
 
 from __future__ import annotations
@@ -356,7 +309,7 @@ def _probe_module(
     return text, ""
 
 
-def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
+def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool | None, str]:
     """Ask this LLVM whether it recognises the declare's name as an intrinsic.
 
     This is the *flavor* axis, and it is worth answering separately because it
@@ -371,17 +324,24 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
     codegen crashes outright: an `llvm.*` name with a `metadata` operand that
     LLVM does not know is lowered as an ordinary call, and computing the
     alignment of a metadata argument segfaults the backend.
+
+    None indicates that opt failed; the diagnostic must prevent an artifact
+    write. False requires a successful round-trip with an unrecognized name.
     """
     src = scratch / "name.ll"
     src.write_text(decl.strip() + "\n", encoding="utf-8")
-    proc = subprocess.run(
-        [opt, "-S", "-o", "-", str(src)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [opt, "-S", "-o", "-", str(src)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        return None, f"could not run opt: {exc}"
     if proc.returncode != 0:
-        return False, f"opt rejected the declare: {_first_error(proc.stderr)}"
+        diagnostic = _first_error(proc.stderr or proc.stdout)
+        return None, f"opt exited {proc.returncode}: {diagnostic}"
     for line in proc.stdout.splitlines():
         if line.startswith("declare "):
             attributed = re.search(r"#\d+\s*$", line) is not None
@@ -695,6 +655,14 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
+    if (args.only or args.arch) and args.out is None and not args.prune:
+        print(
+            "FAIL: filtered runs (--only or --arch) require --out to avoid replacing the "
+            "committed column with a partial measurement.",
+            file=sys.stderr,
+        )
+        return 1
+
     _bootstrap_sys_path()
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
@@ -828,6 +796,9 @@ def main() -> int:
     absent: set[str] = set()
     for key in keys:
         exists, note = _name_exists(opt, decls[key], Path(ir_dir))
+        if exists is None:
+            print(f"\nFAIL: name check for {key}: {note}. Nothing written.")
+            return 1
         if exists:
             canonical[key] = note
         else:
@@ -870,16 +841,10 @@ def main() -> int:
                 last = (lit_status, lit_evidence)
                 if settled is None and not _wants_literals(lit_status, lit_evidence):
                     settled = last
-            # Every variant still failed to legalise -- but with no variable
-            # integer operands left, that is no longer something our probe can
-            # fix, so it is the target speaking. gfx942 takes this call with a
-            # literal size and gfx1201 does not, on both llvm20 and llvm22.
-            # The verifier's immarg complaint is excluded on purpose: surviving
-            # the literal sweep means the non-immediate operand is not an
-            # integer, which really is our module's fault.
-            if settled is None and last and last[0] == STATUS_ARCH_ABSENT:
-                settled = last
-            status, evidence = settled or (status, evidence)
+            # Keep a conclusive retry result, including a target negative.
+            # If all retries still require operand repair, preserve the last
+            # diagnostic so a probe error cannot become a target negative.
+            status, evidence = settled or last or (status, evidence)
 
         # Sweep the immediates. Runs only on a negative, so the common case
         # still costs one probe -- and only on the ~1 key in 6 whose declare
@@ -900,26 +865,21 @@ def main() -> int:
         # our defect, not the target's limit.
         if status in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR) and key in imm_modules:
             settled_imm: tuple[str, str] | None = None
+            last_imm: tuple[str, str] | None = None
             for imm, imm_path in imm_modules[key]:
                 imm_out = Path(ir_dir) / f"{path.stem}.imm{imm}.{arch}.hsaco"
                 imm_status, imm_evidence = _probe(clang, imm_path, arch, imm_out)
                 if imm_status == STATUS_OK:
                     return key, arch, STATUS_OK, "", imm
+                last_imm = (imm_status, imm_evidence)
                 if settled_imm is None and imm_status != STATUS_PROBE_ERROR:
                     settled_imm = (imm_status, imm_evidence)
-            # Every candidate failed, so the operand value was not the
-            # obstacle. Where we started from `arch_absent` the original
-            # evidence already says so and is kept -- the cell should describe
-            # the probe as posed by default.
-            #
-            # Where we started from `probe_error` it does not. "Our module was
-            # malformed" was true of the default probe and is now known not to
-            # be the whole story, because a legal value fails too. Leaving it
-            # would commit a `probe_error` -- the one status that means the
-            # generator is broken -- for a target that simply cannot lower the
-            # intrinsic. So the first candidate that produced a real
-            # classification speaks instead.
-            if status == STATUS_PROBE_ERROR and settled_imm is not None:
+            # A sweep containing only probe errors cannot establish a target
+            # negative, even if the initial probe reported arch_absent.
+            if settled_imm is None and last_imm is not None:
+                status, evidence = last_imm
+            # A conclusive retry can replace an initial probe error.
+            elif status == STATUS_PROBE_ERROR and settled_imm is not None:
                 status, evidence = settled_imm
 
         return key, arch, status, evidence, None
