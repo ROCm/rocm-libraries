@@ -4037,6 +4037,80 @@ Tests:
   unit_check: 1
   fast_check: 1
 
+# fast_check-only copies of the cases above that are quarantined only because the
+# client CPU reference is wrong (ROCM-32062, ROCM-32139). fast_check passes the GPU
+# result there, so these keep its coverage while the reference is broken. The aux
+# copy also pads E (lde) so a kernel that writes E with D's leading dimension shows.
+# Runtime on gfx90a: 7 cases, about 1 s.
+- name: matmul_fast_check_only_epilogue_padded_lda
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA: N
+  transB: T
+  alpha_beta: *integer_exact_alpha_beta
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_only_scales_fp8_fnuz_vec_lda
+  category: pre_checkin
+  function:
+    matmul: *f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_only_scales_fp8_vec_lda
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  scaleA: 2
+  scaleB: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+- name: matmul_fast_check_only_aux_padded_ldd_lde
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 72, lda: 263, ldb: 211, ldc: 140, ldd: 151, lde: 140 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  bias_vector: 1
+  bias_type: f32_r
+  use_e: 1
+  activation_type: relu
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
 # amaxD has no cross-check case: gfx90a and gfx950 offer no amaxD solutions for
 # these types, and gfx942 offers it only with an fp8 output, which the integer
 # scales saturate. FastCheckDevice_pre_checkin.activation_is_checked_through_e

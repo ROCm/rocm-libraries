@@ -5842,6 +5842,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(fast_check_fill_sentinel_device(
                         dBias[i].buf(), Tbias, size_bias[i], stream));
+            // amaxD too: all ones reads back as NaN (or -1 in int32), which no kernel's amaxD
+            // can equal, so a skipped store fails the check.
+            if(arg.fast_check && arg.amaxD)
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(
+                        hipMemsetAsync(dAmaxD[i].buf(), 0xFF, realDataTypeSize(Talpha), stream));
             // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
             // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
             // too early, for example). Zero rather than poison: kernels may rely on their flags
