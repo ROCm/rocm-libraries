@@ -1132,13 +1132,10 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
 }
 
 // Returns why this process cannot select Stream-K solutions, or an empty string when it can.
-// TensileLite reads TENSILE_SOLUTION_SELECTION_METHOD once per process (Debug::Instance), so
-// tensile_solution_selection_method in a test case has no effect once an earlier test in the
-// same process has run a GEMM. A case that needs the Stream-K solutions therefore needs the variable set when the
-// process starts. On gfx950 the Stream-K library is the only one, and the variable has no effect.
-// TENSILE_SOLUTION_SELECTION_METHOD as the process started, read before any test runs: a case's
-// tensile_solution_selection_method sets the variable per handle, after TensileLite has already
-// read it, so the variable at check time can claim a selection the library is not using.
+// TensileLite reads TENSILE_SOLUTION_SELECTION_METHOD once per process (Debug::Instance). A case's
+// tensile_solution_selection_method sets the variable per handle, after that read, so a case that
+// needs the Stream-K solutions needs the variable set when the process starts; this is that value.
+// On gfx950 the Stream-K library is the only one, and the variable has no effect.
 inline const bool kStreamKSelectedAtStartup = [] {
     const char* method = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
     return method && !strcmp(method, "2");
