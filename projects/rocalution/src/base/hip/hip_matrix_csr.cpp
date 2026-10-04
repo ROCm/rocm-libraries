@@ -2057,10 +2057,13 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // rocsparse overwrites the iteration count, so each solve gets its own
+            int niter = max_iter;
+
             // Solve L
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2079,9 +2082,11 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Solve U
+            niter = max_iter;
+
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2519,10 +2524,13 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // rocsparse overwrites the iteration count, so each solve gets its own
+            int niter = max_iter;
+
             // Solve L
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2541,9 +2549,11 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Solve L^T
+            niter = max_iter;
+
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_transpose,
