@@ -279,7 +279,7 @@ then a ctest entry asserts the packed output.
 Probes are build-tree ctest entries only. They exist only under
 `HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES` (default `OFF`, CI-only), are never installed
 and write under `<build>/hkp-probes/<name>/`, outside both shipped descriptor trees.
-With the option `OFF` the only cache or behavior difference is that cache entry (the new module also becomes a CMake regeneration input, which changes no target).
+With the option `OFF` the only difference is that cache entry; the probe module is never read.
 
 ### Running the probes locally
 
