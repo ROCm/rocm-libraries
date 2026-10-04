@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -172,13 +173,28 @@ def test_a_root_wired_without_enable_rocke_fails_configure(consumer):
     assert "was wired without ENABLE_ROCKE" in diagnostic
 
 
+def _collected_ids(command, *, drop_marker=False):
+    """The test ids a registered pytest command selects, listed rather than run."""
+    argv = [a for a in command if a != "-v"]
+    if drop_marker:
+        # The `-m <expression>` after the `-m pytest` that starts the module.
+        at = argv.index("-m", argv.index("-m") + 1)
+        del argv[at : at + 2]
+    proc = subprocess.run(
+        [*argv, "--collect-only", "-q"], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return {line for line in proc.stdout.splitlines() if "::" in line}
+
+
 @pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
 def test_the_registered_suites_collect_tests_rocke_only_with_rocke(
     consumer, enable_rocke
 ):
-    """Without rocKE, both pytest entries ignore tests/rocke/ and nothing else;
-    with it, neither ignores anything. Configured under this interpreter, which
-    can import pytest as hkp_register_tests requires."""
+    """The two registered pytest entries split the suite between them -- every test
+    in exactly one -- and select the tests under tests/rocke/ if and only if the
+    build has rocKE. Configured under this interpreter, which can import pytest as
+    hkp_register_tests requires."""
     consumer.register_tests(enable_rocke)
     consumer.configure(python=sys.executable)
     commands = consumer.registered_commands()
@@ -187,14 +203,18 @@ def test_the_registered_suites_collect_tests_rocke_only_with_rocke(
         "hip-kernel-provider-hkp-pack",
     }
 
-    rocke_tests = os.path.normpath(PKG / "tests" / "rocke")
-    for name, command in commands.items():
-        ignored = [
-            os.path.normpath(arg.removeprefix("--ignore="))
-            for arg in command
-            if arg.startswith("--ignore")
-        ]
-        assert ignored == ([rocke_tests] if enable_rocke == "OFF" else []), name
+    quick = _collected_ids(commands["hip-kernel-provider-hkp-pack-quick"])
+    standard = _collected_ids(commands["hip-kernel-provider-hkp-pack"])
+    everything = _collected_ids(
+        commands["hip-kernel-provider-hkp-pack"], drop_marker=True
+    )
+    assert quick and standard
+    assert not quick & standard
+    assert quick | standard == everything
+
+    rocke_ids = {i for i in everything if i.startswith("tests/rocke/")}
+    assert bool(rocke_ids) == (enable_rocke == "ON")
+    assert {i for i in quick | standard if i.startswith("tests/rocke/")} == rocke_ids
 
 
 @pytest.mark.parametrize(
@@ -458,7 +478,8 @@ def test_the_bundle_gate_reads_the_root_not_the_build_arches(
     consumer, rocke_fixture, enable_rocke
 ):
     """The product root carries a gfx950-only rocKE bundle and the build packs
-    gfx90a alone, so the root is dormant and the arch-aware predicate says no.
+    gfx90a alone, so the root is dormant, whether rocKE is enabled or not, and the
+    arch-aware predicate says no.
     The arch-agnostic gate that decides which host sources compile still says yes
     when rocKE is enabled, and no when its kind is pruned. A probe that could not
     answer reads as the rocKE option."""
@@ -476,6 +497,8 @@ def test_the_bundle_gate_reads_the_root_not_the_build_arches(
             + f"""{forced}
 hkp_product_offers_engine(_offered "test_fixture:attention")
 hkp_gfx950_attention_dense_available(_available)
+get_property(_dormant GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
+{_report("dormant", "${_dormant}")}
 foreach(_name IN ITEMS offered available)
     if(_${{_name}})
         {_report("${_name}", "TRUE")}
@@ -490,6 +513,9 @@ endforeach()
     output = consumer.configure()
     assert _reported(output, "offered") == ("TRUE" if enable_rocke == "ON" else "FALSE")
     assert _reported(output, "available") == "FALSE"
+    # Dormant with rocKE enabled too: the gfx950 bundle is pruned for gfx90a, and a
+    # build that names its product root this way gets a STATUS line, not a failure.
+    assert _reported(output, "dormant").split(";") == ["product"]
 
     consumer._write(gates(True))
     output = consumer.configure()

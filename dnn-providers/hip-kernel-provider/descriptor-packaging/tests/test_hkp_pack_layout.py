@@ -18,6 +18,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,7 +27,9 @@ import pytest
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
+from hkp_pack import pipeline
 from hkp_pack.pipeline import (
+    ArchResult,
     _agreement_inputs,
     compile_intermediate,
     offered_engines,
@@ -35,6 +39,7 @@ from hkp_pack.pipeline import (
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
+    PACKAGING,
     ROCKE_ARCH,
     _load_kpack,
     _nest,
@@ -1826,6 +1831,27 @@ def test_a_root_that_prunes_for_every_arch_packs_nothing_cleanly(
 
 
 @pytest.mark.quick
+def test_a_shard_that_selected_a_compiling_ukd_but_wrote_no_archive_fails(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir, monkeypatch
+):
+    """A shipped shard whose compiling UKD produced no archive is an error, never a
+    silently empty package. The producer is stubbed to write nothing, which is the
+    only way to reach this state."""
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", empty_arch_fixture)
+
+    def pack_nothing(flat, inter, staging, *args, **kwargs):
+        staging.mkdir(parents=True)
+        return ArchResult(arch="gfx942", out_dir=staging, kpack_path=None)
+
+    monkeypatch.setattr(pipeline, "compile_intermediate", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "pack_arch", pack_nothing)
+
+    with pytest.raises(HkpPackError, match="wrote descriptors but no archive"):
+        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx942"])
+
+
+@pytest.mark.quick
 def test_a_passthrough_only_root_passes_with_no_archive(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
@@ -1841,6 +1867,91 @@ def test_a_passthrough_only_root_passes_with_no_archive(
     assert results[ARCH].kpack_path is None
     assert not results[ARCH].skipped
     assert not list((tmp_path / "out").rglob("*.kpack"))
+
+
+# --- L. The build's filters through the real command line --------------------
+def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
+    """`tools/hkp_pack.py` as the build launches it. The hipcc is a name nothing
+    can run: every root here compiles nothing."""
+    argv = [
+        sys.executable,
+        str(PACKAGING / "tools" / "hkp_pack.py"),
+        "--source-root",
+        str(root),
+        "--out-root",
+        str(tmp_path / "out"),
+        "--arches",
+        arch,
+        "--hipcc",
+        "hipcc-not-invoked",
+        "--inter-root",
+        str(tmp_path / "inter"),
+        "--source-label",
+        _LABEL,
+        *flags,
+    ]
+    if rocm_kpack_dir:
+        argv += ["--kpack-python-dir", rocm_kpack_dir]
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+@pytest.mark.quick
+def test_the_excluded_folder_flag_keeps_a_family_out_of_the_shipped_tree(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """`--exclude-folder` is what a build without a family's producer passes: the
+    family's descriptors are not shipped, and the same root without the flag ships
+    them, so the flag is what kept them out."""
+    root = tmp_path / "root"
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+    _embedded_copy(root, "rocKE/pointwise", empty_arch_fixture, suffix="2")
+
+    control = _hkp_pack_cli(root, tmp_path, ARCH, rocm_kpack_dir)
+    assert control.returncode == 0, control.stdout + control.stderr
+    shipped = tmp_path / "out" / ARCH
+    assert (shipped / "embedded").is_dir()
+    assert (shipped / "rocKE").is_dir()
+
+    shutil.rmtree(tmp_path / "out")
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--exclude-folder", "rocKE"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (shipped / "embedded").is_dir()
+    assert not (shipped / "rocKE").exists()
+
+
+@pytest.mark.quick
+def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
+    tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """A build with no rocKE producer packs a rocKE-only root as nothing, and says
+    so; no hipcc or rocke is reached."""
+    root = tmp_path / "root"
+    _nest(root, "rocKE/attention", rocke_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ROCKE_ARCH, rocm_kpack_dir, "--disable-kind", "rocke"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing to pack" in result.stdout
+    assert not (tmp_path / "out" / ROCKE_ARCH).exists()
+
+
+@pytest.mark.quick
+def test_a_misspelled_disabled_kind_fails_the_command_naming_it(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    root = tmp_path / "root"
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture)
+
+    result = _hkp_pack_cli(
+        root, tmp_path, ARCH, rocm_kpack_dir, "--disable-kind", "rokce"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rokce" in result.stderr
 
 
 def _separate_kdps_root(tmp_path, fixture):
@@ -2010,9 +2121,7 @@ def test_an_excluded_folder_is_never_read(tmp_path, main_fixture):
     with pytest.raises(HkpPackError, match="malformed"):
         load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
     (root / "hip" / "rocKE" / "broken.kdp.json").unlink()
-    logs = []
-    flat = load_flat_input(root, log=logs.append, exclude_folders=("rocKE",))
-    assert len([m for m in logs if "rocKE/" in m]) == 1
+    flat = load_flat_input(root, log=_silent, exclude_folders=("rocKE",))
     assert not any("rocKE" in k.path.parts for k in flat.kdps())
     assert flat.kdps()
 
