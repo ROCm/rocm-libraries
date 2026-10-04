@@ -107,6 +107,14 @@ if(HIP_HAS_CLUSTER_LAUNCH)
     target_compile_definitions(tensilelite-tests PRIVATE HIP_HAS_CLUSTER_LAUNCH)
 endif()
 
+# PredictionLibrary_test ranks with a shipped tilewright model and skips when the
+# directory is not present (e.g. an installed test binary on another machine).
+if(TARGET roc::tilewright)
+    get_target_property(_tensilelite_tests_tilewright_dir roc::tilewright SOURCE_DIR)
+    target_compile_definitions(tensilelite-tests PRIVATE
+        TILEWRIGHT_TEST_WEIGHTS_DIR="${_tensilelite_tests_tilewright_dir}/weights/hipblaslt")
+endif()
+
 if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(tensilelite-tests PRIVATE OpenMP::OpenMP_CXX)
 endif()

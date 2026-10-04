@@ -32,15 +32,23 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
+
+#include "FallbackTestUtils.hpp"
 
 #if defined(TENSILE_MSGPACK)
 #include <Tensile/msgpack/MessagePack.hpp>
@@ -122,6 +130,28 @@ namespace
         EXPECT_FALSE(yin.error()) << yin.error().message();
 #endif
     }
+
+    hip::HipAMDGPU makeGfx950Device()
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx950;
+        device.computeUnitCount = 256;
+        device.analyticalHardware
+            = std::make_shared<origami::hardware_t>(arch_t::gfx950,
+                                                    256,
+                                                    163840,
+                                                    262144,
+                                                    8,
+                                                    1.0,
+                                                    1.0,
+                                                    1.0,
+                                                    4000000,
+                                                    1.2,
+                                                    1,
+                                                    std::make_tuple(0.0, 0.008, 0.0));
+        return device;
+    }
 }
 
 TEST(PredictionLibraryTest, CopiesClusterDimIntoOrigamiConfig)
@@ -193,3 +223,188 @@ TEST(PredictionLibraryTest, ClusterDimStaysIndexAlignedWithSolutionList)
     expectClusterDim(lib.origami_config_list[0], TensileLite::dim3(2, 4, 1));
     expectClusterDim(lib.origami_config_list[1], TensileLite::dim3(1, 1, 1));
 }
+
+TEST(PredictionLibraryTest, ZeroRequestedSolutionsReturnsNone)
+{
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, makeMappedSolution(42));
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    ASSERT_EQ(lib.findTopSolutions(problem, device, 1).size(), 1u);
+    EXPECT_TRUE(lib.findTopSolutions(problem, device, 0).empty());
+    EXPECT_FALSE(lib.lastFindTopAlreadyRetAll());
+}
+
+#if defined(TENSILELITE_HAS_TILEWRIGHT)
+namespace
+{
+    class ScratchDir
+    {
+    public:
+        explicit ScratchDir(std::string const& name)
+            : m_path(std::filesystem::temp_directory_path()
+                     / (name + "_"
+                        + std::to_string(
+                            std::chrono::steady_clock::now().time_since_epoch().count())))
+        {
+            std::filesystem::create_directories(m_path);
+        }
+
+        ~ScratchDir()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(m_path, ec);
+        }
+
+        std::filesystem::path const& path() const
+        {
+            return m_path;
+        }
+
+    private:
+        std::filesystem::path m_path;
+    };
+}
+
+TEST(PredictionLibraryTest, TilewrightIsSilentlyUnusedWithoutAnIndex)
+{
+    ScratchDir dir("tensilelite_tilewright_no_index");
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, makeMappedSolution(42));
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+
+    ::testing::internal::CaptureStderr();
+    lib.loadTilewright((dir.path() / "TensileLibrary_Probe_gfx950.dat").string());
+    EXPECT_EQ(::testing::internal::GetCapturedStderr(), "");
+    EXPECT_EQ(lib.tilewright_candidates, nullptr);
+}
+
+TEST(PredictionLibraryTest, TilewrightWarnsAndIsUnusedWhenTheIndexedModelCannotLoad)
+{
+    ScratchDir dir("tensilelite_tilewright_bad_model");
+    std::ofstream(dir.path() / "tilewright_index")
+        << "TensileLibrary_Probe_gfx950\tmissing.tilewright.bin\n";
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, makeMappedSolution(42));
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+
+    ::testing::internal::CaptureStderr();
+    lib.loadTilewright((dir.path() / "TensileLibrary_Probe_gfx950.dat").string());
+    std::string const warning = ::testing::internal::GetCapturedStderr();
+    EXPECT_EQ(lib.tilewright_candidates, nullptr);
+    EXPECT_NE(warning.find("TensileLibrary_Probe_gfx950"), std::string::npos) << warning;
+    EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
+}
+
+#if defined(TILEWRIGHT_TEST_WEIGHTS_DIR)
+namespace
+{
+    std::filesystem::path shippedGfx950Model()
+    {
+        return std::filesystem::path(TILEWRIGHT_TEST_WEIGHTS_DIR) / "gfx950" / "gfx950"
+               / "gfx950_Cijk_Ailk_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs.tilewright.bin";
+    }
+
+    // Loads `table` and the model at `model` as the library of the probe stem.
+    void loadWithTilewright(ScratchDir const&                    dir,
+                            std::filesystem::path const&         model,
+                            std::vector<int> const&              table,
+                            SolutionMap<ContractionSolution>&    solutions,
+                            ContractionProblemPredictionLibrary& lib)
+    {
+        std::filesystem::copy_file(model, dir.path() / "probe.tilewright.bin");
+        std::ofstream(dir.path() / "tilewright_index")
+            << "TensileLibrary_Probe_gfx950\tprobe.tilewright.bin\n";
+        loadPredictionLibrary(table, solutions, lib);
+        lib.loadTilewright((dir.path() / "TensileLibrary_Probe_gfx950.dat").string());
+    }
+
+    std::shared_ptr<ContractionSolution> makeDot2Solution(int index)
+    {
+        auto solution                           = makeMappedSolution(index);
+        solution->sizeMapping.matrixInstruction = {0, 0, 0, 0};
+        return solution;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightOrdersTheKernelsItScores)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    // The shipped model and origami order these two tiles differently at 1024^3.
+    auto blocky                   = makeMappedSolution(11);
+    blocky->sizeMapping.macroTile = TensileLite::dim3(128, 64, 1);
+    auto skinny                   = makeMappedSolution(12);
+    skinny->sizeMapping.macroTile = TensileLite::dim3(16, 256, 1);
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(11, blocky);
+    solutions.emplace(12, skinny);
+    solutions.emplace(13, makeDot2Solution(13));
+
+    ScratchDir                          dir("tensilelite_tilewright_rank");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), {13, 11, 12}, solutions, lib);
+    ASSERT_NE(lib.tilewright_candidates, nullptr);
+
+    tilewright::Problem const tilewrightProblem{
+        .size     = {1024, 1024, 1024},
+        .batch    = 1,
+        .a_dtype  = tilewright::DataType::Float,
+        .b_dtype  = tilewright::DataType::Float,
+        .c_dtype  = tilewright::DataType::Float,
+        .d_dtype  = tilewright::DataType::Float,
+        .mi_dtype = tilewright::DataType::Float,
+    };
+    std::vector<int> expected;
+    for(auto const& r :
+        lib.tilewright_candidates->rank(tilewrightProblem, {256, 163840, 4000000}, 3))
+    {
+        if(r.scored)
+            expected.push_back(lib.solution_list[r.config_index].first);
+    }
+    // At M = 1024 neither tilewright nor origami ranks the Dot2 kernel.
+    ASSERT_EQ(expected.size(), 2u);
+
+    auto const       problem = TensileLite::testing::dummyProblem();
+    auto const       device  = makeGfx950Device();
+    std::vector<int> picked;
+    for(auto const& solution : lib.findTopSolutions(problem, device, 3))
+        picked.push_back(solution->index);
+    EXPECT_EQ(picked, expected);
+    EXPECT_TRUE(lib.lastFindTopAlreadyRetAll());
+
+    auto const best = lib.findTopSolutions(problem, device, 1);
+    ASSERT_EQ(best.size(), 1u);
+    EXPECT_EQ(best[0]->index, expected[0]);
+    EXPECT_FALSE(lib.lastFindTopAlreadyRetAll());
+}
+
+TEST(PredictionLibraryTest, OrigamiRanksWhenTilewrightScoresNothing)
+{
+    if(!std::filesystem::exists(shippedGfx950Model()))
+        GTEST_SKIP() << "no tilewright model at " << shippedGfx950Model();
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(13, makeDot2Solution(13));
+
+    ScratchDir                          dir("tensilelite_tilewright_fallback");
+    ContractionProblemPredictionLibrary lib;
+    loadWithTilewright(dir, shippedGfx950Model(), {13}, solutions, lib);
+    ASSERT_NE(lib.tilewright_candidates, nullptr);
+
+    auto const top
+        = lib.findTopSolutions(TensileLite::testing::dummyProblem(), makeGfx950Device(), 1);
+    ASSERT_EQ(top.size(), 1u);
+    EXPECT_EQ(top[0]->index, 13);
+}
+#endif
+#endif
