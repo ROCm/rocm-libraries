@@ -199,6 +199,7 @@ namespace
     TEST_P(matmul_test, matmul)
     {
         SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
+        SKIP_UNLESS_SELECTED_BY_FILTER();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);

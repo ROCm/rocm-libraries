@@ -16,6 +16,7 @@
 #include "hip_placement.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
+#include "hipblaslt_test.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -1075,6 +1076,27 @@ namespace
 
     // A case that cannot fit must say which memory is short and by how much; one that fits must
     // get an empty answer.
+    // The large fast_check tiers run only under a gtest filter: an unfiltered run, or one that
+    // only excludes, skips them; any selecting pattern runs them.
+    TEST(FastCheck_pre_checkin, large_tiers_need_a_selecting_filter)
+    {
+        const std::string saved = ::testing::GTEST_FLAG(filter);
+        for(const auto& [filter, given] : std::vector<std::pair<std::string, bool>>{
+                {"*", false},
+                {"", false},
+                {"*-*known_bug*", false},
+                {"*stress*-*known_bug*", true},
+                {"*threshold*", true},
+                {"*smoke*:*quick*:*pre_checkin*-*known_bug*", true}})
+        {
+            ::testing::GTEST_FLAG(filter) = filter;
+            EXPECT_EQ(hipblaslt_gtest_filter_given(), given) << filter;
+        }
+        ::testing::GTEST_FLAG(filter) = saved;
+        EXPECT_TRUE(hipblaslt_category_needs_a_filter("stress"));
+        EXPECT_FALSE(hipblaslt_category_needs_a_filter("nightly"));
+    }
+
     TEST(FastCheckDevice_pre_checkin, memory_shortfall_names_the_short_memory)
     {
         EXPECT_EQ(fast_check_memory_shortfall(0, 0), "");
