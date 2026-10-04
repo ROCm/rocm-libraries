@@ -59,7 +59,8 @@ namespace hiptensor
     bool PermutationTest::checkDevice(hiptensorDataType_t datatype) const
     {
         return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F));
+               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
+               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
     }
 
     bool PermutationTest::checkSizes() const
@@ -179,7 +180,7 @@ namespace hiptensor
 
         EXPECT_EQ(dataTypes.size(), 2); // HIPTENSOR_R_16F or HIPTENSOR_R_32F
         auto abDataType = dataTypes[0];
-        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F));
+        EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F) || (abDataType == HIPTENSOR_R_64F));
 
         mRunFlag &= checkDevice(abDataType);
 
@@ -490,6 +491,25 @@ namespace hiptensor
                             (_Float16*)resource->deviceReference().get(),
                             resource->getCurrentMatrixElement(),
                             convertToComputeType(computeDataType));
+                } else if(abDataType == HIPTENSOR_R_64F) {
+                    CHECK_HIPTENSOR_ERROR(hiptensorElementwisePermuteReference(
+                        &alphaValue,
+                        (const double*)resource->hostInput1().get(),
+                        descA,
+                        modeA.data(),
+                        Aop,
+                        (double*)resource->hostReference().get(),
+                        descB,
+                        modeB.data(),
+                        computeDataType,
+                        0 /* stream */));
+
+                    resource->copyReferenceToDevice();
+                    std::tie(mValidationResult, mMaxRelativeError)
+                        = compareEqualLaunchKernel<double>((double*)resource->deviceOutput().get(),
+                                                          (double*)resource->deviceReference().get(),
+                                                          resource->getCurrentMatrixElement(),
+                                                          convertToComputeType(computeDataType));
                 }
                 EXPECT_TRUE(mValidationResult) << "Max relative error: " << mMaxRelativeError;
             } // if (testOptions->performValidation())

@@ -76,6 +76,7 @@ namespace hiptensor
         ElementwiseBinarySolution2DHalfInstances();
         ElementwiseBinarySolution3DFloatInstances();
         ElementwiseBinarySolution3DHalfInstances();
+        ElementwisePermuteSolution2DDoubleInstances();
         ElementwisePermuteSolution2DFloatInstances();
         ElementwisePermuteSolution2DFloatNoopInstances();
         ElementwisePermuteSolution2DHalfInstances();
