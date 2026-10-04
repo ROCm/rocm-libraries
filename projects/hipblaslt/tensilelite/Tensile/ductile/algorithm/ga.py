@@ -37,7 +37,8 @@ class GeneticAlgorithm:
                  checkpoint_path: str = None,
                  weights: list[dict[str, list[float]]] = None,
                  weight_beta: float = 0.25,
-                 auto_pop_size: bool = True):
+                 auto_pop_size: bool = True,
+                 on_generation_end: Callable = None):
 
         self.logger = Logger(self.name, log_file=log_file, verbose=verbose)
 
@@ -136,6 +137,7 @@ class GeneticAlgorithm:
         self.stats = {}
         self._resume_state = None
         self.checkpoint_path = checkpoint_path
+        self.on_generation_end = on_generation_end
 
         random.seed(seed)
         np.random.seed(seed)
@@ -297,7 +299,10 @@ class GeneticAlgorithm:
                 diversity = pop.diversity()
                 
                 self.logger.print_stats(n_gen=gen, n_evals=n_evals, diversity=diversity, f_avg=f_avg, f_max=f_max)
-                
+
+                if self.on_generation_end:
+                    self.on_generation_end(gen)
+
                 self.termination(f_avg=f_avg, f_max=f_max, diversity=diversity)
 
                 old_pop = self.survival(old_pop, pop, self.pop_size)

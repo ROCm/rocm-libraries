@@ -284,6 +284,121 @@ def test_ductile_backend_forwards_auto_pop_size_to_ga(monkeypatch, tmp_path, con
     assert captured["auto_pop_size"] is expected
 
 
+def test_ductile_backend_forwards_on_generation_end_callback_to_ga(monkeypatch, tmp_path):
+    """DuctileBackend must forward a callable on_generation_end to GeneticAlgorithm."""
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            captured["on_generation_end"] = kwargs["on_generation_end"]
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}, {"a": 1}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    with pytest.raises(RuntimeError, match="Expected results file does not exist"):
+        backend.run(
+            {},
+            _make_benchmark_config(tmp_path),
+            lambda *_args, **_kwargs: (str(tmp_path / "missing.csv"), 0),
+        )
+
+    assert callable(captured["on_generation_end"])
+
+
+def test_save_iteration_csv_copies_results_into_ga_iters_dir(monkeypatch, tmp_path):
+    """The on_generation_end callback must copy the most recent benchmark results CSV
+    into <rootPath>/2_BenchmarkData/GA_iters, named after the results file's group
+    directory and the generation number."""
+    group_dir = tmp_path / "my-problem-group" / "0"
+    group_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = group_dir / "results.csv"
+    _write_csv(csv_path, {"sol0": [10.0, 11.0], "sol1": [20.0, 21.0]})
+
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            captured["on_generation_end"] = kwargs["on_generation_end"]
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}, {"a": 1}])
+            # Simulate GeneticAlgorithm invoking the callback after a generation.
+            captured["on_generation_end"](1)
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0"), _fake_solution("sol1")],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+    copied_path = tmp_path / "2_BenchmarkData" / "GA_iters" / "my-problem-group_iter1.csv"
+    assert copied_path.is_file()
+    with open(copied_path, newline="") as f:
+        rows = list(csv.reader(f))
+    assert rows[0] == ["sol0", "sol1"]
+
+
+def test_save_iteration_csv_noop_when_no_results_file_yet(monkeypatch, tmp_path):
+    """The callback must not raise or create any directory if no benchmark has
+    completed yet (results file is None)."""
+    captured = {}
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            captured["on_generation_end"] = kwargs["on_generation_end"]
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            # Invoke the callback before any evaluation has happened.
+            captured["on_generation_end"](1)
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(tmp_path / "missing.csv"), 0))
+
+    assert not (tmp_path / "2_BenchmarkData").exists()
+
+
 def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     _write_csv(csv_path, {"sol0": [10.0, 11.0]})
