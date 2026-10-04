@@ -183,7 +183,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
             dividedForBlkId  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (tile01 == 0) else kernel["MatrixInstN"]
 
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
-        vectorWidth      = kernel["VectorWidth%s"%tc]
+        vectorWidth      = 1 if tP["enableLDSTr"] else kernel["VectorWidth%s"%tc]
         maxKId = waveWidth // ((matrixInstT if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
@@ -197,7 +197,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
-        strideWave   = numTileInInst * matrixInstT * vectorWidth
+        strideWave   = numTileInInst * matrixInstT * kernel["VectorWidth%s"%tc]
         # contigOut: wave base spans its whole contiguous block of MIWaveTile[tile01] tiles.
         contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
         if contigOut:
@@ -338,7 +338,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
             dividedForBlkId  = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (tile01 == 0) else kernel["MatrixInstN"]
 
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
-        vectorWidth      = kernel["VectorWidth%s"%tc]
+        vectorWidth      = 1 if tP["enableLDSTr"] else kernel["VectorWidth%s"%tc]
         maxKId = waveWidth // ((matrixInstT if (tile01 == 0) else kernel["MatrixInstN"]) * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
@@ -352,7 +352,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
-        strideWave   = numTileInInst * matrixInstT * vectorWidth
+        strideWave   = numTileInInst * matrixInstT * kernel["VectorWidth%s"%tc]
         # contigOut (B8/f8): wave base spans its contiguous MIWaveTile block (mirrors bf16 copy).
         contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
         if contigOut:
@@ -811,7 +811,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
             dividedForBlkId  = (matrixInstTO * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstTO
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
-        vectorWidth      = kernel["VectorWidth%s"%tc]
+        vectorWidth      = 1 if enableLDSTr else kernel["VectorWidth%s"%tc]
         if isDTVAB:
             if tP["tlu"]:
                 # DTV + TLU case, glvw and vw are applied to the same direction. No need to apply both.
