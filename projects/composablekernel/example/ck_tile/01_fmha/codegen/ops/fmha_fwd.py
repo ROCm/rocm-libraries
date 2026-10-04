@@ -141,7 +141,7 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
     {F_progressive_ds_load_k}>;
 
 using fmha_pipeline = {F_pipeline}<
-    fmha_pipeline_problem>;
+    fmha_pipeline_problem{F_pipeline_extra_args}>;
 
 using fmha_epilogue =
     ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
@@ -893,6 +893,13 @@ class FmhaFwdKernel:
             ],
             F_progressive_ds_load_k=BOOL_MAP[self.F_pipeline.F_progressive_ds_load_k],
             F_pipeline=PIPELINE_MAP[self.F_pipeline.tag],
+            # Generated sched traits have no virtual sink. The API constraint
+            # checks sink_ptr before selecting this compile-time specialization.
+            F_pipeline_extra_args=(
+                ", ck_tile::FmhaTdmSchedPolicyFor<fmha_pipeline_problem>, false"
+                if self.F_pipeline.tag == "qr_tdm_sched"
+                else ""
+            ),
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
@@ -1819,9 +1826,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
 
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES:
+                # Finite virtual-sink logits retain the existing qr_tdm fallback.
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
-                    f"a.hdim_v == {hdim_v} && a.max_seqlen_q >= 128 && "
+                    f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
+                    "a.max_seqlen_q >= 128 && "
                     f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
                 )
                 for mask, lse in itertools.product(

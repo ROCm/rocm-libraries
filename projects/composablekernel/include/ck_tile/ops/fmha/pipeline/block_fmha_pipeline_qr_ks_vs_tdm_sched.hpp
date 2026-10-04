@@ -16,7 +16,11 @@
 namespace ck_tile {
 
 // Hand-scheduled gfx125 TDM pipeline for native 16-bit D64/V64 and D128/D192 x V128.
-template <typename Problem_, typename Policy_ = FmhaTdmSchedPolicyFor<Problem_>>
+// Separate template instantiations keep finite virtual-sink normalization out of
+// the generated no-sink kernel's register allocation.
+template <typename Problem_,
+          typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
+          bool EnableVirtualSink_ = true>
 struct BlockFmhaPipelineQRKSVSTdmSched
 {
     static constexpr auto I0 = number<0>{};
@@ -60,18 +64,19 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     static constexpr index_t kSubQKHeaddim = BlockFmhaShape::kSubQKHeaddim;
     static constexpr index_t kNWarp        = BlockFmhaShape::Gemm0BlockWarps::at(I1);
 
-    static constexpr bool kIsGroupMode      = Problem::kIsGroupMode;
-    static constexpr bool kPadSeqLenQ       = Problem::kPadSeqLenQ;
-    static constexpr bool kPadSeqLenK       = Problem::kPadSeqLenK;
-    static constexpr bool kPadHeadDimQ      = Problem::kPadHeadDimQ;
-    static constexpr bool kPadHeadDimV      = Problem::kPadHeadDimV;
-    static constexpr bool kHasLogitsSoftCap = Problem::kHasLogitsSoftCap;
-    static constexpr bool kHasDropout       = Problem::kHasDropout;
-    static constexpr auto BiasEnum          = Problem::BiasEnum;
-    static constexpr bool kStoreLSE         = Problem::kStoreLSE;
-    static constexpr bool kHasUnevenSplits  = true;
-    static constexpr bool kHasSink          = Problem::kHasSink;
-    static constexpr auto QScaleEnum        = Problem::QScaleEnum;
+    static constexpr bool kIsGroupMode       = Problem::kIsGroupMode;
+    static constexpr bool kPadSeqLenQ        = Problem::kPadSeqLenQ;
+    static constexpr bool kPadSeqLenK        = Problem::kPadSeqLenK;
+    static constexpr bool kPadHeadDimQ       = Problem::kPadHeadDimQ;
+    static constexpr bool kPadHeadDimV       = Problem::kPadHeadDimV;
+    static constexpr bool kHasLogitsSoftCap  = Problem::kHasLogitsSoftCap;
+    static constexpr bool kHasDropout        = Problem::kHasDropout;
+    static constexpr auto BiasEnum           = Problem::BiasEnum;
+    static constexpr bool kStoreLSE          = Problem::kStoreLSE;
+    static constexpr bool kHasUnevenSplits   = true;
+    static constexpr bool kHasSink           = Problem::kHasSink;
+    static constexpr bool kEnableVirtualSink = EnableVirtualSink_;
+    static constexpr auto QScaleEnum         = Problem::QScaleEnum;
 
     static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
                   "qr_tdm_sched: every softmax site calls exp2, so log2(e) must be folded into "
@@ -944,7 +949,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             });
         };
 
-        if constexpr(BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
+        if constexpr(kEnableVirtualSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
         {
             if(__builtin_isinf_sign(sink_v) != -1)
             {

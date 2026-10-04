@@ -1482,6 +1482,18 @@ struct FmhaFwdKernel
 
     CK_TILE_HOST static bool IsSupportedArgument([[maybe_unused]] const Kargs& kargs)
     {
+        if constexpr(kPipelineName == "qr_tdm_sched")
+        {
+            // The generated no-virtual-sink specialization omits the finite
+            // sink normalization. kHasSink controls retained mask tokens and
+            // cannot be used to infer whether sink_ptr is present.
+            if constexpr(!FmhaPipeline::kEnableVirtualSink)
+            {
+                if(kargs.sink_ptr != nullptr)
+                    return false;
+            }
+        }
+
         if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
         {
             const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
