@@ -57,10 +57,18 @@ NO_CARRY = {
     "s_addk_i32",
     "v_add_u32",
     "v_sub_u32",
+    "v_subrev_u32",
     "v_add_nc_u32",
     "v_sub_nc_u32",
+    "v_subrev_nc_u32",
     "v_add_i32",
+    "v_sub_i32",
+    "v_add_nc_i32",
+    "v_sub_nc_i32",
 }
+# How a global or flat atomic asks for the old value: a _rtn mnemonic, glc (gfx90a), sc0
+# (gfx94x and gfx950) or th:TH_ATOMIC_RETURN (gfx12 and later).
+_ATOMIC_RETURN = re.compile(r"_rtn\b|\bglc\b|\bsc0\b|\bTH_ATOMIC_RETURN\b")
 # Instructions that rewrite a whole pair, which ends any obligation on its low dword.
 PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64", "v_add_nc_u64"}
 # Unconditional transfers: the next instruction in the listing is not the next one executed.
@@ -157,7 +165,7 @@ def address_operands(inst: Instruction) -> list[Reg]:
         # Leave out the data and destination operands: a load writes operand 0, a store reads
         # its data from operand 1, and a returning atomic does both.
         if "_atomic" in m:
-            data = {0, 2} if (m.endswith("_rtn") or "glc" in inst.text) else {1}
+            data = {0, 2} if _ATOMIC_RETURN.search(inst.text) else {1}
         elif "_store" in m:
             data = {1}
         else:
@@ -173,7 +181,7 @@ def written(inst: Instruction) -> list[Reg]:
     ):
         return []
     if re.search(r"_store|_atomic", inst.mnemonic) and not (
-        inst.mnemonic.endswith("_rtn") or "glc" in inst.text
+        "_atomic" in inst.mnemonic and _ATOMIC_RETURN.search(inst.text)
     ):
         return []
     return parse_regs(inst.operands[0])

@@ -125,6 +125,51 @@ def test_a_register_reused_for_other_arithmetic_is_not_reported():
     assert _reasons(asm) == []
 
 
+@pytest.mark.parametrize(
+    "op",
+    ["v_sub_u32", "v_subrev_u32", "v_sub_i32", "v_subrev_nc_u32", "v_add_nc_i32", "v_sub_nc_i32"],
+)
+def test_vector_subtract_without_carry_on_an_address_is_reported(op):
+    asm = f"""
+    {op} v4, v4, v6
+    global_load_dwordx2 v[0:1], v[4:5], off
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and op in reasons[0] and "v4" in reasons[0]
+
+
+# A returning atomic is dst, vaddr, data[, saddr]; one that does not return is vaddr, data[, saddr].
+@pytest.mark.parametrize("marker", ["glc", "sc0", "th:TH_ATOMIC_RETURN"])
+def test_a_returning_atomic_address_is_its_second_operand(marker):
+    bad = f"""
+    v_add_u32 v2, v2, v6
+    global_atomic_add_u64 v[0:1], v[2:3], v[4:5], off {marker}
+    """
+    reasons = _reasons(bad)
+    assert len(reasons) == 1 and "v2" in reasons[0]
+    data_only = f"""
+    v_add_u32 v4, v4, v6
+    v_add_co_u32 v2, vcc, v2, v6
+    v_addc_co_u32 v3, vcc, v3, 0, vcc
+    global_atomic_add_u64 v[0:1], v[2:3], v[4:5], off {marker}
+    """
+    assert _reasons(data_only) == []
+
+
+def test_a_non_returning_atomic_address_is_its_first_operand():
+    asm = """
+    v_add_u32 v4, v4, v6
+    global_atomic_add_u64 v[2:3], v[4:5], off
+    """
+    assert _reasons(asm) == []
+    asm = """
+    v_add_u32 v2, v2, v6
+    global_atomic_add_u64 v[2:3], v[4:5], off
+    """
+    reasons = _reasons(asm)
+    assert len(reasons) == 1 and "v2" in reasons[0]
+
+
 def test_data_registers_of_a_buffer_load_are_not_addresses():
     asm = """
     buffer_load_dwordx4 v[34:37], v5, s[40:43], 0 offen
