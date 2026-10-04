@@ -77,10 +77,11 @@ bool ulp_positive_init();
 // Value patterns for integer_exact A, B and C (the integer_exact_pattern test argument).
 //   standard: A and C in {0, 1, 2}; B in {-2, ..., 2}, signs in a checkerboard.
 //   ternary:  A, B and C in {-1, 0, 1}.
-//   sparse_k: as standard, except that A is zero at all but one K index in each of
-//             kIntegerExactSparseKTerms equal stretches of K, at a different offset in each
-//             stretch, and at the last K index. Partial sums stay small while the kernel still
-//             reads the full K extent.
+//   sparse_k: as standard, except that each row of A is zero at all but one K index in each
+//             of kIntegerExactSparseKTerms equal stretches of K, and at the last K index. The
+//             kept offset changes from stretch to stretch and from row to row, so with at least
+//             K / kIntegerExactSparseKTerms rows every K index is nonzero in some row, and a wrong
+//             read of B anywhere along K changes D. Partial sums stay small whatever K is.
 enum class IntegerExactPattern
 {
     standard,
@@ -106,12 +107,13 @@ struct IntegerExactPatternScope
     }
 };
 
-// True when sparse_k keeps A's K index k nonzero. constexpr so device fills can call it.
-constexpr bool integer_exact_sparse_k_kept(size_t k, size_t K)
+// True when sparse_k keeps K index k of A's row `row` nonzero. constexpr so device fills can
+// call it.
+constexpr bool integer_exact_sparse_k_kept(size_t k, size_t K, size_t row)
 {
     const size_t width = (K + kIntegerExactSparseKTerms - 1) / kIntegerExactSparseKTerms;
     const size_t s     = width > 0 ? width : 1;
-    return k % s == (k / s) % s || k + 1 == K;
+    return k % s == (k / s + row) % s || k + 1 == K;
 }
 
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
