@@ -264,7 +264,7 @@ then a ctest entry asserts the packed output.
 - The rocKE sources come from the wheel the packer is given, not from the in-tree source
   tree the pytest suite imports.
 - The architecture and output wiring of the CMake pack target: `--arches`, the stamp, the
-  interpreter and wheel directory, comgr forwarding.
+  interpreter and wheel directory, comgr forwarding (the last is asserted via `provenance-comgr` only; no local mutation measures it).
 - The output: a kpack archive for exactly that architecture, with the expected UKD count
   and shipped provenance.
 
@@ -279,7 +279,7 @@ then a ctest entry asserts the packed output.
 Probes are build-tree ctest entries only. They exist only under
 `HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES` (default `OFF`, CI-only), are never installed
 and write under `<build>/hkp-probes/<name>/`, outside both shipped descriptor trees.
-With the option `OFF` the only configure difference is that cache entry.
+With the option `OFF` the only cache or behavior difference is that cache entry (the new module also becomes a CMake regeneration input, which changes no target).
 
 ### Running the probes locally
 
