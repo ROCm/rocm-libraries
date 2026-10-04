@@ -344,7 +344,7 @@ reference with an exact probe check of every element of D (see
 
 | Operand | integer_exact values |
 | --- | --- |
-| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: A is zero except at 17 K indices |
+| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
 | B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
 | bias, scaleAlpha vector, E | not covered: the generic integer fill, 1 to 10 |
 | scaleA, scaleB, scaleC, scaleD | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`); fast_check does not accept them yet |

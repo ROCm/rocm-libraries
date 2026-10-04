@@ -3648,8 +3648,10 @@ Tests:
 # result outside D's exact range costs a K-length dot product on the host. Two
 # patterns keep results small at any K:
 #   ternary:  A, B and C in {-1, 0, 1}.
-#   sparse_k: A is zero except at 16 K indices spread over K, plus the last, so
-#             every |result| is at most 140 while the kernel still reads all of K.
+#   sparse_k: each row of A is zero except at 16 K indices spread over K, plus the
+#             last, so every |result| is at most 140. The kept indices move from
+#             row to row: with M at least K/16 every K index is nonzero in some
+#             row, so a wrong read anywhere along K still changes D.
 ###############################################################################
 
 # Both patterns checked against the host reference, which also uses them.

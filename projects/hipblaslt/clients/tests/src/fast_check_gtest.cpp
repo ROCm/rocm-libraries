@@ -438,6 +438,34 @@ namespace
                     << e.status.message;
             }
         }
+
+        // With alpha, the scaleAlpha vector, beta * C and the bias, a partial sum is bounded by
+        // the larger of the plain and the scaled sum, and a result by the scaled sum plus |beta|
+        // times the largest |C| in its row plus |bias|.
+        HostProblem      hp(9, 4, 50, 1, false, true, 2.f, -2.f, true, true);
+        FastCheckProblem p           = hp.problem();
+        double           max_partial = 0, max_result = 0;
+        for(int64_t i = 0; i < hp.M; i++)
+        {
+            double s = 0, c_max = 0;
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                double b_max = 0;
+                for(int64_t j = 0; j < hp.N; j++)
+                    b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                s += std::fabs(hp.a(0, i, k)) * b_max;
+            }
+            for(int64_t j = 0; j < hp.N; j++)
+                c_max = std::max(c_max, std::fabs(double(hp.C[size_t(j * hp.ldc + i)])));
+            const double scaled = 2 * std::fabs(double(hp.scale[size_t(i)])) * s;
+            max_partial         = std::max({max_partial, s, scaled});
+            max_result
+                = std::max(max_result, scaled + 2 * c_max + std::fabs(double(hp.bias[size_t(i)])));
+        }
+        FastCheckExpected e = fast_check_expected(p);
+        EXPECT_EQ(e.max_partial, max_partial);
+        EXPECT_EQ(e.max_result, max_result);
+        EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
     }
 
     // ------------------------------------------------------------------------------------------
@@ -665,12 +693,13 @@ namespace
         EXPECT_TRUE(res.passed) << res.message;
     }
 
-    // sparse_k must keep A nonzero only at its chosen K indices, at most one per sixteenth of K
-    // plus the last, whichever way A is stored; ternary must give B values in {-1, 0, 1} only.
+    // sparse_k must keep each row of A nonzero only at its chosen K indices, at most one per
+    // sixteenth of K plus the last, whichever way A is stored, and with at least K/16 rows every K
+    // index must be nonzero in some row; ternary must give B values in {-1, 0, 1} only.
     TEST(FastCheckDevice_pre_checkin, integer_exact_patterns_keep_their_ranges)
     {
         IntegerExactPatternScope scope;
-        const size_t             K = 200, M = 7, pad = 2;
+        const size_t             K = 200, M = 16, pad = 2;
         for(bool k_is_row : {false, true})
         {
             const size_t rows = k_is_row ? K : M, cols = k_is_row ? M : K, ld = rows + pad;
@@ -692,25 +721,27 @@ namespace
                       hipSuccess);
             (void)hipFree(d);
 
-            size_t kept         = 0;
-            bool   seen_nonzero = false;
-            for(size_t k = 0; k < K; k++)
+            std::vector<bool> covered(K, false);
+            for(size_t m = 0; m < M; m++)
             {
-                const bool keep = integer_exact_sparse_k_kept(k, K);
-                kept += keep;
-                for(size_t m = 0; m < M; m++)
+                size_t kept = 0;
+                for(size_t k = 0; k < K; k++)
                 {
+                    const bool keep = integer_exact_sparse_k_kept(k, K, m);
+                    kept += keep;
                     float v = k_is_row ? h[m * ld + k] : h[k * ld + m];
                     EXPECT_TRUE(v == 0 || v == 1 || v == 2) << "k=" << k << " m=" << m;
                     if(!keep)
                         EXPECT_EQ(v, 0.f) << "k=" << k << " m=" << m << " k_is_row=" << k_is_row;
-                    seen_nonzero |= v != 0;
+                    if(keep)
+                        covered[k] = true;
                 }
+                EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K, m));
+                EXPECT_LE(kept, kIntegerExactSparseKTerms + 1) << "m=" << m;
+                EXPECT_GE(kept, kIntegerExactSparseKTerms - 1) << "m=" << m;
             }
-            EXPECT_TRUE(seen_nonzero);
-            EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K));
-            EXPECT_LE(kept, kIntegerExactSparseKTerms + 1);
-            EXPECT_GE(kept, kIntegerExactSparseKTerms - 1);
+            for(size_t k = 0; k < K; k++)
+                EXPECT_TRUE(covered[k]) << "K index " << k << " is zero in every row";
         }
 
         float* d = nullptr;

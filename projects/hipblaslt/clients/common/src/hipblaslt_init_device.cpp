@@ -1063,7 +1063,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                auto in_batch = idx % index_stride;
                                auto j        = in_batch / lda;
                                auto i        = in_batch - j * lda;
-                               return integer_exact_sparse_k_kept(k_is_row ? i : j, K)
+                               return integer_exact_sparse_k_kept(
+                                          k_is_row ? i : j, K, k_is_row ? j : i)
                                           ? small_int_positive<T>(idx)
                                           : T(0);
                            });
