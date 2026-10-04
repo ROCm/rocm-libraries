@@ -5303,6 +5303,27 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
+    // A Stream-K case that got no Stream-K kernel (TileProcessingStrategy StreamK, "TPSSK" in the
+    // kernel name) would pass while testing none.
+    if(arg.requires_streamk)
+    {
+        bool streamk = false;
+        for(auto& r : heuristicResult)
+            streamk |= hipblaslt_ext::getKernelNameFromAlgo(handle, r.algo).find("_TPSSK_")
+                       != std::string::npos;
+        if(!streamk)
+        {
+            const std::string why = "none of the " + std::to_string(heuristicResult.size())
+                                    + " solutions for this case is a Stream-K kernel";
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
+#else
+            hipblaslt_cout << why << std::endl;
+            return;
+#endif
+        }
+    }
+
     // A placed workspace replaces the normal one, which placement runs never use: placement
     // requires fast_check, and fast_check refuses timing runs.
     const bool placeWorkspace = !strcmp(arg.placement, "workspace");
