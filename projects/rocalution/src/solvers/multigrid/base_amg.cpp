@@ -35,6 +35,7 @@
 
 #include "../../utils/log.hpp"
 
+#include <limits>
 #include <list>
 
 namespace rocalution
@@ -46,6 +47,7 @@ namespace rocalution
         log_debug(this, "BaseAMG::BaseAMG()", "default constructor");
 
         this->coarse_size_ = 300;
+        this->max_levels_  = std::numeric_limits<int>::max();
 
         // manual smoothers and coarse solver
         this->set_sm_ = false;
@@ -83,6 +85,18 @@ namespace rocalution
         assert(coarse_size > 1);
 
         this->coarse_size_ = coarse_size;
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void BaseAMG<OperatorType, VectorType, ValueType>::SetMaxLevels(int max_levels)
+    {
+        log_debug(this, "BaseAMG::SetMaxLevels()", max_levels);
+
+        assert(this->build_ == false);
+        assert(this->hierarchy_ == false);
+        assert(max_levels > 1);
+
+        this->max_levels_ = max_levels;
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -247,7 +261,8 @@ namespace rocalution
 
             ++this->levels_;
 
-            while(op_list_.back()->GetM() > static_cast<int64_t>(this->coarse_size_))
+            while(op_list_.back()->GetM() > static_cast<int64_t>(this->coarse_size_)
+                  && this->levels_ < this->max_levels_)
             {
                 // Add new list elements
                 restrict_list_.push_back(new OperatorType);

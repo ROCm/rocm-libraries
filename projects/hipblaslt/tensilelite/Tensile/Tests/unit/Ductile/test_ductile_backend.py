@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import csv
+import functools
 import os
 import types
 
@@ -563,6 +564,96 @@ def test_validate_solution_calls_get_kernel_source_when_requested(monkeypatch):
     assert seen["src"] is True
 
 
+def test_validate_solution_sets_rocisa_data_when_provided(monkeypatch):
+    """Child processes must re-apply the parent's rocIsa ISA data before validating."""
+    monkeypatch.setattr(
+        ductile_backend_mod,
+        "_generate_single_solution_with_groups",
+        lambda *_a, **_kw: types.SimpleNamespace(),
+    )
+
+    class _OkKW:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def _initKernel(self, *_a, **_kw):
+            return None
+
+    monkeypatch.setattr(ductile_backend_mod, "KernelWriterAssembly", _OkKW)
+
+    set_calls = []
+
+    class _FakeRocIsaInstance:
+        def setData(self, data):
+            set_calls.append(data)
+
+    class _FakeRocIsaClass:
+        @staticmethod
+        def getInstance():
+            return _FakeRocIsaInstance()
+
+    monkeypatch.setattr(ductile_backend_mod.rocisa, "rocIsa", _FakeRocIsaClass)
+
+    sentinel = object()
+    ok = ductile_backend_mod._validate_solution(
+        problemType=types.SimpleNamespace(state={}),
+        constantParams={},
+        assembler=object(),
+        debugConfig=types.SimpleNamespace(),
+        isaInfoMap={"gfx942": {}},
+        perm={"DepthU": 64},
+        get_kernel_src=False,
+        rocIsaData=sentinel,
+    )
+
+    assert ok is True
+    assert set_calls == [sentinel]
+
+
+def test_validate_solution_skips_rocisa_setdata_when_not_provided(monkeypatch):
+    """When no rocIsaData is passed (e.g. main-process calls), setData must not be touched."""
+    monkeypatch.setattr(
+        ductile_backend_mod,
+        "_generate_single_solution_with_groups",
+        lambda *_a, **_kw: types.SimpleNamespace(),
+    )
+
+    class _OkKW:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        def _initKernel(self, *_a, **_kw):
+            return None
+
+    monkeypatch.setattr(ductile_backend_mod, "KernelWriterAssembly", _OkKW)
+
+    set_calls = []
+
+    class _FakeRocIsaInstance:
+        def setData(self, data):
+            set_calls.append(data)
+
+    class _FakeRocIsaClass:
+        @staticmethod
+        def getInstance():
+            return _FakeRocIsaInstance()
+
+    monkeypatch.setattr(ductile_backend_mod.rocisa, "rocIsa", _FakeRocIsaClass)
+
+    ok = ductile_backend_mod._validate_solution(
+        problemType=types.SimpleNamespace(state={}),
+        constantParams={},
+        assembler=object(),
+        debugConfig=types.SimpleNamespace(),
+        isaInfoMap={"gfx942": {}},
+        perm={"DepthU": 64},
+        get_kernel_src=False,
+    )
+
+    assert ok is True
+    assert set_calls == []
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers (mirrors test_ductile_backend.py helpers)
 # ---------------------------------------------------------------------------
@@ -870,6 +961,73 @@ def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
     backend.run({}, cfg, lambda *a, **kw: (str(csv_path), 0))
 
     assert "group_0" in captured_space_kwargs.get("space", {})
+
+
+# ---------------------------------------------------------------------------
+# rocIsa data propagation for subprocess-safe validation
+# ---------------------------------------------------------------------------
+
+def test_run_captures_and_forwards_rocisa_data_to_validate_fn(monkeypatch, tmp_path):
+    """run() must snapshot the current process's rocIsa data and bind it into the
+    validate_fn partial so SearchSpace can restore it in worker processes."""
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
+
+    captured_valid_fn = {}
+
+    class _CapturingSearchSpace:
+        def __init__(self, space, valid=None, **kwargs):
+            captured_valid_fn["valid"] = valid
+
+    class FakeGA:
+        def __init__(self, *a, **kw):
+            self._evaluate = kw["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _b):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.SearchSpace", _CapturingSearchSpace)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.Selection", _FakeFactory)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.Crossover", _FakeFactory)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.Survival", _FakeFactory)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.Mutation", _FakeMutation)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.Mating", _FakeMating)
+    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
+    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *a, **kw: [types.SimpleNamespace()],
+    )
+
+    sentinel_data = object()
+
+    class _FakeRocIsaInstance:
+        def getData(self):
+            return sentinel_data
+
+    class _FakeRocIsaClass:
+        @staticmethod
+        def getInstance():
+            return _FakeRocIsaInstance()
+
+    monkeypatch.setattr(ductile_backend_mod.rocisa, "rocIsa", _FakeRocIsaClass)
+
+    backend = DuctileBackend()
+    backend.run({}, _make_benchmark_config(tmp_path), lambda *a, **kw: (str(csv_path), 0))
+
+    valid_fn = captured_valid_fn.get("valid")
+    assert isinstance(valid_fn, functools.partial)
+    assert valid_fn.func is ductile_backend_mod._validate_solution
+    assert valid_fn.keywords["rocIsaData"] is sentinel_data
 
 
 # ---------------------------------------------------------------------------
