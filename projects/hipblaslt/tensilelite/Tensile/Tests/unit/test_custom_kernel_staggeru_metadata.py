@@ -70,7 +70,7 @@ _PROBE_KERNEL = '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n.text\ns_endpgm\n'
 
 KERNEL_NAMES = getAllCustomKernelNames()
 
-# Assembling and disassembling all 119 kernels is a few seconds of wall time
+# Assembling and disassembling the custom kernels is a few seconds of wall time
 # spread over a thread pool, so no separate slow marker: this stays in the unit
 # suite where a change to a custom kernel will actually run it.
 MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
@@ -486,26 +486,25 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # by a human rather than joining the exception quietly.
 #
 # The four gfx950 entries got there by editing a staggering kernel's declaration
-# down afterwards.  The seventeen gfx1151 w4a16 entries did not: they were generated
+# down afterwards.  The seven gfx1151 w4a16 entries did not: they were generated
 # with StaggerU 0, and the wrap site is present only because
 # SupportCustomStaggerU emits the runtime path unconditionally.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
+        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
     }
 )
 
@@ -513,7 +512,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 151,
+    "kernels": 143,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -524,7 +523,7 @@ EXPECTED_CENSUS = {
     # Includes the six kernels built outside Tensile (aiter, ck, rocroller,
     # triton, wave), which declare StaggerU: 0 because they do not implement
     # the in-loop wrap at all; the disassembly confirms none of them staggers.
-    "declaredZero": 91,
+    "declaredZero": 83,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }

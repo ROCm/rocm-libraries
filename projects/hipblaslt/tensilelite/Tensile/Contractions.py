@@ -265,6 +265,14 @@ class ProblemType:
         # w4a16 group scale (UseScaleAB="Block"): K-group size and scale element
         # type. Zero / compute type when the mode is off.
         rv.scaleBlockSizeA = d.get('ScaleBlockSizeA', 0)
+        groups = d.get('ScaleBlockSizesA', [])
+        if not isinstance(groups, (list, tuple)):
+            raise ValueError("ScaleBlockSizesA must be a list of supported groups")
+        if groups and (rv.useScaleAB != "Block" or not rv.aType.isInt4()
+                       or any(type(g) is not int or g not in (32, 64, 128) for g in groups)
+                       or rv.scaleBlockSizeA not in groups):
+            raise ValueError("ScaleBlockSizesA requires W4A16 groups containing ScaleBlockSizeA")
+        rv.scaleBlockSizesA = tuple(sorted(set(groups)))
         rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
         rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
         rv.useScaleCD = False
@@ -427,7 +435,12 @@ class ProblemType:
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
             if self.useScaleAB == "Block":
-                predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizeA))
+                if self.scaleBlockSizesA:
+                    predicates.append(ProblemPredicate("Or", value=[
+                        ProblemPredicate("ScaleBlockSizeA", value=g)
+                        for g in self.scaleBlockSizesA]))
+                else:
+                    predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizeA))
                 predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
                 predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))

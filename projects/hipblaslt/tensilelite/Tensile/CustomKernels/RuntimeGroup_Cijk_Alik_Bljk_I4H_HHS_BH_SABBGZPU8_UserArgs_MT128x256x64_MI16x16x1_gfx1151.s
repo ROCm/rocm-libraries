@@ -12,8 +12,8 @@
 .p2align 6
 .amdhsa_kernel RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_next_free_vgpr 164 // vgprs
-  .amdhsa_next_free_sgpr 94 // sgprs
+  .amdhsa_next_free_vgpr 168 // vgprs
+  .amdhsa_next_free_sgpr 97 // sgprs
   .amdhsa_group_segment_fixed_size 55296 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -25,9 +25,9 @@
   .amdhsa_float_denorm_mode_16_64 3
 .end_amdhsa_kernel
 .text
-/* Num VGPR   =164 */
+/* Num VGPR   =168 */
 /* Num AccVGPR=0 */
-/* Num SGPR   =86 */
+/* Num SGPR   =97 */
 .amdgpu_metadata
 ---
 custom.config:
@@ -207,14 +207,16 @@ amdhsa.kernels:
     .kernarg_segment_size:       168
     .max_flat_workgroup_size:    512
     .private_segment_fixed_size: 0
-    .sgpr_count:                 94
+    .sgpr_count:                 97
     .sgpr_spill_count:           0
-    .vgpr_count:                 164
+    .vgpr_count:                 168
     .vgpr_spill_count:           0
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
 RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151:
+s_mov_b32 s94, 0x000f000f
+s_mov_b32 s95, 0x00f000f0
 label_ASM_Start:
 .set vgprMXSBase, 0
 .set vgprValuC, 0
@@ -1538,95 +1540,61 @@ s_addc_u32 s83, s83, 0
 s_setpc_b64 s[82:83]
 label_NoBranch_0:
 s_waitcnt vmcnt(0)
-v_cvt_f32_f16 v162, v[vgprG2LScaleA+0]
-v_and_b32 v163, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-v_lshlrev_b32 v163, 2, v163
-v_bfe_u32 v159, v[vgprG2LScaleZeroA+0], v163, 0x4
-v_cvt_f32_i32 v159, v159
-v_mul_f32 v163, v162, v159
-v_xor_b32 v163, 0x80000000, v163
+v_pack_b32_f16 v162, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_cmp_class_f16 s96, v[vgprG2LScaleA+0], 0x207
+v_cndmask_b32 v162, v162, 0x7e007e00, s96
+v_and_b32 v159, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
+v_lshlrev_b32 v159, 2, v159
+v_bfe_u32 v159, v[vgprG2LScaleZeroA+0], v159, 0x4
+v_lshl_or_b32 v159, v159, 16, v159
+v_lshl_or_b32 v163, v159, 0, 0xe400e400
+v_lshl_or_b32 v160, v159, 4, 0xd400d400
 v_mov_b32 v161, v[vgprG2LA+2+0]
-v_bfe_u32 v159, v161, 0x0, 0x4
-v_bfe_u32 v160, v161, 0x4, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+0], v159, v160
-v_bfe_u32 v159, v161, 0x8, 0x4
-v_bfe_u32 v160, v161, 0xc, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+1], v159, v160
-v_bfe_u32 v159, v161, 0x10, 0x4
-v_bfe_u32 v160, v161, 0x14, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+2], v159, v160
-v_bfe_u32 v159, v161, 0x18, 0x4
-v_bfe_u32 v160, v161, 0x1c, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+3], v159, v160
+v_and_or_b32 v164, v161, s94, 0x64006400
+v_and_or_b32 v165, v161, s95, 0x54005400
+v_lshrrev_b32 v161, 8, v161
+v_and_or_b32 v166, v161, s94, 0x64006400
+v_and_or_b32 v167, v161, s95, 0x54005400
+v_pk_add_f16 v164, v164, v163
+v_pk_add_f16 v165, v165, v160
+v_pk_add_f16 v166, v166, v163
+v_pk_add_f16 v167, v167, v160
+v_pk_fma_f16 v164, v164, v162, 0
+v_pk_fma_f16 v165, v165, v162, 0
+v_pk_fma_f16 v166, v166, v162, 0
+v_pk_fma_f16 v167, v167, v162, 0
+v_perm_b32 v[vgprG2LA+0+0], v165, v164, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v167, v166, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v165, v164, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v167, v166, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
-v_cvt_f32_f16 v162, v[vgprG2LScaleA+1]
-v_and_b32 v163, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-v_lshlrev_b32 v163, 2, v163
-v_bfe_u32 v159, v[vgprG2LScaleZeroA+1], v163, 0x4
-v_cvt_f32_i32 v159, v159
-v_mul_f32 v163, v162, v159
-v_xor_b32 v163, 0x80000000, v163
+v_pack_b32_f16 v162, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_cmp_class_f16 s96, v[vgprG2LScaleA+1], 0x207
+v_cndmask_b32 v162, v162, 0x7e007e00, s96
+v_and_b32 v159, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
+v_lshlrev_b32 v159, 2, v159
+v_bfe_u32 v159, v[vgprG2LScaleZeroA+1], v159, 0x4
+v_lshl_or_b32 v159, v159, 16, v159
+v_lshl_or_b32 v163, v159, 0, 0xe400e400
+v_lshl_or_b32 v160, v159, 4, 0xd400d400
 v_mov_b32 v161, v[vgprG2LA+6+0]
-v_bfe_u32 v159, v161, 0x0, 0x4
-v_bfe_u32 v160, v161, 0x4, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+0], v159, v160
-v_bfe_u32 v159, v161, 0x8, 0x4
-v_bfe_u32 v160, v161, 0xc, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+1], v159, v160
-v_bfe_u32 v159, v161, 0x10, 0x4
-v_bfe_u32 v160, v161, 0x14, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+2], v159, v160
-v_bfe_u32 v159, v161, 0x18, 0x4
-v_bfe_u32 v160, v161, 0x1c, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+3], v159, v160
+v_and_or_b32 v164, v161, s94, 0x64006400
+v_and_or_b32 v165, v161, s95, 0x54005400
+v_lshrrev_b32 v161, 8, v161
+v_and_or_b32 v166, v161, s94, 0x64006400
+v_and_or_b32 v167, v161, s95, 0x54005400
+v_pk_add_f16 v164, v164, v163
+v_pk_add_f16 v165, v165, v160
+v_pk_add_f16 v166, v166, v163
+v_pk_add_f16 v167, v167, v160
+v_pk_fma_f16 v164, v164, v162, 0
+v_pk_fma_f16 v165, v165, v162, 0
+v_pk_fma_f16 v166, v166, v162, 0
+v_pk_fma_f16 v167, v167, v162, 0
+v_perm_b32 v[vgprG2LA+4+0], v165, v164, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v167, v166, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v165, v164, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v167, v166, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:9216
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+4:vgprG2LB+4+3] offset:9216
@@ -1781,96 +1749,62 @@ s_waitcnt lgkmcnt(0)
 s_barrier
 v_wmma_f32_16x16x16_f16 v[vgprValuC+48:vgprValuC+48+7], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+48:vgprValuC+48+7]
 s_waitcnt vmcnt(5)
-v_cvt_f32_f16 v162, v[vgprG2LScaleA+0]
-v_and_b32 v163, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-v_lshlrev_b32 v163, 2, v163
-v_bfe_u32 v159, v[vgprG2LScaleZeroA+0], v163, 0x4
-v_cvt_f32_i32 v159, v159
-v_mul_f32 v163, v162, v159
-v_xor_b32 v163, 0x80000000, v163
+v_pack_b32_f16 v162, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_cmp_class_f16 s96, v[vgprG2LScaleA+0], 0x207
+v_cndmask_b32 v162, v162, 0x7e007e00, s96
+v_and_b32 v159, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
+v_lshlrev_b32 v159, 2, v159
+v_bfe_u32 v159, v[vgprG2LScaleZeroA+0], v159, 0x4
+v_lshl_or_b32 v159, v159, 16, v159
+v_lshl_or_b32 v163, v159, 0, 0xe400e400
+v_lshl_or_b32 v160, v159, 4, 0xd400d400
 v_mov_b32 v161, v[vgprG2LA+2+0]
-v_bfe_u32 v159, v161, 0x0, 0x4
-v_bfe_u32 v160, v161, 0x4, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+0], v159, v160
-v_bfe_u32 v159, v161, 0x8, 0x4
-v_bfe_u32 v160, v161, 0xc, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+1], v159, v160
-v_bfe_u32 v159, v161, 0x10, 0x4
-v_bfe_u32 v160, v161, 0x14, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+2], v159, v160
-v_bfe_u32 v159, v161, 0x18, 0x4
-v_bfe_u32 v160, v161, 0x1c, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+0+3], v159, v160
+v_and_or_b32 v164, v161, s94, 0x64006400
+v_and_or_b32 v165, v161, s95, 0x54005400
+v_lshrrev_b32 v161, 8, v161
+v_and_or_b32 v166, v161, s94, 0x64006400
+v_and_or_b32 v167, v161, s95, 0x54005400
+v_pk_add_f16 v164, v164, v163
+v_pk_add_f16 v165, v165, v160
+v_pk_add_f16 v166, v166, v163
+v_pk_add_f16 v167, v167, v160
+v_pk_fma_f16 v164, v164, v162, 0
+v_pk_fma_f16 v165, v165, v162, 0
+v_pk_fma_f16 v166, v166, v162, 0
+v_pk_fma_f16 v167, v167, v162, 0
+v_perm_b32 v[vgprG2LA+0+0], v165, v164, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v167, v166, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v165, v164, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v167, v166, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
 s_waitcnt vmcnt(4)
-v_cvt_f32_f16 v162, v[vgprG2LScaleA+1]
-v_and_b32 v163, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-v_lshlrev_b32 v163, 2, v163
-v_bfe_u32 v159, v[vgprG2LScaleZeroA+1], v163, 0x4
-v_cvt_f32_i32 v159, v159
-v_mul_f32 v163, v162, v159
-v_xor_b32 v163, 0x80000000, v163
+v_pack_b32_f16 v162, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_cmp_class_f16 s96, v[vgprG2LScaleA+1], 0x207
+v_cndmask_b32 v162, v162, 0x7e007e00, s96
+v_and_b32 v159, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
+v_lshlrev_b32 v159, 2, v159
+v_bfe_u32 v159, v[vgprG2LScaleZeroA+1], v159, 0x4
+v_lshl_or_b32 v159, v159, 16, v159
+v_lshl_or_b32 v163, v159, 0, 0xe400e400
+v_lshl_or_b32 v160, v159, 4, 0xd400d400
 v_mov_b32 v161, v[vgprG2LA+6+0]
-v_bfe_u32 v159, v161, 0x0, 0x4
-v_bfe_u32 v160, v161, 0x4, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+0], v159, v160
-v_bfe_u32 v159, v161, 0x8, 0x4
-v_bfe_u32 v160, v161, 0xc, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+1], v159, v160
-v_bfe_u32 v159, v161, 0x10, 0x4
-v_bfe_u32 v160, v161, 0x14, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+2], v159, v160
-v_bfe_u32 v159, v161, 0x18, 0x4
-v_bfe_u32 v160, v161, 0x1c, 0x4
-v_cvt_f32_i32 v159, v159
-v_cvt_f32_i32 v160, v160
-v_fma_f32 v159, v159, v162, v163
-v_fma_f32 v160, v160, v162, v163
-v_cvt_f16_f32 v159, v159
-v_cvt_f16_f32 v160, v160
-v_pack_b32_f16 v[vgprG2LA+4+3], v159, v160
+v_and_or_b32 v164, v161, s94, 0x64006400
+v_and_or_b32 v165, v161, s95, 0x54005400
+v_lshrrev_b32 v161, 8, v161
+v_and_or_b32 v166, v161, s94, 0x64006400
+v_and_or_b32 v167, v161, s95, 0x54005400
+v_pk_add_f16 v164, v164, v163
+v_pk_add_f16 v165, v165, v160
+v_pk_add_f16 v166, v166, v163
+v_pk_add_f16 v167, v167, v160
+v_pk_fma_f16 v164, v164, v162, 0
+v_pk_fma_f16 v165, v165, v162, 0
+v_pk_fma_f16 v166, v166, v162, 0
+v_pk_fma_f16 v167, v167, v162, 0
+v_perm_b32 v[vgprG2LA+4+0], v165, v164, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v167, v166, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v165, v164, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v167, v166, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:9216
 s_waitcnt vmcnt(3)
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0

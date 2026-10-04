@@ -15,7 +15,7 @@
 .amdhsa_kernel RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 256 // vgprs
-  .amdhsa_next_free_sgpr 88 // sgprs
+  .amdhsa_next_free_sgpr 91 // sgprs
   .amdhsa_group_segment_fixed_size 65024 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -29,7 +29,7 @@
 .text
 /* Num VGPR   =256 */
 /* Num AccVGPR=0 */
-/* Num SGPR   =80 */
+/* Num SGPR   =91 */
 
 /******************************************/
 /* Optimizations and Config:              */
@@ -215,7 +215,7 @@ amdhsa.kernels:
     .kernarg_segment_size:       160
     .max_flat_workgroup_size:    128
     .private_segment_fixed_size: 0
-    .sgpr_count:                 88
+    .sgpr_count:                 91
     .sgpr_spill_count:           0
     .vgpr_count:                 256
     .vgpr_spill_count:           0
@@ -223,6 +223,8 @@ amdhsa.kernels:
 ...
 .end_amdgpu_metadata
 RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151:
+s_mov_b32 s88, 0x000f000f
+s_mov_b32 s89, 0x00f000f0
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/
@@ -1889,161 +1891,89 @@ label_NoBranch_0:
 s_waitcnt vmcnt(0)                                 // wait for global read
 
 /* local write a */
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_mov_b32 v225, v[vgprG2LA+2+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+0+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_mov_b32 v225, v[vgprG2LA+6+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+4+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+2], v[vgprG2LScaleA+2]
+v_mov_b32 v225, v[vgprG2LA+10+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+8+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+8+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+8+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+8+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+3], v[vgprG2LScaleA+3]
+v_mov_b32 v225, v[vgprG2LA+14+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+12+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+12+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+12+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+12+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write b */
@@ -2257,161 +2187,89 @@ ds_load_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0]
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_mov_b32 v225, v[vgprG2LA+2+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+0+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS1
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_mov_b32 v225, v[vgprG2LA+6+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+4+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS1
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+2], v[vgprG2LScaleA+2]
+v_mov_b32 v225, v[vgprG2LA+10+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+8+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+8+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+8+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+8+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS1
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+3], v[vgprG2LScaleA+3]
+v_mov_b32 v225, v[vgprG2LA+14+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+12+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+12+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+12+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+12+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS1
 
 /* local write MXSA */
@@ -2729,161 +2587,89 @@ ds_load_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0]
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_mov_b32 v225, v[vgprG2LA+2+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+0+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_mov_b32 v225, v[vgprG2LA+6+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+4+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+2], v[vgprG2LScaleA+2]
+v_mov_b32 v225, v[vgprG2LA+10+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+8+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+8+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+8+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+8+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_cvt_f32_f16 v226, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_mov_b32 v225, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_i32 v223, v225, 0x0, 0x4                     // w4a16: sign-extend int4 #0
-v_bfe_i32 v224, v225, 0x4, 0x4                     // w4a16: sign-extend int4 #1
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
-v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
-v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 fp16
-v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
-v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
-v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v224, v224                           // w4a16: int4 -> f32
-v_mul_f32 v223, v226, v223                         // w4a16: dequantize
-v_mul_f32 v224, v226, v224                         // w4a16: dequantize
-v_cvt_f16_f32 v223, v223                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v224, v224                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 fp16
+v_pack_b32_f16 v226, v[vgprG2LScaleA+3], v[vgprG2LScaleA+3]
+v_mov_b32 v225, v[vgprG2LA+14+0]
+v_xor_b32 v225, 0x88888888, v225
+v_and_or_b32 v228, v225, s88, 0x64006400
+v_and_or_b32 v229, v225, s89, 0x54005400
+v_lshrrev_b32 v225, 8, v225
+v_and_or_b32 v230, v225, s88, 0x64006400
+v_and_or_b32 v231, v225, s89, 0x54005400
+v_pk_add_f16 v228, v228, 0xe408e408
+v_pk_add_f16 v229, v229, 0xd480d480
+v_pk_add_f16 v230, v230, 0xe408e408
+v_pk_add_f16 v231, v231, 0xd480d480
+v_pk_mul_f16 v228, v228, v226
+v_pk_mul_f16 v229, v229, v226
+v_pk_mul_f16 v230, v230, v226
+v_pk_mul_f16 v231, v231, v226
+v_perm_b32 v[vgprG2LA+12+0], v229, v228, 0x05040100
+v_perm_b32 v[vgprG2LA+12+1], v231, v230, 0x05040100
+v_perm_b32 v[vgprG2LA+12+2], v229, v228, 0x07060302
+v_perm_b32 v[vgprG2LA+12+3], v231, v230, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write MXSA */

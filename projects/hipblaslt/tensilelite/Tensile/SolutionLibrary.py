@@ -534,10 +534,12 @@ class MasterSolutionLibrary:
                 elif problemType.useScaleAB == "Vector":
                     placeholderName += '_SABV'
                 elif problemType.useScaleAB == "Block":
-                    # Matching tables key only on dimensions. Keep block-scale
-                    # variants in separate lazy libraries so identical shapes
-                    # cannot select an entry for another group size or encoding.
-                    placeholderName += ('_SABB' + str(problemType.scaleBlockSizeA)
+                    # Runtime-group kernels share one table; fixed-group kernels
+                    # and different quantization modes still need separate tables.
+                    groups = problemType.scaleBlockSizesA
+                    groupTag = ('G' + 'x'.join(map(str, groups)) if groups
+                                else str(problemType.scaleBlockSizeA))
+                    placeholderName += ('_SABB' + groupTag
                                         + '_ZP' + str(int(problemType.scaleZeroPointA))
                                         + '_' + problemType.int4EncodingA)
                 if problemType.useScaleCD:

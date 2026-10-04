@@ -77,10 +77,10 @@ RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151: ; @RuntimeGroup
 	v_dual_mov_b32 v5, 0 :: v_dual_mov_b32 v6, 0
 	s_and_b32 s18, s2, 0xfffffc
 	s_mov_b32 s2, 0
-	s_mov_b32 s19, 0xf000f
-	s_mov_b32 s20, 0x10001
-	s_mov_b32 s21, 0xf000f0
-	s_mov_b32 s22, 0x100010
+	s_mov_b32 s19, 0x10001
+	s_mov_b32 s20, 0x100010
+	s_mov_b32 s21, 0xf000f
+	s_mov_b32 s22, 0xf000f0
 .LBB0_6:                                ; =>This Inner Loop Header: Depth=1
 	s_lshl_b32 s23, s2, 8
 	v_mov_b32_e32 v22, v5
@@ -207,20 +207,20 @@ RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151: ; @RuntimeGroup
 	v_perm_b32 v27, v29, v27, 0x7060302
 	v_perm_b32 v29, v30, v28, 0x5040100
 	v_perm_b32 v28, v30, v28, 0x7060302
-	v_and_or_b32 v30, v50, s19, 0x64006400
-	v_mad_u32_u24 v43, v35, s20, 0xe400e400
-	v_and_or_b32 v37, v50, s21, 0x54005400
+	v_and_or_b32 v30, v50, s21, 0x64006400
+	v_mad_u32_u24 v43, v35, s19, 0xe400e400
+	v_and_or_b32 v37, v50, s22, 0x54005400
 	v_lshrrev_b32_e32 v42, 8, v50
 	s_waitcnt vmcnt(7)
 	v_lshl_or_b32 v48, v48, 16, v48
-	v_mad_u32_u24 v35, v35, s22, 0xd400d400
+	v_mad_u32_u24 v35, v35, s20, 0xd400d400
 	v_pk_add_f16 v30, v30, v43
-	v_and_or_b32 v45, v51, s19, 0x64006400
-	v_and_or_b32 v52, v42, s19, 0x64006400
-	v_and_or_b32 v42, v42, s21, 0x54005400
+	v_and_or_b32 v45, v51, s21, 0x64006400
+	v_and_or_b32 v52, v42, s21, 0x64006400
+	v_and_or_b32 v42, v42, s22, 0x54005400
 	v_pk_add_f16 v37, v37, v35
 	v_pk_mul_f16 v30, v30, v48
-	v_and_or_b32 v49, v51, s21, 0x54005400
+	v_and_or_b32 v49, v51, s22, 0x54005400
 	v_pk_add_f16 v43, v52, v43
 	s_waitcnt vmcnt(6)
 	v_bfe_u32 v44, v44, v15, 4
@@ -228,69 +228,69 @@ RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151: ; @RuntimeGroup
 	v_dot2acc_f32_f16 v6, v30, v36
 	v_pk_add_f16 v35, v42, v35
 	v_pk_mul_f16 v42, v43, v48
-	v_mad_u32_u24 v36, v44, s20, 0xe400e400
+	v_mad_u32_u24 v36, v44, s19, 0xe400e400
 	v_lshrrev_b32_e32 v50, 8, v51
 	v_dot2acc_f32_f16 v6, v37, v19
 	s_waitcnt vmcnt(5)
 	v_lshl_or_b32 v4, v4, 16, v4
-	v_mad_u32_u24 v19, v44, s22, 0xd400d400
+	v_mad_u32_u24 v19, v44, s20, 0xd400d400
 	v_pk_mul_f16 v35, v35, v48
 	v_pk_add_f16 v37, v45, v36
 	v_dot2acc_f32_f16 v6, v42, v21
-	v_and_or_b32 v42, v50, s19, 0x64006400
+	v_and_or_b32 v42, v50, s21, 0x64006400
 	v_pk_add_f16 v43, v49, v19
-	v_and_or_b32 v51, v46, s19, 0x64006400
+	v_and_or_b32 v51, v46, s21, 0x64006400
 	v_pk_mul_f16 v37, v37, v4
 	v_dot2acc_f32_f16 v6, v35, v20
-	v_and_or_b32 v20, v50, s21, 0x54005400
+	v_and_or_b32 v20, v50, s22, 0x54005400
 	s_waitcnt vmcnt(4)
 	v_bfe_u32 v35, v40, v15, 4
 	v_pk_add_f16 v36, v42, v36
 	v_pk_mul_f16 v40, v43, v4
 	v_dot2acc_f32_f16 v6, v37, v22
 	v_pk_add_f16 v19, v20, v19
-	v_mad_u32_u24 v20, v35, s20, 0xe400e400
+	v_mad_u32_u24 v20, v35, s19, 0xe400e400
 	v_pk_mul_f16 v36, v36, v4
-	v_and_or_b32 v30, v46, s21, 0x54005400
+	v_and_or_b32 v30, v46, s22, 0x54005400
 	v_dot2acc_f32_f16 v6, v40, v23
 	v_lshrrev_b32_e32 v21, 8, v46
 	s_waitcnt vmcnt(3)
 	v_lshl_or_b32 v23, v38, 16, v38
-	v_mad_u32_u24 v35, v35, s22, 0xd400d400
+	v_mad_u32_u24 v35, v35, s20, 0xd400d400
 	v_pk_mul_f16 v4, v19, v4
 	v_pk_add_f16 v19, v51, v20
 	v_dot2acc_f32_f16 v6, v36, v25
-	v_and_or_b32 v36, v21, s19, 0x64006400
+	v_and_or_b32 v36, v21, s21, 0x64006400
 	v_pk_add_f16 v30, v30, v35
-	v_and_or_b32 v22, v47, s19, 0x64006400
+	v_and_or_b32 v22, v47, s21, 0x64006400
 	v_pk_mul_f16 v19, v19, v23
 	v_dot2acc_f32_f16 v6, v4, v24
-	v_and_or_b32 v4, v21, s21, 0x54005400
+	v_and_or_b32 v4, v21, s22, 0x54005400
 	s_waitcnt vmcnt(2)
 	v_bfe_u32 v21, v39, v15, 4
 	v_pk_add_f16 v20, v36, v20
 	v_pk_mul_f16 v24, v30, v23
 	v_dot2acc_f32_f16 v6, v19, v26
 	v_pk_add_f16 v4, v4, v35
-	v_mad_u32_u24 v26, v21, s20, 0xe400e400
+	v_mad_u32_u24 v26, v21, s19, 0xe400e400
 	v_pk_mul_f16 v20, v20, v23
-	v_and_or_b32 v25, v47, s21, 0x54005400
+	v_and_or_b32 v25, v47, s22, 0x54005400
 	v_dot2acc_f32_f16 v6, v24, v27
 	v_lshrrev_b32_e32 v19, 8, v47
 	s_waitcnt vmcnt(1)
 	v_lshl_or_b32 v24, v41, 16, v41
-	v_mad_u32_u24 v21, v21, s22, 0xd400d400
+	v_mad_u32_u24 v21, v21, s20, 0xd400d400
 	v_pk_mul_f16 v4, v4, v23
 	v_pk_add_f16 v22, v22, v26
 	v_dot2acc_f32_f16 v6, v20, v29
 	s_waitcnt vmcnt(0)
 	v_perm_b32 v20, v33, v31, 0x5040100
-	v_and_or_b32 v23, v19, s19, 0x64006400
+	v_and_or_b32 v23, v19, s21, 0x64006400
 	v_pk_add_f16 v25, v25, v21
 	v_pk_mul_f16 v22, v22, v24
 	v_dot2acc_f32_f16 v6, v4, v28
 	v_perm_b32 v4, v33, v31, 0x7060302
-	v_and_or_b32 v19, v19, s21, 0x54005400
+	v_and_or_b32 v19, v19, s22, 0x54005400
 	v_pk_add_f16 v23, v23, v26
 	v_pk_mul_f16 v25, v25, v24
 	v_dot2acc_f32_f16 v6, v22, v20
@@ -325,10 +325,10 @@ RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151: ; @RuntimeGroup
 .LBB0_11:
 	v_mov_b32_e32 v5, 0
 	s_mov_b32 s19, 0
-	s_mov_b32 s20, 0xf000f
-	s_mov_b32 s21, 0x10001
-	s_mov_b32 s22, 0xf000f0
-	s_mov_b32 s23, 0x100010
+	s_mov_b32 s20, 0x10001
+	s_mov_b32 s21, 0x100010
+	s_mov_b32 s22, 0xf000f
+	s_mov_b32 s23, 0xf000f0
 .LBB0_12:                               ; =>This Inner Loop Header: Depth=1
 	v_lshl_or_b32 v4, s18, 8, v7
 	s_add_i32 s19, s19, 1
@@ -366,22 +366,22 @@ RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151: ; @RuntimeGroup
 	s_waitcnt vmcnt(3)
 	v_bfe_u32 v4, v4, v15, 4
 	s_waitcnt vmcnt(2)
-	v_and_or_b32 v22, v20, s20, 0x64006400
-	v_and_or_b32 v24, v20, s22, 0x54005400
+	v_and_or_b32 v22, v20, s22, 0x64006400
+	v_and_or_b32 v24, v20, s23, 0x54005400
 	s_delay_alu instid0(VALU_DEP_3)
-	v_mad_u32_u24 v23, v4, s21, 0xe400e400
+	v_mad_u32_u24 v23, v4, s20, 0xe400e400
 	v_lshrrev_b32_e32 v20, 8, v20
-	v_mad_u32_u24 v4, v4, s23, 0xd400d400
+	v_mad_u32_u24 v4, v4, s21, 0xd400d400
 	s_waitcnt vmcnt(1)
 	v_lshl_or_b32 v21, v21, 16, v21
 	v_pk_add_f16 v22, v22, v23
 	s_waitcnt vmcnt(0)
 	v_perm_b32 v25, v18, v16, 0x5040100
-	v_and_or_b32 v26, v20, s20, 0x64006400
+	v_and_or_b32 v26, v20, s22, 0x64006400
 	v_pk_add_f16 v24, v24, v4
 	v_perm_b32 v16, v18, v16, 0x7060302
 	v_pk_mul_f16 v22, v22, v21
-	v_and_or_b32 v18, v20, s22, 0x54005400
+	v_and_or_b32 v18, v20, s23, 0x54005400
 	v_pk_add_f16 v20, v26, v23
 	v_pk_mul_f16 v23, v24, v21
 	s_delay_alu instid0(VALU_DEP_4) | instskip(SKIP_3) | instid1(VALU_DEP_4)

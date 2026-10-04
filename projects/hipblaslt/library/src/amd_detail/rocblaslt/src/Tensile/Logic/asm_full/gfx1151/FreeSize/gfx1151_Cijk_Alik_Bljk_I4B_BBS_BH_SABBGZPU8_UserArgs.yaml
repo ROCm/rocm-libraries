@@ -237,7 +237,8 @@ ProblemType:
   NumIndicesSummation: 1
   OperationType: GEMM
   OutputAmaxD: false
-  ScaleBlockSizeA: 128
+  ScaleBlockSizeA: 32
+  ScaleBlockSizesA: [32, 64, 128]
   ScaleZeroPointA: true
   SetConstStrideA: []
   SetConstStrideB: []

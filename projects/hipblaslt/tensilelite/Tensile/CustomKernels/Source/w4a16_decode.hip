@@ -4,6 +4,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
+#ifndef W4A16_SYMMETRIC
+#define W4A16_SYMMETRIC 0
+#endif
+
 #ifndef W4A16_RUNTIME_GROUP
 #define W4A16_RUNTIME_GROUP 0
 #endif
@@ -74,6 +78,31 @@ namespace
 
 #endif
 
+    struct GroupParams
+    {
+        unsigned scale, bias0, bias1;
+    };
+
+    __device__ __forceinline__ GroupParams loadGroup(const half* scaleA,
+                                                    const unsigned char* zeroA,
+                                                    unsigned row, unsigned groups,
+                                                    unsigned group)
+    {
+        unsigned scale = __half_as_ushort(scaleA[size_t(row) * groups + group]);
+#if W4A16_SYMMETRIC
+        unsigned zero = 8;
+#elif W4A16_RUNTIME_GROUP
+        const size_t byte = (size_t(row / 8) * groups + group) * 4 + (row % 8) / 2;
+        unsigned zero = (zeroA[byte] >> ((row % 2) * 4)) & 15;
+#else
+        unsigned zero = (reinterpret_cast<const uint32_t*>(zeroA)[size_t(row / 8) * groups + group]
+                         >> ((row % 8) * 4)) & 15;
+#endif
+        zero |= zero << 16;
+        return {scale | (scale << 16), zero | 0xe400e400,
+                (zero << 4) | 0xd400d400};
+    }
+
     template<unsigned Width>
     __device__ float accumulate(const unsigned* __restrict__ a,
                                 const half* __restrict__ b,
@@ -95,27 +124,18 @@ namespace
             using Packed = unsigned __attribute__((ext_vector_type(Width)));
             const Packed packed = __builtin_nontemporal_load(
                 reinterpret_cast<const Packed*>(a + size_t(row) * (lda / 8) + kk / 8));
-#if W4A16_GROUP_SIZE == 128 && !W4A16_RUNTIME_GROUP
-            unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k / 128) + kk / 128]);
-            scale |= scale << 16;
-            unsigned z = (reinterpret_cast<const uint32_t*>(zeroA)[size_t(row / 8) * (k / 128) + kk / 128]
-                          >> ((row % 8) * 4)) & 15;
-            z |= z << 16;
-#endif
+            GroupParams shared{};
+            if constexpr(Width <= 4)
+                shared = loadGroup(scaleA, zeroA, row, k >> groupShift, kk >> groupShift);
             #pragma unroll
             for(unsigned j = 0; j < Width; ++j)
             {
-#if W4A16_GROUP_SIZE != 128 || W4A16_RUNTIME_GROUP
-                // Aligned chunks of at most 32 values fit in every supported group.
-                constexpr bool sharedGroup = Width <= 4;
-                const unsigned group = (kk + (sharedGroup ? 0 : j * 8)) >> groupShift;
-                unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k >> groupShift) + group]);
-                scale |= scale << 16;
-                const size_t zeroByte = (size_t(row / 8) * (k >> groupShift) + group) * 4
-                                        + (row % 8) / 2;
-                unsigned z = (zeroA[zeroByte] >> ((row % 2) * 4)) & 15;
-                z |= z << 16;
-#endif
+                GroupParams params;
+                if constexpr(Width <= 4)
+                    params = shared;
+                else
+                    params = loadGroup(scaleA, zeroA, row, k >> groupShift,
+                                       (kk + j * 8) >> groupShift);
                 // Independent chains hide dot-product latency without moving
                 // scaling past the required FP16 dequantization rounding.
                 float& sum = sums[j % W4A16_ACCUMULATORS];
@@ -141,14 +161,14 @@ namespace
                 // The integer lifts/subtractions are exact; scaling rounds to fp16
                 // before the fp32 dot product, matching the matrix kernel's contract.
                 const unsigned p0 = dequantize((q & 0x000f000f) | 0x64006400,
-                                               z | 0xe400e400, scale);
+                                               params.bias0, params.scale);
                 const unsigned p1 = dequantize((q & 0x00f000f0) | 0x54005400,
-                                               (z << 4) | 0xd400d400, scale);
+                                               params.bias1, params.scale);
                 q >>= 8;
                 const unsigned p2 = dequantize((q & 0x000f000f) | 0x64006400,
-                                               z | 0xe400e400, scale);
+                                               params.bias0, params.scale);
                 const unsigned p3 = dequantize((q & 0x00f000f0) | 0x54005400,
-                                               (z << 4) | 0xd400d400, scale);
+                                               params.bias1, params.scale);
                 sum = dot2(p0, activation.x, sum);
                 sum = dot2(p1, activation.y, sum);
                 sum = dot2(p2, activation.z, sum);

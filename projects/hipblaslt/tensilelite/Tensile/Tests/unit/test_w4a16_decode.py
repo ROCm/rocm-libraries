@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dispatch bounds and argument ABI for specialized and runtime-G decode."""
+"""Dispatch bounds and argument ABI for runtime-group decode."""
 from pathlib import Path
 
 import pytest
@@ -13,8 +13,6 @@ from Tensile.CustomKernels import _readEmbeddedYaml, readCustomKernelConfig
 
 pytestmark = pytest.mark.unit
 
-NAME = "Custom_W4A16_Decode_G{group}{suffix}_UnsignedBias8_gfx1151"
-GENERAL = "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB{group}ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151"
 RUNTIME_NAME = "RuntimeGroup_Decode{suffix}_UnsignedBias8_gfx1151"
 RUNTIME_GENERAL = "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151"
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
@@ -25,11 +23,10 @@ def runtime_name(suffix):
     return RUNTIME_NAME.format(suffix=suffix)
 
 
-@pytest.mark.parametrize("group,suffix", [(32, "_W4"), (32, "_W4_U1_A4"), (32, "_W4_NativePerm")])
-@pytest.mark.parametrize("runtime", [False, True])
-def test_decode_selection_bounds(group, suffix, runtime):
-    name = runtime_name(suffix) if runtime else NAME
-    config = readCustomKernelConfig(name.format(group=group, suffix=suffix), DIRECTORY)
+@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
+def test_decode_selection_bounds(suffix):
+    name = runtime_name(suffix)
+    config = readCustomKernelConfig(name, DIRECTORY)
     equal = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", config["AssertSizeEqual"]))
     positive_k = ProblemPredicate.FromOriginalKeyPair(
         ("AssertSizeGreaterThan", config["AssertSizeGreaterThan"]))
@@ -48,19 +45,18 @@ def test_decode_selection_bounds(group, suffix, runtime):
     assert not support["SupportCustomStaggerU"]
 
 
-@pytest.mark.parametrize("group,suffix", [(32, "_W4"), (32, "_W4_U1_A4"), (32, "_W4_NativePerm")])
-@pytest.mark.parametrize("runtime", [False, True])
-def test_decode_universal_arguments_match_matrix_kernel(group, suffix, runtime):
+@pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
+def test_decode_universal_arguments_match_matrix_kernel(suffix):
     def metadata(name):
         return _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
 
-    name = runtime_name(suffix) if runtime else NAME
-    general_name = RUNTIME_GENERAL if runtime else GENERAL
-    decode, general = metadata(name.format(group=group, suffix=suffix)), metadata(general_name.format(group=group))
+    name = runtime_name(suffix)
+    general_name = RUNTIME_GENERAL
+    decode, general = metadata(name), metadata(general_name)
     # HIP compilation must preserve the universal layout that the existing
     # host library supplies, including unused fields and trailing offsets.
     for key in (".kernarg_segment_size", ".kernarg_segment_align"):
-        if runtime and key == ".kernarg_segment_size":
+        if key == ".kernarg_segment_size":
             # HIP omits the final four padding bytes supplied by the host.
             assert decode[key] == 164
             assert (decode[key] + 7) // 8 * 8 == general[key]
@@ -69,10 +65,9 @@ def test_decode_universal_arguments_match_matrix_kernel(group, suffix, runtime):
     assert [(arg[".offset"], arg[".size"]) for arg in decode[".args"]] == [
         (arg[".offset"], arg[".size"]) for arg in general[".args"]
     ]
-    if runtime:
-        assert decode[".args"][-1][".offset"] == 160
-        assert decode[".args"][-1][".size"] == 4
-    config = readCustomKernelConfig(name.format(group=group, suffix=suffix), DIRECTORY)
+    assert decode[".args"][-1][".offset"] == 160
+    assert decode[".args"][-1][".size"] == 4
+    config = readCustomKernelConfig(name, DIRECTORY)
     x, y, z = config["WorkGroup"]
     assert x * y * z == decode[".max_flat_workgroup_size"]
 
@@ -84,7 +79,7 @@ def test_q27b_equality_dispatch_keys():
 
     path = DIRECTORY.parents[2] / (
         "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
-        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_Q27B.yaml"
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml"
     )
     logic = yaml.safe_load(path.read_text())
     solutions = {s["SolutionIndex"]: SimpleNamespace(index=s["SolutionIndex"])
@@ -125,7 +120,7 @@ def test_q27b_equality_dispatch_keys():
                 assert solution["MacroTile0"] == 128
                 assert solution["MacroTile1"] == 256
                 assert solution["WorkGroupMapping"] == 1
-    assert logic["ProblemType"]["ScaleBlockSizeA"] == 32
+    assert logic["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
     assert logic["ProblemType"]["Int4EncodingA"] == "UnsignedBias8"
 
 
@@ -143,7 +138,7 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
 
     path = DIRECTORY.parents[2] / (
         "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
-        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_Q27B.yaml")
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml")
     original = yaml.safe_load(path.read_text())
     merged = None
     for group, zero_point, encoding in [
@@ -153,6 +148,7 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
         (32, False, "UnsignedBias8"),
     ]:
         logic = deepcopy(original)
+        logic["ProblemType"]["ScaleBlockSizesA"] = []
         logic["ProblemType"].update(
             ScaleBlockSizeA=group, ScaleZeroPointA=zero_point, Int4EncodingA=encoding)
         prepareLibraryLogicDict(logic)
@@ -172,21 +168,126 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
 
 
 @pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-@pytest.mark.parametrize("runtime", [False, True])
-def test_decode_custom_launch_preserves_universal_abi(suffix, runtime):
+def test_decode_custom_launch_preserves_universal_abi(suffix):
     from Tensile.CustomKernels import getCustomKernelConfig
 
-    name = runtime_name(suffix) if runtime else NAME.format(group=32, suffix=suffix)
-    general_name = RUNTIME_GENERAL if runtime else GENERAL.format(group=32)
+    name = runtime_name(suffix)
+    general_name = RUNTIME_GENERAL
     decode = getCustomKernelConfig(name, {}, DIRECTORY)["CustomKernel"]
     general = getCustomKernelConfig(general_name, {}, DIRECTORY)["CustomKernel"]
     general_args = [dict(a) for a in general["args"]]
-    if runtime:
-        assert general_args[-1].pop("padding") == 4
+    assert general_args[-1].pop("padding") == 4
     assert decode["args"] == general_args
     tail = [a["semantic"] for a in decode["args"]][24:]
     assert tail == ["AddressScaleZeroA", "BatchOffsetD", "BatchOffsetC",
-                    "BatchOffsetA", "BatchOffsetB"] + (["ScaleBlockSizeA"] if runtime else [])
+                    "BatchOffsetA", "BatchOffsetB"] + ["ScaleBlockSizeA"]
     assert all(a["type"] == "int64" for a in decode["args"][25:29])
     assert decode["grid"] == ["TilesXYBatchGSU", "One", "One"]
     assert decode["macrotile"] == [4, 1, 256]
+
+
+def test_runtime_group_predicate_accepts_only_declared_groups():
+    from Tensile.Contractions import ProblemType
+    from Tensile.SolutionStructs import ProblemType as OriginalProblemType
+
+    config = dict(DataType=4, DataTypeA=24, DataTypeB=4, DestDataType=4,
+                  ComputeDataType=0, HighPrecisionAccumulate=True,
+                  UseScaleAB="Block", ScaleBlockSizeA=32,
+                  ScaleBlockSizesA=[128, 32, 64], ScaleZeroPointA=True,
+                  Int4EncodingA="UnsignedBias8")
+    problem = ProblemType.FromOriginalState(OriginalProblemType(config, False))
+    predicates = [state(p) for p in problem.predicates(includeType=True)]
+    group = next(p for p in predicates if p["type"] == "Or")
+    assert group == {"type": "Or", "value": [
+        {"type": "ScaleBlockSizeA", "value": g} for g in (32, 64, 128)]}
+    assert not any(p["type"] == "ScaleBlockSizeA" for p in predicates)
+    assert {p["type"]: p.get("value") for p in predicates}["ScaleZeroPointA"] is True
+    assert {p["type"]: p.get("value") for p in predicates}["Int4EncodingA"] == "UnsignedBias8"
+
+    config["ScaleBlockSizesA"] = []
+    fixed = ProblemType.FromOriginalState(OriginalProblemType(config, False))
+    assert {"type": "ScaleBlockSizeA", "value": 32} in [
+        state(p) for p in fixed.predicates(includeType=True)]
+
+
+def test_runtime_group_lazy_library_shares_one_group_partition():
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from Tensile.LibraryIO import prepareLibraryLogicDict
+    from Tensile.SolutionLibrary import MasterSolutionLibrary
+
+    class IndexOnlySolution:
+        @staticmethod
+        def FromSolutionStruct(solution, *_args):
+            return SimpleNamespace(index=solution["SolutionIndex"])
+
+    path = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml")
+    logic = yaml.safe_load(path.read_text())
+    prepareLibraryLogicDict(logic)
+    library, _ = MasterSolutionLibrary.FromOriginalState(
+        logic, logic["Solutions"], False, False, False, None, {}, True,
+        solutionClass=IndexOnlySolution)
+    assert len(library.lazyLibraries) == 1
+    assert "SABBG32x64x128_ZP1_UnsignedBias8" in next(iter(library.lazyLibraries))
+
+
+@pytest.mark.parametrize("groups", [[16, 32], [64, 128], ["32"], "32", None])
+def test_invalid_runtime_groups_are_rejected(groups):
+    from Tensile.Contractions import ProblemType
+    from Tensile.SolutionStructs import ProblemType as OriginalProblemType
+
+    problem = OriginalProblemType(dict(
+        DataType=4, DataTypeA=24, DataTypeB=4, DestDataType=4,
+        ComputeDataType=0, HighPrecisionAccumulate=True,
+        UseScaleAB="Block", ScaleBlockSizeA=32), False)
+    problem["ScaleBlockSizesA"] = groups
+    with pytest.raises(ValueError, match="ScaleBlockSizesA"):
+        ProblemType.FromOriginalState(problem)
+
+
+def test_multi_group_logic_requires_runtime_argument(monkeypatch):
+    from Tensile import LibraryIO
+
+    path = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml")
+    logic = yaml.safe_load(path.read_text())
+    get_config = LibraryIO.getCustomKernelConfig
+
+    def without_group_argument(*args, **kwargs):
+        config = get_config(*args, **kwargs)
+        config["CustomKernel"]["args"] = [
+            a for a in config["CustomKernel"]["args"]
+            if a.get("semantic") != "ScaleBlockSizeA"]
+        return config
+
+    monkeypatch.setattr(LibraryIO, "getCustomKernelConfig", without_group_argument)
+    with pytest.raises(ValueError, match="runtime group-size argument"):
+        LibraryIO.parseLibraryLogicData(logic, str(path), None, False, False,
+                                       False, {}, True)
+
+
+def test_unsigned_symmetric_logic_copies_asymmetric_selection():
+    logic_dir = DIRECTORY.parents[2] / (
+        "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality")
+    asymmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml").read_text())
+    symmetric = yaml.safe_load((logic_dir / "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_Q27B.yaml").read_text())
+    assert symmetric["ExactLogic"] == asymmetric["ExactLogic"]
+    assert symmetric["ProblemType"]["ScaleZeroPointA"] is False
+    assert symmetric["ProblemType"]["Int4EncodingA"] == "UnsignedBias8"
+    assert symmetric["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
+    for solution in symmetric["Solutions"]:
+        name = solution["CustomKernelName"]
+        metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
+        original_name = name.replace("SABBGU8", "SABBGZPU8").replace("_Symmetric_", "_")
+        original = _readEmbeddedYaml(original_name, DIRECTORY)["amdhsa.kernels"][0]
+        assert [(arg[".offset"], arg[".size"]) for arg in metadata[".args"]] == [
+            (arg[".offset"], arg[".size"]) for arg in original[".args"]]
+        assert metadata[".args"][-1][".offset"] == 160
+        source = (DIRECTORY / (name + ".s")).read_text()
+        if "Decode" not in name:
+            assert "buffer_load_d16_u8" not in source
+            assert "v_pk_fma_f16" not in source
+            assert "0xe408e408" in source and "0xd480d480" in source

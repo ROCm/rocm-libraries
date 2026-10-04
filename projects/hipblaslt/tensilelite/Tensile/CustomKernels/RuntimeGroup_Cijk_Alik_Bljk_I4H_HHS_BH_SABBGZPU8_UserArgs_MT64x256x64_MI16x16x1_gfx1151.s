@@ -17,7 +17,7 @@
 .amdhsa_kernel RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 191 // vgprs
-  .amdhsa_next_free_sgpr 98 // sgprs
+  .amdhsa_next_free_sgpr 101 // sgprs
   .amdhsa_group_segment_fixed_size 46080 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -31,7 +31,7 @@
 .text
 /* Num VGPR   =191 */
 /* Num AccVGPR=0 */
-/* Num SGPR   =90 */
+/* Num SGPR   =101 */
 .amdgpu_metadata
 ---
 custom.config:
@@ -211,7 +211,7 @@ amdhsa.kernels:
     .kernarg_segment_size:       168
     .max_flat_workgroup_size:    256
     .private_segment_fixed_size: 0
-    .sgpr_count:                 98
+    .sgpr_count:                 101
     .sgpr_spill_count:           0
     .vgpr_count:                 191
     .vgpr_spill_count:           0
@@ -219,6 +219,8 @@ amdhsa.kernels:
 ...
 .end_amdgpu_metadata
 RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151:
+s_mov_b32 s98, 0x000f000f
+s_mov_b32 s99, 0x00f000f0
 label_ASM_Start:
 .set vgprMXSBase, 0
 .set vgprValuC, 0
@@ -1571,59 +1573,61 @@ s_addc_u32 s87, s87, 0
 s_setpc_b64 s[86:87]
 label_NoBranch_0:
 s_waitcnt vmcnt(0)
-v_and_b32 v182, 0xffff, v[vgprG2LScaleA+0]
-v_lshl_or_b32 v182, v182, 16, v182
+v_pack_b32_f16 v182, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_cmp_class_f16 s100, v[vgprG2LScaleA+0], 0x207
+v_cndmask_b32 v182, v182, 0x7e007e00, s100
 v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
 v_lshlrev_b32 v179, 2, v179
 v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v179, 0x4
 v_lshl_or_b32 v179, v179, 16, v179
-v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
-v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
+v_lshl_or_b32 v183, v179, 0, 0xe400e400
+v_lshl_or_b32 v180, v179, 4, 0xd400d400
 v_mov_b32 v181, v[vgprG2LA+2+0]
-v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_lshrrev_b32 v181, 0x8, v181
-v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_pk_add_f16 v185, v185, v183
-v_pk_add_f16 v186, v186, v184
-v_pk_add_f16 v187, v187, v183
-v_pk_add_f16 v188, v188, v184
-v_pk_mul_f16 v185, v185, v182
-v_pk_mul_f16 v186, v186, v182
-v_pk_mul_f16 v187, v187, v182
-v_pk_mul_f16 v188, v188, v182
-v_perm_b32 v[vgprG2LA+0+0], v186, v185, 0x05040100
-v_perm_b32 v[vgprG2LA+0+1], v188, v187, 0x05040100
-v_perm_b32 v[vgprG2LA+0+2], v186, v185, 0x07060302
-v_perm_b32 v[vgprG2LA+0+3], v188, v187, 0x07060302
+v_and_or_b32 v184, v181, s98, 0x64006400
+v_and_or_b32 v185, v181, s99, 0x54005400
+v_lshrrev_b32 v181, 8, v181
+v_and_or_b32 v186, v181, s98, 0x64006400
+v_and_or_b32 v187, v181, s99, 0x54005400
+v_pk_add_f16 v184, v184, v183
+v_pk_add_f16 v185, v185, v180
+v_pk_add_f16 v186, v186, v183
+v_pk_add_f16 v187, v187, v180
+v_pk_fma_f16 v184, v184, v182, 0
+v_pk_fma_f16 v185, v185, v182, 0
+v_pk_fma_f16 v186, v186, v182, 0
+v_pk_fma_f16 v187, v187, v182, 0
+v_perm_b32 v[vgprG2LA+0+0], v185, v184, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v187, v186, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v185, v184, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v187, v186, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
-v_and_b32 v182, 0xffff, v[vgprG2LScaleA+1]
-v_lshl_or_b32 v182, v182, 16, v182
+v_pack_b32_f16 v182, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_cmp_class_f16 s100, v[vgprG2LScaleA+1], 0x207
+v_cndmask_b32 v182, v182, 0x7e007e00, s100
 v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
 v_lshlrev_b32 v179, 2, v179
 v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v179, 0x4
 v_lshl_or_b32 v179, v179, 16, v179
-v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
-v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
+v_lshl_or_b32 v183, v179, 0, 0xe400e400
+v_lshl_or_b32 v180, v179, 4, 0xd400d400
 v_mov_b32 v181, v[vgprG2LA+6+0]
-v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_lshrrev_b32 v181, 0x8, v181
-v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_pk_add_f16 v185, v185, v183
-v_pk_add_f16 v186, v186, v184
-v_pk_add_f16 v187, v187, v183
-v_pk_add_f16 v188, v188, v184
-v_pk_mul_f16 v185, v185, v182
-v_pk_mul_f16 v186, v186, v182
-v_pk_mul_f16 v187, v187, v182
-v_pk_mul_f16 v188, v188, v182
-v_perm_b32 v[vgprG2LA+4+0], v186, v185, 0x05040100
-v_perm_b32 v[vgprG2LA+4+1], v188, v187, 0x05040100
-v_perm_b32 v[vgprG2LA+4+2], v186, v185, 0x07060302
-v_perm_b32 v[vgprG2LA+4+3], v188, v187, 0x07060302
+v_and_or_b32 v184, v181, s98, 0x64006400
+v_and_or_b32 v185, v181, s99, 0x54005400
+v_lshrrev_b32 v181, 8, v181
+v_and_or_b32 v186, v181, s98, 0x64006400
+v_and_or_b32 v187, v181, s99, 0x54005400
+v_pk_add_f16 v184, v184, v183
+v_pk_add_f16 v185, v185, v180
+v_pk_add_f16 v186, v186, v183
+v_pk_add_f16 v187, v187, v180
+v_pk_fma_f16 v184, v184, v182, 0
+v_pk_fma_f16 v185, v185, v182, 0
+v_pk_fma_f16 v186, v186, v182, 0
+v_pk_fma_f16 v187, v187, v182, 0
+v_perm_b32 v[vgprG2LA+4+0], v185, v184, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v187, v186, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v185, v184, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v187, v186, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:4608
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+4:vgprG2LB+4+3] offset:4608
@@ -1784,60 +1788,62 @@ s_waitcnt lgkmcnt(0)
 s_barrier
 v_wmma_f32_16x16x16_f16 v[vgprValuC+48:vgprValuC+48+7], v[vgprValuB_X0_I0+24+0+0:vgprValuB_X0_I0+24+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+48:vgprValuC+48+7]
 s_waitcnt vmcnt(9)
-v_and_b32 v182, 0xffff, v[vgprG2LScaleA+0]
-v_lshl_or_b32 v182, v182, 16, v182
+v_pack_b32_f16 v182, v[vgprG2LScaleA+0], v[vgprG2LScaleA+0]
+v_cmp_class_f16 s100, v[vgprG2LScaleA+0], 0x207
+v_cndmask_b32 v182, v182, 0x7e007e00, s100
 v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
 v_lshlrev_b32 v179, 2, v179
 v_bfe_u32 v179, v[vgprG2LScaleZeroA+0], v179, 0x4
 v_lshl_or_b32 v179, v179, 16, v179
-v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
-v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
+v_lshl_or_b32 v183, v179, 0, 0xe400e400
+v_lshl_or_b32 v180, v179, 4, 0xd400d400
 v_mov_b32 v181, v[vgprG2LA+2+0]
-v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_lshrrev_b32 v181, 0x8, v181
-v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_pk_add_f16 v185, v185, v183
-v_pk_add_f16 v186, v186, v184
-v_pk_add_f16 v187, v187, v183
-v_pk_add_f16 v188, v188, v184
-v_pk_mul_f16 v185, v185, v182
-v_pk_mul_f16 v186, v186, v182
-v_pk_mul_f16 v187, v187, v182
-v_pk_mul_f16 v188, v188, v182
-v_perm_b32 v[vgprG2LA+0+0], v186, v185, 0x05040100
-v_perm_b32 v[vgprG2LA+0+1], v188, v187, 0x05040100
-v_perm_b32 v[vgprG2LA+0+2], v186, v185, 0x07060302
-v_perm_b32 v[vgprG2LA+0+3], v188, v187, 0x07060302
+v_and_or_b32 v184, v181, s98, 0x64006400
+v_and_or_b32 v185, v181, s99, 0x54005400
+v_lshrrev_b32 v181, 8, v181
+v_and_or_b32 v186, v181, s98, 0x64006400
+v_and_or_b32 v187, v181, s99, 0x54005400
+v_pk_add_f16 v184, v184, v183
+v_pk_add_f16 v185, v185, v180
+v_pk_add_f16 v186, v186, v183
+v_pk_add_f16 v187, v187, v180
+v_pk_fma_f16 v184, v184, v182, 0
+v_pk_fma_f16 v185, v185, v182, 0
+v_pk_fma_f16 v186, v186, v182, 0
+v_pk_fma_f16 v187, v187, v182, 0
+v_perm_b32 v[vgprG2LA+0+0], v185, v184, 0x05040100
+v_perm_b32 v[vgprG2LA+0+1], v187, v186, 0x05040100
+v_perm_b32 v[vgprG2LA+0+2], v185, v184, 0x07060302
+v_perm_b32 v[vgprG2LA+0+3], v187, v186, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0
 s_waitcnt vmcnt(8)
-v_and_b32 v182, 0xffff, v[vgprG2LScaleA+1]
-v_lshl_or_b32 v182, v182, 16, v182
+v_pack_b32_f16 v182, v[vgprG2LScaleA+1], v[vgprG2LScaleA+1]
+v_cmp_class_f16 s100, v[vgprG2LScaleA+1], 0x207
+v_cndmask_b32 v182, v182, 0x7e007e00, s100
 v_and_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
 v_lshlrev_b32 v179, 2, v179
 v_bfe_u32 v179, v[vgprG2LScaleZeroA+1], v179, 0x4
 v_lshl_or_b32 v179, v179, 16, v179
-v_lshl_or_b32 v183, v179, 0, s[sgprScaleAPkMagic+2]
-v_lshl_or_b32 v184, v179, 4, s[sgprScaleAPkMagic+3]
+v_lshl_or_b32 v183, v179, 0, 0xe400e400
+v_lshl_or_b32 v180, v179, 4, 0xd400d400
 v_mov_b32 v181, v[vgprG2LA+6+0]
-v_and_or_b32 v185, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v186, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_lshrrev_b32 v181, 0x8, v181
-v_and_or_b32 v187, v181, 0xf000f, s[sgprScaleAPkMagic+0]
-v_and_or_b32 v188, v181, 0xf000f0, s[sgprScaleAPkMagic+1]
-v_pk_add_f16 v185, v185, v183
-v_pk_add_f16 v186, v186, v184
-v_pk_add_f16 v187, v187, v183
-v_pk_add_f16 v188, v188, v184
-v_pk_mul_f16 v185, v185, v182
-v_pk_mul_f16 v186, v186, v182
-v_pk_mul_f16 v187, v187, v182
-v_pk_mul_f16 v188, v188, v182
-v_perm_b32 v[vgprG2LA+4+0], v186, v185, 0x05040100
-v_perm_b32 v[vgprG2LA+4+1], v188, v187, 0x05040100
-v_perm_b32 v[vgprG2LA+4+2], v186, v185, 0x07060302
-v_perm_b32 v[vgprG2LA+4+3], v188, v187, 0x07060302
+v_and_or_b32 v184, v181, s98, 0x64006400
+v_and_or_b32 v185, v181, s99, 0x54005400
+v_lshrrev_b32 v181, 8, v181
+v_and_or_b32 v186, v181, s98, 0x64006400
+v_and_or_b32 v187, v181, s99, 0x54005400
+v_pk_add_f16 v184, v184, v183
+v_pk_add_f16 v185, v185, v180
+v_pk_add_f16 v186, v186, v183
+v_pk_add_f16 v187, v187, v180
+v_pk_fma_f16 v184, v184, v182, 0
+v_pk_fma_f16 v185, v185, v182, 0
+v_pk_fma_f16 v186, v186, v182, 0
+v_pk_fma_f16 v187, v187, v182, 0
+v_perm_b32 v[vgprG2LA+4+0], v185, v184, 0x05040100
+v_perm_b32 v[vgprG2LA+4+1], v187, v186, 0x05040100
+v_perm_b32 v[vgprG2LA+4+2], v185, v184, 0x07060302
+v_perm_b32 v[vgprG2LA+4+3], v187, v186, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:4608
 s_waitcnt vmcnt(7)
 ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+0:vgprG2LB+0+3] offset:0

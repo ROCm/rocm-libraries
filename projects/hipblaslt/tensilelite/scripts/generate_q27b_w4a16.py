@@ -24,8 +24,9 @@ def main():
     root = Path(__file__).resolve().parents[1]
     source = root.parent / (
         "library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx1151/Equality/"
-        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_Q27B.yaml")
+        "gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml")
     logic = yaml.safe_load(source.read_text())
+    logic["ProblemType"]["ScaleBlockSizesA"] = []  # Generated reference remains G32.
     rows = [row for row in logic["ExactLogic"] if row[0][1] == 2048]
     indices = sorted({row[1][0] for row in rows})
     remap = {old: new for new, old in enumerate(indices)}

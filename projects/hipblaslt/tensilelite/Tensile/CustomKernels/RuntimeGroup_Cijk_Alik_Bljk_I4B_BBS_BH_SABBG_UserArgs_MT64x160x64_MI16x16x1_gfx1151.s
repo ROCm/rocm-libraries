@@ -1901,13 +1901,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -1918,13 +1916,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -1935,13 +1931,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -1952,13 +1946,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -1974,13 +1966,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -1991,13 +1981,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2008,13 +1996,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2025,13 +2011,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -2047,13 +2031,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2064,13 +2046,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2081,13 +2061,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2098,13 +2076,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -2120,13 +2096,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2137,13 +2111,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2154,13 +2126,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2171,13 +2141,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write b */
@@ -2405,13 +2373,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2422,13 +2388,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2439,13 +2403,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2456,13 +2418,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS1
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -2478,13 +2438,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2495,13 +2453,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2512,13 +2468,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2529,13 +2483,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS1
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -2551,13 +2503,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2568,13 +2518,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2585,13 +2533,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2602,13 +2548,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS1
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -2624,13 +2568,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2641,13 +2583,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2658,13 +2598,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -2675,13 +2613,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS1
 
 /* local write MXSA */
@@ -3013,13 +2949,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3030,13 +2964,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3047,13 +2979,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3064,13 +2994,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+0+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -3086,13 +3014,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3103,13 +3029,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3120,13 +3044,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3137,13 +3059,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+4+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -3159,13 +3079,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3176,13 +3094,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3193,13 +3109,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3210,13 +3124,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v223, v224         // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+8+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
 v_mov_b32 v228, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
 v_mov_b32 v229, 0x7fff0000                         // w4a16: bf16 Nan pattern
@@ -3232,13 +3144,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+0], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x8, 0x4                     // w4a16: sign-extend int4 #2
 v_bfe_i32 v224, v225, 0xc, 0x4                     // w4a16: sign-extend int4 #3
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3249,13 +3159,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+1], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x10, 0x4                    // w4a16: sign-extend int4 #4
 v_bfe_i32 v224, v225, 0x14, 0x4                    // w4a16: sign-extend int4 #5
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3266,13 +3174,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+2], v224, v223, 0x07060302
 v_bfe_i32 v223, v225, 0x18, 0x4                    // w4a16: sign-extend int4 #6
 v_bfe_i32 v224, v225, 0x1c, 0x4                    // w4a16: sign-extend int4 #7
 v_cvt_f32_i32 v223, v223                           // w4a16: int4 -> f32
@@ -3283,13 +3189,11 @@ v_cmp_u_f32 s8, v223, v223                         // w4a16: check Nan
 v_bfe_u32 v227, v223, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v223, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v223, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v223, 16, v223                       // w4a16: f32 -> bf16
 v_cmp_u_f32 s8, v224, v224                         // w4a16: check Nan
 v_bfe_u32 v227, v224, 16, 1                        // w4a16: lsb of the bf16 mantissa
 v_add3_u32 v227, v224, v227, v228                  // w4a16: add lsb + rounding bias
 v_cndmask_b32 v224, v227, v229, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v224, 16, v224                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v223, v224        // w4a16: pack 2 bf16
+v_perm_b32 v[vgprG2LA+12+3], v224, v223, 0x07060302
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write MXSA */

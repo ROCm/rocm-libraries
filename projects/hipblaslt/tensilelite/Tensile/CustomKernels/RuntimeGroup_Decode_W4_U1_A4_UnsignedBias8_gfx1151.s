@@ -53,8 +53,8 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	v_lshlrev_b32_e32 v14, 2, v6
 	v_dual_mov_b32 v3, 0 :: v_dual_lshlrev_b32 v16, 3, v0
 	v_mad_u64_u32 v[4:5], null, s18, v4, 0
-	s_mov_b32 s19, 0xf000f0
-	s_mov_b32 s20, 0x100010
+	s_mov_b32 s19, 0xf000f
+	s_mov_b32 s20, 0xf000f0
 	s_delay_alu instid0(TRANS32_DEP_1) | instskip(SKIP_1) | instid1(SALU_CYCLE_3)
 	v_readfirstlane_b32 s15, v2
 	s_mul_f32 s15, s15, 0x4f7ffffe
@@ -68,13 +68,13 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	v_mul_hi_u32 v2, v1, s15
 	v_mad_u64_u32 v[7:8], null, s17, v1, 0
 	s_mov_b32 s15, 0
-	s_mov_b32 s17, 0xf000f
+	s_mov_b32 s17, 0x10001
 	v_mul_lo_u32 v2, v2, s14
 	v_lshlrev_b64 v[12:13], 2, v[7:8]
 	v_add_co_u32 v7, s18, s10, v9
 	s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_3) | instid1(VALU_DEP_1)
 	v_add_co_ci_u32_e64 v8, null, s11, 0, s18
-	s_mov_b32 s18, 0x10001
+	s_mov_b32 s18, 0x100010
 	v_and_b32_e32 v9, 4, v14
 	v_sub_nc_u32_e32 v2, v1, v2
 	v_subrev_nc_u32_e32 v15, s14, v2
@@ -132,8 +132,8 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	v_mov_b16_e32 v22.l, v16.h
 	v_and_b32_e32 v16, 0xffff, v17
 	s_waitcnt vmcnt(2)
-	v_and_or_b32 v24, v2, s17, 0x64006400
-	v_and_or_b32 v25, v2, s19, 0x54005400
+	v_and_or_b32 v24, v2, s19, 0x64006400
+	v_and_or_b32 v25, v2, s20, 0x54005400
 	v_lshl_or_b32 v23, v18, 16, v23
 	v_and_or_b32 v18, 0xffff0000, v18, v22
 	v_mov_b16_e32 v22.l, v17.h
@@ -144,7 +144,7 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	v_lshl_or_b32 v21, v21, 16, v21
 	v_lshl_or_b32 v16, v19, 16, v16
 	v_and_or_b32 v19, 0xffff0000, v19, v22
-	v_mad_u32_u24 v22, v20, s18, 0xe400e400
+	v_mad_u32_u24 v22, v20, s17, 0xe400e400
 	;;#ASMSTART
 	v_pk_add_f16 v26, v24, v22
 	v_pk_mul_f16 v26, v26, v21
@@ -152,7 +152,7 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	;;#ASMSTART
 	v_dot2_f32_f16 v15, v26, v23, v15
 	;;#ASMEND
-	v_mad_u32_u24 v20, v20, s20, 0xd400d400
+	v_mad_u32_u24 v20, v20, s18, 0xd400d400
 	;;#ASMSTART
 	v_pk_add_f16 v24, v25, v20
 	v_pk_mul_f16 v24, v24, v21
@@ -160,7 +160,7 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	;;#ASMSTART
 	v_dot2_f32_f16 v15, v24, v18, v15
 	;;#ASMEND
-	v_and_or_b32 v17, v2, s17, 0x64006400
+	v_and_or_b32 v17, v2, s19, 0x64006400
 	;;#ASMSTART
 	v_pk_add_f16 v25, v17, v22
 	v_pk_mul_f16 v25, v25, v21
@@ -168,7 +168,7 @@ RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151: ; @RuntimeGroup_Decode_W4_U1
 	;;#ASMSTART
 	v_dot2_f32_f16 v15, v25, v16, v15
 	;;#ASMEND
-	v_and_or_b32 v2, v2, s19, 0x54005400
+	v_and_or_b32 v2, v2, s20, 0x54005400
 	;;#ASMSTART
 	v_pk_add_f16 v17, v2, v20
 	v_pk_mul_f16 v17, v17, v21

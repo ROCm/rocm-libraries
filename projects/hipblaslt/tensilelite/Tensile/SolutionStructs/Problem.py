@@ -492,6 +492,7 @@ _defaultProblemType = {
     # widening, so it shares it -- and so needs no parameter of its own.
     # ScaleZeroPointA below makes it asymmetric.
     "ScaleBlockSizeA": 0,  # 0 = off, else the K-group size (32, 64 or 128)
+    "ScaleBlockSizesA": [],  # Accepted groups for a custom runtime-group kernel.
     # Asymmetric w4a16: a signed int4 zero-point per group, packed two per byte,
     # in a second region of the same allocation. The kernel computes
     # (q - z) * s instead of q * s.
