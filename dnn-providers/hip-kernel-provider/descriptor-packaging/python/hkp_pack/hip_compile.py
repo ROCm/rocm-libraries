@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -63,8 +64,10 @@ def resolve_descriptor_file(source_root, rel_dir, name, label, where=None):
     fallback would fire exactly when the descriptor-local file is missing, so a
     typo in the name would stop being an error and instead bind silently to a
     same-named file elsewhere in the tree. Sharing one file between sibling
-    folders stays expressible by saying so: `"../shared/Kernel.cpp"`. The
-    resolved path must stay inside the root.
+    folders stays expressible by saying so: `"../shared/Kernel.cpp"`. `..`
+    segments collapse lexically before symlinks are followed, so a name means
+    the same file on every platform. The resolved path must stay inside the
+    root.
 
     Missing file -> '<label> not found'; a path leaving the root -> '<label>
     escapes the source root'; a name the OS cannot resolve (NUL byte, over-long
@@ -74,7 +77,7 @@ def resolve_descriptor_file(source_root, rel_dir, name, label, where=None):
     prefix = f"{where}: " if where else ""
     root = Path(source_root).resolve()
     try:
-        path = (root / rel_dir / name).resolve()
+        path = Path(os.path.normpath(root / rel_dir / name)).resolve()
         is_file = path.is_file()
     except (ValueError, OSError) as exc:
         raise HkpPackError(

@@ -431,6 +431,25 @@ def test_every_spelling_of_one_file_has_one_identity(
 
 
 @pytest.mark.quick
+def test_parent_segment_collapses_before_a_symlink_is_followed(
+    tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir
+):
+    """`link/../X` names `X` beside `link` on every platform, not beside its target."""
+
+    def set_file(doc, template):
+        template["kernel_source"] = _hsaco_source(f"link/../{CO_NAME}")
+
+    root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_file)
+    (root / "solo" / "sub" / "inner").mkdir(parents=True)
+    (root / "solo" / "link").symlink_to(root / "solo" / "sub" / "inner")
+
+    _run(root, tmp_path, rocm_kpack_dir)
+
+    shipped = _read(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
+    assert shipped["kernelDescriptors"][0]["provenance"]["file"] == f"solo/{CO_NAME}"
+
+
+@pytest.mark.quick
 def test_symlink_leaving_the_root_is_refused(
     tmp_path, empty_arch_fixture, hsaco_fixture_dir
 ):
