@@ -39,6 +39,22 @@ if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--gdn-batch",
+        action="store",
+        type=int,
+        default=None,
+        help="run GDN all-candidate numeric coverage for one batch",
+    )
+    parser.addoption(
+        "--gdn-spec-id",
+        action="store",
+        default=None,
+        help="run GDN all-candidate numeric coverage for one stable spec ID",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _restore_attention_arch_state():
     """Undo any write to the process-wide arch memo and its derived cache.
