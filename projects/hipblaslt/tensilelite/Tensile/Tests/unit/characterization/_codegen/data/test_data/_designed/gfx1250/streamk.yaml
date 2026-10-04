@@ -23,11 +23,11 @@
 #   - WavefrontSize: 32
 #   - StreamK=[3] only (mode 4 and 5 have keepsConstantsInSgpr=True, disabling
 #     isStreamKConstantsToVgprEnabled; StreamKAtomic=1 requires SGEMM not MX)
-#   - StreamKXCCMapping=[0] (XCCMapping=3 overflows SGPRs on gfx1250)
+#   - PersistentXCCMapping=[0] (XCCMapping=3 overflows SGPRs on gfx1250)
 #   - isStreamKConstantsToVgprEnabled=True for gfx1250 (ISA=(12,5,0)) only for mode 3
 #
 # StreamK family sweep:
-#   StreamK=[3] x StreamKAtomic=[0] x StreamKXCCMapping=[0]
+#   StreamK=[3] x StreamKAtomic=[0] x PersistentXCCMapping=[0]
 #   => 1 valid combo (modes 4 and 5 suppress isStreamKConstantsToVgprEnabled)
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -100,9 +100,10 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
-        - StreamKXCCMapping: [0]
+        - PersistentXCCMapping: [0]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

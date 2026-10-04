@@ -15,7 +15,9 @@
 // pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
 // and whether a partials workspace is reserved.
 
+#include <array>
 #include <cstdlib>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <limits>
@@ -368,7 +370,7 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     auto d = solution.computeStreamKDecisions(problem, device);
 
@@ -383,6 +385,132 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
     EXPECT_EQ(d.numQueues, 0u) << "static SK3 mock device has no analytical work-queue count";
 }
 
+namespace
+{
+    struct StreamKArgumentCase
+    {
+        const char* name;
+        int mode;
+        bool dynamic;
+        bool parallel;
+        std::array<uint32_t, 6> scheduling;
+    };
+
+    class StreamKArgumentLayoutTest
+        : public ::testing::TestWithParam<std::tuple<int, StreamKArgumentCase>>
+    {
+    };
+}
+
+TEST_P(StreamKArgumentLayoutTest, PacksPartialWorkIntoKernelInvocation)
+{
+    auto const& [outerVersion, test] = GetParam();
+    AnalyticalEnv env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, test.mode);
+    solution.kernelName = "generated_streamk_argument_contract";
+    solution.customKernel.name = solution.kernelName;
+    solution.customKernel.generated = true;
+    solution.sizeMapping.globalSplitU = 0;
+    solution.sizeMapping.globalAccumulation = 0;
+    solution.sizeMapping.workGroupMapping = 1;
+    solution.sizeMapping.workGroupMappingXCC = 1;
+    solution.internalArgsSupport.version = outerVersion;
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    solution.internalArgsSupport.useUniversalArgs = true;
+
+    // Tree: 1056 tiles, eight K iterations each, grid 64. The two-tile
+    // algorithm assigns 96 tiles to StreamK, giving each WG 12 K iterations.
+    // Parallel: 64 tiles, 64 K iterations each, grid 256: four splits of 16.
+    auto problem = test.parallel ? makeGemmProblem(256, 4096, 4096)
+                                 : makeGemmProblem(4096, 4224, 512);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    problem.setParams().setStreamKTileSchedulingMode(test.dynamic ? 1 : 0);
+    env.device.persistentFixedGrid = test.parallel ? 256 : 64;
+    env.device.persistentDynamicGrid = test.parallel
+        ? static_cast<int>(origami::grid_selection_t::k_split_aware) : 0;
+    env.device.skFullTiles = 1;
+    // Dynamic: split 32 of the 1056 tiles into three items (3, 3, 2
+    // iterations). This requires 1120 work items, including actual partials.
+    env.device.skTiles = 32;
+    env.device.skSplit = 3;
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel());
+
+    auto launch = solution.resolvePersistentSettings(problem, env.device);
+    ASSERT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::StreamK);
+    ASSERT_EQ(launch.reduction, test.parallel ? origami::reduction_t::parallel
+                                              : origami::reduction_t::tree);
+    ASSERT_EQ(launch.effectiveWorkAssignment, test.dynamic ? WorkAssignment::DynamicWorkQueue
+                                                          : WorkAssignment::StaticGrid);
+    ASSERT_EQ(launch.grid, test.parallel ? 256u : 64u);
+    ASSERT_GT(launch.workspaceBytes, 0u);
+
+    std::array<uint32_t, 4> workspace{}, flags{};
+    ContractionInputs inputs;
+    inputs.alpha = 1.0f;
+    inputs.beta = 0.0f;
+    inputs.ws = workspace.data();
+    inputs.Synchronizer = flags.data();
+    auto invocation = solution.generateSingleCall<true>(
+        problem, inputs, env.device, launch, GSUSettings{});
+    auto const& args = invocation.args;
+    EXPECT_EQ(invocation.numWorkGroups.x, test.parallel ? 256u : 64u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(KernelArguments::const_iterator(args, "PersistentGrid"), args.end());
+
+    // Check the actual six transmitted words, not a recomputed launch summary.
+    // Division by eight/64 uses multiply-high constants 2^29/2^26, shift zero.
+    const char* firstName = test.mode == 3 ? "itersPerTile" : "ItersPerTile";
+    auto first = KernelArguments::const_iterator(args, firstName);
+    ASSERT_NE(first, args.end());
+    auto start = static_cast<uint8_t const*>((*first).first);
+    auto startOffset = start - static_cast<uint8_t const*>(args.data());
+    ASSERT_GE(args.size(), startOffset + sizeof(test.scheduling));
+    std::array<uint32_t, 6> packed{};
+    std::memcpy(packed.data(), start, sizeof(packed));
+    EXPECT_EQ(packed, test.scheduling);
+
+    auto last = KernelArguments::const_iterator(args, test.dynamic ? "SKGrid" : "skTiles");
+    ASSERT_NE(last, args.end());
+    EXPECT_EQ(static_cast<uint8_t const*>((*last).first) - start, 20);
+    if(outerVersion == 3)
+    {
+        auto alpha = KernelArguments::const_iterator(args, "alpha");
+        ASSERT_NE(alpha, args.end());
+        EXPECT_EQ(static_cast<uint8_t const*>((*alpha).first) - start, 24);
+    }
+    for(auto name : {"ws", "Flags"})
+    {
+        auto field = KernelArguments::const_iterator(args, name);
+        ASSERT_NE(field, args.end()) << name;
+        ASSERT_EQ((*field).second, sizeof(void*)) << name;
+        void* pointer = nullptr;
+        std::memcpy(&pointer, (*field).first, sizeof(pointer));
+        void* expected = std::string(name) == "ws" ? inputs.ws
+                       : test.parallel ? nullptr : inputs.Synchronizer;
+        EXPECT_EQ(pointer, expected) << name;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StreamKModesAndOuterVersions, StreamKArgumentLayoutTest,
+    ::testing::Combine(
+        ::testing::Values(0, 1, 2, 3),
+        ::testing::Values(
+            StreamKArgumentCase{"StaticTree", 3, false, false, {8, 0x20000000, 0, 12, 64, 96}},
+            StreamKArgumentCase{"StaticParallel", 3, false, true, {64, 0x04000000, 0, 16, 256, 4}},
+            StreamKArgumentCase{"Dynamic", 4, true, false, {8, 1120, 32, 3, 3, 64}},
+            StreamKArgumentCase{"HybridStaticTree", 5, false, false, {8, 0x20000000, 0, 12, 64, 96}},
+            StreamKArgumentCase{"HybridStaticParallel", 5, false, true, {64, 0x04000000, 0, 16, 256, 4}},
+            StreamKArgumentCase{"HybridDynamic", 5, true, false, {8, 1120, 0x40000020, 3, 3, 64}})),
+    [](::testing::TestParamInfo<StreamKArgumentLayoutTest::ParamType> const& info) {
+        return "Outer" + std::to_string(std::get<0>(info.param)) + "_"
+             + std::get<1>(info.param).name;
+    });
+
 // ---------------------------------------------------------------------------
 // Force-DP-only (SK3): every tile stays data-parallel. skTiles==0, no partials,
 // workspace==0, dpOnly reported and sourced from the compile-time PARAM.
@@ -395,7 +523,7 @@ TEST(PersistentLaunchSummaryTest, DataParallelHasNoReductionOrWorkspace)
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     auto launch = solution.resolvePersistentSettings(problem, device);
     EXPECT_EQ(launch.grid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(launch.grid, launch.selectedGrid);
@@ -483,7 +611,7 @@ TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
 TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspaceFallback)
 {
     AnalyticalEnv env;
-    env.device.skFixedGrid = 64;
+    env.device.persistentFixedGrid = 64;
     ContractionSolution dataParallel;
     initStreamKSolution(dataParallel, 3);
     dataParallel.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
@@ -537,7 +665,7 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     auto d = solution.computeStreamKDecisions(problem, device);
 
@@ -565,7 +693,7 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsAndDivisible_NoWorkspace)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     auto d = solution.computeStreamKDecisions(problem, device);
 
@@ -591,7 +719,7 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     device.skTiles       = 256; // override: number of split stream-k tiles
     device.skSplit       = 4; // override: k-split factor per tile
 
@@ -785,11 +913,11 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryNaWorkQueueWhenNotDynamic)
 }
 
 // ---------------------------------------------------------------------------
-// DataParallel/StaticGrid uses one workgroup per output tile when spatial
-// cluster peers require multicast. The canonical resolver exposes the selected
-// grid and the clamped launch grid, with no reduction or partial workspace.
+// DataParallel/StaticGrid spatial clusters walk whole Cs x Ck tile blocks, so
+// the launch grid is the selected grid in whole clusters, with no reduction or
+// partial workspace.
 // ---------------------------------------------------------------------------
-TEST(PersistentLaunchSummaryTest, ClusterDataParallelClampsGridToTiles)
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelGridIsWholeClusters)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -797,18 +925,156 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelClampsGridToTiles)
     solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
     auto problem = makeGemmProblem(4096, 4224, 512);
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     auto launch = solution.resolvePersistentSettings(problem, device);
-    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_FALSE(launch.clusterGridClamp);
     EXPECT_EQ(launch.selectedGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(launch.totalTiles, 32u * 33u);
-    EXPECT_EQ(launch.grid, launch.totalTiles);
+    EXPECT_EQ(launch.grid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(launch.reduction, origami::reduction_t::none);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
 }
 
 // ---------------------------------------------------------------------------
-// The clamp requires whole-tile processing and spatial cluster peers. An
+// The selected grid rounds down to whole clusters, keeps at least one cluster,
+// and never exceeds one cluster per tile block (16 x 17 blocks of 2 x 2 tiles).
+// ---------------------------------------------------------------------------
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelGridRoundsToClustersAndBlocks)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.persistentDynamicGrid = 0;
+    const std::vector<std::pair<int, size_t>> cases = {{30, 28u}, {1, 4u}, {5000, 16u * 17u * 4u}};
+    for(auto [fixedGrid, expectedGrid] : cases)
+    {
+        device.persistentFixedGrid = fixedGrid;
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.grid, expectedGrid) << "fixed grid " << fixedGrid;
+        EXPECT_FALSE(launch.clusterGridClamp);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrefetchAcrossPersistent issues the next tile's multicast loads while cluster
+// partners may still read LDS, so it keeps one cluster per tile block.
+// ---------------------------------------------------------------------------
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelPrefetchAcrossPersistentUsesOneBlockPerCluster)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    solution.sizeMapping.prefetchAcrossPersistent = 1;
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.persistentDynamicGrid = 0;
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, 16u * 17u * 4u);
+}
+
+// Padded peers count toward the kernel's 32-bit scheduling bound even when the
+// actual tile count fits. No matrix storage is allocated for these host checks.
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelRejectsPaddedTileCountOverflow)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.persistentDynamicGrid = 0;
+    device.persistentFixedGrid = 4;
+
+    for(bool prefetch : {false, true})
+    {
+        SCOPED_TRACE(prefetch);
+        solution.sizeMapping.prefetchAcrossPersistent = prefetch;
+        // 65535 x 65535 real tiles become 65536 x 65536 padded tiles.
+        auto overflow = makeGemmProblem(65535u * 128u, 65535u * 128u, 64);
+        ASSERT_LT(overflow.getNumTiles(solution.sizeMapping, 1),
+                  std::numeric_limits<uint32_t>::max());
+        EXPECT_THROW(solution.resolvePersistentSettings(overflow, device), std::runtime_error);
+        auto fitting = makeGemmProblem(65534u * 128u, 65535u * 128u, 64);
+        EXPECT_NO_THROW(solution.resolvePersistentSettings(fitting, device));
+
+        // One real tile per batch still consumes a complete four-peer block.
+        auto batched = makeBatchedGemmProblem(128, 128, 64, size_t{1} << 30);
+        EXPECT_THROW(solution.resolvePersistentSettings(batched, device), std::runtime_error);
+    }
+}
+
+// Check the hardware dimensions and packed stride independently of each other:
+// comparing generated and custom calls alone would miss a shared mapping error.
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterRanks)
+{
+    for(auto cluster : {TensileLite::dim3(2, 1, 1), TensileLite::dim3(2, 2, 1),
+                        TensileLite::dim3(2, 4, 1)})
+    for(bool prefetch : {false, true})
+    for(int selected : {1, 13, 1000})
+    {
+        SCOPED_TRACE(::testing::Message() << cluster.x << 'x' << cluster.y
+                     << " prefetch=" << prefetch << " selected=" << selected);
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+        solution.sizeMapping.clusterDim = cluster;
+        solution.sizeMapping.prefetchAcrossPersistent = prefetch;
+        solution.sizeMapping.globalSplitU = 0;
+        solution.sizeMapping.workGroupMapping = 1;
+        solution.sizeMapping.workGroupMappingXCC = 1;
+        solution.internalArgsSupport.version = 3;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 1;
+        solution.internalArgsSupport.useUniversalArgs = true;
+        solution.customKernel.name = "cluster_data_parallel_probe";
+        solution.customKernel.generated = true;
+        solution.customKernel.macrotile = TensileLite::dim3(128, 128, 64);
+        solution.customKernel.threads = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.grid = {CustomGridSize::PersistentGrid,
+                                      CustomGridSize::One, CustomGridSize::One};
+        solution.customKernel.args = {
+            {CustomArgType::uint32, CustomArgSemantic::ItersPerTile},
+            {CustomArgType::uint32, CustomArgSemantic::PersistentGrid}};
+        // 5 x 3 real tiles in each of three batches: both spatial edges pad.
+        auto problem = makeBatchedGemmProblem(513, 257, 129, 3);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+        device.persistentDynamicGrid = 0;
+        device.persistentFixedGrid = selected;
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        const size_t blockCount = cluster.y == 1 ? 27 : cluster.y == 2 ? 18 : 9;
+        const size_t clusterSize = cluster.x * cluster.y;
+        const size_t clusters = prefetch ? blockCount
+            : std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
+        ASSERT_EQ(launch.grid, clusters * clusterSize);
+        ASSERT_EQ(launch.totalTiles, 45u);
+        ContractionInputs inputs;
+        inputs.alpha = 1.0f;
+        inputs.beta = 0.0f;
+        auto generated = solution.generateSingleCall<true>(
+            problem, inputs, device, launch, GSUSettings{});
+        auto custom = solution.generateCustomCall<true>(problem, inputs, device, launch);
+        for(auto const* invocation : {&generated, &custom})
+        {
+            EXPECT_EQ(invocation->numWorkGroups.x, clusters * cluster.x);
+            EXPECT_EQ(invocation->numWorkGroups.y, cluster.y);
+            EXPECT_EQ(invocation->numWorkGroups.z, 1u);
+            auto arg = KernelArguments::const_iterator(invocation->args, "PersistentGrid");
+            ASSERT_NE(arg, invocation->args.end());
+            ASSERT_EQ((*arg).second, sizeof(uint32_t));
+            uint32_t packedGrid = 0;
+            std::memcpy(&packedGrid, (*arg).first, sizeof(packedGrid));
+            EXPECT_EQ(packedGrid, clusters * clusterSize);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cluster grids require whole-tile processing and spatial cluster peers. An
 // unsupported policy pair is rejected; partial StreamK and K-only clusters
 // retain their selected grid.
 // ---------------------------------------------------------------------------
@@ -817,7 +1083,7 @@ TEST(PersistentLaunchSummaryTest, ClusterClampRequiresWholeTilesAndSpatialPeers)
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     ContractionSolution invalid;
     initStreamKSolution(invalid, 4);
     invalid.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
@@ -848,7 +1114,7 @@ TEST(PersistentLaunchSummaryTest, DataParallelSummaryUsesCanonicalFields)
 {
     auto problem = makeGemmProblem(4096, 4224, 512);
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
     for(bool clustered : {false, true})
     {
         ContractionSolution solution;
@@ -865,15 +1131,16 @@ TEST(PersistentLaunchSummaryTest, DataParallelSummaryUsesCanonicalFields)
         EXPECT_NE(text.find("PersistentGrid=" + std::to_string(launch.grid)), std::string::npos);
         EXPECT_EQ(text.find("StreamK"), std::string::npos);
         EXPECT_EQ(text.find("forceDPOnly"), std::string::npos);
-        EXPECT_EQ(launch.clusterGridClamp, clustered);
+        EXPECT_FALSE(launch.clusterGridClamp);
     }
 }
 
 // ---------------------------------------------------------------------------
-// A fixed-grid override selects 32 workgroups, then the spatial cluster clamp
-// sets the launch grid to the tile count. The summary exposes both values.
+// A fixed-grid override selects 32 workgroups, which is already a whole number
+// of 2 x 2 clusters, so the spatial cluster launches it as is. The summary
+// exposes both values.
 // ---------------------------------------------------------------------------
-TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
+TEST(PersistentLaunchSummaryTest, SpatialClusterKeepsWholeClusterFixedGrid)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -881,12 +1148,12 @@ TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
     solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
     auto problem = makeGemmProblem(4096, 4224, 512);
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
-    device.skFixedGrid = 32;
+    device.persistentDynamicGrid = 0;
+    device.persistentFixedGrid = 32;
     auto launch = solution.resolvePersistentSettings(problem, device);
     EXPECT_EQ(launch.selectedGrid, 32u);
-    EXPECT_TRUE(launch.clusterGridClamp);
-    EXPECT_EQ(launch.grid, launch.totalTiles);
+    EXPECT_FALSE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, 32u);
     std::ostringstream output;
     solution.printPersistentLaunchSummary(output, problem, launch);
     const auto text = output.str();
@@ -898,7 +1165,7 @@ TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
 // The parallel (split-K data-parallel) reduction path.
 //
 // The other StreamK tests above run tree-reduction launches. getSKReduction()
-// delegates to origami's select_reduction() whenever the device's skDynamicGrid is
+// delegates to origami's select_reduction() whenever the device's persistentDynamicGrid is
 // k_split_aware (== 6, the AMDGPU default), and select_reduction returns parallel
 // only on the narrow band "tiles < cuCount && itersPerTile >= 64 &&
 // tiles <= cuCount/4". 256x4096x4096 with a 128x128x64 macro tile lands exactly
@@ -992,7 +1259,7 @@ TEST(StreamKLaunchSummaryTest, GeneratedKernelNameKeepsOrigamiReduction)
     AnalyticalEnv       env;
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
-    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    env.device.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
 
     // This shape selects parallel reduction on the 256-CU analytical device.
     auto problem = makeGemmProblem(256, 4096, 4096);
@@ -1066,7 +1333,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
 
     // Hold the grid fixed to test the fit boundary itself: without this
     // override the grid selector can choose a smaller split that still fits.
-    env.device.skFixedGrid = d.finalGrid;
+    env.device.persistentFixedGrid = d.finalGrid;
     problem.setWorkspaceSize(expected - 1);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
     const auto starved = solution.computeStreamKDecisions(problem, env.device);
@@ -1127,7 +1394,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations
             problem.setAmaxD(rocisa::DataType::Float, true);
             problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
             const size_t tiles = 2 * batch;
-            env.device.skFixedGrid = tiles * 4;
+            env.device.persistentFixedGrid = tiles * 4;
             const auto decisions = solution.computeStreamKDecisions(problem, env.device);
             ASSERT_EQ(decisions.reduction, origami::reduction_t::parallel);
             ASSERT_EQ(decisions.finalGrid, tiles * 4);
@@ -1172,7 +1439,7 @@ TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesCustomMetadata)
     problem.setUseGradient(true);
     problem.setBias(rocisa::DataType::Float, 128, 0, true, ContractionProblemGemm::TENSOR::A);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-    env.device.skFixedGrid = 8 * 4;
+    env.device.persistentFixedGrid = 8 * 4;
     ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
 
     // Handwritten kernels use custom metadata; generated kernels use sizeMapping.
@@ -1357,8 +1624,8 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
 // Neither test above can reach that: origami applies the same workspace predicate
 // during grid selection, so a zero-workspace parallel scenario is already sitting on
 // grid == tiles by the time the guard runs, and the guard's grid = tiles assignment is
-// a no-op even when it fires. skFixedGrid bypasses origami's selection entirely
-// (getSKGridImpl takes the user-override branch before it consults skDynamicGrid), so
+// a no-op even when it fires. persistentFixedGrid bypasses origami's selection entirely
+// (getSKGridImpl takes the user-override branch before it consults persistentDynamicGrid), so
 // a fixed grid of 2*tiles keeps the split factor at 2 -- which
 // streamKReconcileReduction accepts -- while the workspace stays at zero. That is the
 // one shape where the guard sees parallel, computes a non-zero partials size, finds it
@@ -1381,7 +1648,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelFixedGridWorkspaceDpFallbackFires)
     // 2 * tiles, so the split factor is exactly 2 -- the smallest value parallel
     // reduction can express, and enough for streamKReconcileReduction to leave it
     // alone.
-    env.device.skFixedGrid = 128;
+    env.device.persistentFixedGrid = 128;
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
@@ -1493,7 +1760,7 @@ TEST(StreamKLaunchSummaryTest, LaunchSummaryDebugBitIsOffByDefault)
         auto problem = makeGemmProblem(4096, 4224, 512);
         problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
         auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-        device.skDynamicGrid = 0;
+        device.persistentDynamicGrid = 0;
 
         std::ostringstream    captured;
         std::streambuf* const savedCerr = std::cerr.rdbuf(captured.rdbuf());
@@ -1534,7 +1801,7 @@ TEST(StreamKLaunchSummaryTest, LaunchSummaryDebugBitIsOffByDefault)
 //
 // The clamp sets grid = tiles, so tiles % grid == 0 and the later workspace-DP
 // fallback cannot fire and steal the attribution -- asserted below rather than
-// assumed. A plain mock AMDGPU with skDynamicGrid = 0 is used so the pre-clamp grid
+// assumed. A plain mock AMDGPU with persistentDynamicGrid = 0 is used so the pre-clamp grid
 // is exactly the CU count rather than a performance-model output.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
@@ -1547,7 +1814,7 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
+    device.persistentDynamicGrid = 0;
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
@@ -1622,13 +1889,13 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
 //
 // fixedGridUsed is otherwise only exercised by
 // ClusterDpClampWinsAttributionOverFixedGrid, where the override deliberately
-// LOSES to a later clamp. Here it is the last clamp standing: SK3, skFixedGrid
+// LOSES to a later clamp. Here it is the last clamp standing: SK3, persistentFixedGrid
 // set, clusterDim {1, 1, 1} (so no multicast clamp), K small enough that the tree
-// bounds are nowhere near, and skFixedGrid chosen to divide tiles so the
+// bounds are nowhere near, and persistentFixedGrid chosen to divide tiles so the
 // workspace-DP fallback has nothing to reserve and cannot steal the attribution.
 //
 // The subtlety this test exists to pin: the selected grid is captured AFTER the
-// skFixedGrid override is applied, so selectedGrid == finalGrid == 32 and the
+// persistentFixedGrid override is applied, so selectedGrid == finalGrid == 32 and the
 // printed "changedBy = fixedGrid" is NOT derived from selected != final. The
 // evidence that the override did something is that the launch grid is 32 rather
 // than the CU count the same solution and problem pick without it -- asserted via
@@ -1646,8 +1913,8 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
-    device.skFixedGrid   = 32;
+    device.persistentDynamicGrid = 0;
+    device.persistentFixedGrid   = 32;
 
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
@@ -1655,7 +1922,7 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     auto d = solution.computeStreamKDecisions(problem, device);
 
     // Anti-vacuity: the override actually ran.
-    ASSERT_TRUE(d.fixedGridUsed) << "scenario must actually take the skFixedGrid override";
+    ASSERT_TRUE(d.fixedGridUsed) << "scenario must actually take the persistentFixedGrid override";
     EXPECT_FALSE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.tiles, 1056u);
@@ -1699,12 +1966,12 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     EXPECT_NE(line.find("clusterDPMulticast = no"), std::string::npos);
 
     // Baseline: same solution and problem, no override. This is the evidence that 32
-    // came from skFixedGrid -- without it the launch uses the CU count.
+    // came from persistentFixedGrid -- without it the launch uses the CU count.
     ContractionSolution baseline;
     baseline.kernelName = "test_streamk_no_fixed_grid";
     initStreamKSolution(baseline, 3);
     auto baseDevice          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    baseDevice.skDynamicGrid = 0; // skFixedGrid stays 0
+    baseDevice.persistentDynamicGrid = 0; // persistentFixedGrid stays 0
 
     auto db = baseline.computeStreamKDecisions(problem, baseDevice);
     EXPECT_FALSE(db.fixedGridUsed);

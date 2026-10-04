@@ -246,6 +246,16 @@ class TestValidation:
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_cluster_barrier=False)) is False
 
+    def test_reject_space_filling_algo(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(SpaceFillingAlgo=[1]), False, _isa_map()) is False
+
+    def test_reject_reuse_across_persistent(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            _mc_state(ReuseAcrossPersistent=1), False, _isa_map()) is False
+
 
 class TestTDMInstValidation:
     """The tightened TDMInst check: StreamKMulticast requires TDMInst == 3 (the
@@ -282,11 +292,10 @@ class TestMulticastGate:
         st = _mc_state(Multicast=True)
         assert streamKMulticast(st)
 
-    def test_prefetch_handshake_inert_without_multicast(self):
+    def test_next_tile_arrive_inert_without_cluster(self):
         from Tensile.Components.WorkAssignment import StaticGrid
-        assignment = StaticGrid()
-        mod = assignment.persistentMulticastProloguePrefetchHandshake(
-            writer=None, kernel=_mc_state(Multicast=False))
+        mod = StaticGrid().persistentClusterNextTileArrive(
+            writer=None, kernel=_mc_state(ClusterDim=[1, 1]))
         items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
         assert list(items) == []
 
@@ -302,6 +311,39 @@ class TestEmit:
         from config_harness import emit_kernels_from_config
         return emit_kernels_from_config(cfg, limit=8, arch=_ARCH,
                                         cluster_dim=_CK1_CLUSTER)
+
+    @pytest.mark.parametrize("pgr", [1, 2])
+    def test_shadow_init_zero_iterations_consume_cluster_arrive(self, tmp_path, pgr):
+        # K < DepthU (or alpha == 0) skips the initial TDM load. Shadow init
+        # still initializes C before exiting the prefetch region, so that skip
+        # edge must consume the cluster arrive before branching past the load.
+        from config_harness import (
+            assert_assembles, assert_real_gfx1250_kernels,
+            derive_states, emit_kernels_from_config,
+        )
+
+        cfg = _write_variant(tmp_path, "shadow.yaml", fork_overrides={
+            "ForceDisableShadowInit": [False], "ClusterDim": [[2, 2]],
+            "PrefetchGlobalRead": [pgr],
+        })
+        states = derive_states(cfg, arch=_ARCH, limit_solutions=1)
+        assert len(states) == 1
+        assert not states[0]["ForceDisableShadowInit"]
+        assert states[0]["PrefetchGlobalRead"] == pgr
+        results = emit_kernels_from_config(cfg, limit=1, arch=_ARCH)
+        assert_real_gfx1250_kernels(results)
+        for base, src, _err in results:
+            assert_assembles(src, base)
+            first_load = src.index("tensor_load_to_lds")
+            skip_load = src.index("s_cbranch_scc1 label_ShadowInitStart")
+            prefetch_guard = src[:skip_load]
+            assert "label_PersistentMC_SkipZeroIterClusterWait" in prefetch_guard, (
+                "zero-iteration shadow-init edge bypasses the first-load cluster wait"
+            )
+            guard = prefetch_guard.rsplit("s_cbranch_scc0 label_PersistentMC_SkipZeroIterClusterWait", 1)
+            assert len(guard) == 2
+            assert guard[1].count("s_barrier_wait -3") == 1
+            assert skip_load < first_load
 
     def test_broadcast_mask_value(self):
         """maskB = (1<<Cs)-1 = 0xf for Cs=4; maskA = self bit (shift of 0x1)."""

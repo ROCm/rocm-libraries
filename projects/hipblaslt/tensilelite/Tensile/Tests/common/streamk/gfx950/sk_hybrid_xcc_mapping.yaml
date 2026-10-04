@@ -17,7 +17,7 @@ GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   MaxWorkspaceSize: 134217728
-  StreamKHybridMode: [0, 1]
+  HybridAssignmentPolicy: [Default, DynamicWorkQueue]
 
 BenchmarkProblems:
   - - OperationType: GEMM

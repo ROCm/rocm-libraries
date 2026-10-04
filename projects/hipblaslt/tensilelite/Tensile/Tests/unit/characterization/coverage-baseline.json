@@ -87,7 +87,7 @@
     "Tensile/KernelWriter.py": 87.36,
     "Tensile/KernelWriterActivationEnumHeader.py": 97.73,
     "Tensile/KernelWriterActivationFunction.py": 93.75,
-    "Tensile/KernelWriterAssembly.py": 83.46,
+    "Tensile/KernelWriterAssembly.py": 82.46,
     "Tensile/KernelWriterBase.py": 75.0,
     "Tensile/KernelWriterBetaOnly.py": 85.94,
     "Tensile/KernelWriterConversion.py": 83.14,

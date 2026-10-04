@@ -108,7 +108,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -139,7 +140,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -164,7 +166,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -187,7 +190,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -240,7 +244,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -268,7 +273,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -294,7 +300,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -318,7 +325,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -368,7 +376,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -396,7 +405,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -422,7 +432,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -446,7 +457,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -497,7 +509,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -525,7 +538,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -551,7 +565,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -575,7 +590,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
         - SourceSwap: [true]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -65,6 +65,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMetadata: [-1]
         - LDSTrInst: [False]
         - TDMInst: [3]
+        - TDMSplit: [False, True]
         - StaggerU: [0]
         - ScheduleIterAlg: [0, 4]
         - PrefetchGlobalRead: [2]
@@ -428,7 +429,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -502,7 +503,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -576,7 +577,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -621,6 +622,8 @@ BenchmarkProblems:
           - Exact: [32, 32, 1, 64]
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 192]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [1024, 768, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
@@ -716,7 +719,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]

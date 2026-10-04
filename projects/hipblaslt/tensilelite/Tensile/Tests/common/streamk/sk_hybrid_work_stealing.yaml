@@ -20,11 +20,11 @@ GlobalParameters:
   EnqueuesPerSync: 4
   # Variable per-WG delay drains queues unevenly so the next-neighbor steal fires under contention.
   SleepPercent: 50
-  # SK5 hybrid-mode paths: 0 = static (SK3 sub-path), 1 = dynamic per-queue
-  # (SK4 sub-path, where work stealing applies). Crossed with StreamKWorkStealing below.
-  StreamKHybridMode: [0, 1]
+  # StreamK/Hybrid hybrid-mode paths: 0 = static (StreamK/StaticGrid sub-path), 1 = dynamic per-queue
+  # (StreamK/DynamicWorkQueue sub-path, where work stealing applies). Crossed with WorkQueueStealing below.
+  HybridAssignmentPolicy: [Default, DynamicWorkQueue]
 
-# Shared SK5-hybrid fork entries; StreamKWorkStealing forked over [0, 1] to
+# Shared StreamK/Hybrid-hybrid fork entries; WorkQueueStealing forked over [0, 1] to
 # validate both stealing-off and stealing-on across both hybrid sub-paths.
 .SkHybridCommonFork: &sk_hybrid_common_fork
   - KernelLanguage: ["Assembly"]
@@ -37,8 +37,9 @@ GlobalParameters:
   - ScheduleIterAlg: [3]
   - SourceSwap: [True]
   - StoreRemapVectorWidth: [0]
-  - StreamK: [5]
-  - StreamKWorkStealing: [0, 1]
+  - TileProcessingStrategy: [StreamK]
+  - WorkAssignment: [Hybrid]
+  - WorkQueueStealing: [0, 1]
   - TransposeLDS: [0]
   - WorkGroupMapping: [1]
 

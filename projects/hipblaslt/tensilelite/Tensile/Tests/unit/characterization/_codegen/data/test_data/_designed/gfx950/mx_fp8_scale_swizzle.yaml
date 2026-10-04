@@ -85,7 +85,8 @@ BenchmarkProblems:
         - StaggerU: [0]
         - SourceSwap: [True]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitU: [1]
         - UseSubtileImpl: [True]
       BenchmarkFinalParameters:

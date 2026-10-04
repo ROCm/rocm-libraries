@@ -1190,7 +1190,7 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
 
 def test_static_assignment_reservation_uses_streamk_partition_bound(monkeypatch):
     # Assignment owns the reservation; StreamK supplies the cursor and bound.
-    # Extraction retains the old exhaustion compare and skip branch.
+    # The exhaustion compare must remain after the reservation marker.
     from rocisa.code import Label
 
     monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: StreamKTwoTileDPFirst())
@@ -1202,6 +1202,7 @@ def test_static_assignment_reservation_uses_streamk_partition_bound(monkeypatch)
     assert "s_cmp_ge_u32 s[sgprPersistentIteration], s[sgprPersistentIterationEnd]" in rendered
     assert "No next persistent iteration" in rendered
     assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
+    assert rendered.index("s_cmov_b32 s[sgprPersistentPrefetchState]") < rendered.index("s_cmp_ge_u32")
 
 
 class _PapFetchWriter:
@@ -1229,10 +1230,11 @@ def test_queue_reservation_primes_before_drain_check(monkeypatch):
         _PapFetchWriter(), {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"}, skip_label
     )
     rendered = str(module)
-    primed = rendered.find("s_mov_b32 s[sgprPersistentPrefetchState], 1")
+    primed = rendered.find("s_mov_b32 s[sgprPersistentPrefetchState], 0x80000000")
     drain = rendered.find("s[sgprTotalItems]")
     assert primed != -1 and drain != -1 and primed < drain
     assert "s[sgprNextWorkItem]" in rendered
+    assert rendered.index("Reuse work or exhaustion reservation without another pop") < rendered.index("unit: queue pop")
 
 
 def test_hybrid_reservation_dispatches_static_and_dynamic(monkeypatch):
