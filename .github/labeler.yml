@@ -15,6 +15,7 @@
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
+  - any-glob-to-any-file: 'shared/tilewright/**/*'
 
 "project: hipblaslt-provider":
 - changed-files:
@@ -150,6 +151,10 @@
 "shared: tensile":
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
+
+"shared: tilewright":
+- changed-files:
+  - any-glob-to-any-file: 'shared/tilewright/**/*'
 
 "project: rocwmma":
 - changed-files:

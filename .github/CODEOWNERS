@@ -87,6 +87,7 @@
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
+/shared/tilewright/                                 @ROCm/hipblaslt-reviewers @ROCm/origami-reviewers
 /projects/hipthreads/                               @ROCm/hipthreads-reviewers
 
 # Next CMake-specific ownership
@@ -113,6 +114,9 @@
 
 /shared/tensile/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/tensile/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+
+/shared/tilewright/**/*.cmake                       @ROCm/rocm-math-lib-build-infra
+/shared/tilewright/**/CMakeLists.txt                @ROCm/rocm-math-lib-build-infra
 
 # Documentation-specific ownership by project
 /projects/hipblas/**/*.md                           @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
