@@ -13,6 +13,7 @@ class C2 on AIHPBLAS-4988).
 
 import os
 import shutil
+import subprocess
 
 import pytest
 
@@ -103,13 +104,52 @@ def test_vaddncu64_registers_lower_to_a_carry_chain(lowered_isa):
     assert lo_ops[1] == hi_ops[1] == hi_ops[4]
 
 
+def _inline(v):
+    return -16 <= v <= 64
+
+
 @pytest.mark.parametrize("imm,low,high", _IMMEDIATES)
 def test_vaddncu64_immediate_high_half_is_the_sign_extension(lowered_isa, imm, low, high):
-    lines = _lines(VAddNCU64(dst=vgpr(4, 2), src0=vgpr(4, 2), src1=imm))
+    inst = VAddNCU64(dst=vgpr(4, 2), src0=vgpr(4, 2), src1=imm)
+    if not _inline(high):
+        # v_addc_co_u32 reads vcc, which leaves no room for a literal next to it.
+        with pytest.raises(Exception, match="not an inline constant"):
+            str(inst)
+        return
+    lines = _lines(inst)
     assert [m for m, _ in lines] == ["v_add_co_u32", "v_addc_co_u32"]
     (_, lo_ops), (_, hi_ops) = lines
-    assert _as_int(lo_ops[3]) == low
-    assert _as_int(hi_ops[3]) == high, f"high half of {imm:#x} must be {high}, got {hi_ops[3]}"
+    # VOP2 takes a literal only in src0, so the immediate comes first.
+    assert _as_int(lo_ops[2]) == low and lo_ops[3] == "v4"
+    assert _as_int(hi_ops[2]) == high and hi_ops[3] == "v5"
+
+
+def _assemble(isa, text, tmp_path):
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join(
+        [os.path.join(rocm_path, "bin"), os.path.join(rocm_path, "lib", "llvm", "bin")]
+    )
+    clang = shutil.which("amdclang++", path=search_path) or shutil.which("amdclang++")
+    if not clang:
+        pytest.skip("amdclang++ not found")
+    src = tmp_path / "lowered.s"
+    src.write_text(text + "\n")
+    return subprocess.run(
+        [clang, "-x", "assembler", "-target", "amdgcn-amd-amdhsa",
+         f"-mcpu={rocisa.isaToGfx(isa)}", "-c", str(src), "-o", str(tmp_path / "lowered.o")],
+        capture_output=True, text=True,
+    )  # fmt: skip
+
+
+# String checks miss an operand the hardware cannot encode; the assembler does not.
+@pytest.mark.parametrize("imm,low,high", _IMMEDIATES)
+def test_lowered_immediate_adds_assemble(lowered_isa, imm, low, high, tmp_path):
+    insts = [SAddU64(dst=sgpr(4, 2), src0=sgpr(4, 2), src1=imm)]
+    if _inline(high):
+        insts.append(VAddNCU64(dst=vgpr(4, 2), src0=vgpr(4, 2), src1=imm))
+    text = "\n".join(str(i) for i in insts)
+    result = _assemble(lowered_isa, text, tmp_path)
+    assert result.returncode == 0, f"{text}\n{result.stderr}"
 
 
 def test_symbolic_immediate_is_rejected(lowered_isa):
