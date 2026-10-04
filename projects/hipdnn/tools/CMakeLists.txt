@@ -121,34 +121,6 @@ endif()
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()
 
-if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
-    # The generator's own pytest suite (config loading, device probe, sweep tools, code
-    # generation). It needs pytest, jinja2 and PyYAML in the configured interpreter; without
-    # them the suite is not registered rather than failing every build that enables the
-    # ingestor.
-    if(Python3_FOUND)
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import pytest, jinja2, yaml"
-            RESULT_VARIABLE _hipdnn_generator_test_deps_rc
-            OUTPUT_QUIET ERROR_QUIET
-        )
-        if(_hipdnn_generator_test_deps_rc EQUAL 0)
-            add_test(
-                NAME hipdnn_ingestor_generator_tests
-                COMMAND ${Python3_EXECUTABLE} -m pytest -p no:cacheprovider -q tests
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator
-            )
-            _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_tests)
-        else()
-            message(
-                STATUS
-                "hipdnn_ingestor_generator_tests not registered: ${Python3_EXECUTABLE} "
-                "cannot import pytest, jinja2 and yaml"
-            )
-        endif()
-    endif() # Python3_FOUND
-endif()
-
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
     # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target

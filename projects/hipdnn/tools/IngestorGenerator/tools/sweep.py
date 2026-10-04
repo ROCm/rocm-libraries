@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from device_probe import ARCH_TOKEN, ProbeUnavailable, device_info
+from device_probe import ProbeUnavailable, device_info, is_arch_token
 
 
 class ConfigError(ValueError):
@@ -219,7 +219,7 @@ def load_config(path):
         config["sweep_root"]
     ):
         raise ConfigError("output_dir must be a dedicated child of sweep_root")
-    if not re.fullmatch(ARCH_TOKEN, _text(config["arch"], "arch")):
+    if not is_arch_token(_text(config["arch"], "arch")):
         raise ConfigError("arch must be an exact gfx token")
     for key in ("engine_name", "engine_ued_name"):
         _text(config[key], key)

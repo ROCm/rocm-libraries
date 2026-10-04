@@ -112,13 +112,15 @@ def gpu_short(gpu_family: str) -> str:
     A concrete target (e.g. ``gfx1250-strict``) is returned whole; a family or
     generic name (e.g. ``gfx94X-dcgpu``, ``gfx950-dcgpu-asan``, ``gfx11-generic``)
     is cut at its first hyphen. A family is any name with a hyphen-separated word
-    of ``all``, ``dcgpu``, ``dgpu``, ``igpu`` or ``generic``.
+    of ``all``, ``dcgpu``, ``dgpu``, ``igpu`` or ``generic``. A feature suffix
+    (``gfx1250-strict:sramecc+``) is dropped before the name is classified.
     """
-    if re.fullmatch(r"gfx[0-9a-f]+(-[a-z]+)*", gpu_family) and not re.search(
-        r"-(generic|all|dcgpu|dgpu|igpu)(-|$)", gpu_family
+    target = gpu_family.split(":")[0]
+    if re.fullmatch(r"gfx[0-9a-f]+(-[a-z]+)*", target) and not re.search(
+        r"-(generic|all|dcgpu|dgpu|igpu)(-|$)", target
     ):
-        return gpu_family
-    return gpu_family.split("-")[0]
+        return target
+    return target.split("-")[0]
 
 
 def config_path(build_dir: Path) -> Path:

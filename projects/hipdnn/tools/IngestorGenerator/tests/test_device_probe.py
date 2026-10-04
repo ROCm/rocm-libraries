@@ -143,3 +143,78 @@ class TestDeviceInfoRaisesTheDistinctType:
         )
         with pytest.raises(ValueError):
             device_probe.device_info("gfx942")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["gfx90a", "gfx942", "gfx1100", "gfx1250", "gfx1250-strict", "gfx1250-strictall"],
+)
+def test_concrete_name_is_an_arch_token(text):
+    assert device_probe.is_arch_token(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # TheRock families and variants, and generic targets: no device reports them.
+        "gfx94X-dcgpu",
+        "gfx950-dcgpu",
+        "gfx950-dcgpu-asan",
+        "gfx900-dgpu",
+        "gfx90c-igpu",
+        "gfx950-all",
+        "gfx1250-all-strict",
+        "gfx11-generic",
+        "gfx9-4-generic",
+        # Shapes that are not target names.
+        "gfx9",
+        "gfx1250-Strict",
+        "gfx1250--strict",
+        "gfx1250-",
+        "gfx1250-4",
+        "GFX942",
+        "gfx942:xnack-",
+        "native",
+        "",
+    ],
+)
+def test_non_concrete_name_is_not_an_arch_token(text):
+    assert not device_probe.is_arch_token(text)
+
+
+@pytest.mark.parametrize("arch", ["gfx950-dcgpu", "gfx11-generic", "gfx1250-Strict"])
+def test_cli_rejects_a_family_or_malformed_arch(tmp_path, arch):
+    with pytest.raises(SystemExit) as excinfo:
+        device_probe.main(_args(tmp_path, arch))
+    assert excinfo.value.code == 2
+
+
+class TestTokensInDeviceOutput:
+    """A token is a whole concrete name; neighbouring text must not split or fake one."""
+
+    @staticmethod
+    def _probe(tmp_path, monkeypatch, stdout, arch):
+        monkeypatch.setattr(device_probe.subprocess, "run", _fake_run(stdout=stdout))
+        return device_probe.main(_args(tmp_path, arch))
+
+    def test_isa_line_with_feature_suffix_names_the_base_arch(
+        self, tmp_path, monkeypatch
+    ):
+        out = "Name: amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-\n"
+        assert self._probe(tmp_path, monkeypatch, out, "gfx942") == 0
+
+    def test_strict_isa_line_names_the_strict_target(self, tmp_path, monkeypatch):
+        out = "Name: amdgcn-amd-amdhsa--gfx1250-strict:sramecc+\n"
+        assert self._probe(tmp_path, monkeypatch, out, "gfx1250-strict") == 0
+        assert self._probe(tmp_path, monkeypatch, out, "gfx1250") == 1
+
+    def test_a_family_name_in_the_output_is_not_a_device(self, tmp_path, monkeypatch):
+        out = "Name: gfx950-dcgpu\n"
+        assert self._probe(tmp_path, monkeypatch, out, "gfx950") == 1
+
+    def test_a_malformed_hyphen_suffix_does_not_read_as_the_base_arch(
+        self, tmp_path, monkeypatch
+    ):
+        # An uppercase or empty suffix is not a target name, and not a device either.
+        for out in ("Name: gfx942-Foo\n", "Name: gfx942-\n"):
+            assert self._probe(tmp_path, monkeypatch, out, "gfx942") == 1

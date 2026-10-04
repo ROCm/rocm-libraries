@@ -7,6 +7,7 @@ generic names that merely look like one (gfx950-dcgpu, gfx11-generic): the first
 shard and reaches ``hipcc --offload-arch``, the second must be dropped with a warning.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,7 +21,8 @@ pytestmark = pytest.mark.quick
 
 
 def _cmake():
-    exe = shutil.which("cmake")
+    # The CMake that configured this build, when ctest forwards it; PATH otherwise.
+    exe = os.environ.get("HKP_CMAKE_COMMAND") or shutil.which("cmake")
     if not exe:
         pytest.fail("cmake not found on PATH")
     return exe
@@ -65,6 +67,9 @@ CONCRETE = [
     "gfx1200",
     "gfx1250",
     "gfx1250-strict",
+    # A word that merely contains a family word is not a family word.
+    "gfx1250-strictall",
+    "gfx942-allx",
 ]
 
 # TheRock family names (including variant spellings whose family word is not last) and
@@ -91,6 +96,10 @@ NOT_CONCRETE = [
     "GFX942",
     "gfx",
     "gfx1250-Strict",
+    "gfx1250--strict",
+    "gfx1250-",
+    "gfx942-4",
+    "gfx1250-all-strict",
     "gfxhkpcensuscontrol",
 ]
 

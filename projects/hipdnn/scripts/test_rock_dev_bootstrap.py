@@ -65,6 +65,18 @@ class TestGpuShort(unittest.TestCase):
         # "strictall" is not the family word "all"; the suffix is kept as part of the target.
         self.assertEqual(gpu_short("gfx1250-strictall"), "gfx1250-strictall")
 
+    def test_a_name_that_is_not_lowercase_is_cut_at_first_hyphen(self):
+        self.assertEqual(gpu_short("gfx1250-Strict"), "gfx1250")
+
+    def test_feature_suffix_is_dropped_before_classifying(self):
+        for name, short in (
+            ("gfx942:xnack-", "gfx942"),
+            ("gfx1250-strict:sramecc+", "gfx1250-strict"),
+            ("gfx950-dcgpu:xnack-", "gfx950"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(gpu_short(name), short)
+
 
 if __name__ == "__main__":
     unittest.main()
