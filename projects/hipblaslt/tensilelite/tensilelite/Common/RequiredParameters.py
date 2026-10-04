@@ -179,6 +179,7 @@ def getRequiredParametersMin() -> set:
         'VectorStore',
         'VectorWidthA',
         'VectorWidthB',
+        'AccumShuffle',
         'WaveSeparateGlobalReadA',
         'WaveSeparateGlobalReadB',
         'WavefrontSize',
