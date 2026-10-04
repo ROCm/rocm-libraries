@@ -173,6 +173,25 @@ class ConfigSectionGenerator:
         so emitted YAML keeps stable key ordering before per-size overrides.
         """
         is_i8 = self._gt.data_type == 'I8'
+        # TODO(subtile-rotating-buffer): Disable the rotating buffer whenever
+        # subtile is involved (search_space == "subtile"; matches
+        # tensilelite's reference subtile configs subtile_bf16.yaml /
+        # subtile_mxfp4.yaml).  The default 1 GiB
+        # rotating buffer is smaller than a single tensor set in our subtile
+        # MT sweeps (e.g. BF16 (32768, 192, 1, 65536) -> A alone is ~4 GiB).
+        # In that case every unit in m_rotatingInfo gets rotatingNum=1 inside
+        # createRotatingMemory (Rotating.cpp), so m_size == m_largestUnitSize
+        # and (m_size - m_largestUnitSize) == 0.  When a smaller per-problem
+        # rotatingSize then asks for >0 rotations in prepareRotatingGPUOutput
+        # (DataInitialization.cpp), the client aborts with
+        #   ``terminate called after throwing an instance of 'std::runtime_error'
+        #    what():  Insufficient rotating buffer size.``
+        # Remove this special-case once tensilelite clamps the per-problem
+        # rotatingNum to (m_size - m_largestUnitSize) / rotatingSize instead
+        # of ceil(m_rotatingBuffer / rotatingSize) - 1, or once it sizes the
+        # rotating buffer using per-problem tensor bytes rather than the
+        # global maxElements across the whole benchmark set.
+        rotating_buffer_size = 0 if self.config.get("search_space") == "subtile" else 1024
         params = {
             'MinimumRequiredVersion': '5.0.0',
             'SleepPercent': 0,
@@ -199,7 +218,7 @@ class ConfigSectionGenerator:
             'SkipSlowSolutionRatio': 0.0,
             '#PrintSolutionRejectionReason': True,
             'KeepBuildTmp': False,
-            'RotatingBufferSize': 1024,
+            'RotatingBufferSize': rotating_buffer_size,
             'UseEffLike': False,
         }
         if self._is_mx():

@@ -10,6 +10,11 @@ import pytest
 from geko.config_generator import config_merger as cm
 from geko.config_generator import output_writer as ow
 from geko.config_generator import config_sections_generator as csg
+from geko.config_generator.constants import (
+    LIST_OF_MT_MAX_SIZE_DEFAULT,
+    LIST_OF_MT_MAX_SIZE_SUBTILE,
+    get_list_of_mt_max_size,
+)
 from geko.config_generator.fork_params.hw_profiles.gfx942 import optimization_param as g942
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
 from geko.schemas import GemmConfig, GemmType
@@ -298,3 +303,40 @@ def test_non_mx_f8_problem_type_has_use_scale_ab():
     gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
     pt = gen._problem_type
     assert "UseScaleAB" in pt or any("UseScaleAB" in k for k in pt)
+
+
+# ---------------------------------------------------------------------------
+# Subtile search-space tests
+# ---------------------------------------------------------------------------
+
+
+def test_global_params_rotating_buffer_size_subtile():
+    """RotatingBufferSize must be 0 for subtile.
+
+    Subtile's wide MT sweeps can exceed the default 1 GiB rotating buffer
+    (e.g. a single BF16 (32768, 192, 1, 65536) tensor is ~4 GiB), which
+    otherwise crashes the client with 'Insufficient rotating buffer size'.
+    """
+    gen = csg.ConfigSectionGenerator(
+        _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space="subtile")
+    )
+    assert gen._global_params_base["RotatingBufferSize"] == 0
+
+
+@pytest.mark.parametrize("search_space", ["heuristic", "generic"])
+def test_global_params_rotating_buffer_size_default(search_space: str):
+    gen = csg.ConfigSectionGenerator(
+        _section_cfg(dtype="H", epilogues=True, backend="tensile", search_space=search_space)
+    )
+    assert gen._global_params_base["RotatingBufferSize"] == 1024
+
+
+def test_get_list_of_mt_max_size_subtile_widens_caps():
+    """Subtile uses wider 512x512 MT-area caps than heuristic/generic."""
+    assert get_list_of_mt_max_size("subtile") is LIST_OF_MT_MAX_SIZE_SUBTILE
+    assert get_list_of_mt_max_size("heuristic") is LIST_OF_MT_MAX_SIZE_DEFAULT
+    assert get_list_of_mt_max_size("generic") is LIST_OF_MT_MAX_SIZE_DEFAULT
+    assert get_list_of_mt_max_size(None) is LIST_OF_MT_MAX_SIZE_DEFAULT
+    for key in ("H", "B", "I8", "X", "X1", "F8", "F8N", "F8B8", "B8F8", "F4"):
+        assert LIST_OF_MT_MAX_SIZE_SUBTILE[key] == 512 * 512
+        assert LIST_OF_MT_MAX_SIZE_SUBTILE[key] > LIST_OF_MT_MAX_SIZE_DEFAULT[key]

@@ -164,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--search-space",
         type=str,
         default=None,
-        choices=["heuristic", "generic"],
+        choices=["heuristic", "generic", "subtile"],
         dest="search_space",
         help="Search space strategy. Defaults to 'generic' for ductile, 'heuristic' for tensile (only used with --tune)",
     )

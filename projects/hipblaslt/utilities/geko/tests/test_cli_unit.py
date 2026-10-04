@@ -51,6 +51,27 @@ def test_parse_cli_args_search_default_keep_thr(tmp_path: Path) -> None:
     assert args.keep_thr == 0.1
 
 
+def test_parse_cli_args_search_space_subtile(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        [
+            "--tune",
+            "--workload-log",
+            str(workload),
+            "--devices",
+            "0",
+            "--arch",
+            "gfx950",
+            "--search-space",
+            "subtile",
+        ]
+    )
+
+    assert args.search_space == "subtile"
+
+
 def test_parse_cli_args_custom_lib_flags(tmp_path: Path) -> None:
     workload = tmp_path / "wkld.yaml"
     workload.write_text("[]\n")

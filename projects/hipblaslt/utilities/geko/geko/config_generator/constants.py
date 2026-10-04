@@ -57,6 +57,9 @@ MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 _LARGE_MT0xMT1_DEFAULT = 256 * 464
 _REGULAR_MT0xMT1_DEFAULT = 256 * 256
 
+_LARGE_MT0xMT1_SUBTILE = 512 * 512
+_REGULAR_MT0xMT1_SUBTILE = 512 * 512
+
 
 def _build_mt_max_size(large: int, regular: int):
     return {
@@ -78,13 +81,13 @@ def _build_mt_max_size(large: int, regular: int):
 
 
 LIST_OF_MT_MAX_SIZE_DEFAULT = _build_mt_max_size(_LARGE_MT0xMT1_DEFAULT, _REGULAR_MT0xMT1_DEFAULT)
+LIST_OF_MT_MAX_SIZE_SUBTILE = _build_mt_max_size(_LARGE_MT0xMT1_SUBTILE, _REGULAR_MT0xMT1_SUBTILE)
 
 
 def get_list_of_mt_max_size(search_space=None):
-    """Return MT-area cap dict for search_space.
-
-    Stage 1 supports heuristic/generic only, both using default caps.
-    """
+    """Return the MT-area cap dict appropriate for *search_space*."""
+    if search_space == "subtile":
+        return LIST_OF_MT_MAX_SIZE_SUBTILE
     return LIST_OF_MT_MAX_SIZE_DEFAULT
 
 
