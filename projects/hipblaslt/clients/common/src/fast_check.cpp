@@ -281,8 +281,10 @@ namespace
 
     View batch_view(const FastCheckMatrix& m, int64_t batch, bool trans)
     {
-        const void* base = static_cast<const char*>(m.data)
-                           + size_t(batch) * size_t(m.stride) * element_size(m.type);
+        // A buffer that is not read (C when beta is 0) may be null and must not be offset.
+        const void* base = m.data ? static_cast<const char*>(m.data)
+                                        + size_t(batch) * size_t(m.stride) * element_size(m.type)
+                                  : nullptr;
         return trans ? View{base, m.type, m.ld, 1} : View{base, m.type, 1, m.ld};
     }
 

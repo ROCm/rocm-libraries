@@ -249,6 +249,13 @@ namespace
             v = 1e30f;
         auto res = fast_check_gemm(hp.problem());
         EXPECT_TRUE(res.passed) << res.message;
+
+        // The fast_check-only harness does not copy C when beta is 0, so C may be null.
+        HostProblem      batched(16, 9, 5, 3, false, true, 2.f, 0.f, false, false);
+        FastCheckProblem p = batched.problem();
+        p.C.data           = nullptr;
+        res                = fast_check_gemm(p);
+        EXPECT_TRUE(res.passed) << res.message;
     }
 
     // bf16 holds integers exactly only below 256. A correct kernel stores the rounded value of a
