@@ -41,7 +41,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
          BlockFmhaShape::kQKHeaddim == 32 && BlockFmhaShape::kVHeaddim == 32)
             ? 8
             : Problem::kBlockPerCu;
-    static constexpr index_t kBlockSize  = Problem::kBlockSize;
+    static constexpr index_t kBlockSize = Problem::kBlockSize;
 
     static constexpr index_t kM0        = BlockFmhaShape::kM0;
     static constexpr index_t kN0        = BlockFmhaShape::kN0;
@@ -53,39 +53,11 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
     static constexpr index_t kQKHeaddim = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
 
-    // D64 P/dS intermediate conversion: preserve round-to-nearest-even for
-    // non-NaN values while omitting NaN canonicalization. Arbitrary NaN payloads
-    // are NOT preserved and may round to infinity or signed zero. Output
-    // epilogues retain the standard conversion. This is a separate numerical
-    // policy change from the D64 scheduling/layout optimizations.
-    template <typename SrcTensor>
-    CK_TILE_DEVICE static auto d64_cast_pds(const SrcTensor& src)
-    {
-        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 &&
-                     (kQKHeaddim == 64 || kQKHeaddim == 32) && kVHeaddim == kQKHeaddim &&
-                     std::is_same_v<GemmDataType, bf16_t> &&
-                     std::is_same_v<remove_cvref_t<typename SrcTensor::DataType>, float>)
-        {
-            return tile_elementwise_in(
-                [](const float& x) {
-                    const uint32_t b = bit_cast<uint32_t>(x);
-                    return bit_cast<bf16_t>(
-                        static_cast<uint16_t>((b + 0x7fffu + ((b >> 16) & 1u)) >> 16));
-                },
-                src);
-        }
-        else
-        {
-            return cast_tile<GemmDataType>(src);
-        }
-    }
-
     static constexpr bool kD64 = kM0 == 32 && kN0 == 64 && kQKHeaddim == 64 && kVHeaddim == 64;
     // D32 reuses the M32/N64 product tile (gfx12 tile b32x64x32); D handling
     // takes the generic (non-kD64) path.
     static constexpr bool kD32 = kM0 == 32 && kN0 == 64 && kQKHeaddim == 32 && kVHeaddim == 32;
-    static_assert(kD64 || kD32 ||
-                      (kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128),
+    static_assert(kD64 || kD32 || (kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128),
                   "The DK/DV-only pipeline requires a supported D32/D64/D128 product tile");
 
     // in the M32/N64 product tile the P/dS LDS transposes
@@ -94,10 +66,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
     // P / dS reach Gemm1 / Gemm3 A without LDS (same wave, lane
     // and thread-buffer slot in the M32/N64 WMMA C -> transposed-A layouts).
     // D64 uses the same M32/N64 tile and warp layouts.
-    static constexpr bool kD32PDirect  = (kD32 || kD64) && kN0 == 64;
+    static constexpr bool kD32PDirect = (kD32 || kD64) && kN0 == 64;
     // Q^T / dO^T in an M-contiguous [D][M] LDS layout (b128 reads).
-    static constexpr bool kD32XtB128 = kD32 && sizeof(QDataType) == 2 &&
-                                       sizeof(OGradDataType) == 2;
+    static constexpr bool kD32XtB128 = kD32 && sizeof(QDataType) == 2 && sizeof(OGradDataType) == 2;
     static constexpr bool kD32DsDirect = (kD32 || kD64) && kN0 == 64;
     CK_TILE_DEVICE static void xwave_publish_sync()
     {
@@ -447,8 +418,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                 static_assert(p_desc.get_element_space_size() == 32 * 32);
                 return p_desc;
             }
-            else if constexpr(kM0 == 32 && kN0 == 64 && (kD64 || kD32) &&
-                              sizeof(GemmDataType) == 2)
+            else if constexpr(kM0 == 32 && kN0 == 64 && (kD64 || kD32) && sizeof(GemmDataType) == 2)
             {
                 // D64-P-ADJACENT-MPAIR:
                 // Shared P/dS LDS layout for the M32/N64/D64 BF16 product.
@@ -535,8 +505,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             sizeof(GemmDataType) * p_xwave_lds_desc.get_element_space_size();
 
         GemmDataType* ds_xwave_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + p_xwave_lds_offset +
-            (kD32 ? 0 : xwave_tile_bytes)));
+            static_cast<char*>(smem_ptr) + p_xwave_lds_offset + (kD32 ? 0 : xwave_tile_bytes)));
         auto p_xwave_lds =
             make_tensor_view<address_space_enum::lds>(p_xwave_lds_ptr, p_xwave_lds_desc);
 
@@ -1027,7 +996,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                 }
                 else
                 {
-                    return d64_cast_pds(p);
+                    return cast_tile<GemmDataType>(p);
                 }
             }();
 
@@ -1109,7 +1078,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             auto ds                 = SPGradBlockTileType{};
             constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
             sweep_tile_span(ds_spans[number<0>{}], [&](auto idx0) {
-                constexpr auto i_idx = make_tuple(idx0);
+                constexpr auto i_idx   = make_tuple(idx0);
                 const auto d_hot_value = [&]() {
                     if constexpr(kD64)
                     {
@@ -1159,7 +1128,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             }
 
             // STAGE 6, SGrad^T@Q^T Gemm3
-            const auto ds_gemm = d64_cast_pds(ds);
+            const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
             // Cross-wave dS^T redistribution through shared LDS scratch.
             // P has already been consumed by Gemm1, so the buffer can be reused.
@@ -1364,7 +1333,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             }
             else
             {
-                return d64_cast_pds(p);
+                return cast_tile<GemmDataType>(p);
             }
         }();
 
@@ -1386,7 +1355,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                 return load_tile(pt_xwave_lds_read_window);
             }
         }();
-        auto dot_reg_tensor           = load_tile(dot_lds_read_window);
+        auto dot_reg_tensor = load_tile(dot_lds_read_window);
         gemm_1(dv_acc, pt_xwave_tail_reg_tensor, dot_reg_tensor);
 
         HotLoopScheduler::template GemmStagedScheduler<1>();
@@ -1463,7 +1432,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
         }
 
         // STAGE 6, SGrad^T@Q^T Gemm3
-        const auto ds_gemm = d64_cast_pds(ds);
+        const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
         // Cross-wave dS^T redistribution through shared LDS scratch.
         // P has already been consumed by Gemm1, so the buffer can be reused.
