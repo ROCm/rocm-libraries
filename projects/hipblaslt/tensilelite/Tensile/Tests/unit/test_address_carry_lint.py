@@ -290,7 +290,11 @@ def test_a_carry_in_add_on_a_low_dword_must_carry_on(op, carry):
 
 @pytest.mark.parametrize(
     "carry,partial",
-    [("s[20:21]", "s_mov_b32 s20, 0"), ("s[20:21]", "s_mov_b32 s21, 0"), ("vcc", "s_mov_b32 vcc_lo, 0")],
+    [
+        ("s[20:21]", "s_mov_b32 s20, 0"),
+        ("s[20:21]", "s_mov_b32 s21, 0"),
+        ("vcc", "s_mov_b32 vcc_lo, 0"),
+    ],
 )
 def test_a_partial_write_to_the_carry_register_is_reported(carry, partial):
     good = f"""
