@@ -55,7 +55,10 @@ _D192_GROUP_NMASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace("_batch_", "_gro
 _D192_BATCH_N128_FILENAME = _D192_BATCH_NMASK_FILENAME.replace(
     "b128x64x32", "b128x128x32"
 ).replace("_o2_", "_o1_")
-_D192_SELECTOR = "a.hdim_q == 192 && a.hdim_v == 128 && a.max_seqlen_q >= 128"
+_D192_SELECTOR = (
+    "a.hdim_q == 192 && a.hdim_v == 128 && a.sink_ptr == nullptr && "
+    "a.max_seqlen_q >= 128"
+)
 
 
 def _generate(receipt, optdim_list=None):
@@ -131,6 +134,7 @@ struct fmha_fwd_args {
     int stride_q = 192, nhead_stride_q = 24576;
     int window_size_left = -1, window_size_right = -1;
     int batch = 2, nhead_q = 8, nhead_k = 2;
+    const void* sink_ptr = nullptr;
     const void* seqlen_k_ptr = nullptr;
     const void* cu_seqlen_k_ptr = nullptr;
 };
@@ -146,13 +150,13 @@ _HOST_MAIN = """
 int main() {
     fmha_fwd_traits t;
     fmha_fwd_args a;
-    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr;
+    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
-         >> has_cu_sk >> has_sk_ptr)) return 2;
+         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -161,6 +165,7 @@ int main() {
     a.max_seqlen_q = max_q < 0 ? a.seqlen_q : max_q;
     a.cu_seqlen_k_ptr = has_cu_sk ? &a : nullptr;
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
+    a.sink_ptr = has_sink_ptr ? &a : nullptr;
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -268,6 +273,7 @@ class _CompiledDispatcher:
             window_size_right=-1,
             has_cu_sk=0,
             has_sk_ptr=0,
+            has_sink_ptr=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -467,6 +473,9 @@ endforeach()
                 self.assertEqual((candidate.F_hdim, candidate.F_tile.F_bn1), (192, 128))
                 source = candidate.render()
                 self.assertIn("BlockFmhaPipelineQRKSVSTdmSched", source)
+                self.assertIn(
+                    "FmhaTdmSchedPolicyFor<fmha_pipeline_problem>, false", source
+                )
                 self.assertIn("QRKSVS_TDM_SCHED", source)
                 self.assertIn(_D192_PIPELINE, candidate.name)
 
@@ -1703,6 +1712,9 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                         )
                         args = dict(hdim_q=dim, group=group, mask=mask, lse=lse)
                         self.assertEqual(dispatch.run(**args), [candidate])
+                        self.assertNotIn(
+                            dispatch.run(**args, has_sink_ptr=1)[0], family_ids
+                        )
                         for changes in (
                             dict(seqlen_q=127),
                             dict(arg_q=160),
