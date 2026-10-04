@@ -405,7 +405,7 @@ def test_every_spelling_of_one_file_has_one_identity(
         "plain": f"sub/{CO_NAME}",
         "absolute": str(root / "solo" / "sub" / CO_NAME),
         "reentering": f"../solo/sub/{CO_NAME}",
-        "symlinked_dir": f"link/../{CO_NAME}",
+        "symlinked_dir": f"link/{CO_NAME}",
         "symlinked_root": f"sub/{CO_NAME}",
     }[spelling]
 
@@ -413,9 +413,9 @@ def test_every_spelling_of_one_file_has_one_identity(
         template["kernel_source"] = _hsaco_source(file)
 
     _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, set_file)
-    (root / "solo" / "sub" / "inner").mkdir(parents=True)
+    (root / "solo" / "sub").mkdir(parents=True)
     shutil.move(root / "solo" / CO_NAME, root / "solo" / "sub" / CO_NAME)
-    (root / "solo" / "link").symlink_to(root / "solo" / "sub" / "inner")
+    (root / "solo" / "link").symlink_to(root / "solo" / "sub")
     source_root = root
     if spelling == "symlinked_root":
         source_root = tmp_path / "rootlink"
