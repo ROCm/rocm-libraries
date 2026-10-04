@@ -36632,7 +36632,7 @@
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 7
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: -1
@@ -39287,7 +39287,7 @@
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 7
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: -1
@@ -65666,7 +65666,7 @@
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 7
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
@@ -68137,7 +68137,7 @@
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
     MaxLDS: 65536
-    MaxOccupancy: 40
+    MaxOccupancy: 7
     MbskPrefetchMethod: 0
     MfmaInitCVgprs: false
     MinGRIncPerMfma: 1
