@@ -602,11 +602,14 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
 {
     const int value_dimension = c.dimension == 64 ? 64 : 128;
     const int m               = c.scheduled ? 128 : 64;
-    std::string name          = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
+    const int n               = c.virtual_sink ? 64 : c.expected_n;
+    // Finite virtual sinks use the qr_tdm fallback; sched is specialized for null sink.
+    const bool use_scheduled = c.scheduled && !c.virtual_sink;
+    std::string name         = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
                        (group ? "_group_b" : "_batch_b") + std::to_string(m) + "x" +
-                       std::to_string(c.expected_n) + "x32x" + std::to_string(value_dimension) +
-                       "x32x" + std::to_string(c.dimension) + "_r4x1x1_r4x1x1_w16x16x32_w16x16x32";
-    if(c.scheduled)
+                       std::to_string(n) + "x32x" + std::to_string(value_dimension) + "x32x" +
+                       std::to_string(c.dimension) + "_r4x1x1_r4x1x1_w16x16x32_w16x16x32";
+    if(use_scheduled)
     {
         const int occupancy = c.dimension == 64 ? 3 : c.expected_n == 64 ? 2 : 1;
         name += "_o" + std::to_string(occupancy) + "_qr_tdm_sched_vr_";
@@ -615,13 +618,22 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
         else
             name += group || c.dimension == 128 ? "psskddv" : "pddv";
     }
+    else if(c.virtual_sink)
+    {
+        const bool pad_sequence = group || c.key_length % 64 != 0;
+        name += "_qr_tdm_vr_";
+        if(c.dimension == 192)
+            name += pad_sequence ? "psskddv" : "pddv";
+        else
+            name += pad_sequence ? "pssk" : "npad";
+    }
     else
         name += c.dimension == 192 ? "_qr_tdm_vr_pddv" : "_qr_tdm_vr_npad";
     name += "_nlogits_nbias_";
     name += c.mask == mask_enum::no_mask ? "nmask" : "mask";
     name += lse ? "_lse" : "_nlse";
     name += "_ndropout_nskip_nqscale_ntrload";
-    if(!c.scheduled)
+    if(!use_scheduled)
         name += "_kvlp_plk";
     return name + "_nsink";
 }
@@ -937,8 +949,9 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     // Empty sampled_query_rows means every logical row. The oracle retains FP32
     // softmax probabilities; it does not quantize P to match the device pipeline.
     const auto expected = reference::Compute(reference_sequences);
-    const reference::AccuracyContract contract{std::is_same_v<DataTypeConfig, FmhaFwdFp16> ? 10 : 7,
-                                               static_cast<std::size_t>(c.expected_n)};
+    const reference::AccuracyContract contract{
+        std::is_same_v<DataTypeConfig, FmhaFwdFp16> ? 10 : 7,
+        static_cast<std::size_t>(c.virtual_sink ? 64 : c.expected_n)};
     const auto metrics = reference::Compare(reference_sequences, expected, outputs, {}, contract);
     std::cout << std::setprecision(10) << "independent_fp32 checked_rows=" << metrics.checked_rows
               << " checked_o=" << metrics.checked_elements
