@@ -286,6 +286,13 @@ namespace TensileLite
                        || (row.first.value->type() == "RangeMatching")))
                     continue;
 
+                // Only an explicit TENSILE_PREDICTION_LIB drops these rows; prediction
+                // implied by dynamic Stream-K scheduling still returns their solutions.
+                if(Debug::Instance().usePredictionLibrary()
+                   && ((row.first.value->type() == "GridBasedMatching")
+                       || (row.first.value->type() == "FreeSizeMatching")))
+                    continue;
+
                 if(row.first(problem, hardware))
                 {
                     solutions
