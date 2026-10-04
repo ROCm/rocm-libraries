@@ -3478,34 +3478,34 @@
         },
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "arch": "gfx1250",
-          "bytes": 35151,
+          "bytes": 35160,
           "family": "gemm",
-          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale_block_scaled_bf8_bf8_M32N48K256_bk32_t16x16x128_wmma_scale",
-          "sha256": "842cd78f69260d8e048f9571d4e3a4dfa890f8a176c47569715d64bdcea96373",
+          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale_block_scaled_bf8_bf8_out_bf16_M32N48K256_bk32_t16x16x128_wmma_scale",
+          "sha256": "95b353eef4dc094b0af1608806df6e621e2007beb4334500f4e1f3eef001a2ed",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
           "arch": "gfx1250",
-          "bytes": 35151,
+          "bytes": 35160,
           "family": "gemm",
-          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale_block_scaled_fp8_fp8_M32N48K256_bk32_t16x16x128_wmma_scale",
-          "sha256": "3887ae7b78e6a9827967b9a6b64309241942e274d3f9db2dfa145d608006538f",
+          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale_block_scaled_fp8_fp8_out_bf16_M32N48K256_bk32_t16x16x128_wmma_scale",
+          "sha256": "c596e32f7fc49f326f8f1ba387aa5eb2fa5ceddbc6a1cfd6351586d172279912",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
           "arch": "gfx1250",
-          "bytes": 41713,
+          "bytes": 41722,
           "family": "gemm",
-          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale16_block_scaled_bf8_bf8_M32N48K256_bk16_t16x16x128_wmma_scale16",
-          "sha256": "51ad5f432b9ec21f373107eaff95ca6c12d15c61c0c553ac5ddc10daf2b0b296",
+          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale16_block_scaled_bf8_bf8_out_bf16_M32N48K256_bk16_t16x16x128_wmma_scale16",
+          "sha256": "4d32d70e8d18efd80aec4e06979ed59d61353f49b7e931a333fd0dbf32a064a3",
           "status": "ok"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
           "arch": "gfx1250",
-          "bytes": 41713,
+          "bytes": 41722,
           "family": "gemm",
-          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale16_block_scaled_fp8_fp8_M32N48K256_bk16_t16x16x128_wmma_scale16",
-          "sha256": "b2b6bf13e0a6f89acedb76512addacb1fc3a5b52a6a8e8783acbd0eaef05eaf7",
+          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale16_block_scaled_fp8_fp8_out_bf16_M32N48K256_bk16_t16x16x128_wmma_scale16",
+          "sha256": "dd482cbba29467b4b038eafdc96fabdc95c62797ae20f4f8a32caf0bd3eb8400",
           "status": "ok"
         },
         "gemm/gfx1250/t32x32x32": {

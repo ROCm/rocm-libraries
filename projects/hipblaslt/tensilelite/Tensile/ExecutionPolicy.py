@@ -171,6 +171,30 @@ def normalize_execution_policy_with_defaults(config, library_defaults):
 
 
 
+def normalize_hybrid_assignment_policy(config):
+    """Resolve explicit global runtime aliases while preserving 0/1/2 meanings."""
+    result = dict(config)
+    names = ("Default", "DynamicWorkQueue", "Auto")
+    canonical = result.get("HybridAssignmentPolicy")
+    legacy = result.get("StreamKHybridMode")
+    if canonical is not None:
+        canonical = list(canonical) if isinstance(canonical, (list, tuple)) else [canonical]
+        if not canonical or any(value not in names for value in canonical):
+            raise ValueError("HybridAssignmentPolicy must contain Default, DynamicWorkQueue, or Auto")
+    if legacy is not None:
+        legacy = list(legacy) if isinstance(legacy, (list, tuple)) else [legacy]
+        if not legacy or any(type(value) is not int or value not in (0, 1, 2) for value in legacy):
+            raise ValueError("StreamKHybridMode must contain 0, 1, or 2")
+        translated = [names[value] for value in legacy]
+        if canonical is not None and canonical != translated:
+            raise ValueError("Conflicting StreamKHybridMode and HybridAssignmentPolicy")
+        canonical = translated
+    if canonical is not None:
+        result["HybridAssignmentPolicy"] = canonical
+        result["StreamKHybridMode"] = [names.index(value) for value in canonical]
+    return result
+
+
 def _translate_legacy_streamk_selectors(config, explicit, result):
     """Validate legacy selectors and write their canonical equivalents to result."""
     mode = config.get("StreamK", 0)
@@ -239,14 +263,32 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     support = dict(result.get("InternalSupportParams", {}))
     version = support.get("PersistentLoopArgsVersion", 0)
     outer_version = support.get("KernArgsVersion", 3)
-    if type(version) is not int or version != 0:
+    if type(version) is not int or version not in (0, 1):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    # Generation and prebuilt loading retain the existing scheduling payload.
-    support["PersistentLoopArgsVersion"] = 0
-    if regenerate and legacy:
+    custom = result.get("CustomKernel")
+    handwritten = (not custom.get("generated", False)
+                   if isinstance(custom, dict) and custom.get("name")
+                   else bool(result.get("CustomKernelName")))
+    if version == 1 and not policy.persistent_data_parallel:
+        # Selector overrides inherit the source's generated layout. Recompute
+        # it below, while preserving explicit and prebuilt layout contracts.
+        if not regenerate or handwritten or "InternalSupportParams" in explicit:
+            raise ValueError("PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid")
+    if version == 1 and outer_version != 3 and (not regenerate or handwritten):
+        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if regenerate and not handwritten:
+        # DataParallel tile traversal and its argument layout are
+        # generator capabilities. Regenerating known older logic upgrades both;
+        # handwritten/prebuilt artifacts retain the layout they declare.
+        support["PersistentLoopArgsVersion"] = 1 if policy.persistent_data_parallel else 0
+        if policy.persistent_data_parallel:
+            support["KernArgsVersion"] = 3
+    if regenerate and (legacy or support.get("PersistentLoopArgsVersion", 0) != version
+                       or support.get("KernArgsVersion", outer_version) != outer_version):
         result["AssignedDerivedParameters"] = False
         result["AssignedProblemIndependentDerivedParameters"] = False
+    support.setdefault("PersistentLoopArgsVersion", 0)
     result["InternalSupportParams"] = support
     return result
