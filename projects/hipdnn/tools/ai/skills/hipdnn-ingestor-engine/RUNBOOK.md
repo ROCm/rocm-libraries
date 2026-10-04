@@ -294,9 +294,10 @@ results. None proves native loading or numerical dispatch.
 ## 4. Build, pack, install and prove the host boundary
 
 Configure from `$REPO` using `hipdnn-superbuild`, with
-`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`,
-`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` and `HIPKERNELPROVIDER_ENABLE_TESTS=ON`. SDPA needs
-`HIPDNN_ENABLE_SDPA=ON` consistently in SDK and provider.
+`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
+`HIPKERNELPROVIDER_ENABLE_TESTS=ON`, plus `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` when the
+build packs a rocKE bundle. SDPA needs `HIPDNN_ENABLE_SDPA=ON` consistently in SDK and
+provider.
 
 The component selection must include the provider. The `hipdnn-providers` preset does
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
@@ -321,8 +322,8 @@ the same filters the pack step gets. A root that is empty, or that would ship no
 for any architecture this build packs for, is **dormant**: it is skipped at pack, any
 stale output tree is removed, and one STATUS line says why. That is never an error,
 whether the root was named or inherited. A root set but not a directory is fatal at configure. A KDP is
-what arch pruning consumes, so standalone UKDs, kernel sources and READMEs alone do not
-make a pack.
+what arch pruning consumes, so standalone UKDs, kernel sources, READMEs and hidden-path
+KDPs alone do not make a pack.
 
 The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
 defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
