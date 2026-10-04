@@ -10,7 +10,7 @@ from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
-from rocke.core.backend import resolve_backend
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
@@ -233,7 +233,12 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 self.assertIn(f", {scale_ty} %", ll)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
-        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        # A native rejection is retried in Python unless strict C++ is requested.
+        error_type = (
+            RuntimeError
+            if resolve_backend() == "cpp" and _cpp_strict()
+            else NotImplementedError
+        )
         for flavor in ("llvm20", "llvm22"):
             with (
                 self.subTest(flavor=flavor),
