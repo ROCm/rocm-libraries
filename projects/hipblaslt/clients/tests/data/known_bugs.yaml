@@ -82,6 +82,10 @@ Known bugs:
   # the packing is shared by every architecture). REMOVE this entry in the PR that
   # fixes ROCM-32140. Review by 2026-11-01.
   - { name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140, function: matmul }
+  # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
+  # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
+  # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.
+  - { name: matmul_fast_check_threshold_cd_4gib_ROCM32050, function: matmul, known_bug_platforms: "gfx1250, gfx1250-strict" }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
