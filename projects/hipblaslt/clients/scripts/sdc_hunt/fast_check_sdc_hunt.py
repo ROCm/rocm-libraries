@@ -50,22 +50,35 @@ def read_text(path: Path) -> Optional[str]:
         return None
 
 
-def command_output(cmd: list[str]) -> Optional[str]:
+def command_output(cmd: list[str], env: Optional[dict] = None) -> Optional[str]:
     try:
         return subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60, check=False
+            cmd, capture_output=True, text=True, timeout=60, check=False, env=env
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
 
 
 def gpu_description() -> dict:
-    """GPU names and architectures from rocminfo, in device order."""
-    out = command_output(["rocminfo"]) or ""
-    names = re.findall(r"Marketing Name:\s+(.+)", out)
-    archs = sorted(set(re.findall(r"Name:\s+(gfx\w+)", out)))
-    gpus = [n.strip() for n in names if "CPU" not in n and n.strip()]
-    return {"gpus": gpus, "archs": archs}
+    """GPU names and architectures from rocminfo, in device order, for the GPUs
+    hipblaslt-test sees."""
+    # rocminfo selects by ROCR_VISIBLE_DEVICES, so mirror HIP_VISIBLE_DEVICES into it, as
+    # the cotenant launcher does for its probe.
+    env = os.environ.copy()
+    if "HIP_VISIBLE_DEVICES" in env:
+        env["ROCR_VISIBLE_DEVICES"] = env["HIP_VISIBLE_DEVICES"]
+    out = command_output(["rocminfo"], env) or ""
+    gpus, archs = [], []
+    # One block per agent; CPU agents can have names without "CPU" in them.
+    for agent in re.split(r"\n\*+\s*\nAgent \d+", out)[1:]:
+        if not re.search(r"Device Type:\s+GPU", agent):
+            continue
+        name = re.search(r"Marketing Name:\s+(.+)", agent)
+        arch = re.search(r"Name:\s+(gfx\w+)", agent)
+        gpus.append(name.group(1).strip() if name else "")
+        if arch:
+            archs.append(arch.group(1))
+    return {"gpus": gpus, "archs": sorted(set(archs))}
 
 
 def environment_record(xnack: str, load: str) -> dict:
