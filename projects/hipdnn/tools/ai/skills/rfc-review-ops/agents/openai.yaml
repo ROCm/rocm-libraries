@@ -1,4 +1,0 @@
-interface:
-  display_name: "RFC Review: Operations"
-  short_description: "Operational review of an RFC"
-  default_prompt: "Use $rfc-review-ops for a deep operational pass on a technical RFC — build system impact, packaging, CI, observability, performance in production, deployment, capacity, and failure modes — and write a focused review report."

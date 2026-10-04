@@ -1,3 +1,0 @@
-rocm-docs-core>=1.7.1
-sphinxcontrib-mermaid>=1.0
-breathe>=4.35.0
