@@ -7217,6 +7217,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
+      # Prefetch lead before its tensor_load, in WMMA windows. A stage (one DepthU iteration)
+      # under 64 WMMAs has no room for a lead: 0 keeps the prefetches at the tensor_load. With
+      # HalfPLR the loop body holds three TDM stages: measured best ~25 when A is sub-byte and
+      # ~40 otherwise on gfx1250 MAF. Without it the body holds one stage, and a lead below 8
+      # tells stinkytofu to issue the whole prefetch group in the tensor_load's window
+      # (temporary per-shape defaults).
+      miWaveTile = kernel.get("MIWaveTile")  # empty (or unset) without matrix instructions
+      wmmasPerStage = miWaveTile[0] * miWaveTile[1] * kernel["LoopIters"] \
+        if isinstance(miWaveTile, (list, tuple)) and len(miWaveTile) == 2 else 0
+      stinky_module_options["PrefetchLeadWmmas"] = \
+        0 if 0 < wmmasPerStage < 64 else \
+        4 if not kernel["HalfPLR"] else \
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
 
