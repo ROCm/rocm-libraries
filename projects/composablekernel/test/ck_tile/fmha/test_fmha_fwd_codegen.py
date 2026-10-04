@@ -1694,6 +1694,11 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             for kernel, value in dispatch.kernel_ids
             if kernel.F_pipeline.tag == "qr_tdm_sched"
         }
+        fallback_ids = {
+            value
+            for kernel, value in dispatch.kernel_ids
+            if kernel.F_pipeline.tag == "qr_tdm"
+        }
         for dim in (128, 192):
             for mode, group in (("batch", 0), ("group", 1)):
                 for mask in (0, 1, 2, 3):
@@ -1712,9 +1717,9 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                         )
                         args = dict(hdim_q=dim, group=group, mask=mask, lse=lse)
                         self.assertEqual(dispatch.run(**args), [candidate])
-                        self.assertNotIn(
-                            dispatch.run(**args, has_sink_ptr=1)[0], family_ids
-                        )
+                        sink_fallback = dispatch.run(**args, has_sink_ptr=1)[0]
+                        self.assertGreater(sink_fallback, 0)
+                        self.assertIn(sink_fallback, fallback_ids)
                         for changes in (
                             dict(seqlen_q=127),
                             dict(arg_q=160),
