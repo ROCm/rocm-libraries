@@ -639,7 +639,14 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
     else
         name += c.dimension == 192 ? "_qr_tdm_vr_pddv" : "_qr_tdm_vr_npad";
     name += "_nlogits_nbias_";
-    name += c.mask == mask_enum::no_mask ? "nmask" : "mask";
+    if(c.mask == mask_enum::no_mask)
+        name += "nmask";
+    else if(c.virtual_sink && !lse && c.window_size_left < 0 && c.window_size_right == 0 &&
+            (c.mask == mask_enum::mask_top_left || c.mask == mask_enum::mask_bottom_right))
+        // The simplified-mask codegen selects its dedicated causal fallback first.
+        name += "mc";
+    else
+        name += "mask";
     name += lse ? "_lse" : "_nlse";
     name += "_ndropout_nskip_nqscale_ntrload";
     if(!use_scheduled)
