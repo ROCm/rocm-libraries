@@ -629,6 +629,60 @@ void log_config_rejection(const config_t& config, const char* reason) {
                              << ") REJECTED: " << reason);
 }
 
+// gfx1151 (wave32, 40 CU) fp16 TN latency correction: lat' = lat * exp(w . f).
+// Fitted offline (pairwise ranking loss on measured HHS-TN kernel pools) to rank this arch's
+// kernels; it penalises large macro tiles (~1.2x per tile-area doubling once the grid fills
+// the CUs) and MT_K=64 (~1.43x). Applies only to gfx1151 with A=T, B=N and fp16 A/B, so every
+// other arch, layout and type is bit-identical. Features (log2 throughout):
+//   la  = log2(MT_M*MT_N / 128^2)        lk  = log2(MT_K / 32)        sk3 = [stream_k == 3]
+//   lw  = log2(max(tiles / N_CU, 1 / N_CU)),  tiles = ceil(M/MT_M) * ceil(N/MT_N) * batch
+//   asp = |log2(MT_M/MT_N) - log2(M/N)|  lK  = log2(K / 1024)
+//   f = [la, lk, sk3, lw, asp, la*lK, sk3*lK, sk3*lw]
+double apply_gfx1151_tn_correction(double latency,
+                                   const problem_t& problem,
+                                   const hardware_t& hardware,
+                                   const config_t& config) {
+  if (hardware.arch != hardware_t::architecture_t::gfx1151) return latency;
+  if (problem.a_transpose != transpose_t::T || problem.b_transpose != transpose_t::N) return latency;
+  if (problem.a_dtype != data_type_t::Half || problem.b_dtype != data_type_t::Half) return latency;
+  if (latency == kRejectedLatency || !std::isfinite(latency)) return latency;
+  if (problem.size.m == 0 || problem.size.n == 0 || problem.size.k == 0 || config.mt.m == 0 ||
+      config.mt.n == 0 || config.mt.k == 0 || hardware.N_CU == 0)
+    return latency;
+
+  constexpr double w[8] = {-0.47966127556450977,
+                           0.36015811049349805,
+                           0.014378827959384569,
+                           -0.7533852215344393,
+                           0.01244129077004457,
+                           0.01912338835567034,
+                           0.020405359405492613,
+                           -0.04049151379414691};
+
+  const double MT_M  = static_cast<double>(config.mt.m);
+  const double MT_N  = static_cast<double>(config.mt.n);
+  const double MT_K  = static_cast<double>(config.mt.k);
+  const double M     = static_cast<double>(problem.size.m);
+  const double N     = static_cast<double>(problem.size.n);
+  const double K     = static_cast<double>(problem.size.k);
+  const double n_cu  = static_cast<double>(hardware.N_CU);
+  const double tiles = static_cast<double>(math::safe_ceil_div(problem.size.m, config.mt.m) *
+                                           math::safe_ceil_div(problem.size.n, config.mt.n) *
+                                           std::max<size_t>(problem.batch, 1));
+
+  const double la  = std::log2(MT_M * MT_N / 16384.0);
+  const double lk  = std::log2(MT_K / 32.0);
+  const double sk3 = config.stream_k == 3 ? 1.0 : 0.0;
+  const double lw  = std::log2(std::max(tiles / n_cu, 1.0 / n_cu));
+  const double asp = std::abs(std::log2(MT_M / MT_N) - std::log2(M / N));
+  const double lK  = std::log2(K / 1024.0);
+  const double f[8] = {la, lk, sk3, lw, asp, la * lK, sk3 * lK, sk3 * lw};
+
+  double s = 0.0;
+  for (int i = 0; i < 8; ++i) s += w[i] * f[i];
+  return latency * std::exp(s);
+}
+
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
@@ -651,8 +705,9 @@ double compute_ranked_latency(const problem_t& problem,
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(
+  const double latency = gemm::compute_total_latency(
       problem, hardware, config, non_temporal_a_available, non_temporal_b_available);
+  return apply_gfx1151_tn_correction(latency, problem, hardware, config);
 }
 
 }  // namespace
