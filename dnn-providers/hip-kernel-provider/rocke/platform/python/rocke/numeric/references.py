@@ -42,3 +42,12 @@ def dense_attention_reference(Q, K, V, *, causal: bool, out_dtype=None):
     probs /= probs.sum(axis=-1, keepdims=True)
     out = np.einsum("ihj,jhd->ihd", probs, V.astype(np.float32))
     return out if out_dtype is None else out.astype(out_dtype)
+
+
+from rocke.numeric.sdpa_reference import (  # noqa: E402,F401
+    keep,
+    resolve_diagonal_band,
+    sdpa_reference,
+)
+
+__all__ += ["keep", "resolve_diagonal_band", "sdpa_reference"]

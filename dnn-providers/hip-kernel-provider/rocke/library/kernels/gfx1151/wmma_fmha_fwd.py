@@ -78,7 +78,7 @@ _BLOCK_K = 16  # K positions per K-tile (WMMA N dim of QK^T)
 def _wmma_op_id_for_arch(arch: str) -> str:
     """The f16 WMMA attention atom op_id for ``arch``: the RDNA4 split-K atom on
     gfx1201, else the RDNA3/3.5 cross-half-duplicated atom. Mirrors
-    :func:`rocke.helpers.mfma_attention._wmma_attn_op_id`."""
+    :func:`rocke.helpers.wmma_attention._wmma_attn_op_id`."""
     return _WMMA_OP_ID_GFX12 if arch == "gfx1201" else _WMMA_OP_ID
 
 

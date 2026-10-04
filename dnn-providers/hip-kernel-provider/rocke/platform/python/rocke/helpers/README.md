@@ -105,6 +105,8 @@ rocke/helpers/
 ├── attention.py # Attention2DConfig, OnlineSoftmaxState, PagedKvDescriptor,
 │ # warp_xor_reduce_*, dtype MFMA dispatch, log2 softcap,
 │ # causal/sliding-window masks, select_*d_config.
+├── attention_fwd_ext.py # AttnFwdExt: opt-in hooks / tail guards for the MFMA+WMMA forward body
+├── attention_band.py # AttnRuntimeBounds / BandEmitter: runtime two-sided band (shell-side)
 ├── compile.py # compile_kernel() one-shot IR -> HSACO
 └── manifest.py # make_gemm_manifest, make_conv_manifest,
  # make_simple_op_manifest, write_artifact
