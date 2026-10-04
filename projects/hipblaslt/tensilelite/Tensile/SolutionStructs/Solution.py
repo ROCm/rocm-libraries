@@ -2970,7 +2970,14 @@ class Solution(collections.abc.Mapping):
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
 	  
-    if state["enableLDSTrA"] or state["enableGLTrA"]:
+    # enableLDSTrA used to clamp VectorWidthA unconditionally: ds_read_tr fixes the lane->row
+    # stride at 1, so a wider store had nothing to read. accumShuffleForLDSTrVW lifts that by
+    # re-ordering the accumulators in the epilogue, but only when asked -- AccumShuffle 0
+    # keeps the old clamp so kernels that predate the shuffle are unaffected, including the
+    # ones that leave VectorWidthA at -1 and would otherwise be auto-promoted to 2/4/8 (which
+    # changes both their performance and, at VectorWidthA > 8, whether they build at all).
+    # The clamp is silent rather than a rejection because that is what it did before.
+    if state["enableGLTrA"] or (state["enableLDSTrA"] and state["AccumShuffle"] == 0):
       state["VectorWidthA"] = 1
 
     if state["enableLDSTrB"] or state["enableGLTrB"]:
@@ -3086,6 +3093,59 @@ class Solution(collections.abc.Mapping):
         state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
       # ON/OFF the sourceswap according to the sparse type automatically
       state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
+
+    # ds_read_tr hands lane L the tile row (m_base + L), so the A read is laid out VW=1 in
+    # the tile direction whatever VectorWidthA is (see mTileOffset in Components/LocalRead.py).
+    # VectorWidthA runs along M, which is contiguous in C/D, so VWA > 1 still pays for itself:
+    # the accumulators are shuffled from the read's VW=1 row order into the store's
+    # VW-interleaved order once in the epilogue (accumShuffleForLDSTrVW in KernelWriterAssembly).
+    # The shuffle handles VectorWidthA 2, 4 and 8 and any MIWaveTile[0] that is a multiple of
+    # it; its cost grows as VW*VW per group of VW tiles, so the wider settings want a
+    # benchmark before use. Placed after the sparse block above because SourceSwap is not
+    # final until then.
+    if state["enableLDSTrA"] and state["VectorWidthA"] > 1:
+      vwA = state["VectorWidthA"]
+      if vwA not in (2, 4, 8):
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA=%u: only 1, 2, 4 and 8 are implemented" % vwA)
+        return
+      if vwA > state["MatrixInstM"]:
+        # lane = ((L << log2VW) & (MI-1)) | s needs the VW slots to fit inside one MI lane group.
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA(%u) > MatrixInstM(%u)" % (vwA, state["MatrixInstM"]))
+        return
+      if state["MIWaveTile"][0] % vwA != 0:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA=%u requires MIWaveTile[0](%u) to be a multiple " \
+            "of VectorWidthA" % (vwA, state["MIWaveTile"][0]))
+        return
+      # MIWaveGroup[0] > 1 is supported: the wave offset keeps the real VectorWidth
+      # (strideWave in Components/LraTileAssignment.py) and the tile offset splits into
+      # group/tile-in-group (mTileOffset in Components/LocalRead.py), so each wave still owns
+      # exactly the VW*MatrixInstM rows the store assigns it and the shuffle stays within the
+      # wave. MatrixInstBM > 1 has not been derived.
+      if state["MatrixInstBM"] != 1:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 requires MatrixInstBM(%u) == 1" \
+            % state["MatrixInstBM"])
+        return
+      if not state["SourceSwap"]:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 requires SourceSwap (the store path takes " \
+            "vectorWidth0 = VectorWidthA only in SourceSwap mode)")
+        return
+      if state["LocalSplitU"] > 1:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 does not support LocalSplitU>1 (LSU reduces " \
+            "through LDS with its own element layout)")
+        return
+      if state["WavefrontSize"] != 32:
+        # The shuffle's ds_bpermute addressing assumes one N group per MI_M lanes within a
+        # 32-lane wave; wave64 has not been derived or validated.
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 is only implemented for WavefrontSize 32 (got %u)" \
+            % state["WavefrontSize"])
+        return
 
     # The real value of "1LDSBuffer" will be determined later (when it is -1), not here
 
@@ -5519,11 +5579,14 @@ class Solution(collections.abc.Mapping):
     state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
     if state["enableLDSTrMetadata"]:
       state["VectorWidthMetadata"] = 1
-
-      # the VetorWidth of the sparse matrix and metadta need to be the same.
-      if state["ProblemType"]["Sparse"] == 1:
-        state["VectorWidthA"] = 1
-      else:
+      # The metadata read and the sparse operand's read used to be required to share a
+      # VectorWidth, which forced VectorWidthA=1 for Sparse==1 and VectorWidthB=1 for
+      # Sparse==2. That coupling is gone on the A side: ds_read_tr fixes the metadata read at
+      # VW=1 in the tile direction regardless (lrvwTileMetadata, KernelWriter.py), and A's
+      # VW>1 is now expressed in the epilogue by accumShuffleForLDSTrVW rather than in the
+      # read geometry, so the two no longer have to agree. Sparse==2 still clamps B, but for
+      # an unrelated reason -- see the enableLDSTrB clamp: N is the strided direction of C/D.
+      if state["ProblemType"]["Sparse"] == 2:
         state["VectorWidthB"] = 1
 
     wmmaV3 = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
@@ -6675,6 +6738,17 @@ class Solution(collections.abc.Mapping):
           return
 
       ldsNumBytes = max(ldsNumBytes, ldsNumBytesRemapC)
+
+    # Normalise AccumShuffle to 0 where the shuffle could not run regardless of what the
+    # yaml asked for: without enableLDSTrA there is no layout to bridge, and storeRemap is the
+    # alternative bridge rather than a companion. 1 and 2 would emit the same assembly as 0 in
+    # those cases, so collapsing them keeps one kernel name instead of three.
+    # VectorWidthA == 1 lands here too: the shuffle is a no-op at 1, so an explicit
+    # VectorWidthA: 1 with AccumShuffle 1 or 2 must not get its own kernel name.
+    # Checked here rather than with the other VectorWidthA preconditions because
+    # StoreRemapVectorWidth is not final until the block just above.
+    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1) or state["StoreRemapVectorWidth"] > 0:
+      state["AccumShuffle"] = 0
 
     state["LdsOffsetBias"] = 0  # TODO: ldsBiasOffset = ldsNumBytesAB
     state["LdsOffsetBiasNonGSU"] = 0

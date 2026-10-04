@@ -978,6 +978,30 @@ validParameters = { # we need to make sure this matches develop
     # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
+    # AccumShuffle: the epilogue accumulator shuffle (accumShuffleForLDSTrVW in
+    # KernelWriterAssembly), which bridges the ds_read_tr M order to the wide store's and is
+    # what makes VectorWidthA > 1 legal under enableLDSTrA.
+    # 0 = off. enableLDSTrA clamps VectorWidthA to 1, exactly as it did before the shuffle
+    #     existed -- including silently overriding an explicit VectorWidthA > 1 in the yaml.
+    #     With no VectorWidthA > 1 there is nothing to bridge, so no shuffle is emitted.
+    # 1 = on. VectorWidthA 2/4/8 is kept and the shuffle re-orders the accumulators. It walks
+    #     numNTiles*numGroups*accPerTile mutually independent passes, each VW*slotBatch
+    #     ds_bpermute followed by a cndmask tree, and drains LDS (s_wait_dscnt 0) before
+    #     consuming each pass -- so the full bpermute latency is exposed once per pass.
+    # 2 = on, software-pipelined. Issues the next pass's ds_bpermute before consuming the
+    #     current one and waits on a staggered dscnt, so each pass's LDS latency hides behind
+    #     the previous pass's cndmask tree. Same instruction multiset as 1; costs a second
+    #     gather buffer (VW*slotBatch extra vgprs).
+    # 0 is NOT a "wrong answers" setting: without the shuffle, VectorWidthA > 1 under
+    # enableLDSTrA reads the wrong M rows, so turning the shuffle off has to turn
+    # VectorWidthA > 1 off with it. That is also why 0 is the default -- it keeps every kernel
+    # that predates this feature bit-identical, including ones that never set VectorWidthA and
+    # would otherwise be auto-promoted into the shuffle path.
+    # 1 vs 2 is a pure scheduling choice and neither wins universally; it depends on the whole
+    # configuration and is not predictable from VectorWidthA, MacroTile or slotBatch alone, so
+    # benchmark both. Forced to 0 when the shuffle cannot run anyway (not enableLDSTrA, or
+    # StoreRemapVectorWidth > 0, which is the alternative bridge).
+    "AccumShuffle": [0, 1, 2],
     # If 0, store 1 element per instruction.
     # If 1, store vector-width elements per instruction.
     # if -1, store vector-wide elements per instruction unless PBD would not generate a valid kernel

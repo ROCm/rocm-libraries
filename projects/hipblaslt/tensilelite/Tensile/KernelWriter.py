@@ -7551,14 +7551,28 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
       (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1) and \
       not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
-    if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
+    # LDSTr: ds_read_tr delivers one tile row per lane per instruction, so the
+    # tile-direction width of a single local read is 1 regardless of VectorWidthA
+    # (LocalRead issues VectorWidthA separate reads, one per row of a VW-group).
+    # Tracking VectorWidthA here would switch on the software pack path -- ValuPack
+    # VGPRs, v_perm transposes, the shrunken numVgprValu below -- which is exactly
+    # what the hardware transpose replaces, and whose VGPRs are deliberately not
+    # allocated when enableLDSTr is set (see vgprAllocationImplClassic).
+    if kernel["enableLDSTrA"]:
+      self.states.lrvwTileA = 1
+    elif not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
       self.states.lrvwTileA = kernel["VectorWidthA"]
     else:
       self.states.lrvwTileA = 1
     forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
       (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThreadB"] > 1) and \
       not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
-    if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
+    # See the enableLDSTrA comment above. Note this branch deliberately does not
+    # touch lrvwTileMXSB: enableLDSTrB implies not UnrollMajorLDSB, so today's
+    # LDSTr kernels already take the first branch and never reach that assignment.
+    if kernel["enableLDSTrB"]:
+      self.states.lrvwTileB = 1
+    elif not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
       self.states.lrvwTileB = kernel["VectorWidthB"]
     else:
       if kernel["ProblemType"]["MXBlockB"]:
@@ -7588,7 +7602,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numVgprBufferPackMetadata = kernel["LoopIters"]
       else:
         self.states.numVgprBufferPackMetadata = self.states.numItersPLR + 1
-      if not kernel["UnrollMajorLDSMetadata"]:
+      # Same reasoning as enableLDSTrA/B above: ds_load_tr8_b64 delivers one metadata
+      # tile row per lane per instruction, so a single local read is 1 wide in the tile
+      # direction whatever VectorWidthMetadata is. Tracking VectorWidthMetadata here
+      # would switch on the software pack path that the hardware transpose replaces.
+      if kernel.get("enableLDSTrMetadata", False):
+        self.states.lrvwTileMetadata = 1
+      elif not kernel["UnrollMajorLDSMetadata"]:
         self.states.lrvwTileMetadata = kernel["VectorWidthMetadata"]
       else:
         self.states.lrvwTileMetadata = 1
