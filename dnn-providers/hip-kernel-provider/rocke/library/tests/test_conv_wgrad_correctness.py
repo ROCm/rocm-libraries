@@ -2134,6 +2134,14 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
         groups=64,
     )
 
+    # The subject of these cases is group merging, not the LDS layout: the
+    # K-outer staging only rides along because it is the layout the merged
+    # dispatch prefers where it exists. It is gated to _KOUTER_ARCHES, so
+    # pinning it True would turn every case below into a skip on gfx942 --
+    # which _assert_case_ran correctly reports as a failure rather than a
+    # green. Follow the arch instead and keep the merge coverage running.
+    _KOUTER = GPU_ARCH in _KOUTER_ARCHES
+
     def test_group_merge_without_two_stage(self):
         # The primary path: split_k=1, so dW is written straight from the tile
         # by the direct or CShuffle store. Both carry the block-diagonal mask
@@ -2148,7 +2156,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
                         "mem",
                         epilogue,
                         split_k=1,
-                        lds_k_outer=True,
+                        lds_k_outer=self._KOUTER,
                         warp_tile_mn=16,
                         tile_k=32,
                         tile_m=32,
@@ -2232,7 +2240,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             "mem",
             "default",
             split_k=1,
-            lds_k_outer=True,
+            lds_k_outer=self._KOUTER,
             warp_tile_mn=16,
             tile_k=32,
             tile_m=32,
