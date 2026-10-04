@@ -15,6 +15,7 @@
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2_prefetch_n.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_one_warp_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_areg_bsmem_creg_v1_custom_policy.hpp"
@@ -208,7 +209,21 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                 typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                 decltype(warp_gemm)>;
 
-            if constexpr(1 < Problem::kNumGemm0Warps)
+            // Prefetch K subtiles for gfx12 BF16 D32/D64. Partial-K tails
+            // retain the generic GEMM because PrefetchN has no partial-K support.
+#if defined(__gfx12__)
+            if constexpr(1 < Problem::kNumGemm0Warps && !Problem::kPadHeadDimQ &&
+                         ((Problem::BlockFmhaShape::kQKHeaddim == 64 &&
+                           Problem::BlockFmhaShape::kK0 == 32) ||
+                          (Problem::BlockFmhaShape::kQKHeaddim == 32 &&
+                           Problem::BlockFmhaShape::kK0 == 16)) &&
+                         std::is_same_v<typename Problem::QDataType, bf16_t> &&
+                         std::is_same_v<typename Problem::KDataType, bf16_t> &&
+                         std::is_same_v<typename Problem::SaccDataType, float>)
+                return BlockGemmARegBSmemCRegV2PrefetchN<GemmProblem, BlockGemmPolicy>{};
+            else
+#endif
+                if constexpr(1 < Problem::kNumGemm0Warps)
                 return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
             else
                 return BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
@@ -1183,7 +1198,27 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                 typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                 decltype(warp_gemm)>;
 
-            return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+            // Prefetch V subtiles for gfx12 BF16 D32/D64. Padded V heads
+            // retain the generic GEMM and its partial-N support.
+#if defined(__gfx12__)
+            if constexpr(((Problem::BlockFmhaShape::kQKHeaddim == 64 &&
+                           Problem::BlockFmhaShape::kN1 == 64) ||
+                          (Problem::BlockFmhaShape::kQKHeaddim == 32 &&
+                           Problem::BlockFmhaShape::kN1 == 32)) &&
+                         (Problem::BlockFmhaShape::kK1 == 32 ||
+                          Problem::BlockFmhaShape::kK1 == 64) &&
+                         !Problem::kPadHeadDimV &&
+                         std::is_same_v<typename Problem::PDataType, bf16_t> &&
+                         std::is_same_v<typename Problem::VDataType, bf16_t> &&
+                         std::is_same_v<typename Problem::OaccDataType, float>)
+            {
+                return BlockGemmARegBSmemCRegV2PrefetchN<GemmProblem, BlockGemmPolicy>{};
+            }
+            else
+#endif
+            {
+                return BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+            }
         }
     }
 };
