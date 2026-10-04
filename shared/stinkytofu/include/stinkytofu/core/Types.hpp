@@ -145,6 +145,12 @@ struct PassFeatureConfig {
         /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
         /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
         bool enableESM2TrackValuVsrc = false;
+        /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
+        /// owed ceil(fillers / WMMAs) of its region and closes once that quota
+        /// is met, instead of being padded to its full co-issue length. ds_load
+        /// selection and coexec hazard padding are unaffected. See
+        /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
+        bool evenSpreadFillers = false;
     };
 
     LoopConfig loopConfig;

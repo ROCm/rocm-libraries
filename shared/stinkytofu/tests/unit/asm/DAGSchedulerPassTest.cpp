@@ -22,9 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <string_view>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -1452,6 +1455,73 @@ TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
                                 "window (each 1-cycle wait hidden by the "
                                 "in-flight WMMA), ahead of the independent "
                                 "WMMA #1";
+}
+
+// ---------------------------------------------------------------------------
+// Property: evenSpreadFillers spreads SALU fillers one per WMMA window.
+//
+// Region: 4 independent WMMAs + 4 independent SALUs, so the quota is
+// ceil(4 / 4) = 1 filler per window.
+//   off: the first WMMA's window stays open for its full co-issue length, so
+//        the scheduler packs several SALUs into it and starves later windows.
+//   on:  each window closes after 1 SALU and the next WMMA issues, giving
+//        wmma, s, wmma, s, ... with at most 1 SALU between WMMAs.
+// Run with and without the hide-budget prescan, which production enables and
+// which separately demands non-WMMA work per window.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, EvenSpreadFillersPlacesOneSaluPerWmmaWindow) {
+    auto saluCountsBetweenWmmas = [&](bool evenSpread, bool hideBudgetPrescan) {
+        am.clear();
+        func = std::make_unique<Function>("even_spread");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/12 + i * 16, /*src0Start=*/200 + i * 16);
+        for (int i = 0; i < 4; ++i) {
+            AsmIRBuilder builder(*bb, arch);
+            StinkyInstruction* s = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+            s->addDestReg(StinkyRegister("s", 100 + i, 1));
+            s->addSrcReg(StinkyRegister("s", 0, 1));
+            s->addSrcReg(StinkyRegister("s", 1, 1));
+        }
+        const int before = countStinkyInstructions(*bb);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.evenSpreadFillers = evenSpread;
+        pfc.dagFeatures.enableWmmaHideBudgetPrescan = hideBudgetPrescan;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        EXPECT_EQ(countStinkyInstructions(*bb), before) << "must not drop instructions";
+
+        // counts[k] = SALUs issued after WMMA #k and before WMMA #k+1.
+        std::vector<int> counts;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || inst->getHwInstDesc() == nullptr) continue;
+            if (isMatrixInstruction(*inst))
+                counts.push_back(0);
+            else if (!counts.empty() &&
+                     std::string_view(inst->getHwInstDesc()->mnemonic).rfind("s_", 0) == 0)
+                ++counts.back();
+        }
+        return counts;
+    };
+
+    for (bool prescan : {false, true}) {
+        SCOPED_TRACE(prescan ? "hide-budget prescan on" : "hide-budget prescan off");
+        const std::vector<int> off = saluCountsBetweenWmmas(/*evenSpread=*/false, prescan);
+        EXPECT_GT(*std::max_element(off.begin(), off.end()), 1)
+            << "baseline packs several SALUs into one window (else this test proves nothing)";
+
+        const std::vector<int> on = saluCountsBetweenWmmas(/*evenSpread=*/true, prescan);
+        EXPECT_EQ(on, (std::vector<int>{1, 1, 1, 1}))
+            << "each WMMA window must get exactly its quota of 1 SALU";
+    }
 }
 
 // ---------------------------------------------------------------------------

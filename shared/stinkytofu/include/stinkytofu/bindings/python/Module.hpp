@@ -115,13 +115,14 @@
 // Keep transition disabled by default to preserve legacy full-throttle pacing:
 // entries=0 skips the transition range, and factor=1.0 is the full interval.
 //
-// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder,
-// which defaults on. Gfx1250Backend resolves unset knobs via
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder and
+// EvenSpreadFillers, which default on. Gfx1250Backend resolves unset knobs via
 // SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
 // insertion (user value wins; degenerate main-loop IR falls back to today's
 // static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
     X(LockDsReadOrder, bool, true)                                    \
+    X(EvenSpreadFillers, bool, true)                                  \
     X(DsReadThrottleTransitionFactor, double, 1.0)                    \
     X(DsReadThrottleTransitionEntries, int, 0)                        \
     X(DsReadThrottleLatency, int, -1)                                 \
