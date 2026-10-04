@@ -44,6 +44,9 @@ Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
 or D192/V128, and row-major V. They use no bias, dropout, logits
 soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
 the existing pipeline candidates.
+Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
+logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
+of the compile-time sink-token flag.
 
 The generated API tries matching scheduled traits first. D64/V64 uses a
 128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
