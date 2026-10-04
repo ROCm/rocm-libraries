@@ -45,7 +45,7 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i32") == 0 || strcmp(name, "f32") == 0)
+    if(strcmp(name, "i32") == 0 || strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0)
     {
         return 4;
     }
@@ -358,7 +358,10 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                                                : rocke_ll_llvm_type(L, val->type);
     const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
     int elem_bytes = ll_elem_bytes(elem_name);
-    int64_t align = vec * elem_bytes;
+    int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+    if(align <= 0 || (align & (align - 1)))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const char* ty = rocke_ll_llvm_type(L, val->type);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
@@ -582,7 +585,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         {
             elem_bytes = 2;
         }
-        else if(strcmp(en, "i32") == 0 || strcmp(en, "f32") == 0)
+        else if(strcmp(en, "i32") == 0 || strcmp(en, "tf32") == 0 || strcmp(en, "f32") == 0)
         {
             elem_bytes = 4;
         }

@@ -36,6 +36,7 @@ _HIP_TYPE = {
     "i8": "int8_t",
     "i16": "int16_t",
     "i32": "int",
+    "tf32": "int",
     "i64": "int64_t",
     "f16": "fp16",
     "bf16": "bf16",
@@ -67,7 +68,7 @@ def _type_to_hip(t) -> str:
             return f"bf16x{t.count}"
         if elem == "f32":
             return f"f32x{t.count}"
-        if elem == "i32":
+        if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
             return f"i16x{t.count}"
@@ -182,6 +183,7 @@ _VEC_PREFIX = {
     "bf16": "bf16x",
     "f32": "f32x",
     "i32": "i32x",
+    "tf32": "i32x",
     "i16": "i16x",
     "i8": "i8x",
     "fp8e4m3": "i8x",
@@ -320,6 +322,11 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        from .tf32 import tf32_op_error
+
+        error = tf32_op_error(op)
+        if error:
+            raise ValueError(error)
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
@@ -570,6 +577,19 @@ class _Lowerer:
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
+        from .tf32 import TF32_MMA
+
+        op_id = op.attrs["op_id"]
+        if op_id in TF32_MMA:
+            if self.arch.gfx != "gfx942":
+                raise ValueError("XF32 MMA requires gfx942")
+            a, b, c = op.operands
+            self._emit(
+                f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
+                f"__builtin_bit_cast(f32x2, {_name(a)}), "
+                f"__builtin_bit_cast(f32x2, {_name(b)}), {_name(c)}, 0, 0, 0);"
+            )
+            return
         op_id = op.attrs["op_id"]
         legacy = Op(
             name=f"tile.{op_id}",
@@ -1835,17 +1855,28 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
-        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
-        if _nontemporal(op):
-            # The vector-pointer cast promises natural alignment; refuse the
-            # hint when the IR guarantees less (as the load's memcpy path does).
-            byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
-            align = int(op.attrs.get("align", byte_count))
-            if align < byte_count:
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", byte_count))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_store_vN: alignment must be a positive power of two"
+            )
+        nontemporal = _nontemporal(op)
+        if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
                 raise NotImplementedError(
                     "global_store_vN: the HIP backend does not yet lower "
-                    "nontemporal on an under-aligned store"
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
                 )
+            self._emit(
+                f"__builtin_memcpy("
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"&{_name(val)}, {byte_count});"
+            )
+            return
+        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
             self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
             return
         self._emit(f"*{dst} = {_name(val)};")

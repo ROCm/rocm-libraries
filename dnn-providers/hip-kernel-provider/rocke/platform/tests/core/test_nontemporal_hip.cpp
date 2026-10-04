@@ -6,8 +6,8 @@
  *
  * With no arguments it self-checks: a ROCKE_TEMPORAL_STREAMING op lowers to
  * __builtin_nontemporal_load / __builtin_nontemporal_store, a default one
- * does not, the unaligned memcpy load path and an under-aligned store do not
- * yet lower the hint (ROCKE_ERR_NOTIMPL; both still lower without it), a
+ * does not, the unaligned memcpy load and store paths do not yet lower the
+ * hint (ROCKE_ERR_NOTIMPL; both still lower through memcpy without it), a
  * non-bool attr is rejected
  * rather than coerced, an out-of-range hint or a struct_size of 0 (opts not
  * built with ROCKE_MEM_OPTS_INIT) puts the builder in its error state, a
@@ -71,7 +71,7 @@ const CopyCase CASES[] = {
     /* align 2 < 16-byte payload: the memcpy load path. */
     {"memcpy_nt", true, 8, 2, true, false, 0},
     {"memcpy_plain", true, 8, 2, false, false, 0},
-    /* align 2 < 16-byte payload on the store side. */
+    /* align 2 < 16-byte payload: the memcpy store path. */
     {"store_underaligned_nt", true, 8, 0, false, true, 2},
     {"store_underaligned_plain", true, 8, 0, false, false, 2},
 };
@@ -379,13 +379,15 @@ void self_check(const char* arch)
        || !has(hip, "__builtin_memcpy("))
         fail("default unaligned load must still take the memcpy path", arch, __LINE__);
 
-    /* An under-aligned streaming store is refused the same way (its vector
-     * pointer cast would over-promise alignment); without the hint it lowers. */
+    /* The memcpy store path refuses the hint the same way, and the same store
+     * without it still lowers through memcpy. */
     if(lower(*find_case("store_underaligned_nt"), arch, BadAttr::none, nullptr)
        != ROCKE_ERR_NOTIMPL)
-        fail("nontemporal on an under-aligned store must be ROCKE_ERR_NOTIMPL", arch, __LINE__);
-    if(lower(*find_case("store_underaligned_plain"), arch, BadAttr::none, nullptr) != ROCKE_OK)
-        fail("default under-aligned store must still lower", arch, __LINE__);
+        fail("nontemporal on the memcpy store path must be ROCKE_ERR_NOTIMPL", arch, __LINE__);
+    hip.clear();
+    if(lower(*find_case("store_underaligned_plain"), arch, BadAttr::none, &hip) != ROCKE_OK
+       || !has(hip, "__builtin_memcpy("))
+        fail("default under-aligned store must take the memcpy path", arch, __LINE__);
 
     if(lower(*find_case("load"), arch, BadAttr::load, nullptr) != ROCKE_ERR_VALUE)
         fail("a non-bool nontemporal attr on the load must be ROCKE_ERR_VALUE", arch, __LINE__);

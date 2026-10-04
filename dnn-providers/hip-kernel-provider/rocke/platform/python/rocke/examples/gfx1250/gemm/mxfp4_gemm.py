@@ -16,7 +16,7 @@ def make_spec(args) -> BlockScaledGemmSpec:
         K=args.k,
         dtype_a="fp4",
         dtype_b="fp4",
-        dtype_c="bf16",
+        dtype_c=args.output_dtype,
         scale_dtype="e8m0",
         matrix_path=args.matrix_path,
         block_k=16 if args.matrix_path == "wmma_scale16" else 32,

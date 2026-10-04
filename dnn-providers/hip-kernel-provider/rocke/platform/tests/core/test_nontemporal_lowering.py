@@ -205,14 +205,18 @@ def test_hip_backend_rejects_nontemporal_on_the_memcpy_path():
     assert "__builtin_memcpy(" in lower_kernel_to_hip(plain, arch="gfx950")
 
 
-def test_hip_backend_rejects_nontemporal_on_an_under_aligned_store():
-    # align 2 < 16-byte payload: the store's vector-pointer cast would promise
-    # 16-byte alignment the IR does not guarantee, so the hint is refused like
-    # the load's (the LLVM path is unaffected).
+def test_hip_backend_rejects_nontemporal_on_the_store_memcpy_path():
+    # align 2 < 16-byte payload takes the store's memcpy path, which the HIP
+    # backend does not yet lower with the hint (the LLVM path does).
     kernel = _copy_kernel(load_nt=False, store_nt=True, elem=F16, n=8, store_align=2)
-    with pytest.raises(NotImplementedError, match="under-aligned store"):
+    with pytest.raises(NotImplementedError, match="does not yet lower nontemporal"):
         lower_kernel_to_hip(kernel, arch="gfx950")
-    # A naturally aligned streaming store still takes the builtin.
+    # Without the hint the same store lowers through memcpy, and a naturally
+    # aligned streaming store still takes the builtin.
+    plain = _copy_kernel(load_nt=False, store_nt=False, elem=F16, n=8, store_align=2)
+    assert "__builtin_memcpy(__builtin_assume_aligned(" in lower_kernel_to_hip(
+        plain, arch="gfx950"
+    )
     aligned = _copy_kernel(load_nt=False, store_nt=True, elem=F16, n=8, store_align=16)
     assert "__builtin_nontemporal_store(" in lower_kernel_to_hip(aligned, arch="gfx950")
 

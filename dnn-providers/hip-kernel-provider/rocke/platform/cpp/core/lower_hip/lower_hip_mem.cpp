@@ -665,20 +665,34 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
+    const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
+    const int64_t align = mem_attr_int(op, "align", byte_count);
+    if(align <= 0 || (align & (align - 1)))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "memref.global_store_vN: nontemporal attr must be a bool");
-    if(nontemporal)
+    if(align < byte_count || (byte_count & (byte_count - 1)))
     {
-        /* The vector-pointer cast promises natural alignment; refuse the hint
-         * when the IR guarantees less (as the load's memcpy path does). */
-        const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-        if(mem_attr_int(op, "align", byte_count) < byte_count)
+        if(nontemporal)
             return rocke_h_fail(lw,
                                 ROCKE_ERR_NOTIMPL,
                                 "global_store_vN: the HIP backend does not yet lower "
-                                "nontemporal on an under-aligned store");
+                                "nontemporal on the memcpy path (under-aligned or "
+                                "non-power-of-two payload)");
+        rocke_h_emitf(lw,
+                      "__builtin_memcpy(__builtin_assume_aligned(%s + %s, %lld), &%s, %lld);",
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx),
+                      (long long)align,
+                      rocke_h_name(lw, val),
+                      (long long)byte_count);
+        return lw->status;
+    }
+    if(nontemporal)
+    {
         rocke_h_emitf(lw,
                       "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
                       rocke_h_name(lw, val),
