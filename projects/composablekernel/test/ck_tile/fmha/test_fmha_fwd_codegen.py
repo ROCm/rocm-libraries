@@ -1521,7 +1521,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             d128 + ".backup",
             "fmha_fwd_api.cpp",
             "mha_fwd.cu",
-            # D64 keeps the compiler's default scheduling mode for both native dtypes.
+            # All supported scheduled head dimensions use expert scheduling mode.
             d128.replace("d128", "d64"),
             d128.replace("d128", "d64").replace("bf16", "fp16"),
         ]
@@ -1548,7 +1548,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertTrue(line.startswith(f"{i}:"))
                 self.assertEqual(
                     "-amdgpu-expert-scheduling-mode" in line,
-                    i in (0, 1, 2, 3, 5),
+                    i in (0, 1, 2, 3, 5, 12, 13),
                 )
                 self.assertNotIn("-wwm-regalloc=fast", line)
 
