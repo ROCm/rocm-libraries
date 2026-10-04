@@ -50,11 +50,15 @@ def normalize_dtype(dtype: str) -> str:
 class GdnDecodeRequest(OperatorRequest):
     """One gated-delta-rule single-token decode step.
 
-    ``batch`` is the number of *active* sequences this step. Tile selection is
-    keyed on ``batch * num_v_heads`` -- the "work" -- not on batch alone: every
-    workgroup does identical work and the grid is their product, so the two are
-    interchangeable. Keying on the product is what keeps a tensor-parallel
-    deployment, which divides ``num_v_heads`` across ranks, on the right tile.
+    ``batch`` is the number of *active* sequences this step. It always
+    contributes to the launch grid.
+
+    For ``gate_kind="gdn"``, ``auto`` uses the static ``DEFAULT_TILE`` whenever
+    it is legal; otherwise dispatch chooses a validator-admitted fallback.
+    Neither ``batch`` nor ``num_v_heads`` chooses GDN's auto tile.
+
+    For ``gate_kind="kda"``, ``auto`` is keyed on ``batch * num_v_heads`` -- the
+    "work" -- so tensor parallelism selects the tile for heads local to a rank.
 
     ``gate_kind`` selects the forget-gate granularity: ``"gdn"`` (one scalar
     decay per head) or ``"kda"`` (a per-channel decay). It reaches the spec and
