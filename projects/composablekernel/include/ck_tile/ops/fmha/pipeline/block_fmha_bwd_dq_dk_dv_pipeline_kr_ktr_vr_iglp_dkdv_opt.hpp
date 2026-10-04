@@ -35,7 +35,12 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
     using BlockFmhaShape = remove_cvref_t<typename Problem::BlockFmhaShape>;
 
-    static constexpr index_t kBlockPerCu = Problem::kBlockPerCu;
+    // D32 DKDV targets 8 waves/EU (VGPR <= 192).
+    static constexpr index_t kBlockPerCu =
+        (BlockFmhaShape::kM0 == 32 && BlockFmhaShape::kN0 == 64 &&
+         BlockFmhaShape::kQKHeaddim == 32 && BlockFmhaShape::kVHeaddim == 32)
+            ? 8
+            : Problem::kBlockPerCu;
     static constexpr index_t kBlockSize  = Problem::kBlockSize;
 
     static constexpr index_t kM0        = BlockFmhaShape::kM0;
@@ -56,7 +61,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
     template <typename SrcTensor>
     CK_TILE_DEVICE static auto d64_cast_pds(const SrcTensor& src)
     {
-        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 && kQKHeaddim == 64 && kVHeaddim == 64 &&
+        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 &&
+                     (kQKHeaddim == 64 || kQKHeaddim == 32) && kVHeaddim == kQKHeaddim &&
                      std::is_same_v<GemmDataType, bf16_t> &&
                      std::is_same_v<remove_cvref_t<typename SrcTensor::DataType>, float>)
         {
@@ -75,8 +81,38 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
     }
 
     static constexpr bool kD64 = kM0 == 32 && kN0 == 64 && kQKHeaddim == 64 && kVHeaddim == 64;
-    static_assert(kD64 || (kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128),
-                  "The DK/DV-only pipeline requires a supported D64/D128 product tile");
+    // D32 reuses the M32/N64 product tile (gfx12 tile b32x64x32); D handling
+    // takes the generic (non-kD64) path.
+    static constexpr bool kD32 = kM0 == 32 && kN0 == 64 && kQKHeaddim == 32 && kVHeaddim == 32;
+    static_assert(kD64 || kD32 ||
+                      (kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128),
+                  "The DK/DV-only pipeline requires a supported D32/D64/D128 product tile");
+
+    // in the M32/N64 product tile the P/dS LDS transposes
+    // are wave-local (wave w writes Gemm0/Gemm2 C columns [16w,16w+16) and reads the same
+    // range as Gemm1/Gemm3 A rows), so D32 needs no block barrier around them.
+    // P / dS reach Gemm1 / Gemm3 A without LDS (same wave, lane
+    // and thread-buffer slot in the M32/N64 WMMA C -> transposed-A layouts).
+    // D64 uses the same M32/N64 tile and warp layouts.
+    static constexpr bool kD32PDirect  = (kD32 || kD64) && kN0 == 64;
+    // Q^T / dO^T in an M-contiguous [D][M] LDS layout (b128 reads).
+    static constexpr bool kD32XtB128 = kD32 && sizeof(QDataType) == 2 &&
+                                       sizeof(OGradDataType) == 2;
+    static constexpr bool kD32DsDirect = (kD32 || kD64) && kN0 == 64;
+    CK_TILE_DEVICE static void xwave_publish_sync()
+    {
+        if constexpr(kD32)
+            asm volatile("s_wait_dscnt 0x0" ::: "memory");
+        else
+            block_sync_lds();
+    }
+    CK_TILE_DEVICE static void xwave_reuse_sync()
+    {
+        if constexpr(kD32)
+            asm volatile("" ::: "memory");
+        else
+            block_sync_lds();
+    }
 
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
     static constexpr index_t kPadHeadDimQ  = Problem::kPadHeadDimQ;
@@ -143,7 +179,12 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             Policy::template MakeSGradLdsBlockDescriptor<Problem>().get_element_space_size();
 
         // Keep P and dS in physically separate LDS scratch regions.
-        return max(smem_size_kv, smem_size_qloop + 2 * smem_size_xwave_tile);
+        // raw Q has its own region after the cross-wave tiles.
+        constexpr index_t smem_size_q_raw = kD32 ? smem_size_q : 0;
+        // D32 P and dS share one wave-local tile.
+        constexpr index_t num_xwave_tiles = kD32 ? 1 : 2;
+        return max(smem_size_kv,
+                   smem_size_qloop + num_xwave_tiles * smem_size_xwave_tile + smem_size_q_raw);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -303,8 +344,20 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                              {seqlen_q_start, 0},
                              Policy::template MakeQDramTileDistribution<Problem>());
 
-        QDataType* q_lds_ptr =
-            static_cast<QDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr)));
+        // D32 keeps raw Q apart from Q^T (offset 0).
+        constexpr index_t q_raw_lds_offset =
+            kD32 ? Policy::template GetSmemSizeQT<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>() +
+                       Policy::template GetSmemSizeOGradT<Problem>() +
+                       Policy::template GetSmemSizeLSE<Problem>() +
+                       Policy::template GetSmemSizeD<Problem>() +
+                       Policy::template GetSmemSizeBias<Problem>() +
+                       1 * sizeof(GemmDataType) * // D32: one shared P/dS tile
+                           Policy::template MakeSGradLdsBlockDescriptor<Problem>()
+                               .get_element_space_size()
+                 : 0;
+        QDataType* q_lds_ptr = static_cast<QDataType*>(
+            static_cast<void*>(static_cast<char*>(smem_ptr) + q_raw_lds_offset));
 
         auto q_lds = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
@@ -394,7 +447,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
                 static_assert(p_desc.get_element_space_size() == 32 * 32);
                 return p_desc;
             }
-            else if constexpr(kM0 == 32 && kN0 == 64 && kQKHeaddim == 64 && kVHeaddim == 64 &&
+            else if constexpr(kM0 == 32 && kN0 == 64 && (kD64 || kD32) &&
                               sizeof(GemmDataType) == 2)
             {
                 // D64-P-ADJACENT-MPAIR:
@@ -482,8 +535,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             sizeof(GemmDataType) * p_xwave_lds_desc.get_element_space_size();
 
         GemmDataType* ds_xwave_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + p_xwave_lds_offset + xwave_tile_bytes));
-
+            static_cast<char*>(smem_ptr) + p_xwave_lds_offset +
+            (kD32 ? 0 : xwave_tile_bytes)));
         auto p_xwave_lds =
             make_tensor_view<address_space_enum::lds>(p_xwave_lds_ptr, p_xwave_lds_desc);
 
@@ -550,8 +603,69 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
         auto shuffled_q_lds_write_window = make_tile_window(
             shuffled_q_lds_write, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
 
-        auto qt_lds_read = make_tensor_view<address_space_enum::lds>(
-            qt_lds_ptr, Policy::template MakeQTLdsReadBlockDescriptor<Problem>());
+        // [D=32][M=32] bf16, element offset
+        //   d*32 + ((m>>3) ^ ((d>>2)&3))*8 + (m&7)
+        // Physical dims Dh,Dl,C,R = 8,4,4,8 (d = Dh*4+Dl, m = C*8+R); C ^= Dh%4.
+        constexpr auto d32_xt_base_desc = [&]() {
+            constexpr auto raw = make_naive_tensor_descriptor(
+                make_tuple(number<8>{}, number<4>{}, number<4>{}, number<8>{}),
+                make_tuple(number<128>{}, number<32>{}, number<8>{}, number<1>{}),
+                number<8>{},
+                number<1>{});
+            return transform_tensor_descriptor(
+                raw,
+                make_tuple(make_xor_transform(make_tuple(number<8>{}, number<4>{})),
+                           make_pass_through_transform(number<4>{}),
+                           make_pass_through_transform(number<8>{})),
+                make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}),
+                make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}));
+        }();
+        // Read view [D, M] (Gemm1 / Gemm3 operand), write view [M, D] (DRAM tile order).
+        constexpr auto d32_xt_read_desc = transform_tensor_descriptor(
+            d32_xt_base_desc,
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<8>{}, number<4>{})),
+                       make_merge_transform_v3_division_mod(make_tuple(number<4>{}, number<8>{}))),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        constexpr auto d32_xt_write_desc = transform_tensor_descriptor(
+            d32_xt_base_desc,
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<8>{}, number<4>{})),
+                       make_merge_transform_v3_division_mod(make_tuple(number<4>{}, number<8>{}))),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+            make_tuple(sequence<1>{}, sequence<0>{}));
+        static_assert(d32_xt_read_desc.get_element_space_size() == 32 * 32);
+        if constexpr(kD32XtB128)
+        {
+            static_assert(kM0 == 32 && kQKHeaddim == 32 && kVHeaddim == 32);
+            static_assert(Policy::template GetSmemSizeQT<Problem>() >= 32 * 32 * 2 &&
+                          Policy::template GetSmemSizeOGradT<Problem>() >= 32 * 32 * 2);
+        }
+
+        auto qt_lds_read = [&]() {
+            if constexpr(kD32XtB128)
+                return make_tensor_view<address_space_enum::lds>(qt_lds_ptr, d32_xt_read_desc);
+            else
+                return make_tensor_view<address_space_enum::lds>(
+                    qt_lds_ptr, Policy::template MakeQTLdsReadBlockDescriptor<Problem>());
+        }();
+        auto d32_qt_lds_write_window = [&]() {
+            if constexpr(kD32XtB128)
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(qt_lds_ptr, d32_xt_write_desc),
+                    make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                    {0, 0});
+            else
+                return 0;
+        }();
+        auto store_qt_lds = [&](const auto& q_tile) {
+            if constexpr(kD32XtB128)
+                store_tile(d32_qt_lds_write_window, q_tile);
+            else
+            {
+                shuffle_tile(shuffled_q_block_tile, q_tile);
+                store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+            }
+        };
 
         auto qt_lds_read_window =
             make_tile_window(qt_lds_read,
@@ -594,8 +708,31 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
         auto shuffled_do_lds_write_window = make_tile_window(
             shuffled_do_lds_write, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
 
-        auto dot_read_lds = make_tensor_view<address_space_enum::lds>(
-            dot_lds_ptr, Policy::template MakeOGradTLdsReadBlockDescriptor<Problem>());
+        auto dot_read_lds = [&]() {
+            if constexpr(kD32XtB128)
+                return make_tensor_view<address_space_enum::lds>(dot_lds_ptr, d32_xt_read_desc);
+            else
+                return make_tensor_view<address_space_enum::lds>(
+                    dot_lds_ptr, Policy::template MakeOGradTLdsReadBlockDescriptor<Problem>());
+        }();
+        auto d32_dot_lds_write_window = [&]() {
+            if constexpr(kD32XtB128)
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(dot_lds_ptr, d32_xt_write_desc),
+                    make_tuple(number<kM0>{}, number<kVHeaddim>{}),
+                    {0, 0});
+            else
+                return 0;
+        }();
+        auto store_dot_lds = [&](const auto& do_tile) {
+            if constexpr(kD32XtB128)
+                store_tile(d32_dot_lds_write_window, do_tile);
+            else
+            {
+                shuffle_tile(shuffled_do_block_tile, do_tile);
+                store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+            }
+        };
 
         auto dot_lds_read_window =
             make_tile_window(dot_read_lds,
@@ -733,12 +870,16 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
          */
         block_sync_lds();
         store_tile(q_lds_window, q_block_tile);
+        // Q^T is published by the barrier below.
+        if constexpr(kD32)
+        {
+            store_qt_lds(q_block_tile);
+        }
 
         store_tile(lse_lds_write_window, lse_block_tile);
 
         store_tile(do_lds_window, do_block_tile);
-        shuffle_tile(shuffled_do_block_tile, do_block_tile);
-        store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+        store_dot_lds(do_block_tile);
 
         block_sync_lds();
 
@@ -750,11 +891,18 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
         // Q-QT-ALIAS:
         // Every wave has consumed raw Q from LDS.
-        // The same bytes may now become Q^T.
-        block_sync_lds();
+        // The same bytes may now become Q^T. (D32: separate regions, no rendezvous.)
+        if constexpr(!kD32)
+            block_sync_lds();
 
-        shuffle_tile(shuffled_q_block_tile, q_block_tile);
-        store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+        if constexpr(!kD32)
+        {
+            store_qt_lds(q_block_tile);
+            // the P/dS barriers that used to publish Q^T are gone;
+            // publish it explicitly before the next Gemm3 reads it from other waves' writes.
+            if constexpr(kD32PDirect)
+                block_sync_lds();
+        }
         // LSE-AFTER-HANDOFF: LSE uses independent LDS; keep it out of raw-Q read rendezvous.
         __builtin_amdgcn_sched_barrier(0);
         auto lse = load_tile(lse_lds_read_window);
@@ -885,9 +1033,23 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
             // STAGE 3, P^T@OGrad^T Gemm1
             // Cross-wave P transpose through LDS.
-            store_tile(p_xwave_lds_write_window, p_gemm);
-            block_sync_lds();
-            auto pt_xwave_reg_tensor = load_tile(pt_xwave_lds_read_window);
+            auto pt_xwave_reg_tensor = [&]() {
+                if constexpr(kD32PDirect)
+                    return [&]() {
+                        auto t = make_static_distributed_tensor<GemmDataType>(
+                            Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+                        static_assert(remove_cvref_t<decltype(t)>::get_thread_buffer_size() ==
+                                      remove_cvref_t<decltype(p_gemm)>::get_thread_buffer_size());
+                        t.get_thread_buffer() = p_gemm.get_thread_buffer();
+                        return t;
+                    }();
+                else
+                {
+                    store_tile(p_xwave_lds_write_window, p_gemm);
+                    xwave_publish_sync();
+                    return load_tile(pt_xwave_lds_read_window);
+                }
+            }();
             gemm_1(dv_acc, pt_xwave_reg_tensor, dot_reg_tensor);
 
             HotLoopScheduler::template GemmStagedScheduler<1>();
@@ -1001,15 +1163,30 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
             // Cross-wave dS^T redistribution through shared LDS scratch.
             // P has already been consumed by Gemm1, so the buffer can be reused.
-            block_sync_lds();
-            store_tile(ds_xwave_lds_write_window, ds_gemm);
-            // Ensure this wave's LDS writes are completed before
-            // all waves rendezvous and begin cross-wave LDS reads.
-            __builtin_amdgcn_s_waitcnt(0);
-            block_sync_lds();
-            auto dst_xwave_hot_reg_tensor = load_tile(dst_xwave_lds_read_window);
-            // Ensure LDS reads have retired before Gemm3 consumes the fragment.
-            __builtin_amdgcn_s_waitcnt(0);
+            auto dst_xwave_hot_reg_tensor = [&]() {
+                if constexpr(kD32DsDirect)
+                    return [&]() {
+                        auto t = make_static_distributed_tensor<GemmDataType>(
+                            Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
+                        static_assert(remove_cvref_t<decltype(t)>::get_thread_buffer_size() ==
+                                      remove_cvref_t<decltype(ds_gemm)>::get_thread_buffer_size());
+                        t.get_thread_buffer() = ds_gemm.get_thread_buffer();
+                        return t;
+                    }();
+                else
+                {
+                    xwave_reuse_sync();
+                    store_tile(ds_xwave_lds_write_window, ds_gemm);
+                    // Ensure this wave's LDS writes are completed before
+                    // all waves rendezvous and begin cross-wave LDS reads.
+                    __builtin_amdgcn_s_waitcnt(0);
+                    xwave_publish_sync();
+                    auto t = load_tile(dst_xwave_lds_read_window);
+                    // Ensure LDS reads have retired before Gemm3 consumes the fragment.
+                    __builtin_amdgcn_s_waitcnt(0);
+                    return t;
+                }
+            }();
             // Issue next Q after the existing broad dS read wait,
             // before QT LDS reads/Gemm3. Do not move any LDS commit or barrier.
             q_block_tile = load_tile(q_dram_window);
@@ -1040,12 +1217,16 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
             block_sync_lds();
 
             store_tile(q_lds_window, q_block_tile);
+            // Q^T is published by the barrier below.
+            if constexpr(kD32)
+            {
+                store_qt_lds(q_block_tile);
+            }
 
             store_tile(lse_lds_write_window, lse_block_tile);
 
             store_tile(do_lds_window, do_block_tile);
-            shuffle_tile(shuffled_do_block_tile, do_block_tile);
-            store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+            store_dot_lds(do_block_tile);
 
             // Publish next-iteration Q/LSE/dO before register reload.
             block_sync_lds();
@@ -1056,11 +1237,18 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
             // Q-QT-ALIAS:
             // Every wave has consumed raw next-Q.
-            // Reuse those bytes for next-iteration Q^T.
-            block_sync_lds();
+            // Reuse those bytes for next-iteration Q^T. (D32: separate regions.)
+            if constexpr(!kD32)
+                block_sync_lds();
 
-            shuffle_tile(shuffled_q_block_tile, q_block_tile);
-            store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+            if constexpr(!kD32)
+            {
+                store_qt_lds(q_block_tile);
+                // the P/dS barriers that used to publish Q^T are gone;
+                // publish it explicitly before the next Gemm3 reads it from other waves' writes.
+                if constexpr(kD32PDirect)
+                    block_sync_lds();
+            }
             // LSE-AFTER-HANDOFF: LSE uses independent LDS; keep it out of raw-Q read rendezvous.
             __builtin_amdgcn_sched_barrier(0);
             lse = load_tile(lse_lds_read_window);
@@ -1181,9 +1369,23 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
         }();
 
         // Cross-wave P transpose through LDS.
-        store_tile(p_xwave_lds_write_window, p_gemm);
-        block_sync_lds();
-        auto pt_xwave_tail_reg_tensor = load_tile(pt_xwave_lds_read_window);
+        auto pt_xwave_tail_reg_tensor = [&]() {
+            if constexpr(kD32PDirect)
+                return [&]() {
+                    auto t = make_static_distributed_tensor<GemmDataType>(
+                        Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+                    static_assert(remove_cvref_t<decltype(t)>::get_thread_buffer_size() ==
+                                  remove_cvref_t<decltype(p_gemm)>::get_thread_buffer_size());
+                    t.get_thread_buffer() = p_gemm.get_thread_buffer();
+                    return t;
+                }();
+            else
+            {
+                store_tile(p_xwave_lds_write_window, p_gemm);
+                xwave_publish_sync();
+                return load_tile(pt_xwave_lds_read_window);
+            }
+        }();
         auto dot_reg_tensor           = load_tile(dot_lds_read_window);
         gemm_1(dv_acc, pt_xwave_tail_reg_tensor, dot_reg_tensor);
 
@@ -1265,15 +1467,30 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 
         // Cross-wave dS^T redistribution through shared LDS scratch.
         // P has already been consumed by Gemm1, so the buffer can be reused.
-        block_sync_lds();
-        store_tile(ds_xwave_lds_write_window, ds_gemm);
-        // Ensure this wave's LDS writes are completed before
-        // all waves rendezvous and begin cross-wave LDS reads.
-        __builtin_amdgcn_s_waitcnt(0);
-        block_sync_lds();
-        auto dst_xwave_tail_reg_tensor = load_tile(dst_xwave_lds_read_window);
-        // Ensure LDS reads have retired before Gemm3 consumes the fragment.
-        __builtin_amdgcn_s_waitcnt(0);
+        auto dst_xwave_tail_reg_tensor = [&]() {
+            if constexpr(kD32DsDirect)
+                return [&]() {
+                    auto t = make_static_distributed_tensor<GemmDataType>(
+                        Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
+                    static_assert(remove_cvref_t<decltype(t)>::get_thread_buffer_size() ==
+                                  remove_cvref_t<decltype(ds_gemm)>::get_thread_buffer_size());
+                    t.get_thread_buffer() = ds_gemm.get_thread_buffer();
+                    return t;
+                }();
+            else
+            {
+                xwave_reuse_sync();
+                store_tile(ds_xwave_lds_write_window, ds_gemm);
+                // Ensure this wave's LDS writes are completed before
+                // all waves rendezvous and begin cross-wave LDS reads.
+                __builtin_amdgcn_s_waitcnt(0);
+                xwave_publish_sync();
+                auto t = load_tile(dst_xwave_lds_read_window);
+                // Ensure LDS reads have retired before Gemm3 consumes the fragment.
+                __builtin_amdgcn_s_waitcnt(0);
+                return t;
+            }
+        }();
         gemm_3(dk_acc, dst_xwave_tail_reg_tensor, qt_reg_tensor);
 
         HotLoopScheduler::template GemmStagedScheduler<3>();
