@@ -62,6 +62,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <sstream>
 
 extern "C" __global__ void flush_icache()
 {
@@ -5671,12 +5672,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                            std::ostringstream skipMsg;
+                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
+                                    << " us, skip ratio = " << std::defaultfloat
+                                    << arg.skip_slow_solution_ratio << ", solution index = "
+                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                    << ")";
+                            hipblaslt_cout << skipMsg.str() << std::endl;
                             continue;
                         }
                     }
@@ -5748,12 +5752,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                            std::ostringstream skipMsg;
+                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
+                                    << " us, skip ratio = " << std::defaultfloat
+                                    << arg.skip_slow_solution_ratio << ", solution index = "
+                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                    << ")";
+                            hipblaslt_cout << skipMsg.str() << std::endl;
                             continue;
                         }
                     }
@@ -5846,12 +5853,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                            std::ostringstream skipMsg;
+                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
+                                    << " us, skip ratio = " << std::defaultfloat
+                                    << arg.skip_slow_solution_ratio << ", solution index = "
+                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                    << ")";
+                            hipblaslt_cout << skipMsg.str() << std::endl;
                             continue;
                         }
                     }
@@ -5941,12 +5951,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                            std::ostringstream skipMsg;
+                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
+                                    << " us, skip ratio = " << std::defaultfloat
+                                    << arg.skip_slow_solution_ratio << ", solution index = "
+                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                    << ")";
+                            hipblaslt_cout << skipMsg.str() << std::endl;
                             continue;
                         }
                     }
@@ -6000,12 +6013,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             = best_warm_time < gpu_time_used ? best_warm_time : gpu_time_used;
                         if((gpu_time_used * arg.skip_slow_solution_ratio) > best_warm_time)
                         {
-                            hipblaslt_cout
-                                << std::setprecision(2) << "Skip solution: " << sol
-                                << " (best warm-up = " << best_warm_time / number_cold_calls
-                                << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                            std::ostringstream skipMsg;
+                            skipMsg << std::fixed << std::setprecision(2) << "Skip solution: " << sol
+                                    << " (best warm-up = " << best_warm_time / number_cold_calls
+                                    << " us , warm-up = " << gpu_time_used / number_cold_calls
+                                    << " us, skip ratio = " << std::defaultfloat
+                                    << arg.skip_slow_solution_ratio << ", solution index = "
+                                    << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                    << ")";
+                            hipblaslt_cout << skipMsg.str() << std::endl;
                             continue;
                         }
                     }
