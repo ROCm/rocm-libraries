@@ -248,6 +248,209 @@ pass `1`, or `2` for `integration`, and the production root passes none, so the 
 its default. The reason is in the `hkp_wire_pack_target()` header in
 `cmake/HkpPackaging.cmake`.
 
+## Packaging probes
+
+A packaging probe proves that one integration's descriptors **pack for one explicit
+architecture**, independent of the architectures the build itself targets. The packer's
+architecture list is `GPU_TARGETS` and nothing else, so a lane that builds gfx942 (Linux)
+or gfx1151 (Windows) never exercises the gfx950 production bundle. A probe closes that
+gap: it runs the real packer through `hkp_wire_pack_target()` with its own architecture,
+then a ctest entry asserts the packed output.
+
+**What a probe proves**
+
+- The real production descriptors (UUID ids, the specialization contract, the real
+  KMD/UED/UDD/UHD) load, pass the pack-time agreement check and compile through comgr.
+- The rocKE sources come from the wheel the packer is given, not from the in-tree source
+  tree the pytest suite imports.
+- The architecture and output wiring of the CMake pack target: `--arches`, the stamp, the
+  interpreter and wheel directory, comgr forwarding.
+- The output: a kpack archive for exactly that architecture, with the expected UKD count
+  and shipped provenance.
+
+**What it does not prove**
+
+- Instances other than the named representative (see below).
+- Device behavior: no kernel is launched, no numerics are checked.
+- Anything about integrations without a probe.
+- That the CI job runs: that is the workflow's job (`--no-tests=error`, the manifest check
+  below).
+
+Probes are build-tree ctest entries only. They exist only under
+`HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES` (default `OFF`, CI-only), are never installed
+and write under `<build>/hkp-probes/<name>/`, outside both shipped descriptor trees.
+With the option `OFF` the only configure difference is that cache entry.
+
+### Running the probes locally
+
+From the repository root. The paths below are the workstation's; substitute your ROCm and
+rocm_kpack locations. The `GPU_TARGETS` value must differ from every probe architecture
+(see "Adding a probe").
+
+```bash
+cmake --preset hipdnn-dev-all -GNinja -B build-probe \
+    -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hip-kernel-provider" \
+    -DGPU_TARGETS=gfx942 \
+    -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+    -DHIPDNN_ENABLE_SDPA=ON \
+    -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=/opt/rocm-kpack/python \
+    -DCMAKE_PREFIX_PATH=/opt/rocm -DROCM_PATH=/opt/rocm \
+    -DPython3_EXECUTABLE=/usr/bin/python3 -DPython_EXECUTABLE=/usr/bin/python3 \
+    -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+    -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+cmake --build build-probe --target hkp_packaging_probes
+ctest --test-dir build-probe -R '^hkp-probe-' --no-tests=error --output-on-failure \
+    --output-junit probe-junit.xml
+python3 .github/scripts/check_probe_junit.py \
+    --junit build-probe/probe-junit.xml --manifest build-probe/hkp-probes/manifest.txt
+```
+
+The selector is `^hkp-probe-`, anchored: `-R` is an unanchored regex. It matches every
+probe (`hkp-probe-<name>`) and `hkp-probe-tools`, the pytest suite of the probe tooling
+(`probes/tests/`). `--no-tests=error` makes an empty selection a failure instead of a
+green run that proved nothing. `manifest.txt` is written at configure and lists the
+ctest names that must run; the junit check fails unless every one ran with no failure,
+error or skip. Configuring without the option and running the same build and ctest lines
+fails (unknown target, then "No tests were found").
+
+Locally on Linux the build takes about 35 s (the wheel environment plus a one-instance
+pack) and the two ctest entries about 3 s. There is no local Windows reproduction.
+
+### `hkp_add_packaging_probe` arguments
+
+Declared in `probes/probes.cmake`, defined in `cmake/HkpPackagingProbes.cmake`.
+
+| Argument | Meaning |
+|---|---|
+| `NAME` | Probe name. Pack target `hkp_packaging_probe_<NAME>`, ctest entry `hkp-probe-<NAME>`. Declaring a name twice is a configure error. |
+| `ARCH` | The one architecture to pack, e.g. `gfx950`. Passed to the packer as `--arches`. |
+| `KIND` | Producer kind. Only `rocke` is supported; any other value is a configure error naming the supported kinds. |
+| `DERIVE_FROM` | Directory of the real production descriptors to derive the probe root from. |
+| `KDP` | File name of the KDP inside `DERIVE_FROM` whose `kernelDescriptors` is trimmed. |
+| `INSTANCE` | The UKD `name` kept as the representative instance. |
+| `PACK_JOBS` | Optional prewarm worker count; defaults to `1`. |
+
+There is one mode, `DERIVE_FROM`. A probe has no `ROOT` argument for a hand-written or
+frozen root: a frozen copy drifts silently from the production schema, which is exactly
+what a probe exists to catch. The expected UKD count is fixed at one.
+
+Configuration fails, never skips, when: `INSTANCE` is not found exactly once in `KDP`;
+the derived root has no KDP covering `ARCH`; the probe output root would sit under a
+shipped descriptor tree; no probe is declared; or pytest is not importable by
+`Python3_EXECUTABLE`.
+
+### The derived-root representative-instance rule
+
+At configure, `tools/hkp_probe_derive_root.py` copies the `DERIVE_FROM` directory into
+`<build>/hkp-probes/<NAME>/root` unchanged, except that `KDP`'s `kernelDescriptors` is
+reduced to the single UKD whose `name` equals `INSTANCE`. The probe therefore packs the
+real descriptors but compiles one kernel (about 1 s) instead of the whole family.
+
+- **The key is the UKD `name`, not its `id`.** Ids are `uuid4` values regenerated on every
+  ingestor run; names encode the specialization and are unique. Keying on the id would
+  turn every legitimate regeneration into a red probe.
+- **Choose the instance whose compile path every variant of that family shares.** One
+  compile then stands for the family. Breakage specific to the other instances is not
+  caught; that is the accepted gap of the design.
+- **When the named instance is renamed or removed**, configure fails with
+  `hkp_probe_derive: instance '<name>' not found in <kdp> (<N> descriptors)` (or
+  `... matched <k> times`). That is the intended signal. Pick another instance of the
+  same family from the KDP and update `INSTANCE` in `probes/probes.cmake`.
+- The derive step re-runs when any file under `DERIVE_FROM` changes.
+
+### Assertion ids
+
+`tools/hkp_probe_assert.py` prints one line per failure, `hkp_probe_assert: FAIL <id>:
+<detail>`, and exits 1; the ids are stable and greppable.
+
+| Id | Fails when |
+|---|---|
+| `out-root-missing` | The probe output root does not exist: build `hkp_packaging_probes` first. |
+| `stamp-missing` | The pack stamp is absent. |
+| `arch-dir-missing` / `extra-arch-dir` | `<out>/<arch>/` is absent, or another `gfx*` directory is present. |
+| `kpack-missing` / `kpack-empty` | `<out>/<arch>/kpack/hip_kernel_provider_<arch>.kpack` is absent or empty. |
+| `no-kdp` | No `*.kdp.json` under `<out>/<arch>`. |
+| `ukd-kind` | A shipped UKD's `kernel_source.kind` is not `kpack`. |
+| `arch-field` | A KDP or UKD `arch` is not exactly the probe architecture. |
+| `kpack-toc` | The archive has no entry for a UKD's `toc_key` and architecture. |
+| `sha256` | The blob's sha256 differs from `kernel_source.sha256`. |
+| `signature` | A UKD has an empty `signature`. |
+| `symbol` | A UKD's `symbol` does not appear in its blob. |
+| `provenance-origin` | `origin_kind` is not `rocke` (for `KIND rocke`). |
+| `provenance-wheel` | `rocke_wheel_sha256` is missing or empty: the wheel did not supply rocKE. |
+| `provenance-comgr` | The comgr recorded at pack time is not the expected library (or is empty). Catches a stale system comgr shadowing the intended one. |
+| `ukd-count` | The number of kpack-kind UKDs is not the expected one, or is zero. |
+
+### Adding a probe
+
+Required for every new architecture or integration. **No CMake guard enforces this:** a
+new integration without a probe configures, builds and passes CI, and its packaging for
+an architecture the lanes do not build is then unchecked.
+
+1. Add one `hkp_add_packaging_probe` declaration to `probes/probes.cmake`, with a comment
+   stating why the chosen `INSTANCE` represents its family. No workflow edit: the jobs
+   build `hkp_packaging_probes` and select `^hkp-probe-`, and the manifest counts every
+   declared probe.
+2. **The probe architecture must differ from the lane's `GPU_TARGETS`** (gfx942 on the
+   Linux job, gfx1151 on the Windows job). If they are equal, the architecture-wiring
+   mutation below becomes unobservable on that job. If a probe must use a lane's
+   architecture, change the job's `GPU_TARGETS` first.
+3. Reconfigure and run the local block above; the new `hkp-probe-<NAME>` entry and the
+   manifest line must appear.
+4. Run the mutation checks below. Each must turn the probe red, and each edit must be
+   reverted afterwards.
+
+### Mutation checks when adding a probe
+
+After each mutation: reconfigure, then build `hkp_packaging_probes`, then run the probe
+ctest entry, then revert the edit.
+
+```bash
+cmake build-probe
+cmake --build build-probe --target hkp_packaging_probes
+ctest --test-dir build-probe -R '^hkp-probe-<NAME>$' --output-on-failure
+```
+
+1. **Derived descriptors reach the compiler.**
+   - Rename the representative UKD in the production KDP: configure must fail with
+     `hkp_probe_derive: instance '<name>' not found`.
+   - Set a compile-affecting spec field of that UKD to a value the builder rejects (for
+     dense attention: `block_n` in `kernel_source.spec` from `64` to `7`): the build must
+     fail in the packer (`invalid spec ...`).
+   - Make a UKD `metadata` field disagree with the compiled specialization (`block_n` in
+     `metadata` from `64` to `128`): the build must fail with the pack-time agreement
+     error (`compiled specialization disagrees with metadata`).
+   - Also run `hip-kernel-provider-hkp-pack` on the mutated tree and record whether it
+     stays green. For the gfx950 dense-attention probe it does, which is what makes the
+     probe more than the existing test.
+2. **The wheel supplies rocKE.** In `rocke/platform/pyproject.toml` change
+   `rocke = ["**/*.json"]` to `rocke = ["analysis/**/*.json"]`, so the built wheel lacks
+   `core/arch/data/arch_specs.json`. The probe build must fail with
+   `FileNotFoundError ... arch_specs.json` from the private wheel directory, while
+   `hip-kernel-provider-hkp-pack` (in-tree source) stays green.
+
+   **Procedure hazard: remove the stale build products before and after this mutation.**
+   Both are gitignored, and either carries `arch_specs.json` into the rebuilt wheel, so
+   the edit is otherwise a silent no-op and the probe stays green:
+
+   ```bash
+   rm -rf dnn-providers/hip-kernel-provider/rocke/platform/build \
+       dnn-providers/hip-kernel-provider/rocke/platform/python/rocke.egg-info
+   ```
+
+   A fresh checkout (CI) has neither directory.
+3. **The architecture and outputs are wired.** In `cmake/HkpPackagingProbes.cmake`:
+   - Replace the `ARCHES` argument of the pack target with the lane's architecture
+     (`gfx942`): the build must fail with `produced nothing: no KDP survived arch pruning`.
+   - Replace it with an empty string: the build succeeds, and the ctest entry must fail
+     `hkp_probe_assert: FAIL arch-dir-missing`.
+   - After a good build, delete `build-probe/hkp-probes/<NAME>/out/.hkp-packed.stamp`: the
+     ctest entry must fail `hkp_probe_assert: FAIL stamp-missing`.
+
+Every mutation above turned the gfx950 dense-attention probe red when run locally on
+Linux. The Windows half of the wheel check, and comgr forwarding (covered only by
+`provenance-comgr`), are verified by CI only.
+
 ## Running the tests
 
 ```bash

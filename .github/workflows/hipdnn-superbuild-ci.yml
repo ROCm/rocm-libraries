@@ -518,12 +518,173 @@ jobs:
             LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
+  # Packs the production gfx950 rocKE descriptors for an architecture this
+  # workflow does not build. Only the packaging-probe ctest entries run; the
+  # build is limited to the probe closure (no hipDNN C++).
+  hipdnn-probe-linux:
+    name: HipDNN Packaging Probe Linux
+    runs-on: azure-linux-scale-rocm
+    env:
+      # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
+      # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
+      # than a TheRock family name. Must differ from every probe's arch so that a probe
+      # that stops passing its own arch to the packer goes red.
+      GPU_TARGET: gfx942
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers
+            projects/hipdnn
+            projects/miopen
+            test
+
+      # Shared CI constants, kpack-ref among them, defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Set environment
+        run: |
+          V="${{ runner.temp }}/rocm_wheels"
+          echo "VENV_PATH=$V" >> "$GITHUB_ENV"
+          echo "VENV_PYTHON=$V/bin/python" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Check build tools
+        run: |
+          command -v ninja >/dev/null || { echo "ninja is not on this runner" >&2; exit 1; }
+
+      - name: Install ROCm wheels
+        run: |
+          echo "Creating Python virtual environment at $VENV_PATH"
+          python -m venv "$VENV_PATH"
+          source "$VENV_PATH/bin/activate"
+
+          echo "Installing ROCm wheels from multi-arch nightlies (device: $GPU_TARGET)"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$GPU_TARGET]"
+
+          echo "Initializing ROCm SDK"
+          rocm-sdk init
+
+          SITE_PACKAGES=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
+          ROCM_SDK_PATH="$SITE_PACKAGES/_rocm_sdk_devel"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
+
+          # rocKE loads libamd_comgr through ctypes, not through CMake, so
+          # -DROCM_PATH below is invisible to it. It resolves via $ROCM_PATH in
+          # the environment or a globbed /opt/rocm*, and this runner is
+          # wheel-only: there is no /opt/rocm, and the devel wheel's lib/ holds
+          # headers and CMake config, not the runtime .so. comgr ships in the
+          # sibling _rocm_sdk_core wheel, so name it explicitly.
+          #
+          # Exported under HKP_ROCKE_COMGR_LIB and fed to the configure step as
+          # -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB, not as rocke's own
+          # ROCKE_COMGR_LIB: the cache variable is the channel hkp already
+          # forwards to the configure probe, the pack step and the ctest
+          # entries, so all four ask about the same library. Exporting rocke's
+          # runtime name directly would instead override every python process
+          # in every later step of this job, including ones that should be
+          # exercising normal resolution.
+          COMGR_LIB=$(ls "$SITE_PACKAGES/_rocm_sdk_core/lib/libamd_comgr.so".* 2>/dev/null | head -n1)
+          test -n "$COMGR_LIB" || { echo "no libamd_comgr.so under $SITE_PACKAGES/_rocm_sdk_core/lib" >&2; exit 1; }
+          echo "HKP_ROCKE_COMGR_LIB=$COMGR_LIB"
+          echo "HKP_ROCKE_COMGR_LIB=$COMGR_LIB" >> "$GITHUB_ENV"
+
+      - name: Check ROCm wheel freshness
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_wheel_freshness.py --max-age-days 14
+
+      - name: Install rocm_kpack
+        run: |
+          set -euo pipefail
+          # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
+          # commit lives in the rocm-systems monorepo, so cloning it whole (or
+          # letting pip do it via a git+ URL) would pull far more than the packer.
+          KPACK_SRC="${RUNNER_TEMP}/rocm-systems-kpack"
+          rm -rf "$KPACK_SRC"
+          mkdir -p "$KPACK_SRC"
+          git -C "$KPACK_SRC" init -q .
+          git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C "$KPACK_SRC" sparse-checkout init --cone
+          git -C "$KPACK_SRC" sparse-checkout set shared/kpack
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" checkout -q FETCH_HEAD
+          # Confirms the fetch landed on the pinned commit.
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
+          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
+          # Installing the directory rebuilds and reinstalls every time, so a
+          # warm venv cannot keep an older build of this same 0.1.0 version.
+          "$VENV_PYTHON" -m pip install "$KPACK_SRC/shared/kpack"
+          # Derived from the installed module, which also proves it imports.
+          KPACK_PYTHON_DIR=$("$VENV_PYTHON" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
+          echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
+
+      # Must precede configure: configuration fails if pytest is not importable
+      # by the interpreter descriptor-packaging registers its tests under. The
+      # interpreter is named explicitly because it must be the one passed as
+      # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
+      # setup-python tool-cache interpreter instead.
+      - name: Install Python dependencies
+        run: |
+          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
+
+      # HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES registers the probe ctest
+      # entries and the hkp_packaging_probes target. The component list is
+      # reduced to what the probes need, and GPU_TARGETS is the lane's gfx942,
+      # not a probe arch: each probe passes its own arch to the packer.
+      - name: Configure superbuild
+        run: |
+          cmake --preset hipdnn-dev-all -GNinja \
+            -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hip-kernel-provider" \
+            -DROCM_PATH="$ROCM_SDK_PATH" \
+            -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
+            -DGPU_TARGETS="$GPU_TARGET" \
+            -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DENABLE_CLANG_TIDY=OFF \
+            -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_SDPA=ON \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
+            -DPython_EXECUTABLE="$VENV_PYTHON" \
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+
+      # An unknown target (option not applied) fails this step.
+      - name: Build packaging probes
+        run: cmake --build build --target hkp_packaging_probes
+
+      # --no-tests=error makes an empty selection fail.
+      - name: Run packaging probes
+        run: ctest --test-dir build -R '^hkp-probe-' --no-tests=error --output-on-failure --output-junit probe-junit.xml
+
+      # ctest reports skipped tests and fewer-than-declared tests as success;
+      # this compares the junit against the manifest configure wrote.
+      - name: Check packaging probes ran
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/probe-junit.xml \
+            --manifest build/hkp-probes/manifest.txt
+
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
+      - hipdnn-probe-linux
     runs-on: ubuntu-24.04
     steps:
       - name: Report results
