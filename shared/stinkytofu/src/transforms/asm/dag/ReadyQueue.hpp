@@ -229,6 +229,12 @@ class ReadyQueue {
         (void)deps;
     }
 
+    // Hook called for every instruction appended to the BB's final order, in order: picks,
+    // filler instructions, and the side-effect instructions between regions.
+    virtual void onScheduled(const StinkyInstruction& inst) {
+        (void)inst;
+    }
+
     // Hook called after a basic block has been fully scheduled. When the queue is
     // reused across BBs in a loop, this lets derived classes snapshot scheduling
     // state that a successor BB's onInit can restore.

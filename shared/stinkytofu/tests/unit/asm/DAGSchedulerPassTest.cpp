@@ -2077,6 +2077,43 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
 }
 
+// ---------------------------------------------------------------------------
+// Property: dsSlotFirst. In a saturated ds stream (ds_loads >= 2 per WMMA) a ds_load that
+// still fits the window goes before fillers; its throttle wait is charged to the ds
+// scheduling budget. Same region as DsReadThrottle_Depth1_SeparatesEveryLoad: off, the
+// fillers separate every ds_load; on, the ds_loads keep their slots back to back.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DsSlotFirst_SaturatedStreamKeepsDsSlotsOverFillers) {
+    auto maxRun = [&](bool dsSlotFirst) {
+        am.clear();
+        func = std::make_unique<Function>("ds_slot_first");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 1;
+        pfc.dagFeatures.dsReadThrottleLatency = 8;
+        pfc.dagFeatures.dsReadDrainLatency = 8;
+        pfc.dagFeatures.dsReadThrottleTransitionFactor = 0.5;
+        pfc.dagFeatures.dsReadThrottleTransitionEntries = -1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.dsSlotFirst = dsSlotFirst;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        return maxConsecutiveDsReads(mnemonicSequence(*bb));
+    };
+    EXPECT_EQ(maxRun(/*dsSlotFirst=*/false), 1) << "off: fillers separate every ds_load";
+    EXPECT_GE(maxRun(/*dsSlotFirst=*/true), 2) << "on: ds_loads keep their slots over fillers";
+}
+
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_UsesIndependentWmmaSchedulingBudget) {
     BasicBlock* body = bb;
     body->addSuccessor(body);

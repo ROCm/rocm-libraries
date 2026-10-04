@@ -193,6 +193,12 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
+                passFeatureConfig.dagFeatures.dsSlotFirst = moduleOptions.DsSlotFirst;
+                // The hold mirrors InsertWaitAlu, which only runs with ESM2.
+                passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
+                    moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
+                passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
+                passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
                 applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =
@@ -300,9 +306,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
         mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
-        mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc,
-                                                   /*sharedOrderCountFollowers=*/true,
-                                                   /*xdlCountFromNextWmma=*/true}));
+        mpm.addPass(createInsertWaitAluModulePass(
+            gfx1250InsertWaitAluOptions(moduleOptions.EnableESM2TrackValuVsrc)));
     }
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));

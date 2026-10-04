@@ -149,6 +149,9 @@ std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstructio
 
     RegionDAG dag = buildRegisterDependencyDAG(instructions);
     addCounterOrderEdges(dag, instructions, anchors);
+    // Prefetches placed by the DAG's prefetch lead stay where it put them.
+    if (passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadWmmas > 0)
+        addPrefetchPinEdges(dag, instructions);
 
     WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
     std::vector<StinkyInstruction*> scheduled = scheduleWithWaitAnchoredReadyQueue(dag, queue);

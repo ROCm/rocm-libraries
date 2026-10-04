@@ -151,6 +151,22 @@ struct PassFeatureConfig {
         /// selection and coexec hazard padding are unaffected. See
         /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
         bool evenSpreadFillers = false;
+        /// In a ds stream of 2+ ds_loads per WMMA window, a ds_load that still fits the
+        /// window goes before fillers and prefetches, so no slot is lost and the
+        /// tensor_load does not slip (mirrors ModuleOptions::DsSlotFirst).
+        bool dsSlotFirst = false;
+        /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
+        /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
+        /// query) is held until just before the next s_barrier_wait; < 0 = off.
+        int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
+        /// this many WMMA windows before the tensor_load it precedes, staggered over its
+        /// group; below 8 marks a single-stage loop (whole group at the load's window,
+        /// ahead of the stage barrier); 0 = off.
+        int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
+        /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
+        int warGateWmmas = 0;
     };
 
     LoopConfig loopConfig;
