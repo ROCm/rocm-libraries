@@ -287,7 +287,7 @@ namespace rocsparse_clients
             : config({operation_A, operation_X, alg, scalar_datatype, compute_datatype, apol})
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-            const rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);
+            rocsparse_status status = rocsparse_create_sptrsm_descr(&this->m_descr);
             if(status != rocsparse_status_success)
             {
                 throw(status);
