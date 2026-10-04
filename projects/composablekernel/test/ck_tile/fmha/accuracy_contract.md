@@ -37,7 +37,13 @@ tests that use smaller chunks. The double A accumulator
 uses the FP32 oracle probabilities; it is not an independent FP64 softmax.
 
 The test uses FP16 unit roundoff `u = 2^-11` or BF16 `u = 2^-8`, and
-`gamma(n) = n*u32 / (1 - n*u32)`. For the tested FP32 score path:
+`gamma(n) = n*u32 / (1 - n*u32)`. BF16 `u = 2^-8` assumes round-to-nearest
+narrowing of device P and O. The tested gfx1250 path uses ties-to-even
+conversion, including the LLVM builtin BF16 cast when enabled. That builtin
+path does not consult `CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT`; the effective
+converter must be checked in the final build. A path that actually truncates
+P or O needs a `u = 2^-7` rounding bound and separate contract validation; it
+is outside this tested budget. For the tested FP32 score path:
 
 ```text
 eta  = max_k (abs(scale) * gamma(Dq) * sum_d abs(Q[d]*K[k,d])
