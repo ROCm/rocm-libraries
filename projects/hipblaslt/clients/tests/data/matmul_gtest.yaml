@@ -4042,7 +4042,8 @@ Tests:
 # scales saturate. FastCheckDevice_pre_checkin.activation_is_checked_through_e
 # covers the amaxD check itself.
 
-# Bias gradients from A (BGRADA) and B (BGRADB). gfx90a has them for f16 only.
+# Bias gradients from A (BGRADA) and B (BGRADB). gfx90a has them for f16 only, and
+# gfx11 and gfx12 (other than gfx125x) have none, as for the other gradient cases.
 # Runtime on gfx90a: 8 cases, under 1 s.
 - name: matmul_fast_check_matches_unit_check_bias_gradient
   category: pre_checkin
@@ -4061,6 +4062,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
 
 # gfx942 and gfx950 offer a bf16 bias gradient only from B with B transposed, and
 # none in f32.
