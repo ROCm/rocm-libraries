@@ -1406,8 +1406,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                      const std::vector<Kernel>&) mutable {
             return [kernel_id2   = kernel_id_,
                     split_k2     = split_k_,
-                    ck_args2     = std::move(ck_args_),
-                    ck_ws_size2  = ck_ws_size_,
+                    ck_args_and_workspace2 = std::make_pair(std::move(ck_args_), ck_ws_size_),
                     sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
@@ -1416,12 +1415,15 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                     MakeNHWCCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
                                      std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
-                                     CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
+                                     CastType>(sh_conv_ptr2,
+                                               ck_args_and_workspace2.first,
+                                               data_ctx,
+                                               split_k2);
                 if constexpr(NativeForwardWorkspace)
                 {
                     const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
                     MIOPEN_THROW_IF(
-                        actual_size > ck_ws_size2 ||
+                        actual_size > ck_args_and_workspace2.second ||
                             (actual_size != 0 &&
                              (data_ctx.workSpace == nullptr ||
                               data_ctx.workSpaceSize < actual_size ||
