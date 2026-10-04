@@ -52,6 +52,64 @@ struct BlockFmhaBwdDQOnlyQMajor
     static constexpr index_t kK4        = BlockFmhaShape::kK4;
     static constexpr index_t kQKHeaddim = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
+    // D32 K^T in an N-contiguous [D][N] LDS layout (b128 reads).
+    // also D64 ([D=64][N=64] K^T).
+    static constexpr bool kD32DqKtB128 = kM0 == 32 && kN0 == 64 &&
+                                         (kQKHeaddim == 32 || kQKHeaddim == 64) &&
+                                         sizeof(typename Problem::KDataType) == 2;
+
+    // K-split Gemm4 with dS fed straight from the TransposeC Gemm0/Gemm2 C.
+    static constexpr bool kD32DqKsplit = kD32DqKtB128;
+
+    template <typename AT, typename BT, index_t kN, index_t kK, typename BlockWarps, typename WarpTile>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeTransposedCBlockGemm()
+    {
+        using GemmProblem = BlockGemmProblem<AT, BT, typename Problem::AccDataType, Problem::kBlockSize,
+                                             TileGemmShape<sequence<kM0, kN, kK>, BlockWarps, WarpTile>>;
+        using WarpGemm = WarpGemmDispatcher<AT, BT, typename Problem::AccDataType,
+                                            WarpTile::at(number<0>{}), WarpTile::at(number<1>{}),
+                                            WarpTile::at(number<2>{}), true,
+                                            WarpTile::at(number<0>{}) == 16 ? false : true>;
+        using BlockGemmPolicy = BlockGemmARegBRegCRegV1CustomPolicy<AT, BT, typename Problem::AccDataType,
+                                                                    BlockWarps, WarpGemm>;
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    // Row (M) distribution of a TransposeC block-gemm C tile: rows on lanes % 16, replicated over
+    // the two lane halves and the N warps; M iterations as the only Y dimension.
+    template <typename BlockGemm>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLSEDReadTransposedC()
+    {
+        constexpr auto config   = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+        using WG                = remove_cvref_t<decltype(config.template at<0>())>;
+        constexpr index_t MWarp = config.template at<1>();
+        constexpr index_t NWarp = config.template at<2>();
+        constexpr index_t L     = WG::WarpGemmAttribute::Impl::kCNLane;  // 16 rows across lanes
+        constexpr index_t R     = WG::WarpGemmAttribute::Impl::kCMLane;  // 2 lane halves
+        constexpr index_t M0    = kM0 / (MWarp * WG::kM);
+        constexpr auto dstr     = make_static_tile_distribution(
+            tile_distribution_encoding<sequence<NWarp, R>,
+                                       tuple<sequence<M0, MWarp, L>>,
+                                       tuple<sequence<1, 0>, sequence<0, 1>>,
+                                       tuple<sequence<1, 0>, sequence<1, 2>>,
+                                       sequence<1>,
+                                       sequence<0>>{});
+        static_assert(container_reduce(dstr.get_lengths(), std::multiplies<index_t>{}, 1) == kM0);
+        return dstr;
+    }
+
+    using KsBf16x8 = bf16_t __attribute__((ext_vector_type(8)));
+    using KsF32x8  = float __attribute__((ext_vector_type(8)));
+    CK_TILE_DEVICE static KsF32x8 ks_wmma(const KsBf16x8& a, const KsBf16x8& b, const KsF32x8& c)
+    {
+#if defined(__gfx12__)
+        return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
+#else
+        ignore = a;
+        ignore = b;
+        return c;
+#endif
+    }
 
     // D64 P/dS intermediate conversion: preserve round-to-nearest-even for
     // non-NaN values while omitting NaN canonicalization. Arbitrary NaN payloads
@@ -61,7 +119,8 @@ struct BlockFmhaBwdDQOnlyQMajor
     template <typename SrcTensor>
     CK_TILE_DEVICE static auto d64_cast_pds(const SrcTensor& src)
     {
-        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 && kQKHeaddim == 64 && kVHeaddim == 64 &&
+        if constexpr(CK_TILE_USE_LLVM_BUILTIN_BF16 &&
+                     (kQKHeaddim == 64 || kQKHeaddim == 32) && kVHeaddim == kQKHeaddim &&
                      std::is_same_v<GemmDataType, bf16_t> &&
                      std::is_same_v<remove_cvref_t<typename SrcTensor::DataType>, float>)
         {
@@ -158,9 +217,13 @@ struct BlockFmhaBwdDQOnlyQMajor
             smem_size_lse +
             ck_tile::max(smem_size_bias, smem_size_ds);
 
-        return ck_tile::max(
+        // final per-wave partial dQ reduction (f32).
+        constexpr ck_tile::index_t smem_size_ksplit =
+            kD32DqKsplit ? (kQKHeaddim == 64 ? 2 : 4) * kM0 * kQKHeaddim * ck_tile::index_t(sizeof(float))
+                         : 0;
+        return ck_tile::max(ck_tile::max(
             smem_size_stage0_control,
-            smem_size_stage1);
+            smem_size_stage1), smem_size_ksplit);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -215,9 +278,23 @@ struct BlockFmhaBwdDQOnlyQMajor
 
         // This first architecture proof is intentionally narrow.
         // It is selected only for the dedicated M32/N64/D128 gfx12 probe tile.
-        constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
+        constexpr auto gemm_0 = [&]() {
+            if constexpr(kD32DqKsplit)
+                return MakeTransposedCBlockGemm<QDataType, KDataType, kN0, kK0,
+                                                typename BlockFmhaShape::Gemm0BlockWarps,
+                                                typename BlockFmhaShape::Gemm0WarpTile>();
+            else
+                return Policy::template GetQKBlockGemm<Problem>();
+        }();
         constexpr auto gemm_1 = Policy::template GetPTOGradTBlockGemm<Problem>(); // zero return type
-        constexpr auto gemm_2 = Policy::template GetOGradVBlockGemm<Problem>();
+        constexpr auto gemm_2 = [&]() {
+            if constexpr(kD32DqKsplit)
+                return MakeTransposedCBlockGemm<OGradDataType, VDataType, kN0, kK2,
+                                                typename BlockFmhaShape::Gemm2BlockWarps,
+                                                typename BlockFmhaShape::Gemm2WarpTile>();
+            else
+                return Policy::template GetOGradVBlockGemm<Problem>();
+        }();
         constexpr auto gemm_3 = Policy::template GetSGradTQTBlockGemm<Problem>(); // zero return type
         constexpr auto gemm_4 = Policy::template GetSGradKTBlockGemm<Problem>();
 
@@ -310,7 +387,12 @@ struct BlockFmhaBwdDQOnlyQMajor
             lse_lds,
             make_tuple(number<kM0>{}),
             {0},
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+            [&]() {
+                if constexpr(kD32DqKsplit)
+                    return MakeLSEDReadTransposedC<decltype(gemm_0)>();
+                else
+                    return Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>();
+            }());
 
         auto d_dram_window = make_tile_window(
             d_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -323,7 +405,12 @@ struct BlockFmhaBwdDQOnlyQMajor
             d_dram_block_window_tmp.get_bottom_tensor_view(),
             d_dram_block_window_tmp.get_window_lengths(),
             d_dram_block_window_tmp.get_window_origin(),
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+            [&]() {
+                if constexpr(kD32DqKsplit)
+                    return MakeLSEDReadTransposedC<decltype(gemm_0)>();
+                else
+                    return Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>();
+            }());
         auto q_block_tile   = load_tile(q_dram_window);
         auto do_block_tile  = load_tile(do_dram_window);
         auto lse_block_tile = load_tile(lse_dram_window);
@@ -375,8 +462,55 @@ struct BlockFmhaBwdDQOnlyQMajor
             kt_lds_ptr, Policy::template MakeShuffledKLdsWriteBlockDescriptor<Problem>());
         auto shuffled_k_lds_write_window = make_tile_window(
             shuffled_k_lds_write, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
-        auto kt_lds_read = make_tensor_view<address_space_enum::lds>(
-            kt_lds_ptr, Policy::template MakeKTLdsReadBlockDescriptor<Problem>());
+        // [D=32][N=64] bf16, element offset
+        //   d*64 + ((n>>3) ^ ((d>>1)&7))*8 + (n&7)
+        // Physical dims A,B,C,R = 16,2,8,8 (d = A*2+B, n = C*8+R); C ^= A%8.
+        constexpr auto d32_kt_base_desc = [&]() {
+            constexpr auto raw = make_naive_tensor_descriptor(
+                make_tuple(number<kQKHeaddim / 2>{}, number<2>{}, number<8>{}, number<8>{}),
+                make_tuple(number<128>{}, number<64>{}, number<8>{}, number<1>{}),
+                number<8>{},
+                number<1>{});
+            return transform_tensor_descriptor(
+                raw,
+                make_tuple(make_xor_transform(make_tuple(number<kQKHeaddim / 2>{}, number<8>{})),
+                           make_pass_through_transform(number<2>{}),
+                           make_pass_through_transform(number<8>{})),
+                make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}),
+                make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}));
+        }();
+        // Read view [D, N] (Gemm4 B operand), write view [N, D] (DRAM tile order).
+        constexpr auto d32_kt_read_desc = transform_tensor_descriptor(
+            d32_kt_base_desc,
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<kQKHeaddim / 2>{}, number<2>{})),
+                       make_merge_transform_v3_division_mod(make_tuple(number<8>{}, number<8>{}))),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        constexpr auto d32_kt_write_desc = transform_tensor_descriptor(
+            d32_kt_base_desc,
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<kQKHeaddim / 2>{}, number<2>{})),
+                       make_merge_transform_v3_division_mod(make_tuple(number<8>{}, number<8>{}))),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+            make_tuple(sequence<1>{}, sequence<0>{}));
+        static_assert(d32_kt_read_desc.get_element_space_size() == kQKHeaddim * 64);
+        if constexpr(kD32DqKtB128)
+            static_assert(Policy::template GetSmemSizeKT<Problem>() >= kQKHeaddim * 64 * 2);
+        auto kt_lds_read = [&]() {
+            if constexpr(kD32DqKtB128)
+                return make_tensor_view<address_space_enum::lds>(kt_lds_ptr, d32_kt_read_desc);
+            else
+                return make_tensor_view<address_space_enum::lds>(
+                    kt_lds_ptr, Policy::template MakeKTLdsReadBlockDescriptor<Problem>());
+        }();
+        auto d32_kt_lds_write_window = [&]() {
+            if constexpr(kD32DqKtB128)
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(kt_lds_ptr, d32_kt_write_desc),
+                    make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
+                    {0, 0});
+            else
+                return 0;
+        }();
         auto kt_lds_read_window =
             make_tile_window(kt_lds_read,
                              make_tuple(number<kQKHeaddim>{}, number<kN0>{}),
@@ -410,6 +544,12 @@ struct BlockFmhaBwdDQOnlyQMajor
                              ds_lds_window.get_window_origin(),
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
 
+        // per-wave partial dQ [mb][db] over this wave's keys.
+        KsF32x8 ks_dq[2][kQKHeaddim / 16];
+        if constexpr(kD32DqKsplit)
+            for(int i = 0; i < 2; ++i)
+                for(int j = 0; j < kQKHeaddim / 16; ++j)
+                    ks_dq[i][j] = KsF32x8{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
         index_t k_step = seqlen_k_start;
         for(index_t ik = 0; ik < num_k_loops; ++ik)
         {
@@ -419,8 +559,13 @@ struct BlockFmhaBwdDQOnlyQMajor
 
             block_sync_lds();
             store_tile(k_lds_write_window, k_block_tile);
-            shuffle_tile(shuffled_k_block_tile, k_block_tile);
-            store_tile(shuffled_k_lds_write_window, shuffled_k_block_tile);
+            if constexpr(kD32DqKtB128)
+                store_tile(d32_kt_lds_write_window, k_block_tile);
+            else
+            {
+                shuffle_tile(shuffled_k_block_tile, k_block_tile);
+                store_tile(shuffled_k_lds_write_window, shuffled_k_block_tile);
+            }
             block_sync_lds();
             // QMAJOR_LATE_KT_LOAD_PROBE:
             // Only normal K must complete before V overwrites the base LDS region.
@@ -434,7 +579,12 @@ struct BlockFmhaBwdDQOnlyQMajor
 
             // QMAJOR_LATE_KT_LOAD_PROBE:
             // KT lives in the non-overlapping +8192 LDS region.
-            auto kt_reg_tensor = load_tile(kt_lds_read_window);
+            auto kt_reg_tensor = [&]() {
+                if constexpr(kD32DqKsplit)
+                    return 0;  // K^T is read per wave as raw b128 fragments below
+                else
+                    return load_tile(kt_lds_read_window);
+            }();
 
             // QK -> P
             auto s_acc = SPBlockTileType{};
@@ -471,7 +621,7 @@ struct BlockFmhaBwdDQOnlyQMajor
             constexpr auto p_spans = decltype(p)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                // DQ-QMAJOR-LSE-VALIDATE-V1: a row with no unmasked key has lse == -inf.
+                // a row with no unmasked key has lse == -inf.
                 // Use 0 (as the DKDV pipeline does) so its masked p is 0, not NaN.
                 const auto raw_lse = lse[i_idx];
                 auto row_lse       = log2e_v<LSEDataType> * [&]() {
@@ -509,38 +659,124 @@ struct BlockFmhaBwdDQOnlyQMajor
             });
 
             const auto ds_gemm = d64_cast_pds(ds);
-            block_sync_lds();
-            store_tile(ds_lds_window, ds_gemm);
-            block_sync_lds();
-
-            auto ds_reg_tensor      = load_tile(ds_lds_read_window);
-            auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
-            move_tile_window(ds_lds_read_window, {0, kK4});
-
-            static_for<0, k4_loops, 1>{}([&](auto i_k4) {
-                if constexpr(i_k4 < k4_loops - 1)
+            if constexpr(kD32DqKsplit)
+            {
+                // A = this wave's dS (TransposeC C: row lane%16, keys 8*(lane/16)+j), K = 16;
+                // B = K^T[d][wave keys] from the [D=32][N=64] layout
+                //   d*64 + ((n>>3) ^ ((d>>1)&7))*8 + (n&7).
+                static_assert(remove_cvref_t<decltype(ds_gemm)>::get_thread_buffer_size() == 16);
+                const index_t wv = get_warp_id(), ln = get_lane_id();
+                const auto& dsb = ds_gemm.get_thread_buffer();
+                KsBf16x8 ka[2];
+                for(int mb = 0; mb < 2; ++mb)
+                    for(int j = 0; j < 8; ++j)
+                        ka[mb][j] = dsb[mb * 8 + j];
+                const index_t n = 16 * wv + 8 * (ln / 16);
+                for(int db = 0; db < kQKHeaddim / 16; ++db)
                 {
-                    ds_reg_tensor_next = load_tile(ds_lds_read_window);
-                    move_tile_window(ds_lds_read_window, {0, kK4});
-                    if constexpr(kM0 == 32 && kN0 == 64 && kQKHeaddim == 64)
-                        __builtin_amdgcn_sched_barrier(0);
+                    const index_t dd = 16 * db + ln % 16;
+                    const KsBf16x8 kb = *reinterpret_cast<const KsBf16x8*>(
+                        kt_lds_ptr + dd * 64 + (((n >> 3) ^ ((dd >> 1) & 7)) << 3));
+                    for(int mb = 0; mb < 2; ++mb)
+                        ks_dq[mb][db] = ks_wmma(ka[mb], kb, ks_dq[mb][db]);
                 }
-                auto kt_reg_tensor_slice = get_slice_tile(
-                    kt_reg_tensor,
-                    sequence<0, i_k4 * kK4>{},
-                    sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
-                gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
-                if constexpr(i_k4 < k4_loops - 1)
-                    ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
-            });
-            move_tile_window(ds_lds_read_window, {0, -kN0});
-            HotLoopScheduler::template GemmStagedScheduler<4>();
+            }
+            else
+            {
+                block_sync_lds();
+                store_tile(ds_lds_window, ds_gemm);
+                block_sync_lds();
 
+                auto ds_reg_tensor      = load_tile(ds_lds_read_window);
+                auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
+                move_tile_window(ds_lds_read_window, {0, kK4});
+
+                static_for<0, k4_loops, 1>{}([&](auto i_k4) {
+                    if constexpr(i_k4 < k4_loops - 1)
+                    {
+                        ds_reg_tensor_next = load_tile(ds_lds_read_window);
+                        move_tile_window(ds_lds_read_window, {0, kK4});
+                        if constexpr(kM0 == 32 && kN0 == 64 && kQKHeaddim == 64)
+                            __builtin_amdgcn_sched_barrier(0);
+                    }
+                    auto kt_reg_tensor_slice = get_slice_tile(
+                        kt_reg_tensor,
+                        sequence<0, i_k4 * kK4>{},
+                        sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
+                    gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
+                    if constexpr(i_k4 < k4_loops - 1)
+                        ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
+                });
+                move_tile_window(ds_lds_read_window, {0, -kN0});
+                HotLoopScheduler::template GemmStagedScheduler<4>();
+
+            }
             move_tile_window(k_dram_window, {kN0, 0});
             move_tile_window(v_dram_window, {kN0, 0});
             k_step += kN0;
         }
 
+        if constexpr(kD32DqKsplit)
+        {
+            // Sum the four per-wave partials once (fixed order w = 0..3) into the Gemm4 C
+            // distribution through LDS.
+            block_sync_lds();
+            float* red = static_cast<float*>(smem_ptr);
+            const index_t wv = get_warp_id(), ln = get_lane_id();
+            constexpr int kRedParts = kQKHeaddim == 64 ? 1 : 4;
+            if constexpr(kQKHeaddim == 64)
+            {
+                // pairwise in 16 KB; final sum (w0+w2)+(w1+w3) in slot 0.
+                auto ridx = [&](int slot, int mb, int db, int j) {
+                    return (slot * kM0 + 16 * mb + 8 * (ln / 16) + j) * kQKHeaddim + 16 * db + ln % 16;
+                };
+                auto put = [&](int slot) {
+                    for(int mb = 0; mb < 2; ++mb)
+                        for(int db = 0; db < kQKHeaddim / 16; ++db)
+                            for(int j = 0; j < 8; ++j)
+                                red[ridx(slot, mb, db, j)] = ks_dq[mb][db][j];
+                };
+                auto add = [&](int slot) {
+                    for(int mb = 0; mb < 2; ++mb)
+                        for(int db = 0; db < kQKHeaddim / 16; ++db)
+                            for(int j = 0; j < 8; ++j)
+                                ks_dq[mb][db][j] += red[ridx(slot, mb, db, j)];
+                };
+                if(wv >= 2) put(wv - 2);
+                block_sync_lds();
+                if(wv < 2) add(wv);
+                block_sync_lds();
+                if(wv == 1) put(0);
+                block_sync_lds();
+                if(wv == 0) { add(0); put(0); }
+            }
+            else
+            {
+                for(int mb = 0; mb < 2; ++mb)
+                    for(int db = 0; db < 2; ++db)
+                        for(int j = 0; j < 8; ++j)
+                            red[(wv * kM0 + 16 * mb + 8 * (ln / 16) + j) * kQKHeaddim + 16 * db + ln % 16] =
+                                ks_dq[mb][db][j];
+            }
+            block_sync_lds();
+            constexpr auto red_desc = make_naive_tensor_descriptor(
+                make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                make_tuple(number<kQKHeaddim>{}, number<1>{}),
+                number<1>{},
+                number<1>{});
+            static_for<0, kRedParts, 1>{}([&](auto w_) {
+                auto red_view = make_tensor_view<address_space_enum::lds>(
+                    red + w_.value * kM0 * kQKHeaddim, red_desc);
+                auto part = load_tile(make_tile_window(red_view,
+                                                       make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                                                       {0, 0},
+                                                       dq_acc.get_tile_distribution()));
+                static_assert(remove_cvref_t<decltype(part)>::get_thread_buffer_size() ==
+                              remove_cvref_t<decltype(dq_acc)>::get_thread_buffer_size());
+                for(int i = 0; i < dq_acc.get_thread_buffer_size(); ++i)
+                    dq_acc.get_thread_buffer()(i) += part.get_thread_buffer()[i];
+            });
+        }
         // Scale once after the whole K reduction, then write this Q tile once.
         tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
         if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
