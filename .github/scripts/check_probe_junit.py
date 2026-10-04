@@ -4,7 +4,7 @@
 
 """Prove that every declared hipDNN packaging probe ran and passed.
 
-The packaging-probe CI jobs run ctest with --output-junit. ctest exits 0 for a
+The superbuild lanes run the packaging probes through ctest --output-junit. ctest exits 0 for a
 junit file that lists fewer tests than were declared, and a skipped test is not
 a failure to it. This script compares the junit file against the manifest the
 CMake configure wrote (one ctest test name per line) so that "declared N, ran

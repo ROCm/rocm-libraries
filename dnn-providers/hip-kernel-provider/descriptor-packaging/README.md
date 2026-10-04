@@ -388,7 +388,7 @@ new integration without a probe configures, builds and passes CI, and its packag
 an architecture the lanes do not build is then unchecked.
 
 1. Add one `hkp_add_packaging_probe` declaration to `probes/probes.cmake`, with a comment
-   stating why the chosen `INSTANCE` represents its family. No workflow edit: the jobs
+   stating why the chosen `INSTANCE` represents its family. No workflow edit: the superbuild lanes
    build `hkp_packaging_probes` and select `^hkp-probe-`, and the manifest counts every
    declared probe.
 2. **The probe architecture must differ from the lane's `GPU_TARGETS`** (gfx942 on the
