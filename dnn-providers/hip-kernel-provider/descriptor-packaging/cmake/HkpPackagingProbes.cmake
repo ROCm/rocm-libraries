@@ -6,9 +6,9 @@
 # packs through hkp_wire_pack_target with the toolchain hkp_add_packaging resolved,
 # then a ctest entry asserts the packed output. Nothing here installs or ships.
 #
-# This module holds function definitions only; it has no configure effect until
-# hkp_load_packaging_probes() runs, which hkp_add_packaging calls under
-# HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES.
+# This module is included only by the guarded hook in hkp_add_packaging, so with the
+# option OFF it is never read. It holds function definitions only; configure effects
+# start when hkp_load_packaging_probes() runs.
 
 include_guard(GLOBAL)
 

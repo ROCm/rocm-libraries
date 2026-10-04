@@ -27,7 +27,6 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
     "Name of the completion stamp each pack writes inside its output root")
 
 include(KpackPython)
-include(HkpPackagingProbes)
 
 # ---------------------------------------------------------------------------
 # hkp_resolve_kpack(<out_var> <python_exe>)
@@ -1444,6 +1443,7 @@ function(hkp_add_packaging)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
+        include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
         hkp_load_packaging_probes(
             "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_rocke_args})
     endif()
