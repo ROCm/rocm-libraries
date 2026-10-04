@@ -5685,6 +5685,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(
                         fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
             }
+            // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
+            // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
+            // too early, for example). Zero rather than poison: kernels may rely on their flags
+            // starting at zero.
+            if(arg.fast_check && workspacePtr && workspace_size)
+                CHECK_HIP_ERROR(hipMemsetAsync(workspacePtr, 0, workspace_size, stream));
             if((arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
                && arg.c_equal_d)
             {
