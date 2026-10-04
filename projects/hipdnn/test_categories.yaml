@@ -39,6 +39,8 @@ test_categories:
     test_patterns:
       - "hipdnn_test_name_validation"
       - "hipdnn_cache_key_codegen_tests"
+      - "hipdnn_rock_dev_bootstrap_tests"
+      - "hipdnn_ingestor_generator_tests"
       - "hipdnn_data_sdk_tests"
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"

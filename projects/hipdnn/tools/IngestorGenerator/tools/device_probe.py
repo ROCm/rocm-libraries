@@ -17,7 +17,9 @@ from pathlib import Path
 #: An architecture token, not a family prefix. Every shipping gfx name carries
 #: at least three characters after `gfx` (gfx90a, gfx942, gfx1100), so `gfx9`
 #: is a family the caller must resolve before a sweep can claim it measured one.
-ARCH_TOKEN = r"gfx[0-9a-f]{3,}"
+#: A hyphenated suffix (`gfx1250-strict`) belongs to the token: that target is
+#: distinct from its base arch.
+ARCH_TOKEN = r"gfx[0-9a-f]{3,}(?:-[a-z]+)*"
 
 
 class ProbeUnavailable(Exception):
@@ -55,7 +57,9 @@ def device_info(arch: str, *, cwd=None, env=None) -> str:
                 f"{tool} exited {result.returncode}: {result.stderr.strip()}"
             )
         found = set(
-            re.findall(rf"(?<![A-Za-z0-9_]){ARCH_TOKEN}(?![A-Za-z0-9_])", result.stdout)
+            re.findall(
+                rf"(?<![A-Za-z0-9_]){ARCH_TOKEN}(?![A-Za-z0-9_-])", result.stdout
+            )
         )
         if arch not in found:
             raise ValueError(

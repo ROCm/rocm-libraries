@@ -19,12 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import device_probe  # noqa: E402
 
 
-def _args(tmp_path: Path) -> list:
+def _args(tmp_path: Path, arch: str = "gfx942") -> list:
     return [
         "--mode",
         "early",
         "--arch",
-        "gfx942",
+        arch,
         "--sweep-root",
         str(tmp_path),
     ]
@@ -83,6 +83,14 @@ class TestExitStatusDistinguishesUnobservedFromNegative:
         rc = device_probe.main(_args(tmp_path))
         assert rc == 0
         assert "UNOBSERVED" not in capsys.readouterr().err
+
+    def test_strict_host_is_not_read_as_its_base_arch(self, tmp_path, monkeypatch):
+        """gfx1250-strict is a distinct target with its own code-object identity."""
+        monkeypatch.setattr(
+            device_probe.subprocess, "run", _fake_run(stdout="Name: gfx1250-strict\n")
+        )
+        assert device_probe.main(_args(tmp_path, "gfx1250")) == 1
+        assert device_probe.main(_args(tmp_path, "gfx1250-strict")) == 0
 
     def test_nonzero_rocminfo_is_a_failure_not_unobserved(self, tmp_path, monkeypatch):
         """A utility that ran and errored HAS reported; it is not unobserved."""
