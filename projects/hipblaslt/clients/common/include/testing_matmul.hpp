@@ -3189,21 +3189,21 @@ void testing_matmul_with_bias(const Arguments& arg,
         // kernel-ready scale layout for both A and B; nothing to do here.
             if(arg.fast_check)
             {
-                fast_check_poison_padding_device(
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
                     {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
                     num_batches[i],
                     size_A[i],
-                    stream);
-                fast_check_poison_padding_device(
+                    stream));
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
                     {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
                     num_batches[i],
                     size_B[i],
-                    stream);
-                fast_check_poison_padding_device(
+                    stream));
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
                     {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
                     num_batches[i],
                     size_C[i],
-                    stream);
+                    stream));
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
                 fcA[i].reset(
@@ -5480,7 +5480,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.fast_check && !arg.c_equal_d)
             {
                 for(int i = 0; i < gemm_count; i++)
-                    fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream);
+                    CHECK_HIP_ERROR(
+                        fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
             }
             if((arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
                && arg.c_equal_d)

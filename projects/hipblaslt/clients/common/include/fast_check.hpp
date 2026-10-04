@@ -151,17 +151,19 @@ std::string fast_check_describe_buffers(const std::vector<FastCheckBuffer>& buff
 // memory; total_elements is the size of its allocation in elements, which may extend past the
 // last batch.
 
-// Fills every element of a device buffer with fast_check_sentinel_bits(type).
-void fast_check_fill_sentinel_device(void*       buffer,
-                                     hipDataType type,
-                                     size_t      elements,
-                                     hipStream_t stream);
+// Fills every element of a device buffer with fast_check_sentinel_bits(type). Returns the launch
+// error, or hipErrorInvalidValue for a type fast_check does not support.
+hipError_t fast_check_fill_sentinel_device(void*       buffer,
+                                           hipDataType type,
+                                           size_t      elements,
+                                           hipStream_t stream);
 
-// Writes kFastCheckPoisonValue into every element outside the rows x cols x batch region.
-void fast_check_poison_padding_device(const FastCheckMatrix& m,
-                                      int64_t                batch_count,
-                                      size_t                 total_elements,
-                                      hipStream_t            stream);
+// Writes kFastCheckPoisonValue into every element outside the rows x cols x batch region. Returns
+// as fast_check_fill_sentinel_device does.
+hipError_t fast_check_poison_padding_device(const FastCheckMatrix& m,
+                                            int64_t                batch_count,
+                                            size_t                 total_elements,
+                                            hipStream_t            stream);
 
 // Checks every element outside the rows x cols x batch region. With expect_poison, each must hold
 // kFastCheckPoisonValue (used when D shares C's poisoned memory); otherwise each must hold the

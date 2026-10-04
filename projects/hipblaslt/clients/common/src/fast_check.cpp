@@ -1064,12 +1064,12 @@ namespace
 
     // Writes `value` into every element outside the rows x cols x batch region.
     template <typename U>
-    void launch_poison(
+    hipError_t launch_poison(
         const FastCheckMatrix& m, int64_t batch, size_t total, uint64_t value, hipStream_t stream)
     {
         // HIP rejects a launch with an empty grid.
         if(total == 0)
-            return;
+            return hipSuccess;
         hipLaunchKernelGGL(poison_kernel<U>,
                            dim3(grid_for(total)),
                            dim3(256),
@@ -1083,42 +1083,40 @@ namespace
                            m.stride,
                            batch,
                            U(value));
+        return hipGetLastError();
     }
 
-    void fill_outside_region(
+    // Leaves a buffer of a type fast_check does not support alone and says so.
+    hipError_t fill_outside_region(
         const FastCheckMatrix& m, int64_t batch, size_t total, uint64_t value, hipStream_t stream)
     {
         switch(element_size(m.type))
         {
         case 1:
-            launch_poison<uint8_t>(m, batch, total, value, stream);
-            break;
+            return launch_poison<uint8_t>(m, batch, total, value, stream);
         case 2:
-            launch_poison<uint16_t>(m, batch, total, value, stream);
-            break;
+            return launch_poison<uint16_t>(m, batch, total, value, stream);
         case 4:
-            launch_poison<uint32_t>(m, batch, total, value, stream);
-            break;
+            return launch_poison<uint32_t>(m, batch, total, value, stream);
         case 8:
-            launch_poison<uint64_t>(m, batch, total, value, stream);
-            break;
+            return launch_poison<uint64_t>(m, batch, total, value, stream);
         default:
-            break;
+            return hipErrorInvalidValue;
         }
     }
 
     template <typename U>
-    void launch_scan(const FastCheckMatrix& m,
-                     int64_t                batch,
-                     size_t                 total,
-                     bool                   expect_poison,
-                     unsigned long long*    d_counters,
-                     hipStream_t            stream)
+    hipError_t launch_scan(const FastCheckMatrix& m,
+                           int64_t                batch,
+                           size_t                 total,
+                           bool                   expect_poison,
+                           unsigned long long*    d_counters,
+                           hipStream_t            stream)
     {
         U sentinel      = U(sentinel_bits(m.type));
         U padding_value = expect_poison ? U(poison_bits(m.type)) : sentinel;
         if(total == 0)
-            return;
+            return hipSuccess;
         hipLaunchKernelGGL(scan_kernel<U>,
                            dim3(grid_for(total)),
                            dim3(256),
@@ -1135,6 +1133,7 @@ namespace
                            !expect_poison && sentinel_is_nan(m.type),
                            sentinel,
                            d_counters);
+        return hipGetLastError();
     }
 
     std::string describe_offset(const FastCheckMatrix& m, int64_t batch, uint64_t offset)
@@ -1366,23 +1365,42 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  p,
                 got_col[size_t(j)]
                     = mod_add(got_col[size_t(j)], col_partial[size_t(c) * size_t(N) + size_t(j)]);
 
-        // The listed elements entered neither probe sum on the device: check each one and add
-        // the exact value to both sums.
-        const BatchInputs       in = batch_inputs(p, e, b);
-        std::vector<BadElement> bad;
-        int64_t                 bad_count = 0;
-        for(size_t s = 0; s < special_offset.size() && !rep.over_budget; s++)
+        // The listed elements entered neither probe sum on the device: check each one (a
+        // K-length dot product, so in parallel) and add the exact value to both sums.
+        const BatchInputs                    in        = batch_inputs(p, e, b);
+        const int64_t                        n_special = int64_t(special_offset.size());
+        const int64_t                        block     = 256;
+        const int64_t                        n_blocks  = (n_special + block - 1) / block;
+        std::vector<int64_t>                 values(special_offset.size(), 0);
+        std::vector<std::vector<BadElement>> bad_per_block(static_cast<size_t>(n_blocks));
+        std::vector<int64_t>                 bad_count_per_block(static_cast<size_t>(n_blocks), 0);
+#pragma omp parallel for schedule(dynamic)
+        for(int64_t blk = 0; blk < n_blocks; blk++)
+            for(int64_t s = blk * block; s < std::min(n_special, (blk + 1) * block); s++)
+            {
+                if(rep.over_budget)
+                    break;
+                values[size_t(s)]
+                    = rep.slow_element(in,
+                                       b,
+                                       int64_t(special_offset[size_t(s)] % uint64_t(p.D.ld)),
+                                       int64_t(special_offset[size_t(s)] / uint64_t(p.D.ld)),
+                                       special_value[size_t(s)],
+                                       bad_per_block[size_t(blk)],
+                                       bad_count_per_block[size_t(blk)]);
+            }
+        if(rep.over_budget)
+            break;
+        for(int64_t blk = 0; blk < n_blocks; blk++)
+            rep.add_bad(bad_per_block[size_t(blk)], bad_count_per_block[size_t(blk)]);
+        for(size_t s = 0; s < special_offset.size(); s++)
         {
             int64_t  i         = int64_t(special_offset[s] % uint64_t(p.D.ld));
             int64_t  j         = int64_t(special_offset[s] / uint64_t(p.D.ld));
-            int64_t  value     = rep.slow_element(in, b, i, j, special_value[s], bad, bad_count);
-            uint64_t vm        = to_mod(value);
+            uint64_t vm        = to_mod(values[s]);
             got_row[size_t(i)] = mod_add(got_row[size_t(i)], mod_mul(vm, e.row_probe[size_t(j)]));
             got_col[size_t(j)] = mod_add(got_col[size_t(j)], mod_mul(vm, e.col_probe[size_t(i)]));
         }
-        if(rep.over_budget)
-            break;
-        rep.add_bad(bad, bad_count);
 
         rep.compare(e, in, b, got_row, got_col, [&](int64_t i, int64_t j) {
             std::vector<char> one(es);
@@ -1402,21 +1420,22 @@ uint64_t fast_check_sentinel_bits(hipDataType type)
     return sentinel_bits(type);
 }
 
-void fast_check_fill_sentinel_device(void*       buffer,
-                                     hipDataType type,
-                                     size_t      elements,
-                                     hipStream_t stream)
+hipError_t fast_check_fill_sentinel_device(void*       buffer,
+                                           hipDataType type,
+                                           size_t      elements,
+                                           hipStream_t stream)
 {
     // An empty region makes every element padding.
-    fill_outside_region({buffer, type, 0, 0, 1, 0}, 1, elements, sentinel_bits(type), stream);
+    return fill_outside_region(
+        {buffer, type, 0, 0, 1, 0}, 1, elements, sentinel_bits(type), stream);
 }
 
-void fast_check_poison_padding_device(const FastCheckMatrix& m,
-                                      int64_t                batch_count,
-                                      size_t                 total_elements,
-                                      hipStream_t            stream)
+hipError_t fast_check_poison_padding_device(const FastCheckMatrix& m,
+                                            int64_t                batch_count,
+                                            size_t                 total_elements,
+                                            hipStream_t            stream)
 {
-    fill_outside_region(m, batch_count, total_elements, poison_bits(m.type), stream);
+    return fill_outside_region(m, batch_count, total_elements, poison_bits(m.type), stream);
 }
 
 FastCheckResult fast_check_scan_padding_device(const FastCheckMatrix& m,
@@ -1432,31 +1451,33 @@ FastCheckResult fast_check_scan_padding_device(const FastCheckMatrix& m,
        || hipMemcpyAsync(d_counters.ptr, init, sizeof(init), hipMemcpyHostToDevice, stream)
               != hipSuccess)
         return {false, "fast_check could not allocate its scan counters"};
+    // A failed launch, or an unsupported type, would otherwise leave the counters clean.
+    hipError_t err = hipErrorInvalidValue;
     switch(element_size(m.type))
     {
     case 1:
-        launch_scan<uint8_t>(m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
+        err = launch_scan<uint8_t>(
+            m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
         break;
     case 2:
-        launch_scan<uint16_t>(
+        err = launch_scan<uint16_t>(
             m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
         break;
     case 4:
-        launch_scan<uint32_t>(
+        err = launch_scan<uint32_t>(
             m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
         break;
     case 8:
-        launch_scan<uint64_t>(
+        err = launch_scan<uint64_t>(
             m, batch_count, total_elements, expect_poison, d_counters.ptr, stream);
         break;
     default:
-        // An unsupported type would otherwise scan nothing and look clean.
-        return {false,
-                std::string("fast_check scan failed: ") + hipGetErrorString(hipErrorInvalidValue)};
+        break;
     }
+    if(err != hipSuccess)
+        return {false, std::string("fast_check scan failed: ") + hipGetErrorString(err)};
     unsigned long long counters[4];
-    hipError_t         err
-        = hipMemcpyAsync(counters, d_counters.ptr, sizeof(counters), hipMemcpyDeviceToHost, stream);
+    err = hipMemcpyAsync(counters, d_counters.ptr, sizeof(counters), hipMemcpyDeviceToHost, stream);
     if(err == hipSuccess)
         err = hipStreamSynchronize(stream);
     if(err != hipSuccess)

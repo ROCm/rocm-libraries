@@ -467,6 +467,34 @@ namespace
         EXPECT_NE(res.message.find("row 0, col 0"), std::string::npos) << res.message;
     }
 
+    // Results above the exact range must round to nearest, ties to even, on both passes. In bf16
+    // the integers from 512 to 1024 are 4 apart: 603 rounds to 604 (truncation would give 600),
+    // and the tie 602 rounds to 600, whose mantissa is even (rounding half up would give 604).
+    TEST(FastCheckDevice_pre_checkin, rounding_is_to_nearest_even)
+    {
+        struct Case
+        {
+            float exact, right, wrong;
+        };
+        for(const Case& c : {Case{603, 604, 600}, Case{602, 600, 604}, Case{-603, -604, -600}})
+        {
+            std::vector<float>        A = {c.exact}, B = {1};
+            std::vector<hip_bfloat16> D = {hip_bfloat16(c.right)};
+            FastCheckProblem          p;
+            p.M = p.N = p.K = 1;
+            p.A             = {A.data(), HIP_R_32F, 1, 1, 1, 1};
+            p.B             = {B.data(), HIP_R_32F, 1, 1, 1, 1};
+            p.C             = {A.data(), HIP_R_32F, 1, 1, 1, 1};
+            p.D             = {D.data(), HIP_R_16BF, 1, 1, 1, 1};
+            EXPECT_TRUE(fast_check_gemm(p).passed) << c.exact;
+            EXPECT_TRUE(device_result(p, D).passed) << c.exact;
+
+            D[0] = hip_bfloat16(c.wrong);
+            EXPECT_FALSE(fast_check_gemm(p).passed) << c.exact;
+            EXPECT_FALSE(device_result(p, D).passed) << c.exact;
+        }
+    }
+
     // fp8 outputs are not converted on the device; the device call copies D and uses the host
     // pass, and must still find a wrong element.
     TEST(FastCheckDevice_pre_checkin, fp8_output_falls_back_to_the_host_pass)
@@ -941,8 +969,11 @@ namespace
         m.write(h);
         FastCheckMatrix complex = m.matrix();
         complex.type            = HIP_C_32F;
-        fast_check_fill_sentinel_device(m.d, HIP_C_32F, DeviceMatrix::total, 0);
-        fast_check_poison_padding_device(complex, DeviceMatrix::batch, DeviceMatrix::total, 0);
+        EXPECT_EQ(fast_check_fill_sentinel_device(m.d, HIP_C_32F, DeviceMatrix::total, 0),
+                  hipErrorInvalidValue);
+        EXPECT_EQ(
+            fast_check_poison_padding_device(complex, DeviceMatrix::batch, DeviceMatrix::total, 0),
+            hipErrorInvalidValue);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         EXPECT_EQ(m.read(), h);
         auto res = fast_check_scan_padding_device(
@@ -972,9 +1003,8 @@ namespace
         EXPECT_EQ(hipGetLastError(), hipSuccess);
     }
 
-    // An exact result beyond the range the compute type holds exactly is reported as such (or
-    // refused up front, once fast_check bounds the results): its GPU value depends on the
-    // summation order, so it is neither right nor wrong.
+    // An exact result beyond the range the compute type holds exactly is reported as such: its
+    // GPU value depends on the summation order, so it is neither right nor wrong.
     TEST(FastCheck_pre_checkin, results_beyond_the_compute_range_are_reported)
     {
         // 100 * 100 + 100 * 100 = 20000, which f16 stores exactly but f16 arithmetic does not
