@@ -5836,6 +5836,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(
                         fast_check_fill_sentinel_device(dE[i].buf(), Taux, size_E[i], stream));
+            // A bias gradient is an output, so a store the kernel misses must not find the
+            // previous launch's values there.
+            if(arg.fast_check && arg.gradient && arg.bias_vector)
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(fast_check_fill_sentinel_device(
+                        dBias[i].buf(), Tbias, size_bias[i], stream));
             // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
             // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
             // too early, for example). Zero rather than poison: kernels may rely on their flags
