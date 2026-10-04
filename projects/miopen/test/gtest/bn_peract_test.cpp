@@ -34,6 +34,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1184,6 +1185,168 @@ struct TestNameGenerator
         return str;
     }
 };
+
+// Exercise the packed retention boundary independently of the backward tests.
+// Odd spatial and batch sizes also leave partial workgroups and an unpaired half.
+template <typename T>
+struct BnPeractRetentionTest : testing::TestWithParam<int>
+{
+    void Run()
+    {
+        const auto n = static_cast<std::size_t>(GetParam());
+        constexpr std::size_t c = 3, h = 7, w = 9;
+        constexpr std::size_t features = c * h * w;
+        constexpr std::size_t guard    = 16;
+        constexpr float canary        = 30000;
+        constexpr double factor       = 0.25;
+        constexpr double epsilon      = 1e-5;
+        constexpr bool is_bfloat      = miopen_type<T>{} == miopenBFloat16;
+
+        tensor<T> input{n, c, h, w};
+        tensor<float> parameters{1, c, h, w};
+        const auto guarded = [](std::size_t count, auto value) {
+            return std::vector<decltype(value)>(count + 2 * guard, value);
+        };
+        auto x        = guarded(n * features, T{canary});
+        auto y        = guarded(n * features, T{canary});
+        auto scale    = guarded(features, canary);
+        auto shift    = guarded(features, canary);
+        auto run_mean = guarded(features, canary);
+        auto run_var  = guarded(features, canary);
+        auto mean     = guarded(features, canary);
+        auto inv_var  = guarded(features, canary);
+
+        for(std::size_t p = 0; p < features; ++p)
+        {
+            scale[guard + p] =
+                (p % 2 == 0 ? 1.0f : -1.0f) * (0.75f + 0.125f * (p % 7));
+            shift[guard + p]    = 0.25f * (static_cast<int>(p % 9) - 4);
+            run_mean[guard + p] = 0.5f * (static_cast<int>(p % 5) - 2);
+            run_var[guard + p]  = 1.0f + 0.25f * (p % 11);
+            for(std::size_t b = 0; b < n; ++b)
+            {
+                // The last batch differs deliberately from the preceding pair.
+                const auto sample = b + 1 == n ? 37 : (13 * b + 7 * p) % 29;
+                const double offset = p % 2 == 0 ? -3.0 : (is_bfloat ? 1024.0 : 120.0);
+                const double step   = p % 2 == 0 ? 0.5 : (is_bfloat ? 8.0 : 0.5);
+                x[guard + b * features + p] = T(offset + step * sample);
+            }
+        }
+        const auto initial_run_mean = run_mean;
+        const auto initial_run_var  = run_var;
+        auto&& handle = get_handle();
+        auto x_dev        = handle.Write(x);
+        auto y_dev        = handle.Write(y);
+        auto scale_dev    = handle.Write(scale);
+        auto shift_dev    = handle.Write(shift);
+        auto run_mean_dev = handle.Write(run_mean);
+        auto run_var_dev  = handle.Write(run_var);
+        auto mean_dev     = handle.Write(mean);
+        auto inv_var_dev  = handle.Write(inv_var);
+        const auto data = [](auto& buffer, auto value) {
+            return static_cast<decltype(value)*>(buffer.get()) + guard;
+        };
+        float alpha = 1.0f, beta = 0.0f;
+        ASSERT_EQ(miopenBatchNormalizationForwardTraining(&handle,
+                                                         miopenBNPerActivation,
+                                                         &alpha,
+                                                         &beta,
+                                                         &input.desc,
+                                                         data(x_dev, T{}),
+                                                         &input.desc,
+                                                         data(y_dev, T{}),
+                                                         &parameters.desc,
+                                                         data(scale_dev, float{}),
+                                                         data(shift_dev, float{}),
+                                                         factor,
+                                                         data(run_mean_dev, float{}),
+                                                         data(run_var_dev, float{}),
+                                                         epsilon,
+                                                         data(mean_dev, float{}),
+                                                         data(inv_var_dev, float{})),
+                  miopenStatusSuccess);
+        y        = handle.Read<T>(y_dev, y.size());
+        run_mean = handle.Read<float>(run_mean_dev, run_mean.size());
+        run_var  = handle.Read<float>(run_var_dev, run_var.size());
+        mean     = handle.Read<float>(mean_dev, mean.size());
+        inv_var  = handle.Read<float>(inv_var_dev, inv_var.size());
+
+        const auto check_guards = [&](const auto& values) {
+            using Value = typename std::decay_t<decltype(values)>::value_type;
+            const double expected_canary = double(Value{canary});
+            for(std::size_t i = 0; i < guard; ++i)
+            {
+                EXPECT_EQ(double(values[i]), expected_canary) << "leading guard " << i;
+                EXPECT_EQ(double(values[values.size() - guard + i]), expected_canary)
+                    << "trailing guard " << i;
+            }
+        };
+        check_guards(y);
+        check_guards(run_mean);
+        check_guards(run_var);
+        check_guards(mean);
+        check_guards(inv_var);
+        const auto check_input = [&](const auto& buffer, const auto& expected) {
+            using Value = typename std::decay_t<decltype(expected)>::value_type;
+            const auto actual = handle.Read<Value>(buffer, expected.size());
+            for(std::size_t i = 0; i < expected.size(); ++i)
+                EXPECT_EQ(double(actual[i]), double(expected[i])) << "input element " << i;
+        };
+        check_input(x_dev, x);
+        check_input(scale_dev, scale);
+        check_input(shift_dev, shift);
+
+        for(std::size_t p = 0; p < features; ++p)
+        {
+            SCOPED_TRACE(testing::Message() << "batch " << n << ", feature " << p);
+            double expected_mean = 0;
+            for(std::size_t b = 0; b < n; ++b)
+                expected_mean += double(x[guard + b * features + p]);
+            expected_mean /= n;
+            double variance = 0;
+            for(std::size_t b = 0; b < n; ++b)
+            {
+                const double centered = double(x[guard + b * features + p]) - expected_mean;
+                variance += centered * centered;
+            }
+            variance /= n;
+            const double expected_inv_var = 1.0 / std::sqrt(variance + epsilon);
+            // Moments are FP32, including with low-precision activations. Allow FP32
+            // accumulation error for the high-offset data, not activation rounding.
+            const double mean_tolerance = 4 * std::numeric_limits<float>::epsilon() *
+                                          std::max(1.0, std::abs(expected_mean));
+            EXPECT_NEAR(mean[guard + p], expected_mean, mean_tolerance);
+            EXPECT_NEAR(inv_var[guard + p], expected_inv_var, 5e-4 * expected_inv_var);
+            const double expected_run_mean =
+                (1 - factor) * initial_run_mean[guard + p] + factor * expected_mean;
+            const double expected_run_var =
+                (1 - factor) * initial_run_var[guard + p] + factor * variance * n / (n - 1);
+            EXPECT_NEAR(run_mean[guard + p], expected_run_mean, mean_tolerance);
+            EXPECT_NEAR(run_var[guard + p], expected_run_var, 5e-4 * expected_run_var);
+            for(std::size_t b = 0; b < n; ++b)
+            {
+                const auto i = guard + b * features + p;
+                const double expected =
+                    double(T(scale[guard + p] * (double(x[i]) - expected_mean) * expected_inv_var +
+                             shift[guard + p]));
+                // Compare with the rounded destination value, with room for at most
+                // two low-precision rounding units from FP32 normalization.
+                const double tolerance = 2 * double(std::numeric_limits<T>::epsilon()) *
+                                         std::max(1.0, std::abs(expected));
+                EXPECT_NEAR(double(y[i]), expected, tolerance) << "batch element " << b;
+            }
+        }
+    }
+};
+
+using GPU_BnPeractRetention_FP16  = BnPeractRetentionTest<half_float::half>;
+using GPU_BnPeractRetention_BFP16 = BnPeractRetentionTest<bfloat16>;
+
+TEST_P(GPU_BnPeractRetention_FP16, ForwardTraining) { this->Run(); }
+TEST_P(GPU_BnPeractRetention_BFP16, ForwardTraining) { this->Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeractRetention_FP16, testing::Values(3, 63, 64, 65));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeractRetention_BFP16, testing::Values(3, 63, 64, 65));
 
 using GPU_BnPeract_FP16  = BnPeractTest<half_float::half>;
 using GPU_BnPeract_FP32  = BnPeractTest<float>;

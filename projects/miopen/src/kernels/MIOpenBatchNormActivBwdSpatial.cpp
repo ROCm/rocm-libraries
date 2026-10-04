@@ -84,6 +84,12 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
     const unsigned int gid   = blockIdx.x;
     const unsigned int chwid = gid * MIO_BN_HW + (MIO_BN_VARIANT == 0 ? lid % (MIO_BN_HW) : 0);
 
+#if MIO_BN_GFX125X
+    const FLOAT_ACCUM scale = CVT_FP32_2ACCUM(bn_scale[gid]);
+    const FLOAT_ACCUM bias = CVT_FP32_2ACCUM(bn_bias[gid]);
+    const FLOAT_ACCUM mean = CVT_FP32_2ACCUM(saved_mean[gid]);
+    const FLOAT_ACCUM inv_variance = CVT_FP32_2ACCUM(saved_inv_variance[gid]);
+#else
     __shared__ FLOAT_ACCUM scale, bias, mean, inv_variance;
     if(lid == 0)
     {
@@ -93,6 +99,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
         inv_variance = CVT_FP32_2ACCUM(saved_inv_variance[gid]);
     }
     __syncthreads();
+#endif
 
     FLOAT_ACCUM tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (MIO_BN_NHW));
 
@@ -384,22 +391,11 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                 values[j]        = tmp3 * (tmp2 + tmp1);
             }
 
-            // Synchronization is not required for correctness but enhances performance.
-            //
-            // Loop is memory bound as it iterates across all the batches in the tensor,
-            // and has memory access strides of CHW size once all the elements in a single
-            // sample have been processed, which may be large.
-            //
-            // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
-            // adjacent elements to its neighbours on the same loop iteration, leading to contiguous
-            // memory access across all the waves in a workgroup. By keeping all the waves on the
-            // same loop iteration it prevents waves on different loop iterations from stalling
-            // as they wait for memory.
-            //
-            // This can be seen by profiling the kernel with rocprofv3 and comparing the
-            // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
-            // compute viewer and seeing the impact on occupancy.
+            // Older targets benefit from lockstep batch accesses; gfx1250
+            // keeps independent waves in flight. No values are shared here.
+#if !MIO_BN_GFX125X
             __syncthreads();
+#endif
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
                 unsigned int l     = k + j;

@@ -108,7 +108,8 @@ void ComputeCPUBNBwd(DLModule& dl_module)
                                      dl_module.savedInvVar,
                                      dl_module.activ_mode,
                                      dl_module.activ_beta,
-                                     dl_module.activ_alpha);
+                                     dl_module.activ_alpha,
+                                     dl_module.epsilon);
     }
     else if(dl_module.bn_mode == miopenBNPerActivation)
     {

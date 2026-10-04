@@ -201,6 +201,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         unsigned int grpid = blockIdx.x;
         unsigned int chwid = grpid * mio_bn_config::hw;
 
+#if MIO_BN_GFX125X
+        const FpPrecType lcl_scale = scale[grpid];
+        const FpPrecType lcl_bias = bias[grpid];
+#else
         __shared__ FpPrecType lcl_bias;
         __shared__ FpPrecType lcl_scale;
         if(lid == 0)
@@ -208,8 +212,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
             lcl_scale = scale[grpid];
             lcl_bias  = bias[grpid];
         }
-
         __syncthreads();
+#endif
 
         if constexpr(mio_bn_config::hw >= 4096)
         {
@@ -319,22 +323,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                     xhat[j]        = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                 }
 
-                // Synchronization is not required for correctness but enhances performance.
-                //
-                // Loop is memory bound as it iterates across all the batches in the tensor,
-                // and has memory access strides of CHW size once all the elements in a single
-                // sample have been processed, which may be large.
-                //
-                // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
-                // adjacent elements to its neighbours on the same loop iteration, leading to
-                // contiguous memory access across all the waves in a workgroup. By keeping all the
-                // waves on the same loop iteration it prevents waves on different loop iterations
-                // from stalling as they wait for memory.
-                //
-                // This can be seen by profiling the kernel with rocprofv3 and comparing the
-                // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
-                // compute viewer and seeing the impact on occupancy.
-                __syncthreads();
+                // Older targets benefit from lockstep batch accesses; gfx1250
+                // keeps independent waves in flight. No values are shared here.
+                if constexpr(mio_bn_config::target_arch != architecture::gfx125x)
+                    __syncthreads();
                 for(unsigned int j = 0; j < max_read; j++)
                 {
                     unsigned int l = k + j;

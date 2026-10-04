@@ -90,64 +90,70 @@ reduce2(FloatAccum& x, FloatAccum& y, FloatAccum scale, unsigned int lid)
         return;
     }
 
-    if constexpr(BlockSize % 64 == 0)
+    if constexpr(BlockSize % 32 == 0)
     {
-        for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
+        // A partial wave64 must use the LDS fallback; wave32 needs only multiples of 32.
+        if(warpSize == 32 || BlockSize % 64 == 0)
         {
-            x += __shfl_down_sync(detail::FULL_MASK, x, d);
-            y += __shfl_down_sync(detail::FULL_MASK, y, d);
-        }
-
-        if(BlockSize <= static_cast<unsigned int>(warpSize))
-        {
-            x = __shfl_sync(detail::FULL_MASK, x, 0) * scale;
-            y = __shfl_sync(detail::FULL_MASK, y, 0) * scale;
-            return;
-        }
-
-        constexpr unsigned int max_warps = BlockSize / 32;
-        __shared__ FloatAccum s_x[max_warps];
-        __shared__ FloatAccum s_y[max_warps];
-
-        const unsigned int lane      = lid % static_cast<unsigned int>(warpSize);
-        const unsigned int wid       = lid / static_cast<unsigned int>(warpSize);
-        const unsigned int num_warps = BlockSize / static_cast<unsigned int>(warpSize);
-
-        if(lane == 0)
-        {
-            s_x[wid] = x;
-            s_y[wid] = y;
-        }
-        __syncthreads();
-
-        if(wid == 0)
-        {
-            x = FloatAccum{0};
-            y = FloatAccum{0};
-            for(unsigned int i = lane; i < num_warps; i += static_cast<unsigned int>(warpSize))
-            {
-                x += s_x[i];
-                y += s_y[i];
-            }
             for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
             {
                 x += __shfl_down_sync(detail::FULL_MASK, x, d);
                 y += __shfl_down_sync(detail::FULL_MASK, y, d);
             }
-        }
 
-        if(lid == 0)
-        {
-            s_x[0] = x * scale;
-            s_y[0] = y * scale;
+            if(BlockSize <= static_cast<unsigned int>(warpSize))
+            {
+                x = __shfl_sync(detail::FULL_MASK, x, 0) * scale;
+                y = __shfl_sync(detail::FULL_MASK, y, 0) * scale;
+                return;
+            }
+
+            constexpr unsigned int max_warps = BlockSize / 32;
+            __shared__ FloatAccum s_x[max_warps];
+            __shared__ FloatAccum s_y[max_warps];
+
+            const unsigned int lane      = lid % static_cast<unsigned int>(warpSize);
+            const unsigned int wid       = lid / static_cast<unsigned int>(warpSize);
+            const unsigned int num_warps = BlockSize / static_cast<unsigned int>(warpSize);
+
+            if(lane == 0)
+            {
+                s_x[wid] = x;
+                s_y[wid] = y;
+            }
+            __syncthreads();
+
+            if(wid == 0)
+            {
+                x = FloatAccum{0};
+                y = FloatAccum{0};
+                for(unsigned int i = lane; i < num_warps; i += static_cast<unsigned int>(warpSize))
+                {
+                    x += s_x[i];
+                    y += s_y[i];
+                }
+                for(unsigned int d = warpSize / 2; d >= 1; d >>= 1)
+                {
+                    x += __shfl_down_sync(detail::FULL_MASK, x, d);
+                    y += __shfl_down_sync(detail::FULL_MASK, y, d);
+                }
+            }
+
+            if(lid == 0)
+            {
+                s_x[0] = x * scale;
+                s_y[0] = y * scale;
+            }
+            __syncthreads();
+            x = s_x[0];
+            y = s_y[0];
+            return;
         }
-        __syncthreads();
-        x = s_x[0];
-        y = s_y[0];
     }
-    else
+
+    if constexpr(BlockSize % 64 != 0)
     {
-        // Slow path, mainly for the unlikely case of a 32 thread block
+        // Gather through LDS when the workgroup contains a partial wave.
         __shared__ FloatAccum s_x[BlockSize];
         __shared__ FloatAccum s_y[BlockSize];
 
@@ -217,6 +223,35 @@ __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
     }
     x = static_cast<FloatAccumC>(lcl_data[xlid * 2 + 0] * scale);
     y = static_cast<FloatAccumC>(lcl_data[xlid * 2 + 1] * scale);
+}
+
+// Caller must launch BlockSize threads with XStride threads along x. UseCompact is true
+// only when the launch uses wave32; keeping it compile-time avoids allocating the full
+// paired LDS scratch for scalar-channel compact reductions.
+template <typename FloatAccumC,
+          typename FloatAccum,
+          unsigned int BlockSize,
+          unsigned int XStride,
+          bool UseCompact>
+__forceinline__ __device__ void reduce2_2d(FloatAccumC& x,
+                                           FloatAccumC& y,
+                                           FloatAccum scale,
+                                           unsigned int xlid,
+                                           unsigned int ylid)
+{
+    static_assert(BlockSize > 0 && XStride > 0 && BlockSize % XStride == 0,
+                  "Invalid two-dimensional reduction workgroup");
+    if constexpr(UseCompact && XStride == 1 && BlockSize % 32 == 0 &&
+                 std::is_same<FloatAccumC, float>::value &&
+                 std::is_same<FloatAccum, float>::value)
+    {
+        reduce2<FloatAccumC, BlockSize>(x, y, scale, ylid);
+    }
+    else
+    {
+        __shared__ FloatAccumC lcl_data[2 * BlockSize];
+        lds_reduce2_2d(x, y, scale, lcl_data, XStride, xlid, ylid, BlockSize / XStride);
+    }
 }
 
 // Caller must ensure: SizeLclData >= (blockDim.x * blockDim.y * blockDim.z + warpSize - 1) /
@@ -379,6 +414,70 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
         }
     }
     __syncthreads();
+
+    if constexpr(miopen::batchnorm::config::target_arch ==
+                     miopen::batchnorm::architecture::gfx125x &&
+                 !miopen::batchnorm::config::use_amdgcn && SizeLclData > 1 && SizeLclData <= 32)
+    {
+        if(warpSize == 32)
+        {
+            // All first-wave lanes execute the shuffles, including neutral lanes beyond the
+            // partial count. Keep the same balanced merge tree as the LDS reduction below.
+            if(lid < 32)
+            {
+                FloatAccum partial_mean     = FloatAccum{0};
+                FloatAccum partial_variance = FloatAccum{0};
+                FloatAccum partial_count    = FloatAccum{0};
+                if(lid < SizeLclData)
+                {
+                    partial_mean     = lcl_data_mean[lid];
+                    partial_variance = lcl_data_variance[lid];
+                    partial_count    = lcl_data_count[lid];
+                }
+
+#pragma unroll
+                for(unsigned int red = detail::next_power_of_2(SizeLclData) >> 1; red > 0;
+                    red >>= 1)
+                {
+                    const FloatAccum other_mean =
+                        __shfl_down_sync(detail::FULL_MASK, partial_mean, red);
+                    const FloatAccum other_variance =
+                        __shfl_down_sync(detail::FULL_MASK, partial_variance, red);
+                    const FloatAccum other_count =
+                        __shfl_down_sync(detail::FULL_MASK, partial_count, red);
+                    // For a power-of-two tree, lane zero only depends on the lower red lanes
+                    // after each level. Other lanes may merge too: their discarded results never
+                    // enter lane zero's tree. Compile out the EXEC mask changes in that case.
+                    constexpr bool full_tree = (SizeLclData & (SizeLclData - 1)) == 0;
+                    if(full_tree || (lid < red && lid + red < SizeLclData))
+                    {
+                        const FloatAccum delta = other_mean - partial_mean;
+                        const FloatAccum n_a   = partial_count;
+                        const FloatAccum n_b   = other_count;
+                        const FloatAccum n_new = n_a + n_b;
+                        const FloatAccum n_new_rcp =
+                            n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.f;
+                        partial_mean =
+                            (partial_mean * n_a + other_mean * n_b) * n_new_rcp;
+                        partial_variance = partial_variance + other_variance +
+                                           delta * delta * (n_a * n_b * n_new_rcp);
+                        partial_count = n_new;
+                    }
+                }
+                if(lid == 0)
+                {
+                    lcl_data_mean[0]     = partial_mean;
+                    lcl_data_variance[0] = partial_variance;
+                    lcl_data_count[0]    = partial_count;
+                }
+            }
+            // Publish the first wave's result to every wave before normalization.
+            __syncthreads();
+            mean     = lcl_data_mean[0];
+            variance = lcl_data_variance[0] * scale;
+            return;
+        }
+    }
 
     // The reduction here merges partitions together in a tree-like fashion. Otherwise,
     // precision is lost in both the mean and variance

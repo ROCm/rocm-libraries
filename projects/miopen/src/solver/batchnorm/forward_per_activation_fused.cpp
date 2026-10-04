@@ -126,7 +126,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 
         kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
-        unsigned int ldsgcn   = xlocalsize / 64;
+        unsigned int ldsgcn   = xlocalsize / handle.GetWavefrontWidth();
         unsigned int ldsnogcn = xlocalsize;
 
         int variant = 0;
@@ -155,6 +155,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& activ_op =
             dynamic_cast<ActivFwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
         const auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"MIO_BN_N", static_cast<int>(n)},
             {"MIO_BN_C", static_cast<int>(c)},
             {"MIO_BN_HW", static_cast<int>(in_cstride)},

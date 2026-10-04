@@ -423,7 +423,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
         {
             fp_prec_read_vec_type read4;
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            // Match each lane's flattened NHW offset to its actual access width,
+            // including the scalar fallback for spatial extents not divisible by four.
+            for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
                 read4 = cast<fp_prec_read_vec_type>(
                     *(reinterpret_cast<const fp_read_vec_type*>(x_in + getTensorIndex(k))));
@@ -433,16 +435,14 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
             if constexpr(rem4 > 0)
             {
-                if(lid < rem4)
+                const unsigned int position = lid * read_size + less4;
+                if(position + read_size <= mio_bn_config::nhw)
                 {
-                    unsigned int index = getTensorIndex((lid << 2) + less4);
-                    if(index + read_size - 1 < mio_bn_config::nchw)
-                    {
-                        read4 = cast<fp_prec_read_vec_type>(
-                            *(reinterpret_cast<const fp_read_vec_type*>(x_in + index)));
-                        miopen::batchnorm::_accumulate(mean, read4);
-                        miopen::batchnorm::_accumulate_mad(variance, read4, read4);
-                    }
+                    unsigned int index = getTensorIndex(position);
+                    read4 = cast<fp_prec_read_vec_type>(
+                        *(reinterpret_cast<const fp_read_vec_type*>(x_in + index)));
+                    miopen::batchnorm::_accumulate(mean, read4);
+                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
                 }
             }
         }
@@ -458,9 +458,10 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem)
                 {
-                    unsigned int index = getTensorIndex(lid + less);
+                    unsigned int position = lid + less;
+                    unsigned int index = getTensorIndex(position);
                     FpPrecType in =
-                        (index < mio_bn_config::nchw) ? cast<FpPrecType>(x_in[index]) : 0;
+                        (position < mio_bn_config::nhw) ? cast<FpPrecType>(x_in[index]) : 0;
                     mean += in;
                     variance = fma(in, in, variance);
                 }
@@ -513,9 +514,10 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
         if constexpr(rem4 > 0)
         {
-            unsigned int index = getTensorIndex((lid * read_size) + less4);
-            if(index + read_size - 1 < mio_bn_config::nchw)
+            const unsigned int position = lid * read_size + less4;
+            if(position + read_size <= mio_bn_config::nhw)
             {
+                unsigned int index = getTensorIndex(position);
                 fp_read_vec_type xread = *(reinterpret_cast<const fp_read_vec_type*>(x_in + index));
                 fp_read_vec_type dyRead =
                     *(reinterpret_cast<const fp_read_vec_type*>(dy_in + index));
@@ -579,22 +581,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                              INHW);
             }
 
-            // Synchronization is not required for correctness but enhances performance.
-            //
-            // Loop is memory bound as it iterates across all the batches in the tensor,
-            // and has memory access strides of CHW size once all the elements in a single
-            // sample have been processed, which may be large.
-            //
-            // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
-            // adjacent elements to its neighbours on the same loop iteration, leading to contiguous
-            // memory access across all the waves in a workgroup. By keeping all the waves on the
-            // same loop iteration it prevents waves on different loop iterations from stalling
-            // as they wait for memory.
-            //
-            // This can be seen by profiling the kernel with rocprofv3 and comparing the
-            // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
-            // compute viewer and seeing the impact on occupancy.
-            __syncthreads();
+            // Older targets benefit from lockstep batch accesses; gfx1250 skips this
+            // optional full-chunk barrier to preserve memory overlap.
+            // Per-thread data is independent; reduction barriers remain required.
+            if constexpr(mio_bn_config::target_arch != miopen::batchnorm::architecture::gfx125x)
+                __syncthreads();
 
             if(l < lessout)
             {
@@ -608,9 +599,10 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             unsigned int remkeyout = (write_size * lid) + lessout;
             for(unsigned int j = 0; j < write_size; j++)
             {
-                unsigned int index = getTensorIndex(remkeyout + j);
-                if(index < mio_bn_config::nchw)
+                const unsigned int position = remkeyout + j;
+                if(position < mio_bn_config::nhw)
                 {
+                    unsigned int index = getTensorIndex(position);
                     FpPrecType value1 = cast<FpPrecType>(dy_in[index]);
                     FpPrecType xhat   = (cast<FpPrecType>(x_in[index]) - mean) * invVariance;
 
@@ -811,6 +803,250 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
     }
 };
 
+#if(MIO_BN_VARIANT == 5)
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormBwdSpatialHIPImpl<5, FpType, FpPrecType, FpAccumType>
+{
+    static constexpr unsigned int vector_size = mio_bn_config::vec_size;
+    static constexpr unsigned int block_size = mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
+    static constexpr unsigned int buffer_size =
+        (vector_count + block_size - 1) / block_size;
+
+    static_assert(MIO_BN_BUFFERED_GFX1250 && MIO_BN_USESAVED == 1 &&
+                      mio_config::input_type_strategy == type_strategy::bfpmix &&
+                      !mio_config::layout_nhwc,
+                  "Buffered backward requires gfx1250 saved-statistics BF16 NCHW");
+    static_assert(vector_size == 4 || vector_size == 8,
+                  "Buffered backward supports vector4 and vector8");
+    static_assert(block_size == 256 || block_size == 512 || block_size == 1024,
+                  "Unsupported buffered backward workgroup");
+    static_assert(mio_bn_config::launch_dim.grp1 == 1 && mio_bn_config::launch_dim.grp2 == 1 &&
+                      mio_bn_config::n_elements == 1 &&
+                      mio_bn_config::lds_gcn_size == block_size / 32 &&
+                      mio_bn_config::n > 0 && mio_bn_config::n <= 64 &&
+                      mio_bn_config::hw > 0 && mio_bn_config::hw <= 4800 &&
+                      mio_bn_config::hw % vector_size == 0 &&
+                      2 * buffer_size * vector_size <= 128,
+                  "Buffered backward exceeds its retained-input bounds");
+
+    using input_vector = typename mapped_vector_type<FpType, vector_size>::type;
+    using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
+
+    __forceinline__ __device__ unsigned int input_index(unsigned int vector_index)
+    {
+        const unsigned int position = vector_index * vector_size;
+        const unsigned int batch = position / mio_bn_config::hw;
+        return batch * mio_bn_config::chw + blockIdx.x * mio_bn_config::hw +
+               position % mio_bn_config::hw;
+    }
+
+    // Exact DX=X and DX=DY are safe: all channel inputs are retained before the
+    // reduction's workgroup barriers, and no output store precedes that reduction.
+    constexpr __forceinline__ __device__ void operator()(const FpType* x_in,
+                                                         const FpType* dy_in,
+                                                         FpType* dx_out,
+                                                         const FpPrecType* __restrict bnScale,
+                                                         const FpPrecType* __restrict bnBias,
+                                                         FpPrecType* __restrict dscale,
+                                                         FpPrecType* __restrict dbias,
+                                                         const FpPrecType* savedMean,
+                                                         const FpPrecType* savedInvVariance,
+                                                         FpPrecType INHW,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta)
+    {
+        const unsigned int lid = threadIdx.x;
+        const unsigned int channel = blockIdx.x;
+        const FpPrecType mean = savedMean[channel];
+        const FpPrecType invVariance = savedInvVariance[channel];
+        const FpPrecType pscale = bnScale[channel];
+        FpPrecType pbias = 0;
+#if(MIOPEN_NRN_OP_ID > 0)
+        pbias = bnBias[channel];
+#endif
+        packed_vector buffered_x[buffer_size];
+        packed_vector buffered_dy[buffer_size];
+        FpAccumType db = 0;
+        FpAccumType ds = 0;
+        static_unroll_full<unsigned int, 0, buffer_size, 1>{[&](unsigned int slot) {
+            const unsigned int vector_index = slot * block_size + lid;
+            if(vector_index < vector_count)
+            {
+                const unsigned int index = input_index(vector_index);
+                buffered_x[slot] = *reinterpret_cast<const packed_vector*>(x_in + index);
+                buffered_dy[slot] = *reinterpret_cast<const packed_vector*>(dy_in + index);
+                const input_vector x = __builtin_bit_cast(input_vector, buffered_x[slot]);
+                const input_vector dy = __builtin_bit_cast(input_vector, buffered_dy[slot]);
+                static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                    const FpPrecType xhat = (cast<FpPrecType>(x[component]) - mean) * invVariance;
+                    const FpPrecType value = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                        cast<FpPrecType>(dy[component]), xhat, pscale, pbias, alpha, beta);
+                    db += value;
+                    ds = fma(xhat, value, ds);
+                }};
+            }
+        }};
+
+        miopen::reduction::reduce2<FpAccumType, block_size>(ds, db, FpAccumType{1}, lid);
+        if(lid == 0)
+        {
+            dbias[channel] = cast<FpPrecType>(db);
+            dscale[channel] = cast<FpPrecType>(ds);
+        }
+        static_unroll_full<unsigned int, 0, buffer_size, 1>{[&](unsigned int slot) {
+            const unsigned int vector_index = slot * block_size + lid;
+            if(vector_index < vector_count)
+            {
+                const input_vector x = __builtin_bit_cast(input_vector, buffered_x[slot]);
+                const input_vector dy = __builtin_bit_cast(input_vector, buffered_dy[slot]);
+                input_vector result;
+                static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                    const FpPrecType xhat = (cast<FpPrecType>(x[component]) - mean) * invVariance;
+                    const FpPrecType value = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                        cast<FpPrecType>(dy[component]), xhat, pscale, pbias, alpha, beta);
+                    result[component] = cast<FpType>(batchBwdNormalization(value,
+                                                                          xhat,
+                                                                          cast<FpPrecType>(db),
+                                                                          cast<FpPrecType>(ds),
+                                                                          pscale,
+                                                                          invVariance,
+                                                                          mio_bn_config::nhw,
+                                                                          INHW));
+                }};
+                *reinterpret_cast<packed_vector*>(dx_out + input_index(vector_index)) =
+                    __builtin_bit_cast(packed_vector, result);
+            }
+        }};
+    }
+};
+#endif
+
+#if(MIO_BN_VARIANT == 8)
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx1250__)
+#error "Streaming backward is only supported on gfx1250"
+#endif
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormBwdSpatialHIPImpl<8, FpType, FpPrecType, FpAccumType>
+{
+    static constexpr unsigned int vector_size = mio_bn_config::vec_size;
+    static constexpr unsigned int block_size = mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
+
+    static_assert(MIO_BN_BUFFERED_GFX1250 && MIO_BN_USESAVED == 1 &&
+                      mio_config::input_type_strategy == type_strategy::bfpmix &&
+                      !mio_config::layout_nhwc,
+                  "Streaming backward requires gfx1250 saved-statistics BF16 NCHW");
+    static_assert(vector_size == 4 || vector_size == 8,
+                  "Streaming backward supports vector4 and vector8");
+    static_assert(block_size == 256 || block_size == 512 || block_size == 1024,
+                  "Unsupported streaming backward workgroup");
+    static_assert(mio_bn_config::launch_dim.grp1 == 1 && mio_bn_config::launch_dim.grp2 == 1 &&
+                      mio_bn_config::n_elements == 1 &&
+                      mio_bn_config::lds_gcn_size == block_size / 32 &&
+                      mio_bn_config::n > 0 && mio_bn_config::n <= 64 &&
+                      mio_bn_config::hw > 0 && mio_bn_config::hw <= 32768 &&
+                      mio_bn_config::hw % vector_size == 0,
+                  "Unsupported streaming backward shape");
+
+    using input_vector = typename mapped_vector_type<FpType, vector_size>::type;
+    using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
+
+    __forceinline__ __device__ unsigned int input_index(unsigned int vector_index)
+    {
+        const unsigned int position = vector_index * vector_size;
+        const unsigned int batch = position / mio_bn_config::hw;
+        return batch * mio_bn_config::chw + blockIdx.x * mio_bn_config::hw +
+               position % mio_bn_config::hw;
+    }
+
+    // Exact DX=X and DX=DY are safe: reduction finishes all first-pass reads,
+    // then each thread rereads and overwrites only its own disjoint vectors.
+    constexpr __forceinline__ __device__ void operator()(const FpType* x_in,
+                                                         const FpType* dy_in,
+                                                         FpType* dx_out,
+                                                         const FpPrecType* bnScale,
+                                                         const FpPrecType* bnBias,
+                                                         FpPrecType* dscale,
+                                                         FpPrecType* dbias,
+                                                         const FpPrecType* savedMean,
+                                                         const FpPrecType* savedInvVariance,
+                                                         FpPrecType INHW,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta)
+    {
+        const unsigned int lid = threadIdx.x;
+        const unsigned int channel = blockIdx.x;
+        const FpPrecType mean = savedMean[channel];
+        const FpPrecType invVariance = savedInvVariance[channel];
+        const FpPrecType pscale = bnScale[channel];
+        FpPrecType pbias = 0;
+#if(MIOPEN_NRN_OP_ID > 0)
+        pbias = bnBias[channel];
+#endif
+        using accum_vector = typename mapped_vector_type<FpAccumType, vector_size>::type;
+        accum_vector db_lanes = {};
+        accum_vector ds_lanes = {};
+        #pragma unroll 2
+        for(unsigned int vector_index = lid; vector_index < vector_count;
+            vector_index += block_size)
+        {
+            const unsigned int index = input_index(vector_index);
+            const input_vector x = __builtin_bit_cast(
+                input_vector, *reinterpret_cast<const packed_vector*>(x_in + index));
+            const input_vector dy = __builtin_bit_cast(
+                input_vector, *reinterpret_cast<const packed_vector*>(dy_in + index));
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                const FpPrecType xhat = (cast<FpPrecType>(x[component]) - mean) * invVariance;
+                const FpPrecType value = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                    cast<FpPrecType>(dy[component]), xhat, pscale, pbias, alpha, beta);
+                db_lanes[component] += value;
+                ds_lanes[component] = fma(xhat, value, ds_lanes[component]);
+            }};
+        }
+        FpAccumType db = 0;
+        FpAccumType ds = 0;
+        static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+            db += db_lanes[component];
+            ds += ds_lanes[component];
+        }};
+
+        miopen::reduction::reduce2<FpAccumType, block_size>(ds, db, FpAccumType{1}, lid);
+        if(lid == 0)
+        {
+            dbias[channel] = cast<FpPrecType>(db);
+            dscale[channel] = cast<FpPrecType>(ds);
+        }
+        #pragma unroll 2
+        for(unsigned int vector_index = lid; vector_index < vector_count;
+            vector_index += block_size)
+        {
+            const unsigned int index = input_index(vector_index);
+            const input_vector x = __builtin_bit_cast(
+                input_vector, *reinterpret_cast<const packed_vector*>(x_in + index));
+            const input_vector dy = __builtin_bit_cast(
+                input_vector, *reinterpret_cast<const packed_vector*>(dy_in + index));
+            input_vector result;
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                const FpPrecType xhat = (cast<FpPrecType>(x[component]) - mean) * invVariance;
+                const FpPrecType value = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                    cast<FpPrecType>(dy[component]), xhat, pscale, pbias, alpha, beta);
+                result[component] = cast<FpType>(batchBwdNormalization(value,
+                                                                      xhat,
+                                                                      cast<FpPrecType>(db),
+                                                                      cast<FpPrecType>(ds),
+                                                                      pscale,
+                                                                      invVariance,
+                                                                      mio_bn_config::nhw,
+                                                                      INHW));
+            }};
+            *reinterpret_cast<packed_vector*>(dx_out + index) =
+                __builtin_bit_cast(packed_vector, result);
+        }
+    }
+};
+#endif
+
 } // namespace batchnorm
 } // namespace miopen
 
@@ -820,13 +1056,27 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
 
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
-    MIOpenBatchNormBwdSpatial(const fp_type* __restrict x_in,
+    MIOpenBatchNormBwdSpatial(
+#if(MIO_BN_VARIANT == 5 || MIO_BN_VARIANT == 8)
+                              const fp_type* x_in,
+                              const fp_type* dy_in,
+                              fp_type* dx_out,
+#else
+                              const fp_type* __restrict x_in,
                               const fp_type* __restrict dy_in,
                               fp_type* __restrict dx_out,
+#endif
+#if(MIO_BN_VARIANT == 8)
+                              const fp_prec_type* bnScale,
+                              const fp_prec_type* bnBias,
+                              fp_prec_type* dscale,
+                              fp_prec_type* dbias,
+#else
                               const fp_prec_type* __restrict bnScale,
                               const fp_prec_type* __restrict bnBias,
                               fp_prec_type* __restrict dscale,
                               fp_prec_type* __restrict dbias,
+#endif
 #if(MIO_BN_USESAVED == 0)
                               double epsilon,
 #elif(MIO_BN_USESAVED == 1)
@@ -863,6 +1113,12 @@ extern "C" __global__ void __launch_bounds__(
 }
 
 #else
+
+#if MIO_BN_BUFFERED_GFX1250 && MIO_BN_USESAVED == 1
+#define MIO_BN_DIRECT_SAVED_PARAMS 1
+#else
+#define MIO_BN_DIRECT_SAVED_PARAMS 0
+#endif
 
 extern "C" __global__ void
 __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
@@ -918,23 +1174,19 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
+    constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
     if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
-        __shared__ fp_accum_c_type
-            lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
-        miopen::reduction::lds_reduce2_2d(mean,
-                                          variance,
-                                          toAccumCType(INHW),
-                                          lcl_data,
-                                          xgrp_sz,
-                                          xlid,
-                                          ylid + zlid * ygrp_sz,
-                                          ygrp_sz * zgrp_sz);
+        miopen::reduction::reduce2_2d<fp_prec_c_type,
+                                     fp_accum_c_type,
+                                     grp_final_total,
+                                     MIO_BN_GRP0_FINAL,
+                                     (MIO_BN_GFX125X && MIO_WAVESIZE == 32)>(
+            mean, variance, toAccumCType(INHW), xlid, ylid + zlid * ygrp_sz);
     }
     else
     {
-        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
         miopen::reduction::reduce2<fp_accum_c_type, grp_final_total>(
             mean, variance, toAccumCType(INHW), ylid + zlid * ygrp_sz);
     }
@@ -1003,7 +1255,8 @@ extern "C" __global__ void __launch_bounds__(
     fp_prec_c_type variance = toPrecCType(0);
     fp_prec_c_type mean     = toPrecCType(0);
 
-    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+       zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
     {
         unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * mio_bn_config::chw +
                                   ygid * ystride * mio_bn_config::vec_size_y +
@@ -1021,15 +1274,12 @@ extern "C" __global__ void __launch_bounds__(
     if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
-        __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
-        miopen::reduction::lds_reduce2_2d(mean,
-                                          variance,
-                                          toAccumCType(1.0),
-                                          lcl_data,
-                                          xgrp_sz,
-                                          xlid,
-                                          ylid + zlid * ygrp_sz,
-                                          ygrp_sz * zgrp_sz);
+        miopen::reduction::reduce2_2d<fp_prec_c_type,
+                                     fp_accum_c_type,
+                                     mio_bn_config::lds_size,
+                                     mio_bn_config::launch_dim.grp0,
+                                     (MIO_BN_GFX125X && MIO_WAVESIZE == 32)>(
+            mean, variance, toAccumCType(1.0), xlid, ylid + zlid * ygrp_sz);
     }
     else
     {
@@ -1103,6 +1353,7 @@ extern "C" __global__ void __launch_bounds__(
     fp_prec_c_type pscale = toPrecCType(0);
     fp_prec_c_type pbias  = toPrecCType(0);
 
+#if !MIO_BN_DIRECT_SAVED_PARAMS
     __shared__ fp_prec_c_type lmean[mio_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type livar[mio_bn_config::launch_dim.grp0];
 #if(MIOPEN_NRN_OP_ID > 0)
@@ -1144,14 +1395,26 @@ extern "C" __global__ void __launch_bounds__(
     }
 
     __syncthreads();
+#endif
 
-    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+       zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
     {
+#if MIO_BN_DIRECT_SAVED_PARAMS
+        // Saved statistics and activation parameters are immutable kernel inputs.
+        mean = reinterpret_cast<const fp_prec_c_type*>(savedMean)[xgid];
+        invVar = reinterpret_cast<const fp_prec_c_type*>(savedInvVariance)[xgid];
+#if(MIOPEN_NRN_OP_ID > 0)
+        pscale = reinterpret_cast<const fp_prec_c_type*>(bnScale)[xgid];
+        pbias = reinterpret_cast<const fp_prec_c_type*>(bnBias)[xgid];
+#endif
+#else
         mean   = lmean[xlid];
         invVar = livar[xlid];
 #if(MIOPEN_NRN_OP_ID > 0)
         pscale = lcl_scale[xlid];
         pbias  = lcl_bias[xlid];
+#endif
 #endif
 
         unsigned int index_base = (zgid * MIO_BN_N_ELEMENTS) * mio_bn_config::chw +
@@ -1182,15 +1445,12 @@ extern "C" __global__ void __launch_bounds__(
     if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
-        __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
-        miopen::reduction::lds_reduce2_2d(dscale,
-                                          dbias,
-                                          toAccumCType(1.0),
-                                          lcl_data,
-                                          xgrp_sz,
-                                          xlid,
-                                          ylid + zlid * ygrp_sz,
-                                          ygrp_sz * zgrp_sz);
+        miopen::reduction::reduce2_2d<fp_prec_c_type,
+                                     fp_accum_c_type,
+                                     mio_bn_config::lds_size,
+                                     mio_bn_config::launch_dim.grp0,
+                                     (MIO_BN_GFX125X && MIO_WAVESIZE == 32)>(
+            dscale, dbias, toAccumCType(1.0), xlid, ylid + zlid * ygrp_sz);
     }
     else
     {
@@ -1278,23 +1538,19 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
+    constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
     if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
-        __shared__ fp_accum_c_type
-            lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
-        miopen::reduction::lds_reduce2_2d(dscale,
-                                          dbias,
-                                          toAccumCType(1.0),
-                                          lcl_data,
-                                          xgrp_sz,
-                                          xlid,
-                                          ylid + zlid * ygrp_sz,
-                                          ygrp_sz * zgrp_sz);
+        miopen::reduction::reduce2_2d<fp_prec_c_type,
+                                     fp_accum_c_type,
+                                     grp_final_total,
+                                     MIO_BN_GRP0_FINAL,
+                                     (MIO_BN_GFX125X && MIO_WAVESIZE == 32)>(
+            dscale, dbias, toAccumCType(1.0), xlid, ylid + zlid * ygrp_sz);
     }
     else
     {
-        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
         miopen::reduction::reduce2<fp_accum_c_type, grp_final_total>(
             dscale, dbias, toAccumCType(1.0), ylid + zlid * ygrp_sz);
     }
@@ -1342,6 +1598,7 @@ extern "C" __global__ void __launch_bounds__(
     fp_prec_c_type pscale, dscale, dbias;
     fp_prec_c_type pbias = toPrecCType(0);
 
+#if !MIO_BN_DIRECT_SAVED_PARAMS
     __shared__ fp_prec_c_type lscale[mio_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type ldscale[mio_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type ldbias[mio_bn_config::launch_dim.grp0];
@@ -1395,9 +1652,22 @@ extern "C" __global__ void __launch_bounds__(
     }
 
     __syncthreads();
+#endif
 
-    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+    if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+       zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
     {
+#if MIO_BN_DIRECT_SAVED_PARAMS
+        // These inputs were finalized by preceding kernels; DX has no stash reads.
+        mean = reinterpret_cast<const fp_prec_c_type*>(savedMean)[xgid];
+        invVar = reinterpret_cast<const fp_prec_c_type*>(savedInvVariance)[xgid];
+        pscale = reinterpret_cast<const fp_prec_c_type*>(bnScale)[xgid];
+#if(MIOPEN_NRN_OP_ID > 0)
+        pbias = reinterpret_cast<const fp_prec_c_type*>(bnBias)[xgid];
+#endif
+        dscale = reinterpret_cast<const fp_prec_c_type*>(delta_scale)[xgid];
+        dbias = reinterpret_cast<const fp_prec_c_type*>(delta_bias)[xgid];
+#else
         mean   = lmean[xlid];
         invVar = livar[xlid];
         pscale = lscale[xlid];
@@ -1406,6 +1676,7 @@ extern "C" __global__ void __launch_bounds__(
 #endif
         dscale = ldscale[xlid];
         dbias  = ldbias[xlid];
+#endif
 
         unsigned int index_base = (zgid * MIO_BN_N_ELEMENTS) * mio_bn_config::chw +
                                   ygid * ystride * mio_bn_config::vec_size_y +

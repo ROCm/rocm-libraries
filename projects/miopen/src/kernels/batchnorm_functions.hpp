@@ -334,11 +334,6 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
                                               Updater const& update,
                                               unsigned int channel)
 {
-    // Variant 4 is not used any more. There used to be a special updater for that case deleted when
-    // porting kernels to HIP.
-    static_assert(miopen::batchnorm::config::variant != 4,
-                  "running_stash is only compiled when MIO_BN_VARIANT != 4.");
-
     auto pvt_runMean     = cast<FpAccumType_C>(prevRunningMean[channel]);
     auto pvt_runVariance = cast<FpAccumType_C>(prevRunningVariance[channel]);
 

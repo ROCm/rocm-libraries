@@ -85,7 +85,7 @@ EXECUTION_SPECIFIER ushort float_to_bfloat16(float src_val)
     }
     else
     {
-#ifdef MIOPEN_USE_RNE_BFLOAT16
+#if MIOPEN_USE_RNE_BFLOAT16 == 1
 // When the exponent bits are not all 1s, then the value is zero, normal,
 // or subnormal. We round the bfloat16 mantissa up by adding 0x7FFF, plus
 // 1 if the least significant bit of the bfloat16 mantissa is 1 (odd).

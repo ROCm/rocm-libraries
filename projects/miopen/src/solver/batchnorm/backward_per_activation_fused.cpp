@@ -159,6 +159,7 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& activ_op =
             dynamic_cast<ActivBwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
         auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"MIO_BN_N", static_cast<int>(n)},
             {"MIO_BN_NCHW", static_cast<int>(n * c * h * w)},
             {"MIO_BN_NHW", static_cast<int>(n * h * w)},

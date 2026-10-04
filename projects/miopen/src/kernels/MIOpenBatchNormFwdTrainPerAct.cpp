@@ -38,6 +38,7 @@
 #endif
 
 #include "batchnorm_functions.hpp"
+#include "static_unroll.hpp"
 
 // Load the configs to this file
 namespace /*anonymous*/ {
@@ -48,6 +49,13 @@ using mio_bn_config = miopen::batchnorm::config;
 //==================== PER ACTIVATION =======================
 
 #define BLOCK_SIZE (MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2)
+
+#if MIO_BN_GFX125X && defined(__gfx1250__) && \
+    (MIOPEN_USE_FPMIX || MIOPEN_USE_BFPMIX) && MIO_BN_N <= 64
+#define MIO_BN_RETAIN_BATCH 1
+#else
+#define MIO_BN_RETAIN_BATCH 0
+#endif
 
 extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrainPerActivation(
     const typename mio_bn_config::fp_type* __restrict__ in,         /* x input */
@@ -107,6 +115,31 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         auto* out_ptr      = out_base + blockOffset;
 
         const auto getIndex = [&](unsigned int i) { return in_nstride * i + threadIdx.y; };
+#if MIO_BN_RETAIN_BATCH
+        // Batch elements are CHW-strided: load them separately and retain only their raw bits.
+        // Full static unrolling makes every packed-buffer access a fixed register index.
+        unsigned int packed_batch[(MIO_BN_N + 1) / 2];
+        const auto getInput = [&](unsigned int n) {
+            const auto bits =
+                static_cast<unsigned short>(packed_batch[n / 2] >> (16 * (n % 2)));
+            return miopen::cast<fp_prec_type>(__builtin_bit_cast(fp_type, bits));
+        };
+        miopen::static_unroll_full<unsigned int, 0, (MIO_BN_N + 1) / 2, 1>{
+            [&](unsigned int pair) {
+                const unsigned int n = 2 * pair;
+                const fp_type first  = in_ptr[getIndex(n)];
+                packed_batch[pair] =
+                    static_cast<unsigned int>(__builtin_bit_cast(unsigned short, first));
+                mean += miopen::cast<fp_prec_type>(first);
+                if(n + 1 < MIO_BN_N)
+                {
+                    const fp_type second = in_ptr[getIndex(n + 1)];
+                    packed_batch[pair] |=
+                        static_cast<unsigned int>(__builtin_bit_cast(unsigned short, second)) << 16;
+                    mean += miopen::cast<fp_prec_type>(second);
+                }
+            }};
+#else
         const auto getInput = [&](unsigned int i) {
             return miopen::cast<fp_prec_type>(in_ptr[getIndex(i)]);
         };
@@ -115,14 +148,22 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         {
             mean += getInput(n);
         }
+#endif
         mean *= invN;
 
+#if MIO_BN_RETAIN_BATCH
+        miopen::static_unroll_full<unsigned int, 0, MIO_BN_N, 1>{[&](unsigned int n)
+#else
         for(unsigned int n = 0; n < MIO_BN_N; n++)
+#endif
         {
             const fp_prec_type x = getInput(n);
             const fp_prec_type d = x - mean;
             variance += d * d;
         }
+#if MIO_BN_RETAIN_BATCH
+        };
+#endif
         variance *= invN;
 
         // epsilon is double in API; cast to precision type for math
@@ -154,13 +195,24 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
             resultSaveMean, resultSaveInvVariance, mean, invVariance, adjIndex);
 #endif
 
+#if MIO_BN_RETAIN_BATCH
+        miopen::static_unroll_full<unsigned int, 0, MIO_BN_N, 1>{[&](unsigned int n)
+#else
         for(unsigned int n = 0; n < MIO_BN_N; n++)
+#endif
         {
+#if MIO_BN_RETAIN_BATCH
+            const fp_prec_type x      = getInput(n);
+#else
             const fp_prec_type x      = miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+#endif
             fp_prec_type inhat        = (x - mean) * invVariance;
             const fp_prec_type y_prec = fma(pvt_scale, inhat, pvt_bias);
             out_ptr[getIndex(n)]      = miopen::cast<fp_type>(y_prec);
         }
+#if MIO_BN_RETAIN_BATCH
+        };
+#endif
     }
 }
 

@@ -68,7 +68,7 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
     return true;
 }
 
-ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
+ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context,
                                                     const FusionDescription& problem) const
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
@@ -102,6 +102,14 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
     size_t ygridsize     = (mode == miopenBNSpatial) ? size_t{is_layout_NHWC ? h * w : c} : 1;
     size_t zlocalsize    = 1;
     size_t zgridsize     = 1;
+    const auto& handle = context.GetStream();
+    if(StartsWith(handle.GetDeviceName(), "gfx125") && handle.GetWavefrontWidth() == 32)
+    {
+        const size_t active_threads_xy = xgridsize * ygridsize;
+        const size_t max_active_threads =
+            handle.GetMaxComputeUnits() * 32 * handle.GetWavefrontWidth();
+        zgridsize = std::min(size_t{n}, std::max(size_t{1}, max_active_threads / active_threads_xy));
+    }
 
     kernel.l_wk.push_back(xlocalsize);
     kernel.l_wk.push_back(ylocalsize);
@@ -114,6 +122,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
     const auto& activ_op =
         dynamic_cast<ActivFwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
     const auto build_params = KernelBuildParameters{
+        {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
         {"MIO_BN_CHW", static_cast<int>(c * h * w)},
         {"MIO_BN_HW", static_cast<int>(h * w)},
         {"MIO_BN_N", static_cast<int>(n)},

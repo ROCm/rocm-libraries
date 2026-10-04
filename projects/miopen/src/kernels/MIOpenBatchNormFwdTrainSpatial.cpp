@@ -400,26 +400,13 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         xhat[j]              = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                     }
 
-                    // Synchronization is not required for correctness but enhances performance.
-                    //
-                    // Loop is memory bound as it iterates across all the batches in the tensor,
-                    // and has memory access strides of CHW size once all the elements in a single
-                    // sample have been processed, which may be large.
-                    //
-                    // `__syncthreads()` helps to coalesce memory accesses as each work-item
-                    // accesses adjacent elements to its neighbours on the same loop iteration,
-                    // leading to contiguous memory access across all the waves in a workgroup. By
-                    // keeping all the waves on the same loop iteration it prevents waves on
-                    // different loop iterations from stalling as they wait for memory.
-                    //
-                    // This can be seen by profiling the kernel with rocprofv3 and comparing the
-                    // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
-                    // compute viewer and seeing the impact on occupancy.
-                    //
-                    // TODO: This call is within the scope of an `if` condition, but it is not clear
-                    // that this control flow is guanteed to be uniform across all threads in a
-                    // workgroup, risking deadlock. Further investigation is needed.
-                    __syncthreads();
+                    // Keeping waves on the same batch iteration benefits older targets,
+                    // but this optional synchronization increases gfx1250 latency.
+                    // Each thread normalizes its own elements; no data is shared here.
+                    if constexpr(mio_bn_config::target_arch != architecture::gfx125x)
+                    {
+                        __syncthreads();
+                    }
 
                     for(unsigned int j = 0; j < max_read; ++j)
                     {
@@ -561,6 +548,305 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
     }
 };
 
+#if MIO_BN_VARIANT == 4
+// gfx1250 FP16/BF16 NCHW: retain packed input and form stable two-pass local partitions.
+// The common channel anchor keeps both the local sums and the Welford merges away
+// from the potentially large input offset. No raw second moments are formed.
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialImpl<4, FpType, FpPrecType, FpAccumType>
+{
+    static constexpr unsigned int vector_size = mio_bn_config::vec_size;
+    static constexpr unsigned int block_size  = mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
+    static constexpr unsigned int buffer_size =
+        (vector_count + block_size - 1) / block_size;
+    static constexpr unsigned int lcl_data_size = mio_bn_config::lds_gcn_size;
+
+    static_assert((mio_config::input_type_strategy == type_strategy::bfpmix ||
+                   mio_config::input_type_strategy == type_strategy::fpmix) &&
+                      !mio_config::layout_nhwc &&
+                      mio_bn_config::target_arch == architecture::gfx125x,
+                  "Buffered batchnorm requires gfx1250 FP16/BF16 NCHW with FP32 parameters");
+    static_assert(vector_size == 4 || vector_size == 8,
+                  "Buffered batchnorm supports vector4 and vector8");
+    static_assert(block_size == 256 || block_size == 512 || block_size == 1024,
+                  "Unsupported buffered batchnorm workgroup");
+    static_assert(mio_bn_config::launch_dim.grp1 == 1 && mio_bn_config::launch_dim.grp2 == 1 &&
+                      mio_bn_config::n_elements == 1 && lcl_data_size == block_size / 32 &&
+                      mio_bn_config::n > 0 && mio_bn_config::n <= 64 && mio_bn_config::hw > 0 &&
+                      mio_bn_config::hw <= 4800 && mio_bn_config::hw % vector_size == 0 &&
+                      buffer_size * vector_size * sizeof(FpType) <= 256,
+                  "Buffered batchnorm configuration exceeds its retained-input bounds");
+
+    using input_scalar  = typename mapped_vector_info<FpType>::UnderlyingType;
+    using input_vector  = typename mapped_vector_type<input_scalar, vector_size>::type;
+    using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
+    using accum_vector  = typename mapped_vector_type<FpAccumType, vector_size>::type;
+    static_assert(sizeof(FpType) == 2 && sizeof(input_vector) == sizeof(packed_vector),
+                  "Buffered batchnorm requires packed 16-bit input storage");
+
+    // Exact in-place input/output is supported: every channel owns one workgroup,
+    // and the reduction barriers precede every store. Partial overlap is unsupported.
+    constexpr __forceinline__ __device__ void operator()(const FpType* in,
+                                                         FpType* out,
+                                                         const FpPrecType* __restrict scale,
+                                                         const FpPrecType* __restrict bias,
+                                                         FpPrecType INHW,
+                                                         double epsilon,
+                                                         FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta)
+    {
+        const unsigned int lid     = threadIdx.x;
+        const unsigned int channel = blockIdx.x;
+        packed_vector buffered[buffer_size];
+        __shared__ FpAccumType anchor;
+        __shared__ FpPrecType lcl_scale;
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpAccumType lcl_mean[lcl_data_size];
+        __shared__ FpAccumType lcl_variance[lcl_data_size];
+        __shared__ FpAccumType lcl_count[lcl_data_size];
+
+        auto input_index = [&](unsigned int vector_index) {
+            const unsigned int logical = vector_index * vector_size;
+            const unsigned int batch   = logical / mio_bn_config::hw;
+            const unsigned int spatial = logical - batch * mio_bn_config::hw;
+            return batch * mio_bn_config::chw + channel * mio_bn_config::hw + spatial;
+        };
+
+        // Use the already-retained first vector as the common anchor; no extra load.
+        if(lid < vector_count)
+            buffered[0] = *reinterpret_cast<const packed_vector*>(in + input_index(lid));
+        if(lid == 0)
+        {
+            const input_vector first = __builtin_bit_cast(input_vector, buffered[0]);
+            anchor                   = cast<FpAccumType>(first[0]);
+            lcl_scale                = scale[channel];
+            lcl_bias                 = bias[channel];
+        }
+        __syncthreads();
+
+        accum_vector shifted_sum = cast<accum_vector>(FpAccumType{0});
+        static_unroll_full<unsigned int, 0, buffer_size, 1>{[&](unsigned int slot) {
+            const unsigned int vector_index = slot * block_size + lid;
+            if(vector_index < vector_count)
+            {
+                if(slot != 0)
+                    buffered[slot] =
+                        *reinterpret_cast<const packed_vector*>(in + input_index(vector_index));
+                const input_vector values = __builtin_bit_cast(input_vector, buffered[slot]);
+                static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                    shifted_sum[component] += cast<FpAccumType>(values[component]) - anchor;
+                }};
+            }
+        }};
+
+        const unsigned int retained_vectors =
+            lid < vector_count ? (vector_count - 1 - lid) / block_size + 1 : 0;
+        FpAccumType count = static_cast<FpAccumType>(retained_vectors * vector_size);
+        FpAccumType local_sum = 0;
+        static_unroll_full<unsigned int, 0, vector_size, 1>{
+            [&](unsigned int component) { local_sum += shifted_sum[component]; }};
+        mean = count != 0 ? local_sum * __builtin_amdgcn_rcpf(count) : FpAccumType{0};
+
+        accum_vector centered_m2 = cast<accum_vector>(FpAccumType{0});
+        static_unroll_full<unsigned int, 0, buffer_size, 1>{[&](unsigned int slot) {
+            if(slot * block_size + lid < vector_count)
+            {
+                const input_vector values = __builtin_bit_cast(input_vector, buffered[slot]);
+                static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                    const FpAccumType centered =
+                        (cast<FpAccumType>(values[component]) - anchor) - mean;
+                    centered_m2[component] =
+                        fma(centered, centered, centered_m2[component]);
+                }};
+            }
+        }};
+        variance = 0;
+        static_unroll_full<unsigned int, 0, vector_size, 1>{
+            [&](unsigned int component) { variance += centered_m2[component]; }};
+
+        miopen::reduction::reduce2_welford<FpAccumType, lcl_data_size>(
+            mean, variance, count, INHW, lcl_mean, lcl_variance, lcl_count, lid);
+        mean += anchor;
+        if(variance < FpPrecType{0})
+            variance = FpPrecType{0};
+        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
+        const FpPrecType pvscale = lcl_scale;
+        const FpPrecType pvbias  = lcl_bias;
+
+        static_unroll_full<unsigned int, 0, buffer_size, 1>{[&](unsigned int slot) {
+            const unsigned int vector_index = slot * block_size + lid;
+            if(vector_index < vector_count)
+            {
+                const input_vector values = __builtin_bit_cast(input_vector, buffered[slot]);
+                input_vector result;
+                static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                    const FpPrecType normalized =
+                        (cast<FpPrecType>(values[component]) - mean) * invVariance;
+                    result[component] = cast<input_scalar>(miopen::batchnorm::activation_op(
+                        fma(pvscale, normalized, pvbias), alpha, beta));
+                }};
+                *reinterpret_cast<input_vector*>(out + input_index(vector_index)) = result;
+            }
+        }};
+    }
+};
+#endif // MIO_BN_VARIANT == 4
+
+#if MIO_BN_VARIANT == 6
+// Stream stable local partitions without retaining input across the statistics passes.
+// Every lane uses the same channel anchor, so the balanced Welford merge operates
+// on relative means rather than the potentially large absolute input offset.
+template <typename FpType, typename FpPrecType, typename FpAccumType>
+struct MIOpenBatchNormFwdTrainSpatialImpl<6, FpType, FpPrecType, FpAccumType>
+{
+    static constexpr unsigned int vector_size   = mio_bn_config::vec_size;
+    static constexpr unsigned int block_size    = mio_bn_config::launch_dim.grp0;
+    static constexpr unsigned int vector_count = mio_bn_config::nhw / vector_size;
+    static constexpr unsigned int lcl_data_size = mio_bn_config::lds_gcn_size;
+
+    static_assert(mio_config::input_type_strategy == type_strategy::bfpmix &&
+                      !mio_config::layout_nhwc &&
+                      mio_bn_config::target_arch == architecture::gfx125x,
+                  "Streaming batchnorm requires gfx1250 BF16 NCHW with FP32 parameters");
+    static_assert(vector_size == 4 || vector_size == 8,
+                  "Streaming batchnorm supports vector4 and vector8");
+    static_assert(block_size == 256 || block_size == 512 || block_size == 1024,
+                  "Unsupported streaming batchnorm workgroup");
+    static_assert(mio_bn_config::launch_dim.grp1 == 1 && mio_bn_config::launch_dim.grp2 == 1 &&
+                      mio_bn_config::n_elements == 1 && lcl_data_size == block_size / 32 &&
+                      mio_bn_config::n > 0 && mio_bn_config::n <= 64 && mio_bn_config::c > 0 &&
+                      mio_bn_config::hw > 0 && mio_bn_config::hw <= 8192 &&
+                      mio_bn_config::hw % vector_size == 0 &&
+                      static_cast<unsigned long long>(mio_bn_config::n) *
+                              mio_bn_config::c * mio_bn_config::hw <=
+                          0xffffffffULL,
+                  "Streaming batchnorm configuration exceeds its input bounds");
+
+    using input_vector  = typename mapped_vector_type<FpType, vector_size>::type;
+    using packed_vector = typename mapped_vector_type<unsigned int, vector_size / 2>::type;
+    using accum_vector  = typename mapped_vector_type<FpAccumType, vector_size>::type;
+
+    constexpr __forceinline__ __device__ void operator()(const FpType* in,
+                                                         FpType* out,
+                                                         const FpPrecType* __restrict scale,
+                                                         const FpPrecType* __restrict bias,
+                                                         FpPrecType INHW,
+                                                         double epsilon,
+                                                         FpPrecType& mean,
+                                                         FpPrecType& variance,
+                                                         FpPrecType& invVariance,
+                                                         FpPrecType alpha,
+                                                         FpPrecType beta)
+    {
+        const unsigned int lid     = threadIdx.x;
+        const unsigned int channel = blockIdx.x;
+        __shared__ FpAccumType anchor;
+        __shared__ FpPrecType lcl_scale;
+        __shared__ FpPrecType lcl_bias;
+        __shared__ FpAccumType lcl_mean[lcl_data_size];
+        __shared__ FpAccumType lcl_variance[lcl_data_size];
+        __shared__ FpAccumType lcl_count[lcl_data_size];
+
+        auto input_index = [&](unsigned int vector_index) {
+            const unsigned int logical = vector_index * vector_size;
+            const unsigned int batch   = logical / mio_bn_config::hw;
+            const unsigned int spatial = logical - batch * mio_bn_config::hw;
+            return batch * mio_bn_config::chw + channel * mio_bn_config::hw + spatial;
+        };
+        auto read_vector = [&](unsigned int vector_index) {
+            const packed_vector packed =
+                *reinterpret_cast<const packed_vector*>(in + input_index(vector_index));
+            return __builtin_bit_cast(input_vector, packed);
+        };
+
+        packed_vector first;
+        if(lid == 0)
+        {
+            first = *reinterpret_cast<const packed_vector*>(in + input_index(0));
+            const input_vector values = __builtin_bit_cast(input_vector, first);
+            anchor                    = cast<FpAccumType>(values[0]);
+            lcl_scale = scale[channel];
+            lcl_bias  = bias[channel];
+        }
+        __syncthreads();
+
+        accum_vector shifted_sum = cast<accum_vector>(FpAccumType{0});
+        if(lid < vector_count)
+        {
+            const input_vector values =
+                lid == 0 ? __builtin_bit_cast(input_vector, first) : read_vector(lid);
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                shifted_sum[component] = cast<FpAccumType>(values[component]) - anchor;
+            }};
+        }
+#pragma unroll 2
+        for(unsigned int vector_index = lid + block_size; vector_index < vector_count;
+            vector_index += block_size)
+        {
+            const input_vector values = read_vector(vector_index);
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                shifted_sum[component] += cast<FpAccumType>(values[component]) - anchor;
+            }};
+        }
+
+        const unsigned int partition_vectors =
+            lid < vector_count ? (vector_count - 1 - lid) / block_size + 1 : 0;
+        FpAccumType count = static_cast<FpAccumType>(partition_vectors * vector_size);
+        FpAccumType local_sum = 0;
+        static_unroll_full<unsigned int, 0, vector_size, 1>{
+            [&](unsigned int component) { local_sum += shifted_sum[component]; }};
+        mean = count != 0 ? local_sum * __builtin_amdgcn_rcpf(count) : FpAccumType{0};
+
+        accum_vector centered_m2 = cast<accum_vector>(FpAccumType{0});
+#pragma unroll 2
+        for(unsigned int vector_index = lid; vector_index < vector_count;
+            vector_index += block_size)
+        {
+            const input_vector values = read_vector(vector_index);
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                const FpAccumType centered =
+                    (cast<FpAccumType>(values[component]) - anchor) - mean;
+                centered_m2[component] = fma(centered, centered, centered_m2[component]);
+            }};
+        }
+        variance = 0;
+        static_unroll_full<unsigned int, 0, vector_size, 1>{
+            [&](unsigned int component) { variance += centered_m2[component]; }};
+
+        miopen::reduction::reduce2_welford<FpAccumType, lcl_data_size>(
+            mean, variance, count, INHW, lcl_mean, lcl_variance, lcl_count, lid);
+        mean += anchor;
+        if(variance < FpPrecType{0})
+            variance = FpPrecType{0};
+        invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
+        const FpPrecType pvscale = lcl_scale;
+        const FpPrecType pvbias  = lcl_bias;
+
+        // The reduction barriers finish every lane's statistics reads before any
+        // store. Each lane then rereads and overwrites only its own disjoint vectors,
+        // making exact in-place operation safe without a barrier per output chunk.
+#pragma unroll 2
+        for(unsigned int vector_index = lid; vector_index < vector_count;
+            vector_index += block_size)
+        {
+            const input_vector values = read_vector(vector_index);
+            input_vector result;
+            static_unroll_full<unsigned int, 0, vector_size, 1>{[&](unsigned int component) {
+                const FpPrecType normalized =
+                    (cast<FpPrecType>(values[component]) - mean) * invVariance;
+                result[component] = cast<FpType>(miopen::batchnorm::activation_op(
+                    fma(pvscale, normalized, pvbias), alpha, beta));
+            }};
+            *reinterpret_cast<input_vector*>(out + input_index(vector_index)) = result;
+        }
+    }
+};
+#endif // MIO_BN_VARIANT == 6
+
 // these are the kernels for MIO_BN_VARIANT == 2
 #if(MIO_BN_VARIANT == 2)
 
@@ -613,20 +899,19 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         FpPrecType_C pvt_bias;
         FpLsType value;
 
-        __shared__ FpPrecType_C lcl_bias[mio_bn_config::launch_dim.grp0];
-        __shared__ FpPrecType_C lcl_scale[mio_bn_config::launch_dim.grp0];
-        __shared__ FpPrecType_C lcl_mean[mio_bn_config::launch_dim.grp0];
-        __shared__ FpPrecType_C lcl_ivar[mio_bn_config::launch_dim.grp0];
-
         if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
             return;
 
         // #4 apply the normalization :: x_hat = (x_i - mean) / sqrt(variance_accum + epsilon)
-        if(ylid == 0 && zlid == 0)
+        // Wave32 can load these block-uniform values directly. The block barrier is
+        // still required: normalization must not overwrite the stash before every
+        // wave has loaded the mean and inverse variance.
+        if constexpr(MIO_BN_GFX125X && MIOPEN_USE_BFPMIX && !mio_config::layout_nhwc &&
+                     mio_bn_config::launch_dim.grp0 == 1)
         {
-            lcl_scale[xlid] = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
-            lcl_bias[xlid]  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
-            lcl_mean[xlid]  = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+            pvt_scale = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
+            pvt_bias  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
+            mean      = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
                 (const FpType_C*)(out),
                 0,
                 zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
@@ -636,7 +921,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                 xgrp_id,
                 xlid,
                 xstride);
-            lcl_ivar[xlid] = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+            invVariance = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
                 (const FpType_C*)(out),
                 1,
                 zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
@@ -646,15 +931,50 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                 xgrp_id,
                 xlid,
                 xstride);
+            __syncthreads();
         }
-        __syncthreads();
-
-        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+        else
         {
-            mean                    = lcl_mean[xlid];
-            invVariance             = lcl_ivar[xlid];
-            pvt_scale               = lcl_scale[xlid];
-            pvt_bias                = lcl_bias[xlid];
+            __shared__ FpPrecType_C lcl_bias[mio_bn_config::launch_dim.grp0];
+            __shared__ FpPrecType_C lcl_scale[mio_bn_config::launch_dim.grp0];
+            __shared__ FpPrecType_C lcl_mean[mio_bn_config::launch_dim.grp0];
+            __shared__ FpPrecType_C lcl_ivar[mio_bn_config::launch_dim.grp0];
+
+            if(ylid == 0 && zlid == 0)
+            {
+                lcl_scale[xlid] = *((const FpPrecType_C*)(scale + xgid * mio_bn_config::vec_size_x));
+                lcl_bias[xlid]  = *((const FpPrecType_C*)(bias + xgid * mio_bn_config::vec_size_x));
+                lcl_mean[xlid]  = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+                    (const FpType_C*)(out),
+                    0,
+                    zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                    ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                    ystride / mio_bn_config::vec_size_x,
+                    xgrp_sz,
+                    xgrp_id,
+                    xlid,
+                    xstride);
+                lcl_ivar[xlid] = miopen::batchnorm::loadFromStash<FpPrecType_C, FpType_C>(
+                    (const FpType_C*)(out),
+                    1,
+                    zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
+                    ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
+                    ystride / mio_bn_config::vec_size_x,
+                    xgrp_sz,
+                    xgrp_id,
+                    xlid,
+                    xstride);
+            }
+            __syncthreads();
+            mean        = lcl_mean[xlid];
+            invVariance = lcl_ivar[xlid];
+            pvt_scale   = lcl_scale[xlid];
+            pvt_bias    = lcl_bias[xlid];
+        }
+
+        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+           zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
+        {
             unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * MIO_BN_CHW +
                                       ygid * ystride * mio_bn_config::vec_size_y +
                                       xgid * xstride * mio_bn_config::vec_size_x;
@@ -763,16 +1083,13 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
                      (grp_final_total < 64))
         {
-            __shared__ FpAccumCType lcl_data[2 * grp_final_total];
-
-            miopen::reduction::lds_reduce2_2d(mean,
-                                              variance,
-                                              INHW,
-                                              lcl_data,
-                                              xgrp_sz,
-                                              xlid,
-                                              ylid + zlid * ygrp_sz,
-                                              ygrp_sz * zgrp_sz);
+            miopen::reduction::reduce2_2d<
+                FpPrecType_C,
+                FpAccumType,
+                grp_final_total,
+                MIO_BN_GRP0_FINAL,
+                mio_bn_config::target_arch == architecture::gfx125x>(
+                mean, variance, INHW, xlid, ylid + zlid * ygrp_sz);
         }
         else
         {
@@ -844,7 +1161,8 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
             return;
 
-        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw && zgid < mio_bn_config::n)
+        if(ygid * mio_bn_config::vec_size_y < mio_bn_config::hw &&
+           zgid * MIO_BN_N_ELEMENTS < mio_bn_config::n)
         {
             unsigned int index_base = zgid * MIO_BN_N_ELEMENTS * mio_bn_config::chw +
                                       ygid * ystride * mio_bn_config::vec_size_y +
@@ -864,15 +1182,13 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
         {
-            __shared__ FpAccumCType lcl_data[2 * mio_bn_config::lds_size];
-            miopen::reduction::lds_reduce2_2d(mean,
-                                              variance,
-                                              cast<FpAccumType>(1.0),
-                                              lcl_data,
-                                              xgrp_sz,
-                                              xlid,
-                                              ylid + zlid * ygrp_sz,
-                                              ygrp_sz * zgrp_sz);
+            miopen::reduction::reduce2_2d<
+                FpPrecType_C,
+                FpAccumType,
+                mio_bn_config::lds_size,
+                mio_bn_config::launch_dim.grp0,
+                mio_bn_config::target_arch == architecture::gfx125x>(
+                mean, variance, cast<FpAccumType>(1.0), xlid, ylid + zlid * ygrp_sz);
         }
         else
         {
@@ -929,8 +1245,13 @@ using MIOpenBNFwdTrainSpatialVar2 =
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
     MIOpenBatchNormFwdTrainSpatial(
+#if MIO_BN_VARIANT == 4 || MIO_BN_VARIANT == 6
+        const typename mio_bn_config::fp_type* in,
+        typename mio_bn_config::fp_type* out,
+#else
         const typename mio_bn_config::fp_type* __restrict in,
         typename mio_bn_config::fp_type* __restrict out,
+#endif
         const typename mio_bn_config::fp_prec_type* __restrict scale,
         const typename mio_bn_config::fp_prec_type* __restrict bias,
         typename mio_bn_config::fp_prec_type INHW,

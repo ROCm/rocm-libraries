@@ -2031,7 +2031,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
                                          savedInvVar.GetTensor(),
                                          activ_mode,
                                          inflags.GetValueDouble("activ_beta"),
-                                         inflags.GetValueDouble("activ_alpha"));
+                                         inflags.GetValueDouble("activ_alpha"),
+                                         static_cast<double>(EPSILON));
         }
         else
         {
@@ -2047,7 +2048,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
                                          empty_tensor,
                                          activ_mode,
                                          inflags.GetValueDouble("activ_beta"),
-                                         inflags.GetValueDouble("activ_alpha"));
+                                         inflags.GetValueDouble("activ_alpha"),
+                                         static_cast<double>(EPSILON));
         }
     }
     else

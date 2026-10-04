@@ -197,6 +197,18 @@ auto GetFullCases()
     return cases;
 }
 
+auto GetBatchSplitCases()
+{
+    return ::testing::Combine(
+        ::testing::ValuesIn(
+            std::set<std::vector<int>>{{43, 8, 1, 63}, {43, 32, 1, 323}}),
+        ::testing::Values(0.5),
+        ::testing::Values(0.5),
+        ::testing::Values(0.5),
+        ::testing::Values(std::string{"MIOPENACTIVATIONRELU"}),
+        ::testing::Values(0, 1));
+}
+
 template <class T>
 struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
 {
@@ -223,8 +235,14 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         input.generate(tensor_elem_gen_integer{max_value});
     }
 
-    void Run()
+    void Run(bool require_batch_split = false)
     {
+        if(require_batch_split)
+        {
+            auto&& handle = get_handle();
+            if(handle.GetDeviceName() != "gfx1250" || handle.GetWavefrontWidth() != 32)
+                GTEST_SKIP() << "Split-batch fusion inference requires gfx1250 wave32";
+        }
         amode = transform_mode(amode);
 
         // NOLINTBEGIN(*-braces-around-statements)
@@ -291,6 +309,26 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
             input[i] = prng::gen_descreet_uniform_sign<T>(Data_scale, 100);
         }
 
+        if(require_batch_split)
+        {
+            // Signed, batch-dependent values expose missing or overwritten batches after ReLU.
+            for(std::size_t i = 0; i < scale.desc.GetElementSize(); ++i)
+            {
+                scale[i] = static_cast<PREC_TYPE>(
+                    (i % 2 == 0 ? 1.0f : -1.0f) * (0.75f + (i % 5) * 0.125f));
+                shift[i]       = static_cast<PREC_TYPE>(0.25f + (i % 3) * 0.125f);
+                estMean[i]     = static_cast<PREC_TYPE>((static_cast<int>(i % 7) - 3) * 0.125f);
+                estVariance[i] = static_cast<PREC_TYPE>(0.5f + (i % 11) * 0.125f);
+            }
+            const auto batch_size = static_cast<std::size_t>(input_c) * input_h * input_w;
+            for(std::size_t i = 0; i < input.desc.GetElementSize(); ++i)
+            {
+                const auto n = i / batch_size;
+                input[i] = static_cast<T>(
+                    (static_cast<int>((i * 13 + n * 7) % 31) - 15) * 0.125f + n * 0.015625f);
+            }
+        }
+
         auto&& handle = get_handle();
 
         miopenFusionOpDescriptor_t bNormOp = nullptr;
@@ -302,13 +340,16 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         miopenCreateOpActivationForward(ptr_fusionplan.get(), &activOp, activ_mode);
 
         miopenStatus_t miopenError = miopenCompileFusionPlan(&handle, ptr_fusionplan.get());
+        if(require_batch_split)
+            ASSERT_EQ(miopenError, miopenStatusSuccess)
+                << "Split-batch BatchNorm+ReLU fusion inference must compile";
         if(miopenError != miopenStatusSuccess)
         {
             GTEST_SKIP() << "BatchNorm+Activation Inference plan not supported." << std::endl;
         }
         else
         {
-            test_helpers::CompareResults(
+            const auto results = test_helpers::CompareResults(
                 verify_inference_batchnorm_activ<T, PREC_TYPE>{ptr_fusionplan.get(),
                                                                input,
                                                                ptr_activdesc.get(),
@@ -319,6 +360,24 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
                                                                bnmode,
                                                                bNormOp,
                                                                activOp});
+            if(require_batch_split)
+            {
+                // Compare each batch separately so a nondivisible tail cannot be diluted by N.
+                auto cpu_batch = tensor<T>{1, input_c, input_h, input_w};
+                auto gpu_batch = tensor<T>{1, input_c, input_h, input_w};
+                const auto batch_size = cpu_batch.data.size();
+                for(std::size_t n = 0; n < input.desc.GetLengths()[0]; ++n)
+                {
+                    SCOPED_TRACE(n);
+                    std::copy_n(results.first.data.begin() + n * batch_size,
+                                batch_size,
+                                cpu_batch.data.begin());
+                    std::copy_n(results.second.data.begin() + n * batch_size,
+                                batch_size,
+                                gpu_batch.data.begin());
+                    EXPECT_TRUE(test_helpers::Compare(cpu_batch, gpu_batch, 80.f));
+                }
+            }
         }
     }
 };
@@ -359,10 +418,15 @@ struct TestNameGenerator
 
 using GPU_na_fusion_inference_test_FP16 = na_fusion_inference_test<half_float::half>;
 using GPU_na_fusion_inference_test_FP32 = na_fusion_inference_test<float>;
+using GPU_na_fusion_batch_split_test_FP16 = na_fusion_inference_test<half_float::half>;
+using GPU_na_fusion_batch_split_test_FP32 = na_fusion_inference_test<float>;
 
 TEST_P(GPU_na_fusion_inference_test_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP32, TestFloat32) { Run(); }
 
+TEST_P(GPU_na_fusion_batch_split_test_FP16, AllBatchesFloat16) { Run(true); }
+TEST_P(GPU_na_fusion_batch_split_test_FP32, AllBatchesFloat32) { Run(true); }
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_na_fusion_inference_test_FP16,
                          GetSmokeCases(),
@@ -379,4 +443,13 @@ INSTANTIATE_TEST_SUITE_P(Full,
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_FP32,
                          GetFullCases(),
+                         TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_batch_split_test_FP16,
+                         GetBatchSplitCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_batch_split_test_FP32,
+                         GetBatchSplitCases(),
                          TestNameGenerator{});

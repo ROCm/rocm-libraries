@@ -45,22 +45,86 @@ namespace batchnorm {
 // to stash intermediate mean and variance
 const unsigned int stash_values_fwd = 2;
 
+namespace {
+bool IsFineSpatialProblem(const miopen::batchnorm::ProblemDescription& problem)
+{
+    if(!problem.Is2D() || !problem.IsLayoutNCHW() || !problem.IsBFp16() ||
+       !problem.IsScaleFp32() || !problem.GetXDesc().IsPacked() ||
+       !problem.GetYDesc().IsPacked())
+        return false;
+    const auto& lengths = problem.GetXDesc().GetLengths();
+    return lengths[0] >= 16 && lengths[0] <= 64 && lengths[1] <= 64 &&
+           lengths[2] * lengths[3] >= 4096 && lengths[2] * lengths[3] <= 8192;
+}
+
+bool IsFineSpatialConfig(const miopen::batchnorm::ProblemDescription& problem,
+                         size_t vectorsize,
+                         size_t xlocalsize,
+                         size_t ylocalsize,
+                         size_t zlocalsize,
+                         size_t nelements)
+{
+    if(!IsFineSpatialProblem(problem) || vectorsize != 4 || xlocalsize != 1 ||
+       (ylocalsize != 64 && ylocalsize != 128) || zlocalsize != 2 || nelements <= 1)
+        return false;
+    const auto& lengths = problem.GetXDesc().GetLengths();
+    const size_t n = lengths[0], hw = lengths[2] * lengths[3];
+    return hw % vectorsize == 0 && n % nelements == 0 &&
+           (hw - 1) % (ylocalsize * vectorsize) + 1 >= 2 * stash_values_fwd &&
+           IsSpatialMultipleApplicable(
+               problem, vectorsize, stash_values_fwd, ylocalsize, zlocalsize, nelements);
+}
+} // namespace
+
 bool PerformanceConfigBnFwdTraining::IsValid(
-    const ExecutionContext&, const miopen::batchnorm::ProblemDescription& problem) const
+    const ExecutionContext& context, const miopen::batchnorm::ProblemDescription& problem) const
 {
     if(this->kernel_id.empty())
     {
         return false;
     }
 
-    // if default config is variant 2, check if it can be applied
-    // (based on variant 2 restrictions)
+    // Device and shape restrictions for the specialized spatial implementations.
     size_t vectorsize = 1, xlocalsize = 1, ylocalsize = 1, zlocalsize = 1, nelements = 1;
     int variant = -1;
     GetVariantFromKernelId(
         this->kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
+    if(variant == 5 || variant == 7 || variant == 8)
+        return false;
+    if(variant == 6)
+    {
+        const auto& handle = context.GetStream();
+        return handle.GetDeviceName() == "gfx1250" && handle.GetWavefrontWidth() == 32 &&
+               ylocalsize == 1 && zlocalsize == 1 && nelements == 1 &&
+               IsSpatialStreamingApplicable(problem, vectorsize, xlocalsize);
+    }
+    if(variant == 4)
+    {
+        const auto& handle = context.GetStream();
+        return handle.GetDeviceName() == "gfx1250" && handle.GetWavefrontWidth() == 32 &&
+               ylocalsize == 1 && zlocalsize == 1 && nelements == 1 &&
+               IsSpatialBufferedApplicable(problem, vectorsize, xlocalsize);
+    }
     if(variant == 2)
     {
+        if(IsFineSpatialProblem(problem) && ylocalsize < 256)
+        {
+            const auto& handle = context.GetStream();
+            if(handle.GetDeviceName() != "gfx1250" || handle.GetWavefrontWidth() != 32 ||
+               !IsFineSpatialConfig(
+                   problem, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements))
+                return false;
+        }
+        if(problem.IsLayoutNCHW() && vectorsize > 4 && problem.IsBFp16())
+        {
+            const auto& handle = context.GetStream();
+            if(vectorsize != 8 || !StartsWith(handle.GetDeviceName(), "gfx125") ||
+               handle.GetWavefrontWidth() != 32 ||
+               !problem.IsScaleFp32() || !problem.GetXDesc().IsPacked() ||
+               !problem.GetYDesc().IsPacked() || nelements == 0 ||
+               problem.GetXDesc().GetLengths()[0] % nelements != 0)
+                return false;
+        }
         return IsSpatialMultipleApplicable(
             problem, vectorsize, stash_values_fwd, ylocalsize, zlocalsize, nelements);
     }
@@ -91,6 +155,19 @@ void PerformanceConfigBnFwdTraining::HeuristicInit(
         {
             DefaultConfigSpatialMultiple(problem, stash_values_fwd, this->valid_kernels);
         }
+    }
+    AddSpatialBufferedConfigs(problem, this->valid_kernels);
+    AddSpatialStreamingConfigs(problem, this->valid_kernels);
+    if(IsFineSpatialProblem(problem))
+    {
+        const size_t n = problem.GetXDesc().GetLengths()[0];
+        size_t nelements = std::min(size_t{8}, n / 2);
+        while(n % nelements != 0)
+            --nelements;
+        for(size_t ylocalsize : {size_t{64}, size_t{128}})
+            if(IsFineSpatialConfig(problem, 4, 1, ylocalsize, 2, nelements))
+                valid_kernels.push_back(GetKernelIdFromVariant(
+                    2, 4, 1, ylocalsize, 2, nelements));
     }
 
     // Set index and kernel_id to default value
@@ -155,10 +232,60 @@ bool BnFwdTrainingSpatial::IsApplicable(
 }
 
 PerformanceConfigBnFwdTraining BnFwdTrainingSpatial::GetDefaultPerformanceConfig(
-    const ExecutionContext&, const miopen::batchnorm::ProblemDescription& problem_desc) const
+    const ExecutionContext& context, const miopen::batchnorm::ProblemDescription& problem_desc) const
 {
     PerformanceConfigBnFwdTraining pp;
     pp.HeuristicInit(problem_desc);
+    const auto buffered = PerformanceConfigBnFwdTraining{
+        0, GetKernelIdFromVariant(4, 8, 512, 1, 1, 1)};
+    if(buffered.IsValid(context, problem_desc))
+    {
+        size_t n, c, h, w;
+        std::tie(n, c, h, w) = tien<4>(problem_desc.GetXDesc().GetLengths());
+        // Bounded packed retention avoids the register-pressure crossover seen
+        // in larger NHW; enough channels are needed to occupy the device.
+        if(n * h * w <= 65536 && h * w >= 512 && c >= 128)
+        {
+            pp.kernel_id = buffered.kernel_id;
+            pp.index = std::distance(
+                pp.valid_kernels.begin(),
+                std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
+        }
+    }
+    const auto streaming = PerformanceConfigBnFwdTraining{
+        0, GetKernelIdFromVariant(6, 8, 1024, 1, 1, 1)};
+    if(streaming.IsValid(context, problem_desc))
+    {
+        size_t n, c, h, w;
+        std::tie(n, c, h, w) = tien<4>(problem_desc.GetXDesc().GetLengths());
+        const size_t hw = h * w, nhw = n * hw;
+        // Streaming avoids the retained-input register-pressure crossover while
+        // keeping the buffered small-NHW default and low-channel heuristics intact.
+        if(c >= 128 && c <= 256 && nhw > 65536 && nhw <= 262144 &&
+           hw >= 4096 && hw <= 8192)
+        {
+            pp.kernel_id = streaming.kernel_id;
+            pp.index = std::distance(
+                pp.valid_kernels.begin(),
+                std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
+        }
+    }
+    if(IsFineSpatialProblem(problem_desc))
+    {
+        const size_t n = problem_desc.GetXDesc().GetLengths()[0];
+        size_t nelements = std::min(size_t{8}, n / 2);
+        while(n % nelements != 0)
+            --nelements;
+        const auto fine = PerformanceConfigBnFwdTraining{
+            0, GetKernelIdFromVariant(2, 4, 1, 64, 2, nelements)};
+        if(fine.IsValid(context, problem_desc))
+        {
+            pp.kernel_id = fine.kernel_id;
+            pp.index = std::distance(
+                pp.valid_kernels.begin(),
+                std::find(pp.valid_kernels.begin(), pp.valid_kernels.end(), pp.kernel_id));
+        }
+    }
     MIOPEN_LOG_I(pp.ToString());
     return pp;
 }
@@ -232,14 +359,26 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     GetVariantFromKernelId(
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
 
+    // GetSolution is also called directly by forced-config consumers.
+    if(variant == 2 && problem.IsLayoutNCHW() && problem.IsBFp16() && vectorsize > 4 &&
+       !config.IsValid(context, problem))
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported BF16 NCHW vector8 batchnorm configuration");
+    if(variant == 4 && !config.IsValid(context, problem))
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported buffered FP16/BF16 batchnorm configuration");
+    if(variant == 5 || variant == 7 || variant == 8)
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported specialized forward batchnorm configuration");
+    if(variant == 6 && !config.IsValid(context, problem))
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported streaming BF16 batchnorm configuration");
+
     size_t xlocalsize_final = xlocalsize, ylocalsize_final = ylocalsize,
            zlocalsize_final = zlocalsize;
     if(variant != 2)
     {
-        xlocalsize = 1024;
-        if(((in_cstride < 256) && (n < 256)) || ((in_cstride < 100) && (n <= 256)))
+        if(variant != 4 && variant != 6)
         {
-            xlocalsize = 256;
+            xlocalsize = 1024;
+            if(((in_cstride < 256) && (n < 256)) || ((in_cstride < 100) && (n <= 256)))
+                xlocalsize = 256;
         }
         xgridsize = c * xlocalsize;
         ldsgcn    = xlocalsize / waveSize;
@@ -293,6 +432,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         auto kernel = KernelInfo{};
 
         auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
             {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},

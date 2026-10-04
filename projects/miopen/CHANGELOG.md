@@ -6,12 +6,25 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## Unreleased
 
 ### Changed
+* [BatchNorm] Optimize gfx1250 wave32 Welford inter-wave reduction and BF16 spatial normalization; add bounded split-batch tuning candidates for packed NCHW BF16 forward training with batches of 8–64, preserving untuned defaults.
+* [BatchNorm] Omit the optional full-chunk Variant1 normalization barrier on gfx1250; retain synchronization on other architectures and in the tail path.
+* [BatchNorm] Use compact wave32/block reductions for gfx1250 NCHW spatial forward statistics and add gfx1250 BF16 vector8 tuning candidates, retaining FP32 normalization arithmetic and existing BF16 conversion behavior.
+* [BatchNorm] Add a gfx1250 BF16 packed-NCHW buffered forward kernel with stable centered variance, one input read per element, and exact in-place support. Bounded small-spatial problems with at least 128 channels use the measured vector8/512-thread default; larger problems retain existing paths.
+* [BatchNorm] Add gfx1250 wave32 backward split-batch tuning candidates and compact spatial reductions. Saved-statistics packed-NCHW BF16 workloads with batches of 16–64, at most 64 channels, and spatial size 4096–8192 use a measured short-batch-loop default.
+* [BatchNorm] Add gfx1250 buffered saved-statistics backward and stable streaming forward kernels for bounded packed-NCHW BF16 problems, with measured defaults for small-spatial backward and medium-spatial forward families; omit the optional backward Variant1 output-loop barrier on gfx1250.
+* [BatchNorm] Add a saved-statistics streaming backward kernel for gfx1250 medium-spatial BF16 NCHW workloads and finer low-channel forward tiles; saved backward stages load immutable parameters directly without redundant shared-memory broadcasts.
+* [BatchNorm] Reuse shared wave32 spatial reductions across FP32 and mixed FP16/BF16, broaden immutable saved-parameter loads to NCHW/NHWC, retain packed per-activation input, and split fused-inference batch work. Buffered spatial forward now supports FP16 as well as BF16.
 * [Conv] Provision selected CK grouped-forward packed-weight scratch for native NHWC and transformed NCHW layouts, rejecting missing or undersized workspace. The internal CK plugin interface is version 6; rebuild the loader and plugin together.
 * [Conv] Exposed a bounded gfx1250 BF16 group-local depthwise CK backward-weights candidate for packed 2D channels-last short-reduction problems; selected BF16 plugin execution requires the usual WRW alpha/beta workspace contract.
 * [Conv] Borrowed individual FP16/BF16 grouped-CK NCHW/NCDHW operands when their packed layout transpose is an identity and aligned caller tensors and reserved workspace have disjoint spans; aliases, nondefault scalars and nonqualifying operands retain staging and the original workspace reservation.
 * [Conv] Omitted the redundant old-output layout copy on gfx1250 for selected, fully initialized 3D FP16/BF16 grouped CK backward-data XDL-v1 invocations; other devices, kernels, aliases and nondefault scalars retain staged behavior and CK's required output clear.
 * [Conv] Omitted the redundant old-output layout copy for selected, fully initialized 2D FP16/BF16 grouped CK forward and backward-data invocations with disjoint tensors and workspace and default scalars; unsupported kernel families and aliases retain staged behavior.
 * [Conv] Validate ranked grouped CK backward-weights defaults against CK argument support at split-K 1, preserving the untuned split-1 default independently of ranked tuning hints.
+
+### Resolved Issues
+* [BatchNorm] Honor configured BF16 output rounding in all batchnorm kernel builds, including explicit truncation mode, and fix scalar fallback indexing for recomputed spatial backward statistics on spatial extents not divisible by four.
+* [BatchNorm] Mask padded batch tiles in spatial forward and backward kernels when multiple batches are processed per thread.
+* [BatchNorm] Fix NHWC vector-channel backward reduction compilation and include epsilon in the recomputed-statistics CPU verification reference.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

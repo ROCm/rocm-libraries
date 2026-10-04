@@ -151,6 +151,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         }
 
         const auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"MIOPEN_USE_FP16", static_cast<int>(bfpmixparm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
             {"MIOPEN_USE_BFP16", static_cast<int>(bbfpmixparam)},

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <miopen/batchnorm/problem_description.hpp>
+#include <limits>
 
 namespace miopen {
 
@@ -189,7 +190,7 @@ inline int GetStashMethod(bool IsLayoutNHWC,
     return stash_method;
 }
 
-// Spatial single
+// Legacy spatial single variants (0, 1, 3)
 // Variant<variant>-<vectorsize>
 inline std::string GetKernelIdFromVariant(int variant, size_t vectorsize)
 {
@@ -198,7 +199,7 @@ inline std::string GetKernelIdFromVariant(int variant, size_t vectorsize)
     return stream.str();
 }
 
-// Spatial multiple
+// Spatial multiple and buffered spatial single (variant 4)
 // Variant<variant>-<vectorsize>-<xlocalsize>-<ylocalsize>-<zlocalsize>-<nelements>
 inline std::string GetKernelIdFromVariant(int variant,
                                           size_t vectorsize,
@@ -214,7 +215,7 @@ inline std::string GetKernelIdFromVariant(int variant,
 }
 
 // Return tuning parameters from kernel_id string
-// In case of variant != 2 (spatial single), only variant and vectorsize are meaningful
+// Variant 2 and specialized variants 4–6 and 8 store explicit dimensions.
 inline void GetVariantFromKernelId(const std::string& kernel_id,
                                    int& variant,
                                    size_t& vectorsize,
@@ -233,7 +234,7 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
     }
     variant    = std::stoi(seglist[0]);
     vectorsize = std::stoi(seglist[1]);
-    if(variant != 2)
+    if(variant != 2 && variant != 4 && variant != 5 && variant != 6 && variant != 8)
     {
         // For variant 0, 1, 3 (spatial single), kernel_id only contains
         // variant and vectorsize. The workgroup sizes (xlocalsize, ylocalsize,
@@ -241,10 +242,96 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
         // computed by the caller based on problem-size heuristics.
         return;
     }
+    if((variant == 4 || variant == 5 || variant == 6 || variant == 8) && seglist.size() != 6)
+    {
+        xlocalsize = ylocalsize = zlocalsize = nelements = 0;
+        return;
+    }
     xlocalsize = std::stoi(seglist[2]);
     ylocalsize = std::stoi(seglist[3]);
     zlocalsize = std::stoi(seglist[4]);
     nelements  = std::stoi(seglist[5]);
+}
+
+// Variant 4 retains each thread's FP16/BF16 input in packed registers. Keep the same
+// 256-byte bound as the kernel, including vector padding in the last slot.
+inline bool IsSpatialBufferedApplicable(const miopen::batchnorm::ProblemDescription& problem,
+                                        size_t vectorsize,
+                                        size_t blocksize)
+{
+    const auto input_type = problem.GetXDesc().GetType();
+    if(problem.GetDirection() != miopen::batchnorm::Direction::ForwardTraining ||
+       problem.GetMode() != miopenBNSpatial || !problem.Is2D() || !problem.IsLayoutNCHW() ||
+       (input_type != miopenHalf && input_type != miopenBFloat16) || !problem.IsScaleFp32() ||
+       problem.GetBnBias().GetType() != miopenFloat ||
+       problem.GetYDesc().GetType() != input_type || !problem.GetXDesc().IsPacked() ||
+       !problem.GetYDesc().IsPacked() || !problem.GetBnScale().IsPacked() ||
+       !problem.GetBnBias().IsPacked() ||
+       problem.GetXDesc().GetLengths() != problem.GetYDesc().GetLengths() ||
+       (vectorsize != 4 && vectorsize != 8) ||
+       (blocksize != 256 && blocksize != 512 && blocksize != 1024))
+        return false;
+
+    size_t n, c, h, w;
+    std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
+    if(n == 0 || n > 64 || c == 0 || h == 0 || h > 4800 || w == 0 || w > 4800 / h)
+        return false;
+    const size_t hw  = h * w;
+    const size_t nhw = n * hw;
+    const size_t slots = (nhw / vectorsize + blocksize - 1) / blocksize;
+    return hw % vectorsize == 0 && slots * vectorsize * GetTypeSize(input_type) <= 256 &&
+           c <= std::numeric_limits<unsigned int>::max() / nhw;
+}
+
+inline void AddSpatialBufferedConfigs(const miopen::batchnorm::ProblemDescription& problem,
+                                      std::vector<std::string>& valid_kernels)
+{
+    // Device/wave restrictions and conservative untuned selection are handled by
+    // the forward solver; append candidates without changing legacy tuning order.
+    for(const size_t blocksize : {1024, 512, 256})
+    {
+        for(const size_t vectorsize : {4, 8})
+        {
+            if(IsSpatialBufferedApplicable(problem, vectorsize, blocksize))
+                valid_kernels.push_back(
+                    GetKernelIdFromVariant(4, vectorsize, blocksize, 1, 1, 1));
+        }
+    }
+}
+
+inline bool IsSpatialStreamingApplicable(const miopen::batchnorm::ProblemDescription& problem,
+                                         size_t vectorsize,
+                                         size_t blocksize)
+{
+    if(problem.GetDirection() != miopen::batchnorm::Direction::ForwardTraining ||
+       problem.GetMode() != miopenBNSpatial || !problem.Is2D() || !problem.IsLayoutNCHW() ||
+       !problem.IsBFp16() || !problem.IsScaleFp32() ||
+       problem.GetBnBias().GetType() != miopenFloat ||
+       problem.GetYDesc().GetType() != miopenBFloat16 || !problem.GetXDesc().IsPacked() ||
+       !problem.GetYDesc().IsPacked() || !problem.GetBnScale().IsPacked() ||
+       !problem.GetBnBias().IsPacked() ||
+       problem.GetXDesc().GetLengths() != problem.GetYDesc().GetLengths() ||
+       (vectorsize != 4 && vectorsize != 8) ||
+       (blocksize != 256 && blocksize != 512 && blocksize != 1024))
+        return false;
+    const auto& lengths = problem.GetXDesc().GetLengths();
+    const size_t n = lengths[0], c = lengths[1], h = lengths[2], w = lengths[3];
+    if(n == 0 || n > 64 || c == 0 || h == 0 || h > 8192 || w == 0 || w > 8192 / h)
+        return false;
+    const size_t hw = h * w, nhw = n * hw;
+    return hw % vectorsize == 0 && c <= std::numeric_limits<unsigned int>::max() / nhw;
+}
+
+inline void AddSpatialStreamingConfigs(const miopen::batchnorm::ProblemDescription& problem,
+                                       std::vector<std::string>& valid_kernels)
+{
+    if(problem.GetXDesc().GetLengths()[1] < 128)
+        return;
+    for(const size_t blocksize : {1024, 512, 256})
+        for(const size_t vectorsize : {4, 8})
+            if(IsSpatialStreamingApplicable(problem, vectorsize, blocksize))
+                valid_kernels.push_back(
+                    GetKernelIdFromVariant(6, vectorsize, blocksize, 1, 1, 1));
 }
 
 // Add spatial single instances for given problem
@@ -774,6 +861,108 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                                                                nelements_default));
             }
             vectorsize_default >>= 1;
+        }
+
+        // Keep the existing default first. Small mixed-precision batches can benefit
+        // from shorter per-thread batch loops and more independent workgroups.
+        // Exact divisors avoid a partial per-thread loop; the final z workgroup may
+        // still contain inactive threads.
+        if(problem.GetDirection() == miopen::batchnorm::Direction::ForwardTraining &&
+           problem.IsBFp16() && problem.IsScaleFp32() && problem.Is2D() &&
+           problem.IsLayoutNCHW() && problem.GetXDesc().IsPacked() &&
+           problem.GetYDesc().IsPacked() && n >= 8 && n <= 64)
+        {
+            // gfx125 wave32 also supports 16-byte BF16 transactions. Keep vector8
+            // behind the forward solver's device check and retain the old default.
+            constexpr size_t vectorsize_vector8 = 8;
+            size_t xlocalsize_vector8, ylocalsize_vector8;
+            GetSpatialMultipleConfig(
+                problem, vectorsize_vector8, xlocalsize_vector8, ylocalsize_vector8);
+            if(IsSpatialMultipleApplicable(problem,
+                                           vectorsize_vector8,
+                                           stash_values,
+                                           ylocalsize_vector8,
+                                           zlocalsize_default,
+                                           nelements_default))
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(2,
+                                                               vectorsize_vector8,
+                                                               xlocalsize_vector8,
+                                                               ylocalsize_vector8,
+                                                               zlocalsize_default,
+                                                               nelements_default));
+            }
+
+            std::vector<size_t> batch_elements;
+            for(size_t target : {size_t{32}, size_t{16}, size_t{8}})
+            {
+                size_t nelements = std::min(target, static_cast<size_t>(n / 2));
+                while(n % nelements != 0)
+                    --nelements;
+                if(nelements > 1 &&
+                   std::find(batch_elements.begin(), batch_elements.end(), nelements) ==
+                       batch_elements.end())
+                {
+                    batch_elements.push_back(nelements);
+                }
+            }
+
+            for(size_t vectorsize : {vectorsize_vector8, size_t{4}, size_t{2}, size_t{1}})
+            {
+                if(in_cstride % vectorsize != 0)
+                    continue;
+
+                size_t xlocalsize, ylocalsize_max;
+                GetSpatialMultipleConfig(problem, vectorsize, xlocalsize, ylocalsize_max);
+                for(size_t ylocalsize : {size_t{256}, size_t{512}})
+                {
+                    if(ylocalsize > ylocalsize_max)
+                        continue;
+                    for(size_t zlocalsize : {size_t{1}, size_t{2}})
+                    {
+                        for(size_t nelements : batch_elements)
+                        {
+                            // Limit split-batch tuning to 32 additional instances. For
+                            // z=2, use only the smaller workgroup and shorter loops.
+                            if(zlocalsize == 2 && (ylocalsize != 256 || nelements > 16))
+                                continue;
+                            if(!IsSpatialMultipleApplicable(problem,
+                                                            vectorsize,
+                                                            stash_values,
+                                                            ylocalsize,
+                                                            zlocalsize,
+                                                            nelements))
+                                continue;
+
+                            const size_t ytile = ylocalsize * vectorsize;
+                            const size_t ytail = (in_cstride - 1) % ytile + 1;
+                            const size_t ztile = zlocalsize * nelements;
+                            const size_t ztail = (n - 1) % ztile + 1;
+                            const int stash_method = GetStashMethod(false,
+                                                                    problem.GetXDesc().GetType(),
+                                                                    stash_values,
+                                                                    c,
+                                                                    n,
+                                                                    in_cstride,
+                                                                    ylocalsize,
+                                                                    zlocalsize,
+                                                                    nelements);
+                            // FP32 stash values occupy two BF16 slots each. Check
+                            // the actual vectorized spatial tile and allow for
+                            // worst-case alignment padding with odd spatial sizes.
+                            const size_t stash_slots = 2 * stash_values;
+                            const size_t padding     = in_cstride % 2;
+                            if((stash_method == 0 && ytail < stash_slots + padding) ||
+                               (stash_method == 1 &&
+                                (ztail < stash_slots || padding != 0)))
+                                continue;
+
+                            valid_kernels.push_back(GetKernelIdFromVariant(
+                                2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
+                        }
+                    }
+                }
+            }
         }
     }
 }
