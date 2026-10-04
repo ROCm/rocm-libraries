@@ -76,7 +76,9 @@ class TestFmhaBwdProductDualCodegen(unittest.TestCase):
             self.assertIn("BlockFmhaBwdDQOnlyQMajor", kernel_source)
             self.assertIn("BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt", kernel_source)
             self.assertIn("product_dual@", kernel_source)
-            self.assertIn("std::is_same_v<ck_tile::gfx12_t, ck_tile::gfx12_t>", kernel_source)
+            self.assertIn(
+                "std::is_same_v<ck_tile::gfx12_t, ck_tile::gfx12_t>", kernel_source
+            )
 
             # The host workspace helpers use the DKDV alias. Only that wrapper
             # receives the product predicate; dQ still writes its output directly.
