@@ -1,0 +1,310 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Coverage for the epilogue accumulator shuffle (accumShuffleForLDSTrVW) on LDSTr kernels.
+# Fixed for every group: LDSTrInst=True, TDMInst=3, StoreRemapVectorWidth=0 (storeRemap is the
+# alternative bridge to a wide store and rejects VectorWidth>1, so it cannot share a group).
+#
+#   group 1  sparse (Sparse=2), explicit VectorWidthA 2/4/8, AccumShuffle 1 and 2
+#   group 2  dense  (Sparse=0), same
+#   group 3  sparse, VectorWidthA -1 (auto), AccumShuffle 0 and 1
+#
+# Groups 1 and 2 cover the shuffle itself and its two schedules: AccumShuffle 1 drains LDS
+# between passes, 2 software-pipelines them. Both emit the same instruction multiset, so a
+# mismatch between them is a scheduling bug. AccumShuffle 0 is deliberately absent -- it
+# clamps VectorWidthA to 1, which emits no shuffle at all and would just re-test the
+# pre-feature kernel under three VectorWidthA values that all collapse to the same name.
+#
+# Group 3 is the regression for that clamp, and it is the reason the group exists separately:
+# VectorWidthA defaults to -1, so a yaml that never mentions it used to get VectorWidthA=1
+# from the enableLDSTrA clamp. AccumShuffle must reproduce that at 0 and only release it at
+# 1 -- otherwise every existing LDSTr kernel silently moves onto the shuffle path with an
+# auto-derived VectorWidthA (up to 8 for f16, 16 for f8, the latter not even implemented).
+# The assertion is on the generated kernel names: AccumShuffle 0 must yield VWA1 for every
+# MacroTile, AccumShuffle 1 must yield VWA > 1.
+#
+# Combinations that cannot be built are rejected during solution validation and simply drop
+# out, so each group over-specifies on purpose. Expected drop-outs:
+#   * the shuffle needs MIWaveTile[0] % VectorWidthA == 0
+#
+# Known silent drop, unrelated to the shuffle: the dense group has no MT256x256 row. That
+# MatrixInstruction overflows the VGPR budget there (1035 > 1024) at VectorWidthA=1 with
+# AccumShuffle=0 -- i.e. with no shuffle emitted at all -- so it never built in the first
+# place. Unlike a solution rejection, a VGPR overflow only warns and the run still exits 0,
+# so it is left out rather than silently discarded on every run.
+#
+# All M/N/K are multiples of 16, which f16 requires. Sizes span tile-aligned shapes, M-only
+# and N-only macro-tile edges, a doubly ragged shape, the 16x16 minimum, and a K tail.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: False
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeScaleAlphaVec: 1
+  KeepBuildTmp: True
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  NumBenchmarks: 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+      MetadataLayout: 0
+
+    - # group 1 -- sparse, explicit VectorWidthA
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, MIWaveGroup0, MIWaveGroup1]
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]   # MT  32x32    VWA 2
+          - [16, 16, 64, 1, 1, 4, 4, 1, 1]   # MT  64x64    VWA 2,4
+          - [16, 16, 64, 1, 1, 2, 4, 2, 2]   # MT  64x128   VWA 2
+          - [16, 16, 64, 1, 1, 4, 8, 2, 1]   # MT 128x128   VWA 2,4
+          - [16, 16, 64, 1, 1, 4, 8, 1, 2]   # MT  64x256   VWA 2,4
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]   # MT 256x256   VWA 2,4,8
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [2, 4, 8]
+        - AccumShuffle: [1, 2]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Every dim is a multiple of 16, as f16 requires. "Edge" here therefore means a
+          # partial *macro tile* (dim % MacroTile != 0), not a partial 16-element vector --
+          # that is the only kind of edge a legal f16 problem can produce.
+          #
+          # tile-aligned: no edge path, the pure multi-tile store
+          - Exact: [512, 512, 1, 512]     # whole multiple of every MT in this group
+          - Exact: [256, 256, 1, 128]     # exactly one tile at MT256x256
+          - Exact: [1024, 768, 1, 256]    # several tiles, rectangular
+          - Exact: [384, 384, 1, 256]     # aligned to 128 but not to 256: partial tile at MT256
+          # edge: partial macro tile, so the masked/edge store path runs
+          - Exact: [272, 272, 1, 256]     # 16*17: partial tile in both dims for every MT >= 32
+          - Exact: [272, 512, 1, 256]     # M edge only
+          - Exact: [512, 272, 1, 256]     # N edge only
+          - Exact: [80, 144, 1, 256]      # small and ragged in both dims
+          - Exact: [16, 16, 1, 128]       # smallest legal problem: a single MI tile
+          # K edge: DepthU is 128, so a K that is not a multiple of it exercises the tail loop
+          - Exact: [512, 512, 1, 144]     # 128 + a 16-deep tail
+          # batched: the shuffle is per-wave and carries no batch term, so these check that
+          # the batch stride reaches the store unchanged rather than exercising new shuffle
+          # code. Batch was excluded when this file was written because batch > 1 was broken
+          # under TDMInst=3; that is no longer true -- (512,512,3,256) now passes at
+          # VectorWidthA=1 / AccumShuffle=0, the exact condition it used to fail at.
+          - Exact: [16, 16, 2, 256]       # smallest legal problem, batched
+          - Exact: [512, 512, 2, 256]     # several tiles per batch
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 0
+      MetadataLayout: 0
+
+    - # group 2 -- dense, explicit VectorWidthA
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, MIWaveGroup0, MIWaveGroup1]
+          - [16, 16, 32, 1, 1, 2, 2, 1, 1]   # MT  32x32    VWA 2
+          - [16, 16, 32, 1, 1, 4, 4, 1, 1]   # MT  64x64    VWA 2,4
+          - [16, 16, 32, 1, 1, 2, 4, 2, 2]   # MT  64x128   VWA 2
+          - [16, 16, 32, 1, 1, 4, 8, 2, 1]   # MT 128x128   VWA 2,4
+          - [16, 16, 32, 1, 1, 4, 8, 1, 2]   # MT  64x256   VWA 2,4
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [2, 4, 8]
+        - AccumShuffle: [1, 2]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Every dim is a multiple of 16, as f16 requires. "Edge" here therefore means a
+          # partial *macro tile* (dim % MacroTile != 0), not a partial 16-element vector --
+          # that is the only kind of edge a legal f16 problem can produce.
+          #
+          # tile-aligned: no edge path, the pure multi-tile store
+          - Exact: [512, 512, 1, 512]     # whole multiple of every MT in this group
+          - Exact: [256, 256, 1, 128]     # exactly one tile at MT256x256
+          - Exact: [1024, 768, 1, 256]    # several tiles, rectangular
+          - Exact: [384, 384, 1, 256]     # aligned to 128 but not to 256: partial tile at MT256
+          # edge: partial macro tile, so the masked/edge store path runs
+          - Exact: [272, 272, 1, 256]     # 16*17: partial tile in both dims for every MT >= 32
+          - Exact: [272, 512, 1, 256]     # M edge only
+          - Exact: [512, 272, 1, 256]     # N edge only
+          - Exact: [80, 144, 1, 256]      # small and ragged in both dims
+          - Exact: [16, 16, 1, 128]       # smallest legal problem: a single MI tile
+          # K edge: DepthU is 128, so a K that is not a multiple of it exercises the tail loop
+          - Exact: [512, 512, 1, 144]     # 128 + a 16-deep tail
+          # batched: the shuffle is per-wave and carries no batch term, so these check that
+          # the batch stride reaches the store unchanged rather than exercising new shuffle
+          # code. Batch was excluded when this file was written because batch > 1 was broken
+          # under TDMInst=3; that is no longer true -- (512,512,3,256) now passes at
+          # VectorWidthA=1 / AccumShuffle=0, the exact condition it used to fail at.
+          - Exact: [16, 16, 2, 256]       # smallest legal problem, batched
+          - Exact: [512, 512, 2, 256]     # several tiles per batch
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0,1]
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 2
+      MetadataLayout: 0
+
+    - # group 3 -- sparse, auto VectorWidthA (-1): AccumShuffle 0 must clamp it to 1
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, MIWaveGroup0, MIWaveGroup1]
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]   # MT  32x32    VWA 2
+          - [16, 16, 64, 1, 1, 4, 4, 1, 1]   # MT  64x64    VWA 2,4
+          - [16, 16, 64, 1, 1, 2, 4, 2, 2]   # MT  64x128   VWA 2
+          - [16, 16, 64, 1, 1, 4, 8, 2, 1]   # MT 128x128   VWA 2,4
+          - [16, 16, 64, 1, 1, 4, 8, 1, 2]   # MT  64x256   VWA 2,4
+          - [16, 16, 64, 1, 1, 8, 8, 2, 2]   # MT 256x256   VWA 2,4,8
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - AccumShuffle: [0, 1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Two shapes only: this group asserts the clamp via the kernel name, the
+          # shuffle itself is already covered by group 1. One tile-aligned, one edge.
+          - Exact: [512, 512, 1, 512]
+          - Exact: [272, 272, 1, 256]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
+        - ActivationArgs:
+          - [Enum: none]
