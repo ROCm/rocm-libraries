@@ -51,7 +51,7 @@ set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 # anyway. The restore below intentionally still doesn't use FORCE, matching
 # today's standalone behavior (where it's already a no-op and the suppression
 # quietly outlives this block for the rest of that configure).
-qq
+set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "" FORCE)
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)

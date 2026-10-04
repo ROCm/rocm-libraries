@@ -28,6 +28,7 @@
  * arena-backed table keyed by the producing Value pointer, since the frozen IR
  * attrs must not be mutated.
  */
+#include "rocke/tf32_internal.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -295,7 +296,7 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     {
         return "int16_t";
     }
-    if(strcmp(ir_scalar_name, "i32") == 0)
+    if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
     {
         return "int";
     }
@@ -345,7 +346,7 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
             {
                 return "f32x";
             }
-            if(strcmp(ir_scalar_name, "i32") == 0)
+            if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
             {
                 return "i32x";
             }
@@ -383,8 +384,8 @@ static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
     {
         return false;
     }
-    return strcmp(name, "f32") == 0 || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0
-           || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
+    return strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0 || strcmp(name, "i32") == 0
+           || strcmp(name, "i16") == 0 || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
            || strcmp(name, "bf8e5m2") == 0;
 }
 
@@ -450,8 +451,9 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
              * through to the KeyError. Detect the listed set explicitly so an
              * unknown vector elem is an error rather than silently "f16x". */
             if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
-               && strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
-               && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
+               && strcmp(elem, "tf32") != 0 && strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0
+               && strcmp(elem, "i8") != 0 && strcmp(elem, "fp8e4m3") != 0
+               && strcmp(elem, "bf8e5m2") != 0)
             {
                 rocke_h_fail(lw, ROCKE_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
                 return "";
@@ -796,6 +798,9 @@ rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "lower_op: NULL op");
     }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
     fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {
