@@ -32,9 +32,9 @@ _GFX1250_ARCHS = (
     "gfx1250",
     "gfx1250_96cu",
     "gfx1250_192cu",
-    "gfx1250v0",
-    "gfx1250v0_96cu",
-    "gfx1250v0_192cu",
+    "gfx1250-strict",
+    "gfx1250-strict_96cu",
+    "gfx1250-strict_192cu",
 )
 
 _GFX942_ARCHS = (

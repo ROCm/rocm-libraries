@@ -23,6 +23,7 @@ import re
 import shutil
 import time
 import pandas as pd
+import yaml
 
 import logging
 
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 from geko import bench
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
-from geko.constants import GEMM_FIELDS
+from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
 from geko.schemas import GemmConfig
 from geko.concurrency.runner import Runner, Worker
 from geko.utils import (
@@ -163,6 +164,7 @@ def configure(
             generator pass), including GemmProblems and ARCH-derived
             hardware fields.
     """
+    arch = canonical_arch(arch)
     gcs: List[GemmConfig] = (
         [gemm_configs] if isinstance(gemm_configs, GemmConfig) else list(gemm_configs)
     )
@@ -331,7 +333,11 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            env = {"PYTHONPATH": tensile_pythonpath(hipblaslt_path)}
+            tuning_config = yaml.safe_load(content)
+            env = {
+                "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
+                **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
+            }
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [

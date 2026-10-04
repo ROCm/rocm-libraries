@@ -232,7 +232,7 @@ ONLY_INCLUDE_MIs_GFX942 = {
 # we confirm exact MIs needed for each data type.
 #
 # This is the MI45X baseline, used as-is by gfx1250. The A0 part takes the
-# restricted ONLY_INCLUDE_MIs_MI45X_V0 below.
+# restricted ONLY_INCLUDE_MIs_MI45X_STRICT below.
 ONLY_INCLUDE_MIs_MI45X = {
     'H': [[16, 16, 32, 1]],
     'B': [[16, 16, 32, 1]],
@@ -242,7 +242,7 @@ ONLY_INCLUDE_MIs_MI45X = {
     'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
     # 'X': [[16, 16, 32, 1]],
     # 'X1': [[16, 16, 32, 1]],
-    # 'S': [[16, 16, 4, 1]],
+    'S': [[16, 16, 4, 1]],
     # 'I8': [[16, 16, 32, 1], [16, 16, 64, 1]],
 }
 
@@ -272,46 +272,46 @@ _LIBRARY_LOGIC_FIELDS_GFX1250 = {
     "ArchitectureName": '"gfx1250"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
 }
-# ScheduleName is the A0/B0 discriminator (gfx1250v0 vs gfx1250) and the ONLY
-# one: TensileCreateLibrary (Run.py validLogicFile) drops any logic file whose
-# ScheduleName does not match the requested revision, in both directions.
-# ArchitectureName stays the real compiler target -- ARCH_COMPILER_TARGET maps
-# gfx1250v0 -> gfx1250 for -mcpu.
 _LIBRARY_LOGIC_FIELDS_GFX1250_MC = {
     "ScheduleName": '"gfx1250"',
     "ArchitectureName": '"gfx1250"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250_MC,
 }
+# A0 is its own compiler target, gfx1250-strict, and ArchitectureName is what
+# TensileCreateLibrary selects logic files by and compiles them for. A0 logic
+# therefore names gfx1250-strict in both ScheduleName and ArchitectureName; a
+# file that names gfx1250 in ArchitectureName is built into the B0 library.
+#
 # DeviceNames follows the SYSTEM, not the ASIC revision: the un-partitioned
 # 256-CU keys take 73f0 and the 96/192-CU (MI450-MC, "Hammer") keys take 75c7,
-# on both gfx1250 and gfx1250v0. ScheduleName is the axis that carries the part, which
-# is why there are four field sets rather than two.
+# on both gfx1250 and gfx1250-strict. The architecture is the axis that carries
+# the part, which is why there are four field sets rather than two.
 #
 # The rule here is match-the-corpus, not name-the-part. In hipBLASLt's shipped
-# logic 73f0 sits on all 431 un-partitioned gfx1250/gfx1250v0 files and 75c7 on
-# the 20 files under the four _96cu/_192cu dirs, so this mapping is what merges
-# cleanly with it. 73f0 does not identify this silicon: pci.ids calls it Navi 33,
+# logic 73f0 sits on every un-partitioned gfx1250 and gfx1250-strict file and
+# 75c7 on every file under the four _96cu/_192cu dirs, so this mapping is what
+# merges cleanly with it. 73f0 does not identify this silicon: pci.ids calls it Navi 33,
 # the same string appears under aldebaran/gfx1201/navi31/navi32/navi33, and an
 # MI455X reports 1002:75c1. Nothing downstream notices either way -- Tensile
 # only turns DeviceNames into a PciChipId predicate inside
 # `if supportsChipIdPredicate(gfxArch)`, which is `return gfx == "gfx950"`
 # (Common/Architectures.py), and the runtime gate is the same. Built gfx1250
 # libraries contain zero chip-id predicates; gfx950 libraries contain six.
-_LIBRARY_LOGIC_FIELDS_GFX1250V0 = {
-    "ScheduleName": '"gfx1250v0"',
-    "ArchitectureName": '"gfx1250"',
+_LIBRARY_LOGIC_FIELDS_GFX1250_STRICT = {
+    "ScheduleName": '"gfx1250-strict"',
+    "ArchitectureName": '"gfx1250-strict"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
 }
-_LIBRARY_LOGIC_FIELDS_GFX1250V0_MC = {
-    "ScheduleName": '"gfx1250v0"',
-    "ArchitectureName": '"gfx1250"',
+_LIBRARY_LOGIC_FIELDS_GFX1250_STRICT_MC = {
+    "ScheduleName": '"gfx1250-strict"',
+    "ArchitectureName": '"gfx1250-strict"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250_MC,
 }
 
-# A0 (gfx1250v0) lacks the wide fp4 WMMA, so it takes the baseline minus
+# A0 (gfx1250-strict) lacks the wide fp4 WMMA, so it takes the baseline minus
 # [32, 16, 128, 1]. Spelled out rather than derived by subscript so that
 # re-commenting 'F4' above cannot turn this into an import-time KeyError.
-ONLY_INCLUDE_MIs_MI45X_V0 = {
+ONLY_INCLUDE_MIs_MI45X_STRICT = {
     **ONLY_INCLUDE_MIs_MI45X,
     'F4': [[16, 16, 128, 1]],
 }
@@ -338,9 +338,13 @@ _ARCH_SPECS = {
     "gfx1250": (256, 8, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250, 3, 32),
     "gfx1250_96cu": (96, 3, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250_MC, 3, 32),
     "gfx1250_192cu": (192, 6, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250_MC, 3, 32),
-    "gfx1250v0": (256, 8, ONLY_INCLUDE_MIs_MI45X_V0, _LIBRARY_LOGIC_FIELDS_GFX1250V0, 3, 32),
-    "gfx1250v0_96cu": (96, 3, ONLY_INCLUDE_MIs_MI45X_V0, _LIBRARY_LOGIC_FIELDS_GFX1250V0_MC, 3, 32),
-    "gfx1250v0_192cu": (192, 6, ONLY_INCLUDE_MIs_MI45X_V0, _LIBRARY_LOGIC_FIELDS_GFX1250V0_MC, 3, 32),
+    "gfx1250-strict": (256, 8, ONLY_INCLUDE_MIs_MI45X_STRICT, _LIBRARY_LOGIC_FIELDS_GFX1250_STRICT, 3, 32),
+    "gfx1250-strict_96cu": (
+        96, 3, ONLY_INCLUDE_MIs_MI45X_STRICT, _LIBRARY_LOGIC_FIELDS_GFX1250_STRICT_MC, 3, 32,
+    ),
+    "gfx1250-strict_192cu": (
+        192, 6, ONLY_INCLUDE_MIs_MI45X_STRICT, _LIBRARY_LOGIC_FIELDS_GFX1250_STRICT_MC, 3, 32,
+    ),
 }
 
 HARDWARE_MAP = {
@@ -358,6 +362,25 @@ HARDWARE_MAP = {
 assert set(SUPPORTED_ARCH) == set(_ARCH_SPECS), (
     "SUPPORTED_ARCH must match _ARCH_SPECS / HARDWARE_MAP keys"
 )
+
+
+def library_logic_architecture(arch: str) -> str:
+    """Tensile architecture (compiler target) of a gfx-style ``ARCH`` key.
+
+    ``ARCH`` keys carry a partition suffix (``gfx1250_96cu``) that no compiler
+    or Tensile tool accepts; the LibraryLogic ``ArchitectureName`` is the target
+    to build kernels and clients for.
+
+    Args:
+        arch: A key of HARDWARE_MAP.
+
+    Returns:
+        The architecture without YAML quoting, e.g. ``gfx1250`` or ``gfx1250-strict``.
+
+    Raises:
+        KeyError: If ``arch`` is not a HARDWARE_MAP key.
+    """
+    return HARDWARE_MAP[arch]["LibraryLogic"]["ArchitectureName"].strip('"')
 
 
 def mx_format(gemm_config: Any, arch: Optional[str]) -> Optional[Tuple[int, str]]:
@@ -533,9 +556,9 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
     "gfx1250_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
     "gfx1250_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250v0": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250v0_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250v0_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
+    "gfx1250-strict": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
+    "gfx1250-strict_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
+    "gfx1250-strict_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (
@@ -568,9 +591,9 @@ SEARCH_SPACE_GA_BUDGET = {
             "gfx1250",
             "gfx1250_96cu",
             "gfx1250_192cu",
-            "gfx1250v0",
-            "gfx1250v0_96cu",
-            "gfx1250v0_192cu",
+            "gfx1250-strict",
+            "gfx1250-strict_96cu",
+            "gfx1250-strict_192cu",
         )
     },
 }

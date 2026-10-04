@@ -14,6 +14,7 @@ from geko.config_generator import get_optimization_params, get_post_processor
 from geko.config_generator.cluster_sizes import do_cluster
 from geko.config_generator.config_merger import do_merge
 from geko.config_generator.config_sections_generator import ConfigSectionGenerator
+from geko.config_generator.constants import library_logic_architecture
 from geko.config_generator.fork_param_generator import generate_fork_params
 from geko.config_generator.mi_designer import MIDesign
 from geko.config_generator.output_writer import EntityOutputWriter
@@ -22,6 +23,12 @@ from geko.utils import build_tensilelite_client
 from geko.concurrency import parallel_for
 
 logger = logging.getLogger("GEKO")
+
+
+def _client_gpu_target(config: Dict[str, Any]) -> Optional[str]:
+    """Compiler target to build the tensilelite client for, or None if ARCH is unset."""
+    arch = config.get("ARCH")
+    return library_logic_architecture(arch) if arch else None
 
 
 def run(
@@ -58,7 +65,7 @@ def run(
         client_path = build_tensilelite_client(
             hipblaslt_path, 
             config.get("BUILD_DIR", None), 
-            gpu_targets=config.get("ARCH")
+            gpu_targets=_client_gpu_target(config)
         )
 
     for gp in config["GemmProblems"]:
@@ -168,7 +175,7 @@ def _run_per_gemm_type(
         client_path = build_tensilelite_client(
             hipblaslt_path, 
             config.get("BUILD_DIR", None), 
-            gpu_targets=config.get("ARCH")
+            gpu_targets=_client_gpu_target(config)
         )
 
     csg = ConfigSectionGenerator(config)

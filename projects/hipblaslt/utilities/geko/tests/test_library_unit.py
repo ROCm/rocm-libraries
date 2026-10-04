@@ -216,3 +216,28 @@ def test_dict_library_supports_property_access_and_dump(tmp_path: Path) -> None:
     assert dumped["ExactLogic"] == [[[8, 8, 1, 8], [1, 100.0]]]
     assert dumped["PerfMetric"] == "OtherMetric"
     assert dumped["LibraryType"] == "GridBased"
+
+
+@pytest.mark.parametrize(
+    "schedule_name,arch,expected",
+    [
+        ("gfx1250-strict", "gfx1250-strict", "gfx1250-strict"),
+        ("gfx1250", "gfx1250", "gfx1250"),
+        ("aquavanjaram", "gfx942", "gfx942"),
+        (None, "gfx950", "gfx950"),
+    ],
+)
+def test_schedule_is_an_architecture_create_library_accepts(schedule_name, arch, expected) -> None:
+    lib = _mk_lib()
+    lib.data[1] = schedule_name
+    lib.data[2] = arch
+    assert lib.schedule == expected
+
+
+def test_schedule_rejects_retired_gfx1250v0_logic() -> None:
+    """Old A0 logic would otherwise be built into the gfx1250 (B0) library."""
+    lib = _mk_lib()
+    lib.data[1] = "gfx1250v0"
+    lib.data[2] = "gfx1250"
+    with pytest.raises(ValueError, match="gfx1250-strict"):
+        lib.schedule

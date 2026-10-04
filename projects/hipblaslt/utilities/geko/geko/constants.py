@@ -8,10 +8,14 @@ Defines constants for:
 - GEMM operation field definitions and categorizations.
 - Log file field specifications.
 - Index type mappings for different data formats.
-- Gfx-style ``ARCH`` strings for YAML / tuning config (``SUPPORTED_ARCH``).
+- Gfx-style ``ARCH`` strings for YAML / tuning config (``SUPPORTED_ARCH``), the
+  retired spellings still accepted for them, and the runtime environment an
+  architecture needs.
 
 These constants ensure consistent data handling across the optimization workflow.
 """
+
+import logging
 
 DTYPE = {
     "bf16_r": "B",
@@ -189,7 +193,56 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx1250",
     "gfx1250_96cu",
     "gfx1250_192cu",
-    "gfx1250v0",
-    "gfx1250v0_96cu",
-    "gfx1250v0_192cu",
+    "gfx1250-strict",
+    "gfx1250-strict_96cu",
+    "gfx1250-strict_192cu",
 )
+
+# Retired ARCH spellings, accepted with a deprecation warning. hipBLASLt rejects
+# ``gfx1250v0`` everywhere a user can name it; the A0 stepping is the
+# ``gfx1250-strict`` compiler target.
+LEGACY_ARCH_ALIASES: dict[str, str] = {
+    "gfx1250v0": "gfx1250-strict",
+    "gfx1250v0_96cu": "gfx1250-strict_96cu",
+    "gfx1250v0_192cu": "gfx1250-strict_192cu",
+}
+
+
+def canonical_arch(arch: str) -> str:
+    """Return the supported spelling of an ``ARCH`` string.
+
+    Args:
+        arch: ARCH as given on the command line or in an input config.
+
+    Returns:
+        ``arch`` itself, or its replacement when it is a retired alias, in which
+        case a deprecation warning is logged.
+    """
+    replacement = LEGACY_ARCH_ALIASES.get(arch)
+    if replacement is None:
+        return arch
+    logging.getLogger("GEKO").warning(
+        f"ARCH '{arch}' is deprecated; using '{replacement}'. Update the input config "
+        f"or command line to '{replacement}'."
+    )
+    return replacement
+
+
+# On gfx1250 A0 the HSA runtime reports the device as gfx1250, and loads only
+# gfx1250 code objects, unless its strict mode is on. Tuning gfx1250-strict
+# kernels therefore needs strict mode for every process that touches the GPU.
+STRICT_RUNTIME_ENV: dict[str, str] = {"HSA_DISABLE_GFX12_STRICT": "0"}
+
+
+def runtime_env(architecture: str | None) -> dict[str, str]:
+    """Environment variables a tuning process needs on a Tensile architecture.
+
+    Args:
+        architecture: The LibraryLogic ``ArchitectureName`` of the configs being
+            tuned (a compiler target such as ``gfx1250-strict``), or None.
+
+    Returns:
+        Variables to add to the process environment; empty when the
+        architecture needs none.
+    """
+    return dict(STRICT_RUNTIME_ENV) if architecture == "gfx1250-strict" else {}

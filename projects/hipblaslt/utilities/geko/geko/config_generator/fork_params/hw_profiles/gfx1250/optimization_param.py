@@ -9,7 +9,7 @@ GFX1250Params (heuristic):
     Parameter values derived from the golden reference tensilelite YAML configs
     (bbs_nn, bbs_nt, bbs_tn, bbs_tn_large, bbs_tn_maf, bbs_tn_batch4096,
      bss_nt, f8_bf16out_tn, f8_tn_maf, f8bf8_bf16out_tn, f8bf8_f32out_tn).
-    Non-StreamK (SK=0) by default.
+    Non-persistent (TileProcessingStrategy None) by default.
 
 GFX1250GAParams (generic):
     Broader exploratory ranges for GA/Ductile search on gfx1250.
@@ -27,13 +27,19 @@ Key differences vs gfx950 (MFMA) profiles:
 
 from typing import Optional
 
-from geko.config_generator.constants import dataSize, mx_format
+from geko.config_generator.constants import HARDWARE_MAP, dataSize, mx_format
+from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
+    hardware_cluster_dims,
+    wgps_per_shader_engine,
+)
 from geko.config_generator.fork_params.optimization_param import (
     BaseOptimizationParams,
+    group,
     param,
 )
 from geko.config_generator.shared_utils import (
     ForkParameter,
+    GroupDimension,
     SizeContext,
 )
 
@@ -50,7 +56,8 @@ class GFX1250Params(BaseOptimizationParams):
 
     Parameter values are conditioned on data type and layout (transpose)
     to reproduce the exact search spaces from the reference YAMLs.
-    StreamK=3 mode is activated via config["StreamK"] = True.
+    Persistent StreamK (on the StaticGrid assignment) is activated via
+    config["StreamK"] = True.
     """
 
     def _is_tn(self) -> bool:
@@ -358,25 +365,25 @@ class GFX1250Params(BaseOptimizationParams):
         return self._make_param("StoreRemapVectorWidth", [0], active=False)
 
     @param
-    def stream_k(self, ctx: SizeContext) -> ForkParameter:
+    def tile_processing_strategy(self, ctx: SizeContext) -> ForkParameter:
         if self._sk3():
-            return self._make_param("StreamK", [3])
-        return self._make_param("StreamK", [0])
+            return self._make_param("TileProcessingStrategy", ["StreamK"])
+        return self._make_param("TileProcessingStrategy", ["None"])
+
+    @param
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        if self._sk3():
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
 
     # =================================================================
-    # StreamK=3-only params (emitted when config StreamK is True)
+    # StreamK-only params (emitted when config StreamK is True)
     # =================================================================
 
     @param
     def prefetch_across_persistent(self, ctx: SizeContext) -> Optional[ForkParameter]:
         if self._sk3():
             return self._make_param("PrefetchAcrossPersistent", [0, 1], active=False)
-        return None
-
-    @param
-    def stream_k_force_dp_only(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        if self._sk3():
-            return self._make_param("StreamKForceDPOnly", [0, 1], active=False)
         return None
 
     @param
@@ -387,7 +394,7 @@ class GFX1250Params(BaseOptimizationParams):
 
 
 class GFX1250GAOrigamiPolicy:
-    """StreamK / origami decisions for gfx1250 generic mode.
+    """Persistent / origami decisions for gfx1250 generic mode.
 
     Shared by GFX1250GAParams and GFX1250GAPostProcessor: the profile emits the
     WGM / StaggerU axes and the post-processor's MT_DU overrides pin them, so
@@ -395,7 +402,7 @@ class GFX1250GAOrigamiPolicy:
     """
 
     def _sk3(self) -> bool:
-        """Whether the input config's ``StreamK: true`` puts SK3 kernels in the space."""
+        """Whether the input config's ``StreamK: true`` puts persistent kernels in the space."""
         return bool(self.config.get("StreamK", False))
 
     def _origami_picks_wgm(self) -> bool:
@@ -403,7 +410,7 @@ class GFX1250GAOrigamiPolicy:
 
         ContractionSolution takes the Origami path under exactly
 
-            streamK != 0 && skgrid != 0
+            isPersistent() && skgrid != 0
             && workGroupMapping == 0 && workGroupMappingXCC == -1
 
         and then calls ``origami::select_workgroup_mapping`` and
@@ -416,8 +423,8 @@ class GFX1250GAOrigamiPolicy:
         never tuned at, and these axes are shape-dependent. An Equality library
         only runs on its tuned shape, so it should keep searching them.
 
-        Requires StreamK, since ``WorkGroupMappingXCC: -1`` is rejected without
-        it ("Can only use auto WGMXCC with StreamK").
+        Requires a persistent strategy, since ``WorkGroupMappingXCC: -1`` is
+        rejected without it ("Auto WGMXCC requires persistent execution").
         """
         is_oob = str(self.config.get("LIBRARY_TYPE", "OOB")).lower() != "equality"
         return is_oob and self._sk3()
@@ -553,34 +560,40 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     def schedule_iter_alg(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("ScheduleIterAlg", [4])
 
-    def _is_v0(self) -> bool:
-        """True on the A0 part, i.e. any ``gfx1250v0*`` ARCH key.
+    def _is_strict(self) -> bool:
+        """True on the A0 part, i.e. any ``gfx1250-strict*`` ARCH key.
 
-        gfx1250 is the part; A0 is the exception that needs calling out, so the
-        ARCH name carries ``v0`` only for A0 and the plain name means the
-        shipping part. That makes ARCH the switch rather than a separate config
-        key. Nothing in tensilelite keys on silicon revision
-        (``asmCaps["HasClusterBarrier"]`` succeeds on A0 too), so the config is
-        the only place the distinction can be made.
+        A0 is its own compiler target, gfx1250-strict, and the plain gfx1250
+        name means the shipping part. Tensile builds A0 kernels but still
+        accepts features A0 cannot use (it drops TDM multicast there instead of
+        rejecting a cluster), so the profile has to leave them out itself.
         """
-        return str(self.config.get("ARCH", "")).startswith("gfx1250v0")
+        return str(self.config.get("ARCH", "")).startswith("gfx1250-strict")
 
     @param
     def cluster_dim(self, ctx: SizeContext) -> ForkParameter:
-        if self._is_v0():
+        """Every cluster shape the device can place whole; [[1, 1]] on A0.
+
+        A0 has no TDM multicast, which is what clusters are for, so there a
+        cluster would only add synchronization. Elsewhere the post-processor
+        narrows these shapes per MI to the ones worth tuning on its tile grid
+        (see ``cluster_dim.py``). The shapes follow the physical topology of the
+        ARCH key, not a ``CUs`` override, which only budgets work.
+        """
+        if self._is_strict():
             return self._make_param("ClusterDim", [[1, 1]])
-        return self._make_param("ClusterDim", [[1, 1], [2, 2], [2, 4], [4, 2], [4, 4]])
+        hw = HARDWARE_MAP[self.config["ARCH"]]
+        shapes = hardware_cluster_dims(wgps_per_shader_engine(hw["CUs"], hw["XCC"]))
+        return self._make_param("ClusterDim", [list(shape) for shape in shapes])
 
     @param
     def prefetch_gl2(self, ctx: SizeContext) -> ForkParameter:
-        """[0] on A0, and whenever StreamK is off.
+        """[0] on A0; [0, 1, 2] on every other part, with or without StreamK.
 
-        Tensile rejects PrefetchGL2 > 0 with GlobalSplitU -1 ("Currently
-        PrefetchGL2 does not support GSU"), and a DP-only axis leaves GSU at -1
-        for every candidate. StreamK forces GSU to 0, so the SK3 half of an
-        Equality library's [0, 3] axis can still use 1 and 2.
+        Tensile emits both GSU branches of the prefetch and picks one off the
+        runtime GSU, so PrefetchGL2 > 0 is valid with GlobalSplitU -1.
         """
-        if self._is_v0() or not self._sk3():
+        if self._is_strict():
             return self._make_param("PrefetchGL2", [0])
         return self._make_param("PrefetchGL2", [0, 1, 2])
 
@@ -617,13 +630,13 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         return self._make_param("LdsBlockSizePerPadMXSB", [-1]) if self._mx_block() else None
 
     # =================================================================
-    # 2. StreamK and GlobalSplitU: flat axes
+    # 2. Persistent strategy and GlobalSplitU
     # =================================================================
-    # SAFETY NOTE: StreamK=3 with TDMInst=3 and UseSubtileImpl=1
+    # SAFETY NOTE: the old StreamK=3 with TDMInst=3 and UseSubtileImpl=1
     # is this campaign's one CONFIRMED hard-wedge (~22% fault rate, reboot-only
     # recovery). UseSubtileImpl is never emitted for gfx1250 and Tensile
     # defaults it False, so the confirmed triple cannot form -- a mitigation,
-    # not a clearance. StreamK: true puts SK3 kernels in the space.
+    # not a clearance. StreamK: true puts persistent kernels in the space.
 
     @param
     def global_split_u(self, ctx: SizeContext) -> ForkParameter:
@@ -634,46 +647,61 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         return self._make_param("GlobalSplitU", [-1])
 
     @param
-    def stream_k(self, ctx: SizeContext) -> ForkParameter:
-        """DP only unless the geko input config sets ``StreamK: true``.
+    def tile_processing_strategy(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        """None (non-persistent) unless the geko input config sets ``StreamK: true``.
 
-        With it, an Equality library searches [0, 3]. An OOB library takes [3]
-        alone: its origami sentinel ``WorkGroupMappingXCC: -1`` is rejected at
-        StreamK=0 ("Can only use auto WGMXCC with StreamK"), so DP entries could
-        never build there.
+        With it, :meth:`execution_policy` carries the strategy together with its
+        persistent-only options.
         """
-        if not self._sk3():
-            return self._make_param("StreamK", [0])
-        return self._make_param("StreamK", [3] if self._origami_picks_wgm() else [0, 3])
+        if self._sk3():
+            return None
+        return self._make_param("TileProcessingStrategy", ["None"])
 
-    # StreamK-only knobs, emitted only when the input config sets StreamK: true.
     @param
-    def stream_k_xcc_mapping(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        """Off, plus the XCD-count divisors.
+    def work_assignment(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        if self._sk3():
+            return self._make_param("WorkAssignment", ["StaticGrid"])
+        return None
 
-        Tensile accepts [0, 2, 3, 4, 5, 6, 7, 8]. The inherited list was
-        [0, 4, 8], which omitted 2 for no stated reason. SKXCCMapping groups
-        Stream-K workgroups across XCDs, so on the 8-XCC keys the values that
-        partition evenly are 2, 4 and 8; 3, 5, 6 and 7 are legal but leave a
-        ragged last group, so they are left out rather than spent on.
+    def _xcc_remap_values(self) -> list:
+        """Off, plus the counts that split this ARCH's XCCs into equal groups.
 
-        Only 0 is legal once WorkGroupMappingXCC is -1 ("Cannot use auto WGMXCC
-        with SKXCC"), so the nonzero values are offered only when this profile
-        is not handing WGM to the runtime.
+        PersistentXCCMapping groups persistent workgroups across XCCs, and Tensile
+        accepts 2 through 8. Only divisors of the XCC count partition evenly (2, 4
+        and 8 on an 8-XCC key, 3 on a 3-XCC DPX partition); the others are legal
+        but leave a ragged last group, so they are not spent on.
+        """
+        xcc = HARDWARE_MAP[self.config["ARCH"]]["XCC"]
+        return [0] + [n for n in range(2, 9) if xcc % n == 0]
+
+    @group
+    def execution_policy(self, ctx: SizeContext) -> Optional[GroupDimension]:
+        """Persistent strategies with their options, when the input config sets ``StreamK: true``.
+
+        StreamK and DataParallel each pair with PrefetchAcrossPersistent [0, 1]
+        and the XCC remap. Both options exist only for a persistent kernel: Tensile
+        raises UnsupportedExecutionPolicy for an explicit PrefetchAcrossPersistent
+        with TileProcessingStrategy None, which aborts the run, and zeroes the XCC
+        remap there. So an Equality library keeps the non-persistent kernel as an
+        entry of its own. An OOB library drops it, since its origami sentinel
+        ``WorkGroupMappingXCC: -1`` needs a persistent kernel, and keeps only XCC
+        remap 0 ("Cannot use auto WGMXCC with SKXCC").
         """
         if not self._sk3():
             return None
-        if self._origami_picks_wgm():
-            return self._make_param("StreamKXCCMapping", [0])
-        return self._make_param("StreamKXCCMapping", [0, 2, 4, 8])
-
-    @param
-    def prefetch_across_persistent(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        return self._make_param("PrefetchAcrossPersistent", [0, 1]) if self._sk3() else None
-
-    @param
-    def stream_k_force_dp_only(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        return self._make_param("StreamKForceDPOnly", [0, 1]) if self._sk3() else None
+        origami = self._origami_picks_wgm()
+        entries = [] if origami else [
+            {"TileProcessingStrategy": self._make_param("TileProcessingStrategy", ["None"])}
+        ]
+        for strategy in ("StreamK", "DataParallel"):
+            for prefetch in (0, 1):
+                for remap in [0] if origami else self._xcc_remap_values():
+                    entries.append({
+                        "TileProcessingStrategy": self._make_param("TileProcessingStrategy", [strategy]),
+                        "PrefetchAcrossPersistent": self._make_param("PrefetchAcrossPersistent", [prefetch]),
+                        "PersistentXCCMapping": self._make_param("PersistentXCCMapping", [remap]),
+                    })
+        return entries
 
     @param
     def global_split_u_algorithm(self, ctx: SizeContext) -> ForkParameter:
@@ -683,9 +711,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     def work_group_mapping_xcc(self, ctx: SizeContext) -> ForkParameter:
         """Explicit values, except when the runtime picks them.
 
-        ``-1`` (auto) is rejected without StreamK ("Can only use auto WGMXCC
-        with StreamK"), so it is only offered when StreamK is in play and the
-        library is OOB. Otherwise gfx950's explicit generic list carries over.
+        ``-1`` (auto) is rejected without a persistent kernel ("Auto WGMXCC
+        requires persistent execution"), so it is only offered when StreamK is in
+        play and the library is OOB. Otherwise gfx950's explicit generic list
+        carries over.
         """
         if self._origami_picks_wgm():
             return self._make_param("WorkGroupMappingXCC", [-1])

@@ -10,12 +10,38 @@ are computed once at init. Per-size sections are built via build_config().
 """
 
 import math
+from collections import Counter
+
 import numpy as np
 
 from geko.config_generator.constants import *
 from geko.config_generator.mi_designer import MIDesign
 from geko.config_generator.shared_utils import ConfigEntry
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# Ductile draws group_0 entry i with probability proportional to
+# exp(-DUCTILE_COST_SCALE * cost_i) (Ductile/ductile/algorithm/ga.py).
+DUCTILE_COST_SCALE = 0.25
+
+
+def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
+
+    An MI group entry repeated once per ClusterDim shape would otherwise be
+    drawn as many times more often as it has shapes. Adding ln(n) / scale to
+    each of the n variants divides each variant's probability by n, so the MI
+    as a whole keeps the probability its cost gives it.
+    """
+    keys: List[Optional[tuple]] = [
+        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
+        if "ClusterDim" in entry else None
+        for entry in mi_groups
+    ]
+    counts = Counter(key for key in keys if key is not None)
+    return np.array(
+        [math.log(counts[key]) / DUCTILE_COST_SCALE if key is not None else 0.0 for key in keys],
+        dtype=np.float32,
+    )
 
 
 class ConfigSectionGenerator:
@@ -165,6 +191,7 @@ class ConfigSectionGenerator:
             'DataInitTypeC': 3 if is_i8 else 12,
             'DataInitTypeD': 3 if is_i8 else 12,
             'DataInitTypeScaleAlphaVec': 3 if is_i8 else 12,
+            'DataInitSeed': 1,
             'CSVExportWinner': True,
             'CSVMergeSameProblemID': True,
             'PreciseKernelTime': False,
@@ -337,6 +364,7 @@ class ConfigSectionGenerator:
         cost = np.empty(len(mi_groups), dtype=np.float32)
         cost[non_cms_mask] = cost_matrix[:, non_cms_mask].mean(axis=0)
         cost[~non_cms_mask] = cost[non_cms_mask].min()
+        cost += _cluster_variant_cost_offsets(mi_groups)
         
         d = dict(
             soo=soo,

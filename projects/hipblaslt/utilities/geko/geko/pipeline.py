@@ -29,7 +29,7 @@ from geko import bench, library, logger, optim, search, _set_log_level
 from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe, validate_mx_arch_support
 from geko.bench.utils import update_lib_source
 from geko.config_generator.constants import VALID_BACKENDS
-from geko.constants import SUPPORTED_ARCH
+from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
 
@@ -402,6 +402,7 @@ def run_configure(
                 f"Device ID must be 0-7, got {d}. Use -d or --device to specify the device ID."
             )
 
+    arch = canonical_arch(arch)
     if arch not in SUPPORTED_ARCH:
         raise ValueError(f"Must be one of {SUPPORTED_ARCH}")
 

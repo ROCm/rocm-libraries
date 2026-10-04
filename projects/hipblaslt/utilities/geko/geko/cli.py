@@ -26,7 +26,7 @@ import yaml
 from geko import logger, _set_log_level
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
 from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
-from geko.constants import SUPPORTED_ARCH
+from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--arch",
-        type=str,
+        type=canonical_arch,
         default=None,
         choices=SUPPORTED_ARCH,
         metavar="ARCH",

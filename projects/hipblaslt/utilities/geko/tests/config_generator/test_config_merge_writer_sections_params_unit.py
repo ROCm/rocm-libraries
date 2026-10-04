@@ -209,7 +209,7 @@ def test_gfx942_params_branches(monkeypatch) -> None:
     params, groups = p.generate_for_size((4096, 256, 1, 8192))
     assert "DepthU" in params
     assert "WorkGroupMapping" in params
-    assert "StreamK" in params
+    assert "TileProcessingStrategy" in params
     assert len(groups) >= 1
 
     ga = g942.GFX942GAParams(cfg)

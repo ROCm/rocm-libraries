@@ -44,7 +44,7 @@ from geko.config_generator.constants import (
     mx_format_from_scale_code,
 )
 from geko.config_generator.sizes import get_sizes
-from geko.constants import GEMM_TYPE_FIELDS
+from geko.constants import GEMM_TYPE_FIELDS, canonical_arch
 from geko.schemas import GemmConfig, GemmType
 
 logger = logging.getLogger("GEKO")
@@ -327,6 +327,8 @@ def validate_input_config(config: Dict[str, Any]) -> None:
     REQUIRED_CONFIG_FIELDS must be present.
 
     ARCH must already be set (YAML or arch= to load_prepared_config_from_yaml).
+    A retired ARCH spelling is rewritten in place to its replacement, with a
+    deprecation warning.
 
     Raises:
         ValueError: If required fields or ARCH are invalid.
@@ -344,6 +346,7 @@ def validate_input_config(config: Dict[str, Any]) -> None:
         if missing:
             raise ValueError(f"Missing required config fields: {missing}")
 
+    config["ARCH"] = canonical_arch(config["ARCH"])
     if config["ARCH"] not in HARDWARE_MAP:
         raise ValueError(
             f"Unknown ARCH '{config['ARCH']}'. "
@@ -374,6 +377,12 @@ def _resolve_search_space(config: Dict[str, Any]) -> str:
                 "will most likely fail due to the large number of kernels defined.",
                 stacklevel=3,
             )
+        if ss == "subtile":
+            arch = config.get("ARCH", "")
+            if arch not in ("gfx950", "gfx950_128cu"):
+                raise ValueError(
+                    f"search_space 'subtile' is only supported for gfx950 / gfx950_128cu, got '{arch}'"
+                )
 
     config["search_space"] = ss
     return ss
@@ -382,8 +391,10 @@ def _resolve_search_space(config: Dict[str, Any]) -> str:
 def apply_input_config_defaults(config: Dict[str, Any]) -> None:
     """Apply per-ARCH defaults, hardware fields, search-space resolution, and kernel-cap rules.
 
-    Mutates config in place. Call validate_input_config first for YAML-loaded dicts.
+    Mutates config in place, including rewriting a retired ARCH spelling. Call
+    validate_input_config first for YAML-loaded dicts.
     """
+    config["ARCH"] = canonical_arch(config["ARCH"])
     for key, default in CONFIG_DEFAULTS_BY_ARCH[config["ARCH"]].items():
         config.setdefault(key, default)
 
@@ -417,6 +428,13 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
                     f"Heuristic search space is not yet supported for complex data type "
                     f"'{gdt}'. Use search_space='generic' instead."
                 )
+
+    if ss == "subtile":
+        # Subtile tuning requires a persistent StreamK strategy (self-healed downstream)
+        # and runs with CMS disabled.
+        config["StreamK"] = True
+        config["CMS"] = False
+        config["CMS_PRIORITY"] = False
 
     if ss == "generic":
         config["MAX_NUM_KERNELS_PER_CONFIG"] = sys.maxsize

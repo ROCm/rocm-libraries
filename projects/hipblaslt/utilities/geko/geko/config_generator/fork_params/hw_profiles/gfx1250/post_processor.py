@@ -11,12 +11,17 @@ The base class's optional MT_DU filtering still runs via ``apply``.
 
 from typing import Dict, List, Sequence, Tuple
 
+from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
+    select_cluster_dims,
+    tile_grid,
+)
 from geko.config_generator.fork_params.hw_profiles.gfx1250.optimization_param import (
     GFX1250GAOrigamiPolicy,
 )
 from geko.config_generator.fork_params.post_processor import (
     BasePostProcessor,
     mark_post_process,
+    mi_macro_tile,
 )
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension, SizeContext
 
@@ -193,15 +198,52 @@ class _GFX1250DropMIGroupGSU:
         return fork_params, deduped
 
 
+class _GFX1250ClusterDimCoupling:
+    """Move ClusterDim into the MI groups, with the shapes each MI's grid admits.
+
+    Whether a cluster shape tiles the grid, and which shape of a size fetches
+    least, depend on the macro tile, so a flat ClusterDim axis would pair every
+    MI with shapes chosen for none of them. Each MI group entry is instead
+    repeated once per shape that :func:`select_cluster_dims` keeps for its tile
+    grid at this size, and the flat parameter is dropped.
+
+    The execution policy stays a separate group, so some pairs remain that
+    Tensile rejects: persistent StreamK takes only ``[Cs, 1]`` shapes and
+    DataParallel no ``[1, Ck]`` shape. Rejected solutions fail the GA's
+    validity check and are never benchmarked.
+    """
+
+    @mark_post_process
+    def couple_cluster_dim(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], list]:
+        fp = fork_params.get("ClusterDim")
+        if fp is None or not fp.active or len(fp.values) < 2:
+            return fork_params, mi_groups
+        coupled = []
+        for entry in mi_groups:
+            macro_tile = mi_macro_tile(entry)
+            grid = tile_grid(ctx.M, ctx.N, macro_tile)
+            for shape in select_cluster_dims(fp.values, grid, macro_tile):
+                coupled.append({**entry, "ClusterDim": self._make_param("ClusterDim", [list(shape)])})
+        del fork_params["ClusterDim"]
+        return fork_params, coupled
+
+
 # Base order is load-bearing. ``BasePostProcessor.__init__`` collects steps by
 # walking ``reversed(type(self).__mro__)``, so the LAST base listed contributes
 # its steps FIRST. _GFX1250GeometryNarrowing must run after
 # _GFX1250WaveTileFilter -- it derives HalfPLR / LDSSegmentInterleave from the
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
-# here therefore runs it second.
+# here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
+# it runs last, on the final, de-duplicated MI groups.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
+    _GFX1250ClusterDimCoupling,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
     _GFX1250WaveTileFilter,

@@ -45,7 +45,7 @@ def test_scale_values_round_trip(fmt: tuple, code: int) -> None:
         ("gfx950", (32, "E8"), 1001),
         ("gfx950_128cu", (32, "E8"), 1001),
         ("gfx950", (16, "F8"), 6),
-        ("gfx1250v0_96cu", (32, "E8"), 3),
+        ("gfx1250-strict_96cu", (32, "E8"), 3),
         (None, (32, "E8"), 3),
         ("gfx1250", None, 0),
     ],

@@ -153,19 +153,26 @@ class Library:
     def schedule(self) -> str:
         """Get the ``--architecture`` value TensileCreateLibrary needs for this library.
 
-        Returns:
-            str: The schedule name when it names a revision of the architecture
-            (e.g. "gfx1250v0" for gfx1250), otherwise the architecture.
+        TensileCreateLibrary selects logic files by their architecture, so that is
+        the value. ScheduleName can hold a codename instead (gfx942:
+        "aquavanjaram"), which ``--architecture`` rejects.
 
-        TensileCreateLibrary drops logic files whose ScheduleName revision differs
-        from the requested one in either direction, so a revisioned part has to be
-        requested by its ScheduleName. Other architectures carry a codename there
-        (gfx942: "aquavanjaram"), which ``--architecture`` rejects.
+        Returns:
+            str: The library's architecture, e.g. "gfx950" or "gfx1250-strict".
+
+        Raises:
+            ValueError: For gfx1250 A0 logic in the retired convention
+                (ScheduleName "gfx1250v0" over architecture "gfx1250"), which
+                TensileCreateLibrary would build into the gfx1250 (B0) library.
         """
         arch = self.arch
-        schedule = self._get(1, "ScheduleName")
-        if isinstance(schedule, str) and arch and schedule.startswith(arch):
-            return schedule
+        if self._get(1, "ScheduleName") == "gfx1250v0":
+            raise ValueError(
+                f"Library '{self.name}' is gfx1250 A0 logic in the retired gfx1250v0 convention "
+                f"(ScheduleName gfx1250v0, architecture {arch}). Set ScheduleName and "
+                "ArchitectureName to gfx1250-strict; as written it would be built into the "
+                "gfx1250 library."
+            )
         return arch
 
     @property

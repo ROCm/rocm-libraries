@@ -41,4 +41,8 @@ Until step 4 is done, `get_optimization_params` will raise `KeyError` for the ne
 
 - **Search space selection:** Parallel class sets and registries for the same `ARCH` string. `get_optimization_params` / `get_post_processor` switch on `config["search_space"]` and index the right map.
 
+- **Persistent-only options:** `PrefetchAcrossPersistent` and `PersistentXCCMapping` exist only for a persistent `TileProcessingStrategy`. Tensile raises on an explicit `PrefetchAcrossPersistent` with strategy `None`, which aborts a Ductile run, and zeroes the XCC remap there. Where a profile searches the non-persistent kernel alongside persistent ones (gfx1250 generic, Equality libraries), emit them as one group of valid pairs rather than as crossed flat axes.
+
+- **gfx1250 ClusterDim:** the generic profile offers every cluster shape whose size divides the WGPs of a shader engine (16 on every gfx1250 key; `[[1, 1]]` on gfx1250-strict, which has no TDM multicast). The generic post-processor then moves `ClusterDim` into the MI groups, keeping for each MI the shapes that tile its grid with the least traffic per size ([`hw_profiles/gfx1250/cluster_dim.py`](hw_profiles/gfx1250/cluster_dim.py)). `ConfigSectionGenerator` offsets the Ductile `group_0` costs so an MI's sampling probability does not grow with its number of shapes.
+
 For extension patterns, read `generate_for_size` on [`BaseOptimizationParams`](optimization_param.py) and `apply` on [`BasePostProcessor`](post_processor.py).

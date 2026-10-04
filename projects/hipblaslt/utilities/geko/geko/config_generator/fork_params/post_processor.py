@@ -110,10 +110,10 @@ class BasePostProcessor(BaseParamBuilder):
     def _origami_picks_wgm(self) -> bool:
         """Whether the runtime, not this search, picks WGM and StaggerU.
 
-        hipBLASLt takes the origami path only for StreamK kernels, and Tensile
-        rejects ``WorkGroupMappingXCC: -1`` without StreamK ("Can only use auto
-        WGMXCC with StreamK"). Profiles that also gate on something else, such
-        as the library type, override this.
+        hipBLASLt takes the origami path only for persistent kernels, and Tensile
+        rejects ``WorkGroupMappingXCC: -1`` without a persistent strategy ("Can
+        only use auto WGMXCC with StreamK"). Profiles that also gate on something
+        else, such as the library type, override this.
         """
         return bool(self.config.get("StreamK", False))
 
@@ -128,7 +128,7 @@ class BasePostProcessor(BaseParamBuilder):
         Overrides select params with fixed values and filters MI groups
         to only keep entries matching the specified macro tile (MT0, MT1).
         The origami sentinels (WorkGroupMapping 0, WorkGroupMappingXCC -1,
-        StreamKXCCMapping 0) are applied only when ``_origami_picks_wgm()``;
+        PersistentXCCMapping 0) are applied only when ``_origami_picks_wgm()``;
         otherwise the profile's own values stay.
         """
         fixed_MT0, fixed_MT1, fixed_DU = mt_du[0], mt_du[1], mt_du[2]
@@ -141,10 +141,10 @@ class BasePostProcessor(BaseParamBuilder):
             "NonTemporalB": [0],
             "NonTemporalC": [0],
             "NonTemporalD": [0],
-            "StreamKXCCMapping": [0],
+            "PersistentXCCMapping": [0],
         }
         if not self._origami_picks_wgm():
-            for name in ("WorkGroupMapping", "WorkGroupMappingXCC", "StreamKXCCMapping"):
+            for name in ("WorkGroupMapping", "WorkGroupMappingXCC", "PersistentXCCMapping"):
                 del overrides[name]
         for name, values in overrides.items():
             if name in fork_params:
@@ -160,7 +160,12 @@ class BasePostProcessor(BaseParamBuilder):
         return fork_params, mi_groups
 
 
+def mi_macro_tile(entry: Dict[str, ForkParameter]) -> Tuple[int, int]:
+    """``(MT0, MT1)`` of an MI group entry."""
+    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+    return mfma_params.MT0, mfma_params.MT1
+
+
 def _mi_matches_mt(entry: Dict[str, ForkParameter], fixed_MT0: int, fixed_MT1: int) -> bool:
     """Check if an MI group entry's macro tile matches the fixed MT."""
-    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
-    return mfma_params.MT0 == fixed_MT0 and mfma_params.MT1 == fixed_MT1
+    return mi_macro_tile(entry) == (fixed_MT0, fixed_MT1)
