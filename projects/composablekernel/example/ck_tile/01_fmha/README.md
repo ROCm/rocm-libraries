@@ -52,9 +52,8 @@ historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
 residency. Aligned batch K lengths use unpadded
 sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
 softmax maximum chains and places each next-stage LDS read before the current
-WMMA, preserving read counts and stage-tail waits. Its generated sources use
-the compiler's default scheduling mode; only D128/D192 scheduled sources enable
-expert scheduling mode. D128 uses a
+WMMA, preserving read counts and stage-tail waits. Generated D64/D128/D192
+scheduled sources enable expert scheduling mode. D128 uses a
 128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
 is at least 512, the Q grid fits within the CU count, logical length pointers
 are absent, and the mask is dense or square causal. Otherwise it uses a
