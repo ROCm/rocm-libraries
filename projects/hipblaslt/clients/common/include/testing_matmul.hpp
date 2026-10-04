@@ -5115,9 +5115,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
 
-    // The workspace the checked solutions use.
+    // The workspace the checked solutions use. A placed workspace moves for each solution, so
+    // that solution's own workspace straddles the 4 GiB boundary.
     std::unique_ptr<PlacedRegion> placedWorkspace;
-    void*                         workspacePtr = static_cast<unsigned char*>(*dWorkspace);
+    void*                         workspacePtr   = static_cast<unsigned char*>(*dWorkspace);
+    size_t                        workspaceBytes = workspace_size;
     if(placeWorkspace)
     {
         std::string why;
@@ -5130,8 +5132,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             unsupported = true;
         }
         else
-            placedWorkspace = PlacedRegion::create(
-                workspace_size, size_t(arg.placement_offset), HIP_R_8I, &why, &unsupported);
+            // Twice the workspace (plus room for the boundary to land on a mapping granule), so
+            // that each solution's start can sit below the boundary with the whole workspace
+            // size, which any solution may use, still mapped after it.
+            placedWorkspace = PlacedRegion::create(2 * workspace_size + (size_t(4) << 20),
+                                                   size_t(arg.placement_offset),
+                                                   HIP_R_8I,
+                                                   &why,
+                                                   &unsupported);
         CHECK_PLACEMENT(placedWorkspace != nullptr, unsupported, why);
         workspacePtr = placedWorkspace->ptr();
     }
@@ -5592,6 +5600,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             SCOPED_TRACE(solution_description(
                 handle, heuristicResult[sol].algo, sol, heuristicResult.size(), false));
 #endif
+            if(placedWorkspace)
+            {
+                workspacePtr
+                    = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
+                workspaceBytes = heuristicResult[sol].workspaceSize;
+            }
             if(arg.fast_check && !arg.c_equal_d)
             {
                 for(int i = 0; i < gemm_count; i++)
@@ -5828,12 +5842,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
                     if(!scan.passed || !res.passed)
                     {
-                        std::vector<FastCheckBuffer> buffers = {
-                            {"A", dA[i].buf(), size_A[i] * realDataTypeSize(TiA)},
-                            {"B", dB[i].buf(), size_B[i] * realDataTypeSize(TiB)},
-                            {"C", dC[i].buf(), size_C[i] * realDataTypeSize(To)},
-                            {"D", (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To)},
-                            {"workspace", workspacePtr, workspace_size}};
+                        std::vector<FastCheckBuffer> buffers
+                            = {{"A", dA[i].buf(), size_A[i] * realDataTypeSize(TiA)},
+                               {"B", dB[i].buf(), size_B[i] * realDataTypeSize(TiB)},
+                               {"C", dC[i].buf(), size_C[i] * realDataTypeSize(To)},
+                               {"D", (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To)},
+                               {"workspace", workspacePtr, workspaceBytes}};
                         if(arg.bias_vector)
                             buffers.push_back(
                                 {"bias", dBias[i].buf(), size_bias[i] * realDataTypeSize(Tbias)});
@@ -5863,6 +5877,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                 for(auto* v : {&dA, &dB, &dC, &dD, &dBias, &dScaleAlphaVec})
                     if(!placed && !v->empty() && (*v)[0].placement())
                         placed = (*v)[0].placement();
+                // A placement that silently fell back to a normal allocation would pass while
+                // testing nothing.
+                const bool straddles = placed
+                                       && (placed != placedWorkspace.get() || workspaceBytes <= 256
+                                           || placed->crosses(workspacePtr, workspaceBytes));
+                if(*arg.placement && !straddles)
+                {
+                    const std::string report
+                        = std::string("fast_check placement: ") + arg.placement
+                          + " was to cross a 4 GiB boundary but "
+                          + (placed ? "this solution's range does not" : "no buffer was placed");
+#ifdef GOOGLE_TEST
+                    ADD_FAILURE() << report;
+#else
+                    hipblaslt_cerr << report << std::endl;
+#endif
+                }
                 if(placed)
                 {
                     FastCheckResult poison = placed->verify_poison(arg.placement, stream);

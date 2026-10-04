@@ -1182,6 +1182,45 @@ namespace
         EXPECT_NE(why.find("multiple of the mapping granularity"), std::string::npos) << why;
     }
 
+    // Solutions use different amounts of one placed workspace, and each one's range must cross the
+    // boundary while staying inside the mapped window. A write past the end of a placed buffer,
+    // into the rest of its mapped window, must be reported.
+    TEST(FastCheckDevice_pre_checkin, placed_workspace_straddles_for_every_size)
+    {
+        const size_t bytes = (size_t(16) << 20) - 4096;
+        std::string  why;
+        bool         unsupported = false;
+        auto         region      = PlacedRegion::create(bytes, 0, HIP_R_8I, &why, &unsupported);
+        if(!region && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(region) << why;
+
+        // As the harness places a workspace: twice the largest size, so any solution may use all
+        // of it from wherever its own range starts.
+        const uint64_t lo   = reinterpret_cast<uint64_t>(region->ptr());
+        const size_t   room = bytes / 2;
+        for(size_t ws : {size_t(300), size_t(4096), size_t(1) << 20, size_t(5) << 20, room})
+        {
+            void*          p  = region->straddle(ws, room);
+            const uint64_t at = reinterpret_cast<uint64_t>(p);
+            EXPECT_TRUE(region->crosses(p, ws)) << ws;
+            EXPECT_EQ(at % 256, 0u) << ws;
+            EXPECT_GE(at, lo) << ws;
+            EXPECT_LE(at + room, lo + bytes) << ws;
+        }
+
+        auto clean = region->verify_poison("workspace", 0);
+        EXPECT_TRUE(clean.passed) << clean.message;
+        if(region->span() > bytes)
+        {
+            ASSERT_EQ(hipMemset(static_cast<char*>(region->ptr()) + bytes, 1, 1), hipSuccess);
+            auto tail = region->verify_poison("workspace", 0);
+            EXPECT_FALSE(tail.passed);
+            EXPECT_NE(tail.message.find("past the end of workspace"), std::string::npos)
+                << tail.message;
+        }
+    }
+
     // std::vector growth moves its elements. A placed buffer must keep its address through the
     // move, and the moved-from object must not touch the placed memory when it is destroyed.
     TEST(FastCheckDevice_pre_checkin, placed_buffer_survives_vector_growth)

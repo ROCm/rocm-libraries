@@ -23,6 +23,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 class PlacedRegion
 {
@@ -156,14 +158,48 @@ public:
         return (m_windows[0] / k4GiB + 1) * k4GiB;
     }
 
-    // Refills both poison windows with kFastCheckPoisonValue.
+    // Bytes mapped for the buffer: its size rounded up to the mapping granularity.
+    size_t span() const
+    {
+        return m_span;
+    }
+
+    // Whether [p, p + bytes) crosses the boundary.
+    bool crosses(const void* p, size_t bytes) const
+    {
+        const uint64_t at = reinterpret_cast<uint64_t>(p);
+        return at < boundary() && at + bytes > boundary();
+    }
+
+    // A 256-byte aligned start inside the buffer window from which a range of `bytes` straddles
+    // the boundary near its middle, while `room` bytes from the start (at least `bytes`) stay
+    // inside the buffer. Different solutions use different amounts of one placed workspace, each
+    // needs its own range to cross, and each may touch up to the whole workspace size it was
+    // given. A range of 256 bytes or less cannot cross from an aligned start.
+    void* straddle(size_t bytes, size_t room) const
+    {
+        room = std::max(room, bytes);
+        if(bytes <= 256 || room > m_bytes)
+            return ptr();
+        const uint64_t lo   = m_windows[0];
+        const uint64_t hi   = (m_windows[0] + m_bytes - room) / 256 * 256;
+        const uint64_t half = std::max<uint64_t>(256, bytes / 2 / 256 * 256);
+        return reinterpret_cast<void*>(std::clamp(boundary() - half, lo, std::max(lo, hi)));
+    }
+
+    // Refills both poison windows, and the buffer window past the buffer's end, with
+    // kFastCheckPoisonValue.
     hipError_t fill_poison(hipStream_t stream) const
     {
-        const size_t elements = m_span / fast_check_element_size(m_type);
-        for(int w = 1; w < 3; w++)
-            fast_check_poison_padding_device(
-                {reinterpret_cast<void*>(m_windows[w]), m_type, 0, 0, 1, 0}, 1, elements, stream);
-        return hipGetLastError();
+        hipError_t err = hipSuccess;
+        for(const auto& [at, elements] : poisoned_ranges())
+        {
+            hipError_t e = fast_check_poison_padding_device(
+                {reinterpret_cast<void*>(at), m_type, 0, 0, 1, 0}, 1, elements, stream);
+            if(e != hipSuccess)
+                err = e;
+        }
+        return err;
     }
 
     // Fails when any element of either poison window no longer holds the poison value: a write
@@ -172,25 +208,32 @@ public:
     {
         FastCheckResult    result;
         std::ostringstream msg;
-        const size_t       es       = fast_check_element_size(m_type);
-        const char*        where[3] = {"", "below", "above"};
-        for(int w = 1; w < 3; w++)
+        const size_t       es     = fast_check_element_size(m_type);
+        const auto         ranges = poisoned_ranges();
+        for(size_t w = 0; w < ranges.size(); w++)
         {
-            FastCheckChanged c = fast_check_count_changed_device(
-                reinterpret_cast<const void*>(m_windows[w]), m_type, m_span / es, stream);
+            const auto [at, elements] = ranges[w];
+            FastCheckChanged c        = fast_check_count_changed_device(
+                reinterpret_cast<const void*>(at), m_type, elements, stream);
             if(!c.ok)
                 return {false, "could not scan the placement poison windows"};
-            if(c.count)
+            if(!c.count)
+                continue;
+            result.passed = false;
+            if(w < 2)
             {
-                result.passed = false;
-                msg << c.count << " elements of the poison window 4 GiB " << where[w] << " "
-                    << operand << " were written. The first is " << operand << " element "
-                    << c.first << " (byte offset " << c.first * es << ") moved 4 GiB " << where[w]
+                const char* where = w == 0 ? "below" : "above";
+                msg << c.count << " elements of the poison window 4 GiB " << where << " " << operand
+                    << " were written. The first is " << operand << " element " << c.first
+                    << " (byte offset " << c.first * es << ") moved 4 GiB " << where
                     << ", the effect of an address that "
-                    << (w == 1 ? "lost the carry out of its low 32 bits"
+                    << (w == 0 ? "lost the carry out of its low 32 bits"
                                : "gained a carry into its high 32 bits")
                     << ".\n";
             }
+            else
+                msg << c.count << " elements past the end of " << operand
+                    << " were written; the first is element " << m_bytes / es + c.first << ".\n";
         }
         result.message = msg.str();
         return result;
@@ -198,6 +241,19 @@ public:
 
 private:
     PlacedRegion() = default;
+
+    // (address, elements) of each poisoned range: the windows 4 GiB below and above the buffer,
+    // then the mapped tail of the buffer window after the buffer's last element.
+    std::vector<std::pair<uint64_t, size_t>> poisoned_ranges() const
+    {
+        const size_t                             es = fast_check_element_size(m_type);
+        std::vector<std::pair<uint64_t, size_t>> ranges
+            = {{m_windows[1], m_span / es}, {m_windows[2], m_span / es}};
+        const size_t used = (m_bytes + es - 1) / es;
+        if(m_span / es > used)
+            ranges.push_back({m_windows[0] + used * es, m_span / es - used});
+        return ranges;
+    }
 
     hipDataType                     m_type{};
     hipMemAllocationProp            m_prop{};
