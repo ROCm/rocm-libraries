@@ -121,7 +121,8 @@ static constexpr bool fmha_bwd_product_dual_{F_idx} =
     ({F_maxq} == 0) &&
     ({F_bm0} == 32) &&
     ((({F_bn0} == 32) && ({F_bhdq} == 128) && ({F_bhdv} == 128)) ||
-     (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64))) &&
+     (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64)) ||
+     (({F_bn0} == 64) && ({F_bhdq} == 32) && ({F_bhdv} == 32))) &&
     ({F_dpad} == 0) &&
     ({F_dvpad} == 0) &&
     !({F_dbias}) &&
@@ -442,7 +443,8 @@ FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && 
         ({F_maxq} == 0) &&
         ({F_bm0} == 32) &&
         ((({F_bn0} == 32) && ({F_bhdq} == 128) && ({F_bhdv} == 128)) ||
-         (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64))) &&
+         (({F_bn0} == 64) && ({F_bhdq} == 64) && ({F_bhdv} == 64)) ||
+         (({F_bn0} == 64) && ({F_bhdq} == 32) && ({F_bhdv} == 32))) &&
         ({F_dpad} == 0) &&
         ({F_dvpad} == 0) &&
         !({F_dbias}) &&

@@ -3,7 +3,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Regression tests for the gfx12 BF16 D=64/128 product-dual codegen paths."""
+"""Regression tests for the gfx12 BF16 D=32/64/128 product-dual codegen paths."""
 
 import re
 import subprocess
@@ -138,6 +138,16 @@ class TestFmhaBwdD64ProductDualCodegen(TestFmhaBwdProductDualCodegen):
     eligible_glob = (
         "fmha_bwd_d64_bf16_batch_"
         "b32x64x64x32x64x32x32x64x64_*_"
+        "maxq0_npad_nbias_ndbias_nmask_ndropout_"
+        "ndeterministic_ntrload_gfx12.cpp"
+    )
+
+
+class TestFmhaBwdD32ProductDualCodegen(TestFmhaBwdProductDualCodegen):
+    dim = 32
+    eligible_glob = (
+        "fmha_bwd_d32_bf16_batch_"
+        "b32x64x32x32x32x32x64x32x32_*_"
         "maxq0_npad_nbias_ndbias_nmask_ndropout_"
         "ndeterministic_ntrload_gfx12.cpp"
     )
