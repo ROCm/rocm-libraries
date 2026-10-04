@@ -106,9 +106,12 @@ def environment_record(xnack: str, load: str) -> dict:
     return record
 
 
-def load_command(load: str, test_bin: Path, cotenant_log: Path) -> Optional[list[str]]:
+def load_command(
+    load: str, test_bin: Path, cotenant_log: Path, ready_seconds: float
+) -> Optional[list[str]]:
     """The background workload for one load setting, or None for no load. The cotenant writes its
-    kernel's output, including READY, to cotenant_log."""
+    kernel's output, including READY, to cotenant_log, and gives up after ready_seconds.
+    """
     if load == "none":
         return None
     if load == "gemm":
@@ -127,6 +130,8 @@ def load_command(load: str, test_bin: Path, cotenant_log: Path) -> Optional[list
             load.split(":", 1)[1],
             "--log",
             str(cotenant_log),
+            "--wait",
+            str(ready_seconds),
             "--",
             "sleep",
             "infinity",
@@ -160,8 +165,10 @@ def parse_run(output: str) -> dict:
         )
     )
     passed = re.search(r"^\[  PASSED  \] (\d+) tests?", output, re.MULTILINE)
+    skipped = re.search(r"^\[  SKIPPED \] (\d+) tests?", output, re.MULTILINE)
     return {
         "tests_passed": int(passed.group(1)) if passed else 0,
+        "tests_skipped": int(skipped.group(1)) if skipped else 0,
         "tests_failed": failed,
         "failing_solutions": solutions,
         "buffers_crossing_4gib": [f"{name}: {span}" for name, span in crossings],
@@ -182,9 +189,9 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
         f"{args.invocation}.run{index}_{xnack}_{re.sub(r'[^A-Za-z0-9._-]+', '-', load)}"
     )
 
-    background, load_log = None, None
+    background, load_log, problem = None, None, None
     cotenant_log = args.results.with_suffix(f".{stem}.cotenant.log")
-    bg_cmd = load_command(load, args.test_bin, cotenant_log)
+    bg_cmd = load_command(load, args.test_bin, cotenant_log, args.load_ready_seconds)
     # The load is stopped however this run ends, including on Ctrl-C while it settles, so it
     # never carries over into a later combination.
     try:
@@ -193,14 +200,18 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
             with load_log.open("w") as bg_out:
                 # Its own session, so stopping it reaches the cotenant and the command the
                 # cotenant launcher runs as well.
-                background = subprocess.Popen(
-                    bg_cmd,
-                    env=env,
-                    stdout=bg_out,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            problem = wait_for_load(background, load, cotenant_log, args)
+                try:
+                    background = subprocess.Popen(
+                        bg_cmd,
+                        env=env,
+                        stdout=bg_out,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                except OSError as e:
+                    problem = f"could not start the load: {e}"
+            if background:
+                problem = wait_for_load(background, load, cotenant_log, args)
             if problem:
                 record.update(
                     {
@@ -238,6 +249,8 @@ def run_once(args: argparse.Namespace, xnack: str, load: str, index: int) -> dic
     record.update(parse_run(output))
     if code == 0 and not record["tests_passed"] and not record["tests_failed"]:
         record["error"] = "no tests ran; check --filter and --test-bin"
+    elif args.fail_on_skip and record["tests_skipped"]:
+        record["error"] = f"{record['tests_skipped']} tests skipped"
     if is_failure(record):
         log = args.results.with_suffix(f".{stem}.log")
         log.write_text(output)
@@ -307,6 +320,14 @@ def is_failure(record: dict) -> bool:
 
 
 def main(argv: list[str]) -> int:
+    # Route SIGTERM and SIGHUP (a dropped ssh session) through the cleanup Ctrl-C already uses,
+    # so the background load, which runs in its own session, is stopped with this script.
+    def _interrupt(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _interrupt)
+
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -354,6 +375,11 @@ def main(argv: list[str]) -> int:
         help="seconds to wait for the cotenant's READY (default: %(default)s)",
     )
     parser.add_argument(
+        "--fail-on-skip",
+        action="store_true",
+        help="count a run in which any test skipped as a failure",
+    )
+    parser.add_argument(
         "--results",
         type=Path,
         default=Path("sdc_hunt_results.jsonl"),
@@ -365,6 +391,13 @@ def main(argv: list[str]) -> int:
             parser.error(f"--{name.replace('_', '-')} must not be negative")
     if args.timeout <= 0 or args.runs < 1:
         parser.error("--timeout must be positive and --runs at least 1")
+    for load in args.load:
+        if load.startswith("cotenant:"):
+            cus = load.split(":", 1)[1]
+            if not cus.isdigit() or int(cus) < 1:
+                parser.error(
+                    f"{load}: the cotenant needs a positive CU count; use 'none' for no load"
+                )
     args.results = args.results.resolve()
     # Names this invocation's logs, so a later invocation appending to the same results file
     # does not overwrite them.
@@ -383,7 +416,8 @@ def main(argv: list[str]) -> int:
         print(
             f"run {index}: xnack={xnack} load={load} cwsr={record['cwsr_enable']} "
             f"-> {verdict} ({record['tests_passed']} passed, "
-            f"{len(record['tests_failed'])} failed, {record['seconds']} s)"
+            f"{len(record['tests_failed'])} failed, {record['tests_skipped']} skipped, "
+            f"{record['seconds']} s)"
         )
         for problem in (record.get("load_error"), record.get("error")):
             if problem:

@@ -197,12 +197,12 @@ bool match_test_category(const Arguments& arg, const char* category);
         }                                                                           \
     } while(0)
 
-// fast_check cases in these categories need tens of GiB or run for many minutes. A run with no
-// gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a filter that selects them,
-// such as the ctest tier patterns, runs them.
+// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
+// filter that selects them, such as the ctest tier patterns, runs them.
 inline bool hipblaslt_category_needs_a_filter(const char* category)
 {
-    return !strcmp(category, "stress");
+    return !strcmp(category, "stress") || !strcmp(category, "sdc_hunt");
 }
 
 inline bool hipblaslt_gtest_filter_given()

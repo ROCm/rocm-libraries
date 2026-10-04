@@ -46,7 +46,11 @@ cotenant's `READY` (up to `--load-ready-seconds`), or gives other loads
 `load_failed`. A load that stops during the run is recorded as
 `load_ran_throughout: false` and fails the run. The cotenant's kernel log is
 kept next to the results when a run fails. A run in which no test ran, usually a stale binary or
-a mistyped `--filter`, also fails.
+a mistyped `--filter`, also fails. Skipped tests are counted in `tests_skipped`; with
+`--fail-on-skip`, a run with any skip fails too.
+
+Stopping the script with Ctrl-C, `kill` or a dropped session also stops its background load and
+the test it was running.
 
 This is for dedicated hardware, not CI: the runs hold the GPU for a long time, and
 on gfx1250 a page fault can leave the GPU unusable until it is reset (ROCM-32049).
