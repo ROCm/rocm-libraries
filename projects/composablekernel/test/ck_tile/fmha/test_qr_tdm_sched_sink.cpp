@@ -135,15 +135,37 @@ void Launch(const Config& c, fmha_fwd_args args)
         ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<float, Data, true, true>>;
     using Kernel = ck_tile::FmhaFwdKernel<Pipeline, Epilogue>;
     static_assert(Kernel::kHasSink == HasSink && Kernel::kStoreLSE == Lse);
-    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<Kernel>(args);
+    auto [kargs, grids]         = fmha_fwd_create_kargs_and_grids<Kernel>(args);
+    using NoVirtualSinkPipeline = ck_tile::BlockFmhaPipelineQRKSVSTdmSched<Problem, Policy, false>;
+    using NoVirtualSinkKernel   = ck_tile::FmhaFwdKernel<NoVirtualSinkPipeline, Epilogue>;
+    auto [no_virtual_sink_kargs, no_virtual_sink_grids] =
+        fmha_fwd_create_kargs_and_grids<NoVirtualSinkKernel>(args);
+    EXPECT_EQ(NoVirtualSinkKernel::IsSupportedArgument(no_virtual_sink_kargs),
+              args.sink_ptr == nullptr);
+    const bool finite_virtual_sink = args.sink_ptr != nullptr;
     std::cout << "sink_kernel=qr_tdm_sched dtype=" << kDtype << " dq=" << kD << " n=" << kN
               << " mask=" << Mask << " token_sink=" << HasSink << " lse=" << Lse
-              << " occupancy=" << Kernel::kBlockPerCu << " grid=" << grids.x << ',' << grids.y
-              << ',' << grids.z << " folded_scale=" << kargs.scale_s << '\n';
+              << " virtual_sink=" << finite_virtual_sink << " occupancy=" << Kernel::kBlockPerCu
+              << " grid=" << grids.x << ',' << grids.y << ',' << grids.z
+              << " folded_scale=" << kargs.scale_s << '\n';
     const ck_tile::stream_config stream{nullptr, false, 0, 0, 1};
-    ck_tile::launch_kernel(stream,
-                           ck_tile::make_kernel<Kernel::kBlockPerCu, ck_tile::gfx125_t>(
-                               Kernel{}, grids, Kernel::BlockSize(), 0, kargs));
+    if(finite_virtual_sink)
+    {
+        ck_tile::launch_kernel(stream,
+                               ck_tile::make_kernel<Kernel::kBlockPerCu, ck_tile::gfx125_t>(
+                                   Kernel{}, grids, Kernel::BlockSize(), 0, kargs));
+    }
+    else
+    {
+        ck_tile::launch_kernel(
+            stream,
+            ck_tile::make_kernel<NoVirtualSinkKernel::kBlockPerCu, ck_tile::gfx125_t>(
+                NoVirtualSinkKernel{},
+                no_virtual_sink_grids,
+                NoVirtualSinkKernel::BlockSize(),
+                0,
+                no_virtual_sink_kargs));
+    }
     Check(hipGetLastError());
     Check(hipDeviceSynchronize());
     (void)c;
@@ -314,7 +336,16 @@ struct SinkCase
     const char* name;
     Config config;
 };
-const std::array<SinkCase, 6> kSinkCases{{
+const std::array<SinkCase, 8> kSinkCases{{
+    {"DenseNoVirtual",
+     Config{.sq       = 128,
+            .sk       = 128,
+            .left     = -1,
+            .right    = -1,
+            .sink     = 0,
+            .masked   = false,
+            .has_sink = false}},
+    {"CausalNoVirtual", Config{.sq = 128, .sk = 128, .left = -1, .sink = 0, .has_sink = false}},
     {"DenseVirtual",
      Config{.sq         = 128,
             .sk         = 128,
@@ -353,7 +384,7 @@ TEST_P(QrTdmSchedSink, DirectPaddedBatch)
 }
 INSTANTIATE_TEST_SUITE_P(VirtualAndRealPrefix,
                          QrTdmSchedSink,
-                         ::testing::Combine(::testing::Range(0, 6), ::testing::Bool()),
+                         ::testing::Combine(::testing::Range(0, 8), ::testing::Bool()),
                          [](const ::testing::TestParamInfo<QrTdmSchedSink::ParamType>& case_info) {
                              const auto index = std::get<0>(case_info.param);
                              const auto lse   = std::get<1>(case_info.param);
