@@ -7,8 +7,6 @@ generic names that merely look like one (gfx950-dcgpu, gfx11-generic): the first
 shard and reaches ``hipcc --offload-arch``, the second must be dropped with a warning.
 """
 
-import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -20,15 +18,7 @@ _PROVIDER_CMAKE_DIR = _CMAKE_DIR.parents[1] / "cmake"
 pytestmark = pytest.mark.quick
 
 
-def _cmake():
-    # The CMake that configured this build, when ctest forwards it; PATH otherwise.
-    exe = os.environ.get("HKP_CMAKE_COMMAND") or shutil.which("cmake")
-    if not exe:
-        pytest.fail("cmake not found on PATH")
-    return exe
-
-
-def _select(tmp_path, targets, variable="GPU_TARGETS"):
+def _select(cmake, tmp_path, targets, variable="GPU_TARGETS"):
     """Return (selected arches, ignored entries, source variable) for a target list."""
     script = tmp_path / "select.cmake"
     script.write_text(
@@ -40,7 +30,7 @@ def _select(tmp_path, targets, variable="GPU_TARGETS"):
         'message(STATUS "SELECTED=[${_arches}] SOURCE=[${_source}]")\n'
     )
     result = subprocess.run(
-        [_cmake(), "-P", str(script)], capture_output=True, text=True, check=True
+        [cmake, "-P", str(script)], capture_output=True, text=True, check=True
     )
     out = result.stdout + result.stderr
     selected = next(line for line in out.splitlines() if "SELECTED=[" in line).split(
@@ -105,42 +95,44 @@ NOT_CONCRETE = [
 
 
 @pytest.mark.parametrize("target", CONCRETE)
-def test_concrete_target_is_selected_whole(tmp_path, target):
-    assert _select(tmp_path, target)[:2] == ([target], [])
+def test_concrete_target_is_selected_whole(cmake, tmp_path, target):
+    assert _select(cmake, tmp_path, target)[:2] == ([target], [])
 
 
 @pytest.mark.parametrize("target", NOT_CONCRETE)
-def test_non_concrete_name_is_dropped_with_a_warning(tmp_path, target):
-    assert _select(tmp_path, target)[:2] == ([], [target])
+def test_non_concrete_name_is_dropped_with_a_warning(cmake, tmp_path, target):
+    assert _select(cmake, tmp_path, target)[:2] == ([], [target])
 
 
-def test_strict_and_base_arch_stay_separate_entries(tmp_path):
-    assert _select(tmp_path, "gfx1250;gfx1250-strict")[0] == [
+def test_strict_and_base_arch_stay_separate_entries(cmake, tmp_path):
+    assert _select(cmake, tmp_path, "gfx1250;gfx1250-strict")[0] == [
         "gfx1250",
         "gfx1250-strict",
     ]
 
 
-def test_feature_suffix_is_stripped_before_the_check(tmp_path):
+def test_feature_suffix_is_stripped_before_the_check(cmake, tmp_path):
     arches, ignored, _ = _select(
-        tmp_path, "gfx942:xnack-;gfx1250-strict:sramecc+;gfx950-dcgpu:xnack-"
+        cmake, tmp_path, "gfx942:xnack-;gfx1250-strict:sramecc+;gfx950-dcgpu:xnack-"
     )
     assert arches == ["gfx942", "gfx1250-strict"]
     assert ignored == ["gfx950-dcgpu:xnack-"]
 
 
-def test_mixed_list_keeps_only_concrete_targets(tmp_path):
+def test_mixed_list_keeps_only_concrete_targets(cmake, tmp_path):
     arches, ignored, _ = _select(
-        tmp_path, "gfx94X-dcgpu;gfx11-generic;gfx950;gfx1250-strict"
+        cmake, tmp_path, "gfx94X-dcgpu;gfx11-generic;gfx950;gfx1250-strict"
     )
     assert arches == ["gfx950", "gfx1250-strict"]
     assert ignored == ["gfx94X-dcgpu", "gfx11-generic"]
 
 
-def test_duplicates_collapse(tmp_path):
-    assert _select(tmp_path, "gfx942;gfx942:xnack-;gfx942")[0] == ["gfx942"]
+def test_duplicates_collapse(cmake, tmp_path):
+    assert _select(cmake, tmp_path, "gfx942;gfx942:xnack-;gfx942")[0] == ["gfx942"]
 
 
-def test_amdgpu_targets_is_the_fallback_source(tmp_path):
-    arches, _, source = _select(tmp_path, "gfx1250-strict", variable="AMDGPU_TARGETS")
+def test_amdgpu_targets_is_the_fallback_source(cmake, tmp_path):
+    arches, _, source = _select(
+        cmake, tmp_path, "gfx1250-strict", variable="AMDGPU_TARGETS"
+    )
     assert (arches, source) == (["gfx1250-strict"], "AMDGPU_TARGETS")
