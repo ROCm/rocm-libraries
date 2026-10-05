@@ -497,8 +497,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 "default); got " +
                 std::to_string(cfg) + ".");
         }
-        // The arch default is per WMMA window; the span covers a whole batch.
-        const int resolved = cfg < INT_MAX ? cfg : config_.dsReadPerCap * wmmaBatchSize();
+        const int resolved = cfg < INT_MAX ? cfg : config_.dsReadPerCap;
         // The arch default is static data, so a bad one is a build-time mistake
         // in this file rather than a caller error.
         assert(resolved > 0 && "arch config dsReadPerCap must be positive");

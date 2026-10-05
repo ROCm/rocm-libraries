@@ -1752,10 +1752,6 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanCoversTheWmmaBatchWindow) {
     ASSERT_NE(spanPos, std::string::npos);
     EXPECT_EQ(std::stoi(captured.str().substr(spanPos + 5)), 8 + 4 * 7)
         << "{1,8} WMMA, batch of 5: 8 + (5-1)*(8-1)";
-    // Arch default cap (3 per WMMA window) applies per batch window: 3 * 5.
-    const int cap =
-        std::stoi(captured.str().substr(pos + std::string("[CDNA5 dsCap] dsReadPerCap=").size()));
-    EXPECT_EQ(cap, 15);
 }
 
 // A batch window's ds_load budget lands on the batch's first WMMA; the rest of

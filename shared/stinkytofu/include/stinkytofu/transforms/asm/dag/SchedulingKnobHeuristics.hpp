@@ -53,8 +53,6 @@ struct SchedulingIRStats {
     int sumWmmaLatencyCycles = 0;
     /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
     int firstWmmaLatencyCycles = 0;
-    /// `issueCycles` of the first main-loop matrix instruction (0 if none).
-    int firstWmmaIssueCycles = 0;
     /// `latencyCycles` of the first main-loop ds_load (0 if none).
     int firstDsLoadLatencyCycles = 0;
 
@@ -66,7 +64,7 @@ struct SchedulingIRStats {
 /// Stable feature schema for heuristic / future NN policies (bump version when
 /// the layout of fields that models train on changes).
 struct SchedulingFeatures {
-    int featureVersion = 7;
+    int featureVersion = 6;
     std::array<int, 3> arch{};
     SchedulingIRStats stats{};
     /// Optional tile/wave shape from ModuleOptions (0 = unknown / unset).
@@ -79,9 +77,6 @@ struct SchedulingFeatures {
     /// Tensile `KernelWriter.states.unrollLoopCopies`: how many unrolled loop
     /// bodies are emitted. HalfPLR sets this to 3. 0 = not provided.
     int unrollLoopCopies = 0;
-    /// ModuleOptions::WmmaBatchSize (<= 0 -> 1). A batch of N WMMAs spans one
-    /// L + (N-1)*(L-I) window, and dsReadPerCap applies per that window.
-    int wmmaBatchSize = 1;
 };
 
 struct ResolvedSchedulingKnobs {
