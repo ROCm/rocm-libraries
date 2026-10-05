@@ -24,7 +24,9 @@
  *   B[total_k, KH, KW, 1]  naive
  *   D[N, Ho, Wo, total_k]  naive
  *
- * Unroll threshold: n_iters * KH * KW <= 20000 (one W-pos per thread).
+ * Unroll threshold: n_iters * KH * KW <= 0 (one W-pos per thread), i.e. never —
+ * the cost is always >= 1.  Shared with the streaming builder; see
+ * _DW_UNROLL_THRESH in the Python source for why it is 0.  Change together.
  * Above the threshold: scf_for_iter over n_groups = ceil(n_iters / KH) groups.
  *
  * Phase functions: rocke_build_direct_depthwise_spatial (full kernel build),
@@ -153,7 +155,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     total_k = rocke_direct_conv_problem_total_k(p);
 
     n_iters = p->H + p->KH - 1;
-    _use_unroll = ((long)n_iters * p->KH * p->KW) <= 20000;
+    _use_unroll = ((long)n_iters * p->KH * p->KW) <= 0;
     is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
@@ -454,6 +456,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
         for(j = 0; j < KH; ++j)
         {
+            rocke_value_t* y_grp;
             rocke_value_t* y_j;
             rocke_value_t* j_valid;
             int s_const, r_const;
@@ -470,8 +473,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
             const char* dn[4];
             rocke_value_t* dv[4];
 
-            y_j = rocke_b_add(
-                bld, rocke_b_mul(bld, group_loop.iv, c_KH), rocke_b_const_i32(bld, j));
+            /* y_j = grp*KH + j.  Force Python left-to-right: mul, const(j), add
+             * -- two builder calls in one argument list leave the order to the
+             * compiler, and each allocates an IR value id, so the constant would
+             * be numbered before the mul here and after it in Python. */
+            y_grp = rocke_b_mul(bld, group_loop.iv, c_KH);
+            y_j = rocke_b_add(bld, y_grp, rocke_b_const_i32(bld, j));
             j_valid = rocke_b_cmp_lt(bld, y_j, rocke_b_const_i32(bld, n_iters));
 
             for(s_const = 0; s_const < p->KW; ++s_const)
