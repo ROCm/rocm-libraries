@@ -1175,12 +1175,34 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
     gp.wgs_x = wgs;
 
     // Grid arrangement is different than regular SBCC
-    // for improved global memory access patterns.
-    auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
+    // for improved global memory access patterns.  A block covers every
+    // off-dimension point that this kernel's partial pass transforms.
+    auto factor = product(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
     gp.b_x /= factor;
     gp.wgs_x *= factor;
     lds *= factor;
+}
+
+bool SBCCPPNode::CreateDeviceResources()
+{
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    // this node's length is rotated so that its own transform dimension comes
+    // first, which shifts ppOffDim (a plan dimension) one slot to the right
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(length[(ppOffDim + 1) % length.size()], precision, deviceProp);
+
+    return LeafNode::CreateDeviceResources();
 }
 
 std::vector<size_t> SBCCPPNode::CollapsibleDims()
