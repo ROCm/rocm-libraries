@@ -130,6 +130,9 @@ SUPPORTED_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8")
 # --verify relative tolerance per dtype. fp32 is held to a few hundred fp32 ulps,
 # well below one fp16 ulp (2**-10), so a kernel that silently computes in a
 # narrower type fails verification instead of passing the fp16 tolerance.
+# The fp32 accumulation error grows about as sqrt(K): the worst max_rel at the
+# default problems (K <= 4096) is about 9x below the bound, which leaves room up
+# to K of roughly 256k; pass --verify-tol for larger K.
 DEFAULT_VERIFY_TOL = 2e-2
 VERIFY_TOL = {"fp32": 256 * 2.0**-23}
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
@@ -408,7 +411,8 @@ def main():
         type=float,
         default=None,
         help=f"Relative tolerance for --verify (default per dtype: {VERIFY_TOL}, "
-        f"else {DEFAULT_VERIFY_TOL})",
+        f"else {DEFAULT_VERIFY_TOL}); the fp32 default holds up to K of about "
+        "256k, raise it for larger K",
     )
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
