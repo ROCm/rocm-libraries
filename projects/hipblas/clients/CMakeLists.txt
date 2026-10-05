@@ -149,6 +149,16 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
+# hipblas_fortran comes from ../fortran. Checked before project(), which would
+# otherwise try to enable Fortran on a host with no Fortran compiler.
+if ( BUILD_FORTRAN_CLIENTS AND NOT TARGET hipblas_fortran )
+  message(STATUS
+    "hipBLAS: the Fortran bindings were not built, so the Fortran clients are "
+    "skipped. They come from projects/hipblas/fortran, which needs "
+    "BUILD_FORTRAN_BINDINGS on and a Fortran compiler.")
+  set( BUILD_FORTRAN_CLIENTS OFF )
+endif()
+
 # This project may compile dependencies for clients
 if ( BUILD_FORTRAN_CLIENTS )
   if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
@@ -173,26 +183,24 @@ if( BUILD_FORTRAN_CLIENTS )
     set(hipblas_f90_source_clients_solver
       include/hipblas_fortran_module.f90
     )
-
-    set (hipblas_f90_source
-      ../library/src/hipblas_module.f90
-    )
 endif()
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES )
-  # Create hipBLAS Fortran module
   if( BUILD_FORTRAN_CLIENTS )
       # Set Fortran module output directory
       set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipblas)
-      add_library(hipblas_fortran OBJECT ${hipblas_f90_source})
-  endif()
 
-  if( BUILD_FORTRAN_CLIENTS )
-    if( BUILD_WITH_SOLVER )
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} $<TARGET_OBJECTS:hipblas_fortran>)
-    else()
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} $<TARGET_OBJECTS:hipblas_fortran>)
-    endif()
+      # TEMPORARY until ROCm/rocm-systems#11923: the stub supplies module hip's
+      # hipDataType enumerators for the shims. Build-only, never installed. To
+      # remove, drop it here and link hip::hip_fortran; the `use hip` lines stay.
+      set(hipblas_hip_stub ${CMAKE_CURRENT_SOURCE_DIR}/../fortran/hip_datatypes_stub.F90)
+
+      if( BUILD_WITH_SOLVER )
+        add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} ${hipblas_hip_stub})
+      else()
+        add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} ${hipblas_hip_stub})
+      endif()
+      target_link_libraries(hipblas_fortran_client PUBLIC roc::hipblas_fortran)
   endif()
 
   if(SKIP_LIBRARY)

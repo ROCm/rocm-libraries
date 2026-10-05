@@ -157,6 +157,7 @@
 /projects/hipblas/**/.readthedocs.yaml              @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
 /projects/hipblas/docs/                             @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
 /projects/hipblas/library/include/                  @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/fortran/                          @ROCm/rocm-fortran-maintainers @ROCm/hipblas-reviewers
 
 /projects/hipblas-common/**/*.md                    @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/**/*.rst                   @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
