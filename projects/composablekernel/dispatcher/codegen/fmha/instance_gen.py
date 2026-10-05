@@ -126,13 +126,14 @@ def derive_bk1(bm0: int, bn0: int, bk0: int, hdim_q: int, hdim_v: int) -> int:
     """Derive bk1 from tile config for fp16/bf16/fp32.
 
     Source: fmha_fwd.py FmhaFwdTileSize definitions — bk1 (element 4) is
-    always 32 except for three specific configs where it's 16.
+    always 32 except for four specific configs where it's 16.
     These special cases come from the CK example's hand-tuned tile tables.
     """
     if (bm0, bn0, bk0, hdim_q) in (
         (128, 64, 32, 128),
         (32, 128, 32, 128),
         (32, 128, 16, 48),
+        (64, 64, 32, 512)
     ):
         return 16
     return 32

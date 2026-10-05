@@ -896,7 +896,9 @@ def validate_config(
             tile = alg.get("tile", [])
             warp = alg.get("warp", [])
             if len(wave) >= 3 and len(tile) >= 1:
-                num_warps = wave[0] * wave[1] * wave[2]
+                num_gemm0_warps = wave[0] * wave[1] * wave[2]
+                num_gemm1_warps = wave[3] * wave[4] * wave[5]
+                num_warps = max(num_gemm0_warps, num_gemm1_warps)
                 if num_warps <= 0 or tile[0] // num_warps > max_rows:
                     result.add_error(
                         f"hdim > {max_hdim_non_fwd_qr} needs bm0 / num_warps <= "
