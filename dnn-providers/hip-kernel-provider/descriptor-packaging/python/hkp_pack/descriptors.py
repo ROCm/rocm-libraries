@@ -38,6 +38,19 @@ def type_from_filename(path):
     return parts[-2]
 
 
+@dataclass(frozen=True)
+class Sidecar:
+    """A non-descriptor file (e.g. a model) a descriptor names by relative path.
+
+    `rel_dir` preserves the authored layout under the source root, so the authored
+    relative path still resolves in the packed tree.
+    """
+
+    source: Path
+    rel_dir: Path
+    name: str
+
+
 @dataclass
 class Descriptor:
     """A parsed descriptor loaded from a flat-folder JSON file.
@@ -52,6 +65,7 @@ class Descriptor:
     path: Path
     doc: dict
     rel_dir: Path = Path(".")
+    sidecars: list = field(default_factory=list)
 
     @property
     def type(self):
@@ -84,6 +98,10 @@ class FlatInput:
     def ukd_by_id(self):
         return {d.id: d for d in self.ukds()}
 
+    def sidecars_for(self, descriptors):
+        """Every sidecar the given descriptors name, in descriptor order."""
+        return [sidecar for desc in descriptors for sidecar in desc.sidecars]
+
 
 def _read_json(path):
     try:
@@ -108,11 +126,7 @@ def _validate_version(value, where):
     Mirrors the loader's parseDescriptorVersion (loader is authoritative); the
     tool fails fast on a malformed value rather than shipping an ungatable file.
     """
-    if (
-        not isinstance(value, str)
-        or value.count(".") != 1
-        or not all(part.isdigit() for part in value.split("."))
-    ):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", value):
         raise HkpPackError(
             f"{where} has invalid version '{value}' "
             "(expected '<major>.<minor>' with numeric halves)"
@@ -389,14 +403,97 @@ def _validate_ued(desc):
             f"UED {desc.path.name} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
+    where = f"UED {desc.path.name}"
+    if "heuristic" in desc.doc:
+        raise HkpPackError(
+            f"{where}: legacy heuristic is not supported; use role/arch maps"
+        )
+    # Mirrors the loader's requireKnownKeys: a misspelled role would otherwise be
+    # silently absent.
+    unknown = sorted(
+        key
+        for key in desc.doc
+        if key not in _UED_KEYS
+        and not key.startswith(("x-", "_"))
+        and key != "provenance"
+    )
+    if unknown:
+        raise HkpPackError(
+            f"{where} has unknown fields {unknown}; "
+            "extension keys must start with 'x-' or '_'"
+        )
+    for role in _UHD_ROLES:
+        if role not in desc.doc:
+            continue
+        entries = desc.doc[role]
+        if not isinstance(entries, dict) or not entries:
+            raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
+        for arch, value in entries.items():
+            if arch != "default":
+                _reject_nonbare_arch([arch], where)
+            entry_where = f"{where}.{role}.{arch}"
+            if isinstance(value, str) or role not in _METRIC_ROLES:
+                _validate_uuid(value, entry_where)
+                continue
+            # RFC 0019 §3.1: a scoring role may list one UHD per metric.
+            if not isinstance(value, list) or not value:
+                raise HkpPackError(
+                    f"{entry_where} must be a UUID or a nonempty list of UUIDs"
+                )
+            seen = set()
+            for identity in value:
+                _validate_uuid(identity, entry_where)
+                if identity.lower() in seen:
+                    raise HkpPackError(f"{entry_where} lists {identity} twice")
+                seen.add(identity.lower())
+
+
+def _role_references(doc, role):
+    """Every UHD id a UED role names, flattening the list form of a scoring role."""
+    for value in doc.get(role, {}).values():
+        if isinstance(value, list):
+            yield from value
+        else:
+            yield value
 
 
 # The loader's enum vocabularies, mirrored so a bad spelling is a pack-time
 # error rather than a runtime file-drop. Loader is authoritative:
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
-# metadataTypeFromString.
+# metadataTypeFromString / parseEngineDescriptor.
 _MATCH_SCOPES = ("graph", "kernel")
-_HEURISTIC_KINDS = ("native", "model")
+_UHD_ADAPTERS = (
+    "static_order",
+    "native",
+    "tree_data",
+    "table",
+    "onnx",
+    "custom_library",
+)
+_UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
+# Roles mapping an arch to one UHD per ranking metric. A candidate generator has no
+# metric, so predict_applicable_kernels stays single.
+_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
+_UED_KEYS = (
+    "version",
+    "revision",
+    "id",
+    "name",
+    "sdk_version",
+    *_UHD_ROLES,
+    "metadata",
+    "knobs",
+    "behavior_notes",
+    "numerical_notes",
+    "graph_match",
+)
+# RFC 0019 §4.4 ranking-metric registry (RankingMetrics.hpp): metric -> required
+# UHD `objective`.
+_RANKING_METRIC_OBJECTIVES = {"tflops": "max", "time": "min"}
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
+
+# Adapters whose body names a file the packed tree must carry.
+_ARTIFACT_ADAPTERS = ("tree_data", "table", "onnx", "custom_library")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -426,12 +523,231 @@ def _validate_udd(desc):
     _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
 
 
-def _validate_uhd(desc):
-    """UHD: kind is a closed enum, payload required. Mirrors
-    parseHeuristicDescriptor."""
+def _validate_uuid(value, where):
+    if not isinstance(value, str) or not _UUID_RE.fullmatch(value):
+        raise HkpPackError(f"{where} requires a UUID, got {value!r}")
+
+
+def _known_keys(value, allowed, where):
+    if not isinstance(value, dict):
+        raise HkpPackError(f"{where} must be an object")
+    unknown = set(value) - set(allowed)
+    if unknown:
+        raise HkpPackError(f"{where} has unknown fields {sorted(unknown)}")
+
+
+def _string(value, where):
+    if not isinstance(value, str) or not value:
+        raise HkpPackError(f"{where} must be a nonempty string")
+
+
+def _validate_trained_against(value, where):
+    # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
+    # for a model bound by provider-declared UUID, a selector_revision. Either may add
+    # feature_semantics_revision (integer >= 1). Loader is authoritative: UhdParser.hpp.
+    _known_keys(
+        value,
+        ("ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"),
+        where,
+    )
+    if "feature_semantics_revision" in value:
+        semantics = value["feature_semantics_revision"]
+        if (
+            isinstance(semantics, bool)
+            or not isinstance(semantics, int)
+            or not 1 <= semantics < 2**63
+        ):
+            raise HkpPackError(
+                f"{where}.feature_semantics_revision must be an integer >= 1"
+            )
+    names_descriptor_set = any(key in value for key in ("ued", "kmd", "umd"))
+    if "selector_revision" in value:
+        revision = value["selector_revision"]
+        if not isinstance(revision, str) or not revision:
+            raise HkpPackError(f"{where}.selector_revision must be a nonempty string")
+    elif not names_descriptor_set:
+        raise HkpPackError(
+            f"{where} must name a descriptor set (ued/kmd/umd) or a selector_revision"
+        )
+    if not names_descriptor_set:
+        return
+    _require(value, ("ued", "kmd", "umd"), where)
+    if not isinstance(value["umd"], list):
+        raise HkpPackError(f"{where}.umd must be an array")
+    for kind in ("ued", "kmd", "umd"):
+        dependencies = value[kind] if kind == "umd" else [value[kind]]
+        seen = set()
+        for dependency in dependencies:
+            entry_where = f"{where}.{kind}"
+            _known_keys(dependency, ("id", "revision"), entry_where)
+            _require(dependency, ("id", "revision"), entry_where)
+            _validate_uuid(dependency["id"], entry_where)
+            _validate_version(dependency["revision"], f"{entry_where} revision")
+            identity = dependency["id"].lower()
+            if identity in seen:
+                raise HkpPackError(f"{entry_where} repeats dependency {identity}")
+            seen.add(identity)
+
+
+def _validate_uhd(desc, source_root):
+    """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
+
+    A missing model artifact is a hard error: the runtime drops the whole engine.
+    """
+    doc = desc.doc
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "kind", "payload"], where)
-    _require_enum(desc.doc, "kind", _HEURISTIC_KINDS, where)
+    _known_keys(
+        doc,
+        (
+            "version",
+            "id",
+            "name",
+            "adapter",
+            "features_signature",
+            "features_hash",
+            "categorical_encoding",
+            "trained_against",
+            "objective",
+            "score",
+            *_UHD_ADAPTERS,
+        ),
+        where,
+    )
+    _require(doc, ("version", "id", "name", "adapter"), where)
+    if doc["version"] != "1.0":
+        raise HkpPackError(
+            f"{where}: unsupported file-format version {doc['version']!r}"
+        )
+    _validate_uuid(doc["id"], where)
+    _string(doc["name"], f"{where}.name")
+    _require_enum(doc, "adapter", _UHD_ADAPTERS, where)
+    adapter = doc["adapter"]
+    bodies = [key for key in _UHD_ADAPTERS if key in doc]
+    if bodies != [adapter] or not isinstance(doc[adapter], dict):
+        raise HkpPackError(
+            f"{where} requires exactly one body matching adapter '{adapter}'"
+        )
+    if adapter != "static_order" or "objective" in doc:
+        _require(doc, ("objective",), where)
+        _require_enum(doc, "objective", ("max", "min"), where)
+    if adapter in ("tree_data", "table", "onnx"):
+        _require(doc, ("features_signature", "features_hash", "trained_against"), where)
+    if "features_signature" in doc:
+        signature = doc["features_signature"]
+        if not isinstance(signature, list) or not signature:
+            raise HkpPackError(f"{where}.features_signature must be a nonempty array")
+        for entry in signature:
+            if not (
+                (isinstance(entry, str) and entry.startswith("$") and len(entry) > 1)
+                or (isinstance(entry, dict) and len(entry) == 1)
+            ):
+                raise HkpPackError(
+                    f"{where}.features_signature requires bare references or inline expressions"
+                )
+        _require(doc, ("features_hash", "trained_against"), where)
+    if "features_hash" in doc:
+        value = doc["features_hash"]
+        if not isinstance(value, str) or not re.fullmatch(
+            r"sha256:[0-9a-f]{16}", value
+        ):
+            raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
+    if "trained_against" in doc:
+        _validate_trained_against(doc["trained_against"], f"{where}.trained_against")
+    if "categorical_encoding" in doc:
+        encoding = doc["categorical_encoding"]
+        if not isinstance(encoding, dict):
+            raise HkpPackError(f"{where}.categorical_encoding must be an object")
+        for name, codes in encoding.items():
+            if (
+                not isinstance(codes, dict)
+                or not codes
+                or any(type(code) is not int for code in codes.values())
+            ):
+                raise HkpPackError(
+                    f"{where}.categorical_encoding.{name} must map values to integer codes"
+                )
+    if "score" in doc:
+        score = doc["score"]
+        _known_keys(score, ("metric", "calibrated", "transform"), f"{where}.score")
+        if "transform" in score:
+            _string(score["transform"], f"{where}.score.transform")
+        if "metric" in score and (
+            not isinstance(score["metric"], str)
+            or score["metric"] not in _RANKING_METRIC_OBJECTIVES
+        ):
+            raise HkpPackError(
+                f"{where}.score.metric {score['metric']!r} is not a registered ranking "
+                f"metric (expected one of {', '.join(_RANKING_METRIC_OBJECTIVES)})"
+            )
+        if "calibrated" in score and not isinstance(score["calibrated"], bool):
+            raise HkpPackError(f"{where}.score.calibrated must be a boolean")
+        # A calibrated score is comparable across engines only in a named quantity
+        # (RFC 0019 §4.4).
+        if score.get("calibrated") and "metric" not in score:
+            raise HkpPackError(f"{where}: a calibrated score requires score.metric")
+        # The metric fixes the ranking direction; `objective` must agree with it.
+        if "metric" in score:
+            expected = _RANKING_METRIC_OBJECTIVES[score["metric"]]
+            if doc.get("objective") != expected:
+                raise HkpPackError(
+                    f"{where}: score.metric '{score['metric']}' requires objective "
+                    f"'{expected}', got {doc.get('objective')!r}"
+                )
+    body = doc[adapter]
+    if adapter == "static_order":
+        # static_order ranks by UKD priority, then descriptor id. Declared criteria are
+        # refused, as UhdParser refuses them, rather than packed and ignored.
+        if isinstance(body, dict) and "order" in body:
+            raise HkpPackError(
+                f"{where}.static_order.order is not supported: declared ordering criteria are "
+                "not implemented; static_order ranks by priority, then descriptor id"
+            )
+        _known_keys(body, (), f"{where}.{adapter}")
+        return
+    if adapter == "native":
+        _known_keys(body, ("symbol",), f"{where}.{adapter}")
+        _string(body.get("symbol"), f"{where}.native.symbol")
+        return
+    key = "library" if adapter == "custom_library" else "artifact"
+    allowed = (
+        ("library", "symbol", "hash", "config")
+        if adapter == "custom_library"
+        else ("artifact", "hash")
+    )
+    _known_keys(body, allowed, f"{where}.{adapter}")
+    _string(body.get(key), f"{where}.{adapter}.{key}")
+    if "hash" in body:
+        _string(body["hash"], f"{where}.{adapter}.hash")
+    if adapter == "custom_library":
+        _string(body.get("symbol"), f"{where}.{adapter}.symbol")
+        if "config" in body and not isinstance(body["config"], dict):
+            raise HkpPackError(f"{where}.custom_library.config must be an object")
+    desc.sidecars.append(_resolve_sidecar(desc, source_root, body[key]))
+
+
+def _resolve_sidecar(desc, source_root, payload):
+    """Resolve a descriptor-relative payload path to a carriable Sidecar.
+
+    No root-relative fallback (matching compile_hip_variant): a typo must not bind
+    to a same-named file elsewhere. Use `../shared/model.bin` to share an artifact.
+    """
+    root = Path(source_root).resolve()
+    resolved = (root / desc.rel_dir / payload).resolve()
+    where = f"UHD {desc.path.name}"
+
+    if not resolved.is_relative_to(root):
+        raise HkpPackError(
+            f"{where} payload escapes the source root: {payload} "
+            f"(from {Path(desc.rel_dir).as_posix()}, resolved to {resolved})"
+        )
+    if not resolved.is_file():
+        raise HkpPackError(
+            f"{where} payload source not found: {payload} (looked for {resolved}, "
+            f"resolved relative to descriptor folder {Path(desc.rel_dir).as_posix()})"
+        )
+
+    dest = resolved.relative_to(root)
+    return Sidecar(source=resolved, rel_dir=dest.parent, name=dest.name)
 
 
 def _validate_kmd(desc):
@@ -455,7 +771,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, log=print):
+def _validate_shape(desc, source_root, log=print):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -471,6 +787,8 @@ def _validate_shape(desc, log=print):
     # the inline UKD form is exempt (rejected in _validate_inline_ukd).
     _require(doc, ["version"], f"descriptor {path.name}")
     _validate_version(doc.get("version"), f"descriptor {path.name}")
+    if dtype in ("ued", "kmd", "umd") and "revision" in doc:
+        _validate_version(doc["revision"], f"descriptor {path.name} revision")
     if dtype == UKD_TYPE:
         _validate_standalone_ukd(desc, log)
     if dtype == KDP_TYPE:
@@ -482,7 +800,7 @@ def _validate_shape(desc, log=print):
     if dtype == "udd":
         _validate_udd(desc)
     if dtype == "uhd":
-        _validate_uhd(desc)
+        _validate_uhd(desc, source_root)
     if dtype == "kmd":
         _validate_kmd(desc)
 
@@ -552,7 +870,7 @@ def load_flat_input(root, log=print):
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, log)
+        _validate_shape(desc, root, log)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors)
@@ -656,18 +974,53 @@ def _validate_references(flat):
                     f"UKD '{udoc.get('id')}' arch {udoc.get('arch')} is not a "
                     f"subset of KDP {kdp.path.name} arch {doc.get('arch')}"
                 )
+    typed_ids = {kind: {d.id for d in flat.by_type(kind)} for kind in ("kmd", "uhd")}
+    uhd_by_id = {d.id: d for d in flat.by_type("uhd")}
     for ued in flat.by_type("ued"):
-        for ref in (ued.doc.get("heuristic"), ued.doc.get("metadata")):
-            if ref is not None and ref not in ids:
+        references = [(ued.doc.get("metadata"), "kmd")]
+        references += [
+            (ref, "uhd")
+            for role in _UHD_ROLES
+            for ref in _role_references(ued.doc, role)
+        ]
+        for ref, kind in references:
+            if ref is not None and ref not in typed_ids[kind]:
                 raise HkpPackError(
-                    f"UED {ued.path.name} references unknown descriptor Id '{ref}'"
+                    f"UED {ued.path.name} references unknown {kind.upper()} descriptor Id '{ref}'"
                 )
+        _validate_role_metrics(ued, uhd_by_id)
+
+
+def _validate_role_metrics(ued, uhd_by_id):
+    """At most one model per metric for each architecture a scoring role names.
+
+    RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
+    model must declare a metric.
+    """
+    for role in _METRIC_ROLES:
+        for arch, value in ued.doc.get(role, {}).items():
+            where = f"UED {ued.path.name}.{role}.{arch}"
+            by_metric = {}
+            for ref in [value] if isinstance(value, str) else value:
+                metric = (uhd_by_id[ref].doc.get("score") or {}).get("metric")
+                if metric is None and role == "predict_engine":
+                    raise HkpPackError(
+                        f"{where} names UHD '{ref}', which declares no "
+                        "score.metric; an engine prediction needs one"
+                    )
+                if metric in by_metric:
+                    what = f"metric '{metric}'" if metric else "no metric"
+                    raise HkpPackError(
+                        f"{where} names two UHDs with {what}: "
+                        f"'{by_metric[metric]}' and '{ref}'"
+                    )
+                by_metric[metric] = ref
 
 
 def reachable_generic_ids(flat, surviving_kdps):
     """Ids of the generics reachable from a set of surviving KDPs.
 
-    Walks KDP -> {matchers, engine, dispatch} and UED -> {heuristic, metadata}
+    Walks KDP -> {matchers, engine, dispatch} and UED -> {role models, metadata}
     transitively. A generic survives pruning iff its Id is in this set.
     """
     by_id = flat.generic_by_id()
@@ -684,5 +1037,8 @@ def reachable_generic_ids(flat, surviving_kdps):
         reachable.add(rid)
         gdesc = by_id[rid]
         if gdesc.type == "ued":
-            pending += [gdesc.doc.get("heuristic"), gdesc.doc.get("metadata")]
+            pending.append(gdesc.doc.get("metadata"))
+            pending += [
+                ref for role in _UHD_ROLES for ref in _role_references(gdesc.doc, role)
+            ]
     return reachable

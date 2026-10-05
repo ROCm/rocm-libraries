@@ -235,9 +235,7 @@ endfunction() # _create_check_targets_internal
 
 
 
-# Registers the cache-key generator's own unit tests as a ctest test. The generated
-# header's runtime behaviour is covered by the C++ suites; this covers the generator's
-# field policy, so a change to it fails here rather than silently reshaping the key.
+# Registers the schema generators' own unit tests (cache key, node operands) as a ctest test.
 #
 # The policy under test belongs to the schemas, so this runs regardless of
 # HIPDNN_ENABLE_KERNEL_INGESTOR.
@@ -246,7 +244,7 @@ function(_create_cache_key_codegen_test_internal prefix_name)
         add_test(
             NAME ${prefix_name}_cache_key_codegen_tests
             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s
-                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_cache_key.py" -v
+                    ${PROJECT_SOURCE_DIR}/scripts -p "test_gen_*.py" -v
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
         )
         _apply_hipdnn_test_category_labels(${prefix_name}_cache_key_codegen_tests)
@@ -308,6 +306,19 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(add_hipdnn_test TARGET WORKING_DIR)
+    # ROCm ships its own googletest, which hip::host puts on the include path. Ahead of the
+    # fetched googletest it compiles against ROCm's headers but links the fetched archive.
+    # Pinned per target, for both gtest and gmock, so library sources never see googletest.
+    foreach(_hipdnn_gtest_target GTest::gtest GTest::gmock)
+        if(TARGET ${_hipdnn_gtest_target})
+            get_target_property(_hipdnn_gtest_includes ${_hipdnn_gtest_target}
+                                INTERFACE_INCLUDE_DIRECTORIES)
+            if(_hipdnn_gtest_includes)
+                target_include_directories(${TARGET} BEFORE PRIVATE ${_hipdnn_gtest_includes})
+            endif()
+        endif()
+    endforeach()
+
     set(TARGET_EXE ${TARGET})
 
     # Add executable suffix if needed (e.g., .exe on Windows)

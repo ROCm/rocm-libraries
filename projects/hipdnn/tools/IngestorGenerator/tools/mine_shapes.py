@@ -13,10 +13,14 @@ by source; a `microbench/` path is a provenance label, not a synthetic-data
 warning.
 
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
+    mine_shapes.py --catalog ../hipdnn_torch/MODEL_CATALOG.md \
+        --shape-dir ~/model-shapes --out-query-csv model-shapes.csv
 
-Emits the request-field mappings `dispatch_parity.py --shapes` consumes, and
-does not filter by what the kernel can serve: the dispatcher reports declines
-with reasons, and filtering here would hide the gap this corpus measures.
+Emits the request-field mappings `dispatch_parity.py --shapes` consumes and, with
+`--out-query-csv`, the `q.<parameter>` columns `hipdnn_corpus_gen --model-shapes`
+reads. Neither output filters by kernel support -- that would hide the gap this
+corpus measures. The CSV narrows only to what one operation declaration can express,
+and reports every row it drops.
 """
 
 from __future__ import annotations
@@ -25,13 +29,14 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
-#: CSV mask spellings -> the request's mask_type. `swin` is a sliding window, a
-#: different mask kind rather than a causal variant, carried with its own value
-#: so the dispatcher declines it explicitly.
-_MASK_TYPE = {"full": 0, "none": 0, "causal": 1, "swin": 2}
+#: CSV mask spellings -> the request's mask_type. `swin` (sliding window) keeps its own
+#: value so the dispatcher declines it instead of serving it as causal. `bottom_right`
+#: is deliberately absent: it differs from top-left causal when seqlen_q != seqlen_k.
+MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1, "swin": 2}
 
 #: Tensor names marking a graph as backward, in both gradient spellings a
 #: corpus uses: `d_query`-style names alone would let `dq`/`dk`/`dv`/`do`
@@ -61,16 +66,16 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
             mask = (row.get("mask") or "").strip().lower()
             if mask == "swin" and not include_windowed:
                 continue
-            mask_type = _MASK_TYPE.get(mask)
+            mask_type = MASK_TYPE.get(mask)
             if mask_type is None:
                 raise SystemExit(
                     f"FAIL: unknown mask spelling {mask!r} in {path}. Add it to "
-                    f"_MASK_TYPE rather than defaulting -- guessing a mask is how a "
+                    f"MASK_TYPE rather than defaulting -- guessing a mask is how a "
                     f"windowed graph gets served as plain causal."
                 )
             head_dim = int(row["head_dim"])
             window = 0
-            if mask_type == _MASK_TYPE["swin"]:
+            if mask_type == MASK_TYPE["swin"]:
                 raw_window = (row.get("window_size") or "").strip()
                 if not raw_window.isdigit() or int(raw_window) <= 0:
                     raise SystemExit(
@@ -86,7 +91,7 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     "seqlen_k": int(row["seq_kv"]),
                     "hdim_q": head_dim,
                     "hdim_v": head_dim,
-                    "dtype": _normalise_dtype(row.get("dtype"), path, "bf16"),
+                    "dtype": normalise_dtype(row.get("dtype"), path, "bf16"),
                     "mask_type": mask_type,
                     "sliding_window": window,
                     "use_sinks": False,
@@ -108,7 +113,11 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
 def _mask_from_attributes(
     attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
 ) -> dict:
-    """Normalize the graph dialect to AttentionRequest's top-left causal/window form."""
+    """Normalize the graph dialect to a mask kind, a window, and an anchor.
+
+    The anchor is reported, not folded onto top-left: the two differ when Sq != Sk,
+    and the UHD corpus deliberately includes that case. `alignment` is additive.
+    """
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
         raise SystemExit(f"FAIL: {path}: unsupported diagonal_alignment {alignment!r}")
@@ -128,8 +137,9 @@ def _mask_from_attributes(
     left = -1 if left is None else left
     right = -1 if right is None else right
     if left == -1 and right == -1:
-        return {"mask_type": 0, "sliding_window": 0}
-    if right != 0 or (alignment == "BOTTOM_RIGHT" and seqlen_q != seqlen_k):
+        return {"mask_type": 0, "sliding_window": 0, "alignment": "top_left"}
+    if right != 0:
+        # A right bound other than 0 is not causal under any anchor.
         raise SystemExit(
             f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
             f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
@@ -137,14 +147,13 @@ def _mask_from_attributes(
     return {
         "mask_type": 1 if left == -1 else 2,
         "sliding_window": 0 if left == -1 else left + 1,
+        "alignment": "bottom_right" if alignment == "BOTTOM_RIGHT" else "top_left",
     }
 
 
-#: Every spelling a source uses for a dtype -> the spelling the rocKE spec
-#: takes. hipDNN graphs say `bfloat16`, torch traces `torch.bfloat16`, the spec
-#: `bf16`. An unmapped dtype is rejected at spec construction, which reads like
-#: the kernel declining a shape when the miner mis-spelled one.
-_DTYPE_SPELLINGS = {
+#: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
+#: is rejected at spec construction, which looks like a kernel declining the shape.
+DTYPE_SPELLINGS = {
     "bf16": "bf16",
     "bfloat16": "bf16",
     "torch.bfloat16": "bf16",
@@ -155,7 +164,7 @@ _DTYPE_SPELLINGS = {
 }
 
 
-def _normalise_dtype(raw, path: Path, fallback: str) -> str:
+def normalise_dtype(raw, path: Path, fallback: str) -> str:
     """One spelling for a dtype, or a refusal naming the source.
 
     An absent dtype falls back; an unrecognised one is a mapping this table
@@ -164,11 +173,11 @@ def _normalise_dtype(raw, path: Path, fallback: str) -> str:
     if raw is None or str(raw).strip() == "":
         return fallback
     spelling = str(raw).strip().lower()
-    resolved = _DTYPE_SPELLINGS.get(spelling)
+    resolved = DTYPE_SPELLINGS.get(spelling)
     if resolved is None:
         raise SystemExit(
             f"FAIL: unknown dtype spelling {raw!r} in {path}. Add it to "
-            f"_DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
+            f"DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
             f"wrong binary and still validates."
         )
     return resolved
@@ -185,8 +194,13 @@ def from_graph_corpus(root: Path) -> list[dict]:
             graph = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
+        # Non-graph JSON (e.g. records beside graphs in a shape dir) is skipped.
+        if not isinstance(graph, dict):
+            continue
         tensors = {
-            str(t.get("name", "")).lower(): t for t in graph.get("tensors", []) or []
+            str(t.get("name", "")).lower(): t
+            for t in graph.get("tensors", []) or []
+            if isinstance(t, dict)
         }
         # A backward graph cannot be served by a prefill kernel. The filename
         # is not authoritative, so the marker is structural: the node's own op
@@ -249,7 +263,7 @@ def from_graph_corpus(root: Path) -> list[dict]:
             raise SystemExit(
                 f"FAIL: {path}: incompatible independent Q/K/V dimensions {dimensions}"
             )
-        dtypes = [_normalise_dtype(t.get("data_type"), path, "bf16") for t in selected]
+        dtypes = [normalise_dtype(t.get("data_type"), path, "bf16") for t in selected]
         if len(set(dtypes)) != 1:
             raise SystemExit(
                 f"FAIL: {path}: mixed Q/K/V dtypes cannot form one request"
@@ -350,15 +364,15 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             # triangle for a banded request -- a wrong answer, not a decline.
             sliding_window = 0
             if int(left) < 0 and int(right) < 0:
-                mask_type = _MASK_TYPE["causal"]
+                mask_type = MASK_TYPE["causal"]
             elif int(left) >= 0 and int(right) == 0:
-                mask_type = _MASK_TYPE["swin"]
+                mask_type = MASK_TYPE["swin"]
                 # The spec counts the window in TOKENS including the current one,
                 # matching the kernel's `q-W+1 <= k <= q` band, so a recorded left
                 # bound of 127 is a 128-token window.
                 sliding_window = int(left) + 1
             elif int(left) == -1 and int(right) == 0:
-                mask_type = _MASK_TYPE["causal"]
+                mask_type = MASK_TYPE["causal"]
             else:
                 raise SystemExit(f"FAIL: {path}: unsupported trace window {window!r}")
             head_size = record.get("head_size")
@@ -370,7 +384,7 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                 continue
             # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised
             # through the same table the graph corpus uses.
-            dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
+            dtype = normalise_dtype(record.get("q_dtype"), path, dtype_default)
             shapes.append(
                 {
                     "batch": int(record.get("num_seqs") or 1),
@@ -410,6 +424,425 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             f"trace read as non-causal sizes a set that cannot serve it."
         )
     return shapes
+
+
+#: Column spellings a published shape file uses -> this tool's field. Publishers
+#: disagree (`heads_q`, `nhead_q`, `h`, ...); a new one costs one entry here.
+SHAPE_COLUMNS = {
+    "batch": "batch",
+    "batch_size": "batch",
+    "b": "batch",
+    "num_seqs": "batch",
+    "heads_q": "heads_q",
+    "nhead_q": "heads_q",
+    "num_query_heads": "heads_q",
+    "hq": "heads_q",
+    "h": "heads_q",
+    "heads": "heads_q",
+    "heads_kv": "heads_kv",
+    "nhead_k": "heads_kv",
+    "nhead_kv": "heads_kv",
+    "num_kv_heads": "heads_kv",
+    "hkv": "heads_kv",
+    "h_kv": "heads_kv",
+    "seqlen_q": "seqlen_q",
+    "seq_q": "seqlen_q",
+    "sq": "seqlen_q",
+    "s_q": "seqlen_q",
+    "seqlen_k": "seqlen_kv",
+    "seqlen_kv": "seqlen_kv",
+    "seq_kv": "seqlen_kv",
+    "seq_k": "seqlen_kv",
+    "skv": "seqlen_kv",
+    "s_kv": "seqlen_kv",
+    "head_dim": "head_dim",
+    "hdim_q": "head_dim",
+    "hdim": "head_dim",
+    "head_size": "head_dim",
+    "d": "head_dim",
+    "dtype": "dtype",
+    "data_type": "dtype",
+    "q_dtype": "dtype",
+    "mask": "mask",
+    "mask_type": "mask",
+    "causal": "mask",
+    "is_causal": "mask",
+    "model": "model",
+    "name": "model",
+    "arch": "arch",
+}
+
+
+def _shape_rows_from_json(path: Path) -> list[dict]:
+    """Records from a JSON shape file, which is a list of them or a map of them."""
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(content, dict):
+        if "tensors" in content and "nodes" in content:
+            return []  # a graph; `from_graph_corpus` reads those
+        content = [
+            dict(record, model=record.get("model", name))
+            for name, record in content.items()
+            if isinstance(record, dict)
+        ]
+    if not isinstance(content, list):
+        return []
+    return [record for record in content if isinstance(record, dict)]
+
+
+def _shape_rows_from_csv(path: Path) -> list[dict]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _shape_rows_from_text(path: Path) -> list[dict]:
+    """`key=value key=value` per line, one shape per line.
+
+    Follows `dnn-convert-shapes`' convention: blank lines and `#` comments skipped.
+    """
+    rows = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        pairs = dict(token.split("=", 1) for token in line.split() if "=" in token)
+        if pairs:
+            rows.append(pairs)
+    return rows
+
+
+def _shape_row(row: dict, path: Path) -> dict | None:
+    """A published row as a record, or None if it is not a shape row at all.
+
+    An unrecognised dtype or mask spelling is refused, never guessed.
+    """
+    fields: dict = {}
+    for key, value in row.items():
+        if key is None:
+            continue
+        field = SHAPE_COLUMNS.get(str(key).strip().lower())
+        if field is not None and value not in (None, ""):
+            fields.setdefault(field, value)
+    required = ("batch", "heads_q", "seqlen_q", "seqlen_kv", "head_dim")
+    if any(field not in fields for field in required):
+        return None
+
+    # A boolean `is_causal` column or a `MASK_TYPE` name; anything else (e.g.
+    # `bottom_right`, a different mask) is refused.
+    raw_mask = str(fields.get("mask", "")).strip().lower()
+    if raw_mask in ("true", "1", "yes"):
+        mask_type = MASK_TYPE["causal"]
+    elif raw_mask in ("", "false", "0", "no"):
+        mask_type = MASK_TYPE["full"]
+    elif raw_mask in MASK_TYPE:
+        mask_type = MASK_TYPE[raw_mask]
+    else:
+        raise SystemExit(
+            f"FAIL: unknown mask spelling {raw_mask!r} in {path}. Add it to MASK_TYPE "
+            f"rather than defaulting -- guessing a mask puts a differently-masked "
+            f"problem in the corpus under the row's name."
+        )
+
+    heads_q = int(fields["heads_q"])
+    return {
+        "batch": int(fields["batch"]),
+        "nhead_q": heads_q,
+        "nhead_k": int(fields.get("heads_kv", heads_q)),
+        "seqlen_q": int(fields["seqlen_q"]),
+        "seqlen_k": int(fields["seqlen_kv"]),
+        "hdim_q": int(fields["head_dim"]),
+        "hdim_v": int(fields["head_dim"]),
+        "dtype": normalise_dtype(fields.get("dtype"), path, "bf16"),
+        "mask_type": mask_type,
+        "_provenance": {
+            "source": "shape_dir",
+            "file": path.name,
+            "model": str(fields.get("model", path.stem)),
+            "arch": fields.get("arch"),
+        },
+    }
+
+
+def from_shape_dir(root: Path, arch: str | None = None) -> list[dict]:
+    """Shapes from a published directory -- the cluster's `~/model-shapes`.
+
+    Reads hipDNN graph JSON (via `from_graph_corpus`) and tabular files (`.json`
+    records, `.csv`, `key=value` lines); a directory may mix both.
+
+    `arch`, when given, drops rows naming a different arch; rows naming none are kept.
+    """
+    shapes = list(from_graph_corpus(root))
+    wrong_arch = 0
+    for path in sorted(root.rglob("*")):
+        suffix = path.suffix.lower()
+        if suffix == ".json":
+            rows = _shape_rows_from_json(path)
+        elif suffix == ".csv":
+            rows = _shape_rows_from_csv(path)
+        elif suffix in (".txt", ".shapes"):
+            rows = _shape_rows_from_text(path)
+        else:
+            continue
+        for row in rows:
+            record = _shape_row(row, path)
+            if record is None:
+                continue
+            if arch is not None and record["_provenance"]["arch"] not in (None, arch):
+                wrong_arch += 1
+                continue
+            shapes.append(record)
+    if wrong_arch:
+        print(f"  NOTE: {wrong_arch} published row(s) skipped -- named another arch.")
+    return shapes
+
+
+#: Batches to expand each catalog geometry over. The catalog's runs are all batch 1,
+#: a measurement convention; served batches (see `sdpa_fwd.opmeta.json`) are larger.
+CATALOG_BATCHES = (1, 8, 32)
+
+
+def _catalog_sections(text: str) -> dict:
+    """The catalog's per-model entries, keyed by harness file stem."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.splitlines():
+        heading = re.match(r"^###\s+`([A-Za-z0-9_]+)\.py`", line)
+        if heading:
+            current = heading.group(1)
+            sections[current] = []
+            continue
+        if line.startswith("### ") or line.startswith("## "):
+            current = None
+        elif current is not None:
+            sections[current].append(line)
+    return {name: "\n".join(body) for name, body in sections.items()}
+
+
+def _catalog_table(text: str) -> list[dict]:
+    """The `model | D | q/kv heads | causal` drill-down rows.
+
+    The table is the row source; prose is consulted only for sequence length.
+    """
+    rows, header_seen = [], False
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            header_seen = False
+            continue
+        cells = [
+            cell.strip().replace("**", "").replace("`", "")
+            for cell in line.strip("|").split("|")
+        ]
+        if cells[:4] == ["model", "D", "q/kv heads", "causal"]:
+            header_seen = True
+            continue
+        if not header_seen or set(cells[0]) <= set("-: "):
+            continue
+        rows.append(
+            {
+                "model": cells[0],
+                "head_dims": cells[1],
+                "heads": cells[2],
+                "causal": cells[3],
+            }
+        )
+    return rows
+
+
+def _catalog_numbers(field: str) -> list[int]:
+    return [int(value) for value in re.findall(r"\d+", field)]
+
+
+def _catalog_lengths(body: str) -> list[int]:
+    """Sequence lengths the entry records (`Sq=Skv=512` or `seq512`).
+
+    Nothing is inferred from a model's name; an entry with no length yields no shape.
+    """
+    found = set(int(value) for value in re.findall(r"Sq=Skv=(\d+)", body))
+    found |= set(int(value) for value in re.findall(r"\bseq(\d+)\b", body))
+    return sorted(found)
+
+
+def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
+    """Every attention geometry `MODEL_CATALOG.md` records, expanded over batch.
+
+    A causal entry also yields its decode shape (one query token against the full
+    context), which is memory bound where prefill is compute bound.
+    """
+    text = path.read_text(encoding="utf-8")
+    sections = _catalog_sections(text)
+    shapes: list[dict] = []
+    skipped: list[str] = []
+
+    for row in _catalog_table(text):
+        model = row["model"]
+        head_dims = _catalog_numbers(row["head_dims"])
+        heads = _catalog_numbers(row["heads"])
+        body = next(
+            (
+                section
+                for name, section in sorted(sections.items())
+                if name.startswith(model)
+            ),
+            "",
+        )
+        lengths = _catalog_lengths(body)
+        # Only the dtypes the entry was validated in. `\bf16\b` cannot match inside
+        # `bf16` (`b` and `f` are both word characters).
+        dtypes = set()
+        if re.search(r"\bbf16\b", body):
+            dtypes.add("bf16")
+        if re.search(r"\bfp16\b|\bf16\b", body):
+            dtypes.add("fp16")
+        dtypes = sorted(dtypes) or ["bf16"]
+        causal = row["causal"].lower().startswith("y")
+
+        if not heads or not head_dims or not lengths:
+            skipped.append(
+                model
+                + " (catalog records no "
+                + ", ".join(
+                    label
+                    for label, present in (
+                        ("head count", heads),
+                        ("head dim", head_dims),
+                        ("sequence length", lengths),
+                    )
+                    if not present
+                )
+                + ")"
+            )
+            continue
+
+        # `12/12` is query/KV; `5/10/20` is three MHA stages of one UNet, not a
+        # grouping -- a single value repeats as its own KV count.
+        pairs = (
+            [(heads[0], heads[1])]
+            if len(heads) == 2
+            else [(head, head) for head in heads]
+        )
+        for head_dim in head_dims:
+            for heads_q, heads_kv in pairs:
+                for dtype in dtypes:
+                    for length in lengths:
+                        for batch in batches:
+                            common = {
+                                "batch": batch,
+                                "nhead_q": heads_q,
+                                "nhead_k": heads_kv,
+                                "hdim_q": head_dim,
+                                "hdim_v": head_dim,
+                                "dtype": dtype,
+                                "mask_type": MASK_TYPE["causal" if causal else "full"],
+                            }
+                            shapes.append(
+                                {
+                                    **common,
+                                    "seqlen_q": length,
+                                    "seqlen_k": length,
+                                    "_provenance": {
+                                        "source": "catalog",
+                                        "model": model,
+                                        "phase": "prefill",
+                                        "catalog": path.name,
+                                    },
+                                }
+                            )
+                            if causal:
+                                shapes.append(
+                                    {
+                                        **common,
+                                        "seqlen_q": 1,
+                                        "seqlen_k": length,
+                                        "_provenance": {
+                                            "source": "catalog",
+                                            "model": model,
+                                            "phase": "decode",
+                                            "catalog": path.name,
+                                        },
+                                    }
+                                )
+    if skipped:
+        print(
+            f"  NOTE: {len(skipped)} catalog entr(ies) yielded no shape: "
+            + "; ".join(skipped)
+        )
+    return shapes
+
+
+def _shape_name(shape: dict, index: int) -> str:
+    """A human-readable name for one shape, or a positional one if it has no name."""
+    origin = shape.get("_provenance") or {}
+    model = str(origin.get("model") or "")
+    phase = str(origin.get("phase") or "")
+    if model and phase:
+        return f"{model} {phase}"
+    for key in ("graph", "trace", "model", "suite"):
+        named = str(origin.get(key) or "")
+        if named:
+            return named
+    return f"{origin.get('source') or 'shape'}-{index}"
+
+
+def write_query_csv(shapes: list[dict], path: Path) -> dict:
+    """The mined corpus as the `q.<parameter>` columns `corpus_gen --model-shapes` reads.
+
+    Narrows to what `sdpa_fwd` can express (no sliding window, asymmetric head dim,
+    or sinks) and counts each drop by reason. `q.alignment` defaults to `top_left`
+    for sources that cannot record an anchor; it and `q.generate_stats` (always
+    `false`: sources record inference forwards) are always written because argument
+    resolution requires every parameter it reads.
+    """
+    columns = [
+        "name",
+        "op",
+        "q.batch",
+        "q.heads",
+        "q.heads_kv",
+        "q.seqlen_q",
+        "q.seqlen_k",
+        "q.head_dim",
+        "q.is_causal",
+        "q.alignment",
+        "q.generate_stats",
+        "q.dtype",
+    ]
+    dropped: dict[str, int] = {}
+    written = 0
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(columns)
+        for index, shape in enumerate(shapes):
+            reason = None
+            if shape["mask_type"] not in (MASK_TYPE["full"], MASK_TYPE["causal"]):
+                reason = "windowed mask, which sdpa_fwd declares no parameter for"
+            elif shape["hdim_q"] != shape["hdim_v"]:
+                reason = "asymmetric head dims (MLA), one head_dim declared"
+            elif shape.get("use_sinks"):
+                reason = "attention sinks, which sdpa_fwd declares no parameter for"
+            if reason is not None:
+                dropped[reason] = dropped.get(reason, 0) + 1
+                continue
+            causal = shape["mask_type"] == MASK_TYPE["causal"]
+            writer.writerow(
+                [
+                    _shape_name(shape, index),
+                    "sdpa_fwd",
+                    shape["batch"],
+                    shape["nhead_q"],
+                    shape["nhead_k"],
+                    shape["seqlen_q"],
+                    shape["seqlen_k"],
+                    shape["hdim_q"],
+                    "true" if causal else "false",
+                    shape.get("alignment", "top_left") if causal else "top_left",
+                    "false",
+                    shape["dtype"],
+                ]
+            )
+            written += 1
+    return {"written": written, "dropped": dropped}
 
 
 def _shape_key(shape: dict) -> str:
@@ -456,7 +889,29 @@ def main(argv=None) -> int:
         "the only one that says what the kernel team measures on an arch with no "
         "published results CSV.",
     )
-    parser.add_argument("--arch", default="gfx942", help="Filter the CSV to one arch.")
+    parser.add_argument(
+        "--catalog",
+        help="hipdnn_torch/MODEL_CATALOG.md. The fourth source, and the only in-tree "
+        "one: the geometries models were observed running at, rather than plausible "
+        "numbers. Expanded over batch and, for causal entries, over decode.",
+    )
+    parser.add_argument(
+        "--shape-dir",
+        action="append",
+        default=[],
+        dest="shape_dirs",
+        metavar="DIR",
+        help="A published shape directory -- the cluster's `~/model-shapes`. Reads "
+        "graph JSON and tabular files alike (.json records, .csv, `key=value` lines) "
+        "through SHAPE_COLUMNS, so a new publisher's spelling costs one table entry "
+        "rather than a reader. Repeatable.",
+    )
+    parser.add_argument(
+        "--arch",
+        default="gfx942",
+        help="Filter the published CSV to one arch, and drop shape-directory rows "
+        "that name a different one.",
+    )
     parser.add_argument(
         "--include-windowed",
         action="store_true",
@@ -464,15 +919,36 @@ def main(argv=None) -> int:
         "kind, and a kernel that clamps top-left only will decline them anyway -- "
         "but they are excluded LOUDLY here rather than folded onto causal.",
     )
-    parser.add_argument("--out", required=True, help="Write the shape corpus here.")
+    parser.add_argument(
+        "--out",
+        help="Write the shape corpus here, as the request-field JSON "
+        "`dispatch_parity.py --shapes` consumes.",
+    )
+    parser.add_argument(
+        "--out-query-csv",
+        help="Also write the corpus as `q.<parameter>` columns, which "
+        "`hipdnn_corpus_gen --model-shapes` reads as its model pool. A narrowing to "
+        "what one operation declaration can express; what it drops is reported.",
+    )
     args = parser.parse_args(argv)
 
-    if not args.published and not args.graphs and not args.rocke_bench:
+    if not args.out and not args.out_query_csv:
+        parser.error("give --out, --out-query-csv, or both; otherwise nothing is kept.")
+
+    if (
+        not args.published
+        and not args.graphs
+        and not args.rocke_bench
+        and not args.catalog
+        and not args.shape_dirs
+    ):
         parser.error(
             "give at least one source. No corpus alone is sufficient: the CSV is "
             "what the kernel team measures, the graph tree is what callers send, "
-            "rocKE's bench tree is what the kernel's own authors sweep, and an "
-            "integration sized from only one of them has missed real shapes twice."
+            "rocKE's bench tree is what the kernel's own authors sweep, the catalog "
+            "is what models were observed running, a shape directory is whatever a "
+            "publisher handed over, and an integration sized from only one of them "
+            "has missed real shapes twice."
         )
 
     shapes: list[dict] = []
@@ -489,6 +965,14 @@ def main(argv=None) -> int:
     if args.rocke_bench:
         found = from_rocke_bench(Path(args.rocke_bench), "bf16")
         print(f"  rocKE bench   : {len(found):5d} trace records")
+        shapes += found
+    if args.catalog:
+        found = from_model_catalog(Path(args.catalog))
+        print(f"  model catalog : {len(found):5d} recorded geometries")
+        shapes += found
+    for directory in args.shape_dirs:
+        found = from_shape_dir(Path(directory), args.arch)
+        print(f"  shape dir     : {len(found):5d} published shapes in {directory}")
         shapes += found
 
     unique, duplicates = deduplicate(shapes)
@@ -508,8 +992,22 @@ def main(argv=None) -> int:
         by_source[shape["_provenance"]["source"]] += 1
     print(f"  by source     : {by_source}")
 
-    Path(args.out).write_text(json.dumps(unique, indent=2))
-    print(f"\n  wrote {args.out}")
+    if args.out:
+        Path(args.out).write_text(json.dumps(unique, indent=2))
+        print(f"\n  wrote {args.out}")
+    if args.out_query_csv:
+        stats = write_query_csv(unique, Path(args.out_query_csv))
+        print(f"\n  wrote {args.out_query_csv}: {stats['written']} row(s)")
+        for reason, count in sorted(stats["dropped"].items()):
+            print(f"    dropped {count:5d}: {reason}")
+        if stats["written"] == 0:
+            print(
+                "\nFAIL: every mined shape was dropped on the way to the query CSV; "
+                "the model pool would be empty and the corpus would report itself as "
+                "having one.",
+                file=sys.stderr,
+            )
+            return 1
     print(
         "  Provenance is carried on every shape. Split every reported result by it: a "
         "geomean over a mixed corpus reports the synthetic population's win as if it "

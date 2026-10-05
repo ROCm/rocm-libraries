@@ -144,6 +144,45 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                        hipdnnPluginConstData_t* engine_details);
 
 /**
+ * @brief Optional matched-catalog enumeration (engine plugin API 1.5.0).
+ *
+ * Explicit knob settings in engine_config restrict the catalog. offset is zero-based and
+ * must not exceed total_count; limit must be in [1, 10000]. Candidate order is stable and
+ * independent of ranking. An absent export or NOT_APPLICABLE means unsupported, not empty.
+ * Free a successful response with DestroyEngineDetails.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginEnumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                          const hipdnnPluginConstData_t* engine_config,
+                                          const hipdnnPluginConstData_t* op_graph,
+                                          uint64_t offset,
+                                          uint64_t limit,
+                                          hipdnnPluginConstData_t* engine_details);
+
+/**
+ * @brief Describes or evaluates an engine UHD prediction (engine API 1.5.0).
+ *
+ * ENGINE predicts execution with tuning off; CONFIGURATION returns complete knob settings
+ * for one configuration. Neither may benchmark, tune, or run GPU work, and a missing
+ * prediction never changes applicability. The output `metric` is always
+ * engine_config.ranking_metric (empty = "tflops"; RFC 0019 §11.4); an engine with no
+ * model for it reports UNAVAILABLE. An unregistered metric is BAD_PARAM.
+ *
+ * @param[in] evaluate Zero for description only, one to evaluate the prediction.
+ * @param[out] prediction Serialized EnginePrediction, freed with
+ * hipdnnEnginePluginDestroyEngineDetails; left empty on failure.
+ * @return SUCCESS with an AVAILABLE, UNAVAILABLE, or INVALID prediction, or an error.
+ * An absent export or NOT_APPLICABLE means unsupported.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetPrediction(hipdnnEnginePluginHandle_t handle,
+                                    const hipdnnPluginConstData_t* engine_config,
+                                    const hipdnnPluginConstData_t* op_graph,
+                                    hipdnnEnginePredictionKind_t kind,
+                                    int32_t evaluate,
+                                    hipdnnPluginConstData_t* prediction);
+
+/**
  * @brief Destroys the `engine_details` object and releases the associated resources.
  *
  * @param[in] handle The engine plugin handle.
@@ -177,6 +216,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 
 /**
  * @brief Creates an execution context for a specific engine configuration and an operation graph.
+ *
+ * An engine that chooses its own kernel here ranks its catalog by
+ * engine_config.ranking_metric (empty = "tflops"), within any explicit knob settings.
  *
  * @param[in] handle The engine plugin handle.
  * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from

@@ -1,0 +1,1148 @@
+# UHD Generation Tool
+
+Train and export heuristic models for hipDNN's Universal Heuristic Descriptor (UHD) system.
+
+## Overview
+
+This tool takes benchmark timing data and produces:
+1. A trained LightGBM model
+2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
+3. A UHD descriptor (`<stem>.uhd.json`) for the shared plugin-SDK runtime (RFC 0019 §4)
+
+Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
+reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
+names the engine it serves.
+
+## Installation
+
+```bash
+cd projects/hipdnn/tools/uhd_gen
+pip install -e .
+```
+
+## The pipeline
+
+```
+  sweep  ->  export-benchmarks  ->  dataset  ->  train  ->  evaluate  ->  promote
+   |          |                      |            |          |             |
+   |          |                      |            |          |             `- writes the UED's
+   |          |                      |            |          |                role/architecture reference
+   |          |                      |            |          `- eval_report.json (§11.2/§11.4 regret)
+   |          |                      |            `- <stem>.uhd.json + model.bin
+   |          |                      `- dataset.parquet: §8.3's checks applied, the
+   |          |                         collector's is_valid/skip_reason rewritten as
+   |          |                         `error`, tflops/gbs derived from the engine's counts
+   |          `- §8.3 collection CSV: appendable, resumable, one per shard
+   `- ingestor benchmark log
+```
+
+```bash
+# 1. sweep: run the graphs you care about with benchmark logging on
+HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run your graphs>
+
+# 2. export-benchmarks: log -> the §8.3 collection CSV, one per shard, appendable
+python -m uhd_gen export-benchmarks sweep.log -o bench.csv
+
+# 3. uhd_gen.dataset: the collected shards -> the published §8.3 dataset. This is where
+#    §8.3's checks are applied, where a failed candidate's is_valid/skip_reason becomes
+#    the dataset's `error`, and where tflops and gbs are derived from the `<root>.flops`
+#    and `<root>.bytes` the engine published beside the problem (RFC 0019 §13.6) -- the
+#    collector measures times, the engine that ran the graph knows what work it did.
+python -m uhd_gen.dataset \
+    --csv bench.csv \
+    --out dataset.parquet
+
+# 4. train: dataset -> descriptor + model artifact. A collected .csv works too, with a
+#    target the CSV carries (a timing column) and none of §8.3's checks applied.
+python -m uhd_gen train \
+    --input dataset.parquet \
+    --features q.M q.N q.K kernel.tile_m kernel.tile_n kernel.tile_k device.cu_count \
+    --descriptor-tree ./descriptors --engine hipkernel:gemm \
+    --training-arches gfx942 \
+    --target tflops \
+    --group-by benchmark device \
+    --output-dir ./uhd_output \
+    --descriptor-name gemm \
+    --name "GEMM UHD"
+
+# 5. evaluate: how much worse is the model's pick than the best kernel measured?
+python -m uhd_gen evaluate \
+    --input dataset.parquet \
+    --model-dir ./uhd_output
+
+# 6. promote: install the pair and update only its role/architecture reference
+python -m uhd_gen promote \
+    --model-dir ./uhd_output \
+    --descriptor-tree ./descriptors \
+    --engine hipkernel:gemm --arch gfx942
+```
+
+**Step 6 is not optional.** The UED's `sort_kernel_catalog` map must name the
+model under the target architecture (or `default`). Promotion updates that entry;
+other architectures and roles retain their existing models. An unavailable or
+incompatible model disables only that model, leaving a valid engine usable with
+deterministic priority/descriptor-ID ranking. A broken explicit architecture entry
+does not silently select the default model.
+
+### Feature columns use published symbol names
+
+`--features` takes exact published column names without the leading `$`.
+For example, `attention_dense.seqlen_q` becomes `$attention_dense.seqlen_q`.
+The runtime does not add a synthetic `q.` namespace.
+
+| Source | Example |
+|--------|---------|
+| Engine-published graph, node, or tensor binding | `attention_dense.seqlen_q`, `q.dims[2]` |
+| Per-candidate UKD metadata | `kernel.tile_m`, `kernel.split_k` |
+| Device properties | `device.cu_count` |
+
+Use the names returned by candidate enumeration. Renaming columns without changing
+the engine's published bindings produces a model the engine cannot evaluate.
+
+### Constant feature columns are dropped, and named
+
+A column with one value across the whole input cannot separate one candidate from
+another. `train` detects those before fitting, names each one with its value, and
+**drops** it:
+
+```
+WARNING - Dropping 2 feature column(s) that never vary in this corpus:
+kernel.tile_m=128, device.cu_count=304. RFC 0019.13 §10.4: this prunes model inputs
+only, and leaves the engine's authored public knobs untouched.
+```
+
+No tree can split on such a column, so it adds nothing to the model — and it is not
+free. RFC 0019 §6.3 hashes the whole `features_signature` into `features_hash`, so a
+dead column enlarges the contract the runtime has to reproduce and bakes itself into the
+descriptor's identity. Keeping it makes a later, more correct retrain that omits it read
+as a contract break rather than as a better model.
+
+**The test is variance in this corpus, never the column's name.** A rule of the form
+"single-arch runs must not pass `device.*`" is wrong here:
+`GenericPlanBuilder::candidateFeatures` deliberately supports merging a sweep across
+several boards of one architecture, and gfx942 spans MI300X and MI325X, whose
+`total_global_mem`, `memory_clock_rate` and `peak_memory_bandwidth` genuinely differ. The
+8 `$device.*` fields `deviceFeatureValues` publishes therefore behave differently
+depending on what was collected: a single-board corpus loses all 8, and a corpus merged
+across those two boards keeps those 3 and loses the other 5.
+
+Every drop is named with its value because constancy is measured against the corpus that
+was collected, and a CSV cannot tell two opposite situations apart. rocKE's attention
+kernels bake their geometry in, so the matcher pins 8 of their 14 fields before ranking
+begins and those 8 can never vary. But a column that *does* vary in the world, sampled at
+one value because the corpus is thin, reads identically — and only the author can tell
+those apart. Naming the omission is what lets them: a thin sweep is fixed by collecting
+more, not by shipping a feature no tree used.
+
+`train_manifest.json` records `requested_features` and `dropped_constant_features` (each
+with its constant value), so the provenance says what was asked for and what never varied.
+
+- pruning a model input is never knob removal. Training and ordinary promotion preserve
+  the UED's authored knobs (RFC 0019.13 §10.4). Explicit `promote --remove-knob NAME`
+  requires a model trained against the intended major-revised UED and rejects removal of a
+  field the model still consumes;
+- when **two thirds or more** of the requested columns are constant, `train` warns that
+  the proportion looks like a thin corpus and points at the input file. The threshold
+  sits above the 8-of-14 rocKE shape (57%) on purpose: a warning that fires on every
+  normal run is one people learn to ignore;
+- when **every** requested column is constant, `train` fails and names each column with
+  its value. That is an error, not an empty feature set: a model over zero varying
+  features scores every candidate identically, and shipping one is worse than shipping
+  none — the engine ranks by a model that cannot discriminate instead of falling back to
+  its declared order.
+
+### `train` arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--input` | Yes | Path to benchmark CSV/JSON |
+| `--features` / `--feature-signature` | One | Exact published columns, or a JSON file containing inline feature expressions |
+| `--descriptor-tree` / `--provenance` | One | Descriptor snapshot used for collection, or its recorded identity/revision provenance |
+| `--engine` | If ambiguous | UED name or UUID in the descriptor tree |
+| `--feature-evaluator` | Only if undiscoverable | Shared `hipdnn_uhd_features` executable. Every signature needs it, raw references included: it is the one implementation of `features_hash`. Looked up in this order — this flag, `HIPDNN_UHD_FEATURE_EVALUATOR`, `bin/` and `build/bin/` under the interpreter prefix or above this package, then PATH. All relative, so a checkout mounted at a different root inside a container resolves the same way |
+| `--metric` | No | Ranking metric the score estimates (RFC 0019 §4.4): `tflops` (label column `tflops`, objective `max`) or `time` (label column `avgTimeMs`, objective `min`). Written as `score.metric`. Default: `tflops` when `--target` is omitted or is `tflops`; any other `--target` without `--metric` trains a metric-less ranker that orders its own catalog only. |
+| `--target` | No | Target column name (default: the metric's label column). With a metric it must be that label; a contradiction is refused. |
+| `--objective` | No | `max` or `min`. A metric fixes it and a contradicting value is refused; a metric-less model defaults to `max`, so pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
+| `--calibrated` | No | Declare the score cross-engine comparable — RFC 0019 §4.1's `score.calibrated` header, which §11.3 reads when it compares predicted values across engines. Requires a metric. Off by default; nothing here verifies the claim, but RFC 0019.13 §11.2 pins a calibrated score to `avgTimeMs`, so `--timing-statistic avgTimeMs` is required alongside it. |
+| `--timing-statistic` | With `--calibrated` | Which measured timing the target was derived from (`avgTimeMs`, `minTimeMs`, `robustMeanMs`). Recorded in the manifest per §10.5: §11.2 refuses cross-engine comparison between models trained on different statistics, so it has to be readable off the artifact. |
+| `--group-by` | No | Columns for GroupKFold CV |
+| `--group-by-feature` | No | Train a two-layer (grouped) artifact keyed on this feature. Each group's layer-2 model is exported under the value the feature row carries — a string column's categorical code — which is what the runtime compares. Refused for `--role predict_engine`: the runtime scores an L1 model's root ensemble only, so a grouped L1 artifact has no per-row contract |
+| `--output-dir` | Yes | Output directory |
+| `--name` | No | UHD display name |
+| `--descriptor-name` | No | Stem for the emitted descriptor (default: `heuristic`), producing `<stem>.uhd.json` |
+| `--uhd-id` | No | Reuse this UUID as the descriptor's id instead of minting a fresh one |
+| `--num-boost-round` | No | Max boosting rounds (default: 500) |
+| `--early-stopping` | No | Early stopping patience (default: 50) |
+| `--keep-lgbm` | No | Keep intermediate .lgbm file |
+| `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
+| `--model-version` | No | Semantic version embedded in the model metadata |
+
+`--uhd-id` makes retraining a no-edit operation: pass the id the engine's UED already
+names and the pair is simply overwritten in place. A value that is not a UUID is
+rejected before training starts — a typo'd id becomes the descriptor's *identity*, so
+the UED would point at an id nothing defines and the engine would load with no
+heuristic and no error.
+
+`--role predict_engine` trains only on rows collected under the model's metric: every
+row's `binding.metric` must equal `--metric`, and a mismatch fails naming both. A row
+measured under the `tflops` selector records what that selector picked, so a `time` model
+fitted on it models the wrong engine behaviour without any number looking wrong.
+
+`train_manifest.json` records `training_problem_keys` — the problems (in `evaluate`'s
+`(benchmark, device)` identity) the model was fitted on — for every role whose corpus has a
+`benchmark` column, so a later standalone `evaluate` proves its holdout from content.
+
+### `promote` arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--model-dir` | Yes | The `train --output-dir` result: one `<stem>.uhd.json` plus its artifact |
+| `--descriptor-tree` | Yes | Tree holding the engine's `<name>.ued.json`; searched recursively |
+| `--engine` | If ambiguous | The UED's `name` (e.g. `hipkernel:pointwise_model`) |
+| `--arch` | Unless unambiguous | Target architecture, or explicit `default`; may be inferred from one training architecture |
+| `--role` | No | UED model role (default: `sort_kernel_catalog`) |
+| `--remove-knob` | No | Explicit authored knob removal; requires compatible major-revised training provenance |
+| `--dry-run` | No | Print the plan, write nothing |
+| `--uhd-id` | For an opaque engine, unless recorded | `METRIC=UUID` (repeatable) or a bare UUID for the one model being promoted. The model must already carry the id — `promote` never renames a model; a mismatch is refused |
+| `--feature-evaluator` | Only if undiscoverable | Shared `hipdnn_uhd_features` of the build the model is promoted for, looked up as for `train`. A model with a `features_signature` whose recorded `trained_against.feature_semantics_revision` (absent means 1) differs from the revision this evaluator reports is refused, naming both — the loader would refuse it the same way |
+
+`promote` copies the descriptor and artifact into the UED's directory — under
+`heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
+metric-less ranker — and binds it under `<role>.<arch>`. `sort_kernel_catalog` and
+`predict_engine` bind a **list** per arch, one UHD per `score.metric` (RFC 0019 §3.1):
+the incoming UHD replaces only the bound UHD of its own metric (read from the bound UHD
+itself, which must therefore be installed in the tree) and otherwise joins the list; a
+single id is converted to a list. `predict_applicable_kernels` stays a single id. It
+preserves other model references and authored knobs.
+
+**One UUID is one model, under every arch key that binds it.** Promoting a model already
+installed elsewhere in the tree for another arch binds the installed copy (no second
+copy) when its document and artifact bytes are identical, and re-promoting identical
+content changes nothing. The same id with *different* content is refused: it would
+silently change what every other arch binding of that id scores with. Train the
+replacement under a new id, or promote it to the arch it is installed for to replace it
+in place.
+
+An engine with no UED (MIOpen, AITER) reads only the UHD ids its provider declares, per
+metric. The id `promote` installs under must be that declaration: the one the collection
+recorded (`train_manifest.json`'s `binding.uhd_id`, which the engine's description
+reports), or `--uhd-id METRIC=UUID`. With neither, promotion is refused — a model under
+any other id is one the engine never reads. Because the loader keys on the id, not the
+path, a different model already installed under that id anywhere in the tree is
+**replaced where it lies** (document and artifact, under their existing file names) when
+it is this slot's model: a `tree_data` model of the same `score.metric` whose artifact's
+training architectures are all among those being promoted for (`--arch`, or the
+manifest's `training_arches` for `--arch default`). That is how a retrained ASM SDPA
+model replaces the one shipped beside the provider. An installed model under the id that
+serves another metric or architecture, or whose coverage cannot be read, is refused, and
+so is the id installed twice.
+
+It validates everything before writing anything, and refuses rather than half-succeed:
+
+- the descriptor must satisfy the canonical schema and its artifact must exist;
+  missing or incompatible models otherwise leave runtime selection in fallback;
+- the artifact must pass the checks the runtime applies when it loads it: for
+  `tree_data`, the declared digest, the `HGBM` file identifier, the FlatBuffers
+  verifier's structural checks (every offset, vtable, vector, string terminator and nested
+  table, as `VerifyGbdtModelBuffer`), the artifact's `features_hash` matching the
+  descriptor's, and its `num_features` equal to the `features_signature` slot count; for
+  any other artifact, the declared digest. A `predict_engine` model must not be a grouped
+  (two-layer) artifact. A `custom_library` body's `config` must be omitted or empty, as
+  the runtime parser requires.
+  The descriptor's `features_hash` is recomputed from its `features_signature` and
+  `categorical_encoding` through the feature evaluator, as the loader does, rather than
+  compared with another stored copy.
+  When the descriptor declares no digest, `promote` writes the artifact's (bare hex
+  SHA-256, as the runtime compares it) into the installed copy, so the runtime's model
+  identity follows the bytes installed rather than a UUID that outlives a weight change;
+- with more than one UED in the tree, `--engine` is **required**. Promoting into the
+  wrong engine fails twice over: the engine you retrained keeps its old model, and one
+  you never touched starts ranking with a model trained for a different kernel set.
+  Both load cleanly and report nothing, so this is never guessed;
+- replacing a descriptor or artifact still used by another engine, role, or
+  architecture is refused. Use distinct artifact and descriptor paths;
+- recorded UED, KMD, and UMD identities/revisions must remain compatible, checked per
+  target arch: every matcher of a pack serving that arch that the model recorded must
+  still exist at a compatible revision; recorded matchers that only the engine's
+  *other*-arch packs own are ignored (a model collected over gfx942 and gfx950 packs is
+  valid on each), and one no pack of the engine owns any more is refused. This is the rule
+  the runtime loader applies.
+- every `$kernel.*` axis the signature reads (by base name: `$kernel.tile[0]` reads
+  `tile`) must be a field of the engine's KMD **and** a knob of its UED as installed,
+  after any `--remove-knob`. The runtime drops any other model and ranks by priority, then
+  id (RFC 0019 §6.3 check 2). Problem-side facts such as dtype, head counts or causal
+  come from the graph's own columns, never `$kernel.*`;
+- a `predict_engine` model for a descriptor-backed engine must record
+  `trained_against.selector_revision`, which the runtime compares with the engine's
+  current selector revision. Every binding `hipdnn_bench` records carries it.
+
+## `evaluate`: regret against the best kernel that was measured
+
+RMSE on `log1p(target)` is what `train` reports, and it can improve while the model's
+*choice* gets worse. `evaluate` measures the choice, per RFC 0019.13 §11.2 and §11.4:
+
+- **top-1 regret** — how much worse the model's pick is than the oracle `v*(p)`, the
+  best measured candidate for that problem. `t(v̂)/t(v*) − 1` under `objective: min`,
+  `1 − t(v̂)/t(v*)` under `max`; non-negative either way, reported as mean, p50, p95,
+  max;
+- **regret tail** — the fraction of problems whose regret exceeds 5%;
+- **top-k recall** — how often the oracle is in the model's top k, for k = 1, 3, 5;
+- **per-regime regret** — the same mean, grouped by the corpus's regime column. §11.2
+  makes this the *primary* form: an aggregate hides a model that is excellent on the
+  dense middle of the corpus and useless on decode-shaped or prime-dimension problems.
+- **§11.4 references** — the same figures for the two things the model has to be read
+  against: the **static order** the engine ships (its `priority`/`id` ordering, read
+  off the corpus's enumeration order) and **random** choice from `V(p)`, plus the
+  oracle's zero. The model's regret is not interpretable alone: §11.4 wants to know
+  whether it beats the ordering it replaces. It also warns when it does not, in
+  aggregate (MUST 2) or in any one regime (MUST 3).
+
+The model's pick is the one the engine would make: a candidate is rankable only when its
+recovered score is finite and, for a physical score (a declared `score.metric`, or a
+`log`/`log1p`/`sqrt` transform), positive. Anything else the runtime discards, so it
+ranks last in declared order here too, and calibration leaves it out and counts it as
+`excluded_runtime_discarded_predictions`. This is the only regret `uhd_gen` reports:
+`train` has no out-of-fold estimate, because one fitted unlike the exported model
+describes a model nobody ships.
+
+It writes `eval_report.json` — the artifact §10.4 names — into `--model-dir`.
+
+```bash
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output
+```
+
+```
+Regret report (0019.13 §11.2, §11.4) -- ./uhd_output/eval_report.json
+  metric:             (none: ranks its own catalog only)
+  target/objective:   minTimeMs (min)
+  problems grouped by: benchmark, device
+  split:              group_holdout_by_problem, seed 0, 12 eval / 48 train problem(s)
+  problems scored:    12
+  top-1 regret:       mean 0.7012  p50 0.0000  p95 2.1976  max 2.2109
+  regret tail (>5%):  0.4167 (5 problem(s))
+  top-1 recall:       strict 0.5833   tie-aware 0.5833
+  vs §11.4 references: static order 1.2210   random 1.8043   oracle 0.0000 (mean top-1 regret)
+  per-regime regret:  (from column 'regime')
+    decode                   mean 1.4025  (6 problem(s))
+    prefill                  mean 0.0000  (6 problem(s))
+  holdout integrity:  held_out
+```
+
+### A problem is `(benchmark, device)`
+
+The same graph on two GPUs is two problems with two different best kernels. Grouped on
+`benchmark` alone, the oracle becomes the best kernel on whichever card is faster and
+the regret figure is a different quantity — on the demo corpus above, conflating two
+devices moved the mean from 0.70 to 0.26.
+
+A corpus exported before the `device` column existed carries it empty on every row.
+`evaluate` degrades to `benchmark` alone rather than refusing, and says so on stdout,
+in `grouping.degraded`, and in `warnings[]`:
+
+```
+!! DEGRADED PROBLEM GROUPING: problems are identified by 'benchmark' ALONE because
+no 'device' column in this corpus ... They are not comparable with figures from a
+corpus that carries device identity. Re-export from a sweep that logs the `device`
+column.
+```
+
+### The split holds out problems, not rows
+
+Regret belongs to the evaluation slice (§5.6.4); on training data it is optimistic and
+is not the number anyone wants. `evaluate` holds out `--eval-fraction` of the
+**problems**, assigned by a seeded SHA-256 of the problem key — reproducible from
+`(corpus, --seed)` alone, and independent of row order, so concatenating a log
+differently does not move the slice.
+
+Splitting *rows* would put some of a problem's candidates in training and the rest in
+evaluation. The evaluation-side oracle would then be the best of a subset, and a
+mediocre pick would look correct because the better candidate was not there to compare
+against. On the fixture in `tests/test_evaluate.py` that turns a true regret of 3.00
+into 2.25; the tests assert the group-aware figure.
+
+The model must not have trained on the evaluation problems, and only problem identity
+can show that. `train` records the `(benchmark, device)` keys it fitted on as
+`training_problem_keys`; `evaluate` compares them with every evaluated problem: disjoint
+is `held_out`, any shared problem is `COMPROMISED` (printed first, with the count). A
+model that records no keys reports `unknown` — a different file name is not evidence,
+since a renamed copy of the training corpus is the same problems. When one side has no
+device identity the keys are compared on the graph alone, and a shared graph is
+`unknown`. The fix for a compromised run is one extra step:
+
+```bash
+# write the training side of the split, then fit on that
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output \
+    --emit-train-slice train_slice.csv
+python -m uhd_gen train --input train_slice.csv ... --output-dir ./uhd_honest
+python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_honest   # same --seed
+```
+
+On the demo corpus that raises the reported mean regret from 0.45 to 0.70: the leak was
+worth a third of the number.
+
+### What is excluded, and what is not
+
+§5.6.3 warns that dropping a configuration from the evaluation slice removes it from
+the oracle. So only rows that carry no usable measurement are dropped, and every drop
+is counted in `exclusions`:
+
+| Excluded | Why |
+|----------|-----|
+| `is_valid=False` rows | A candidate that never ran has no time and cannot be the best. Its empty timing column would otherwise read as a zero and win every `min`. Only a collected CSV carries the flag. |
+| `numerically_valid=False` rows | A candidate checked wrong has no time for the right answer; a direct corpus may still carry its wrong answer's (fast) timing, which would otherwise become the oracle. Counted as `numerically_invalid_rows`; an undecided (null) verdict stays. |
+| Rows whose target is empty or non-numeric | Same reason, without the flag -- which is how a published dataset spells it, since §8.3 has no validity column and records the failure in `error` instead. |
+| Problems with one measured candidate | With nothing to choose between, a correct pick is not evidence; scoring it as regret 0 would dilute the mean. |
+| Problems whose oracle value is not positive | Both formulas divide by it, and under `max` the ratio's sense flips. |
+
+Every measured candidate of an evaluated problem stays in `V(p)`.
+
+### Ties within noise
+
+Regret needs no tie rule — it is measured in the target metric, so two kernels a
+fraction of a percent apart produce a regret a fraction of a percent from zero, which
+is §11.2's stated reason for measuring it that way. **Top-k recall does need one**: it
+is a rank test, and it scores the second of two statistically indistinguishable kernels
+as an outright miss.
+
+So recall is reported twice. `strict` demands the exact oracle row in the top k.
+`tie_aware` accepts any candidate that is tied with the oracle, where tied means either
+
+- within `--tie-rel-tolerance` (default 1%) of the oracle's measured value — unit-free,
+  works for either objective, and it is the same quantity the regret column reports, so
+  "tied" means exactly "costs less than 1%"; or
+- within `--tie-sigma` standard errors of it, using `stddevMs` and `iters`. Applied
+  **only** when the target is a millisecond timing (`minTimeMs`, `avgTimeMs`,
+  `robustMeanMs`), because `stddevMs` is in milliseconds and widening a TFLOPS
+  comparison by it would be a units error. For `avgTimeMs` that band is exact; for
+  `minTimeMs` — §8.5's default target — and for `robustMeanMs`, the sample spread is a
+  scale for the noise rather than that estimator's own error, so the band is
+  approximate and deliberately so: the alternative is no noise notion at all for
+  either.
+
+The band needs the columns to be there. §8.3 makes `stddevMs` and `iters` part of the
+result envelope, and both `export-benchmarks` and `generate` emit them; a corpus that
+drops them turns the band off, and `ties.policy` then names the missing column rather
+than blaming the target's units. `evaluate` also warns loudly, because nothing else in
+the report changes when the band goes away.
+
+`topk_recall.trivial` records the fraction of problems with no more than k measured
+candidates, so a recall@5 of 1.0 on 4-candidate problems is legible as the tautology it
+is.
+
+### `evaluate` arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--input` | Yes | Benchmark CSV/JSON to evaluate on |
+| `--model-dir` | Yes | A `train --output-dir` result |
+| `--model` | No | Artifact to rank with (default: `model.lgbm` if kept, else the descriptor's `tree_data.artifact` — the file the engine itself loads) |
+| `--output` | No | Report path (default: `<model-dir>/eval_report.json`) |
+| `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
+| `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
+| `--target` | No | Measured column regret is computed in (default: the manifest's `target`) |
+| `--objective` | No | Override the direction read from the descriptor/manifest. Refused when it contradicts the descriptor's `score.metric` |
+| `--device-column` | No | Column holding device identity (default: `device`) |
+| `--regime-column` | No | Regime column for the per-regime table (default: the first of `regime`, `corpus_regime`, `q.regime`, `problem.regime` that is present) |
+| `--tie-rel-tolerance` | No | Tie tolerance for tie-aware recall (default: 0.01) |
+| `--tie-sigma` | No | Noise-band width in standard errors (default: 2.0) |
+| `--regret-tail-threshold` | No | Tail cutoff (default: 0.05, §11.2's 5%) |
+| `--include-per-problem` | No | Write every problem's oracle, pick and regret into the report |
+| `--emit-train-slice` | No | Write the training side of this split to a CSV |
+
+The **objective is read, never assumed** — from the descriptor, falling back to the
+manifest. Both directions are legal and the wrong one inverts every number, so a corpus
+that offers neither is an error rather than a guess. A descriptor naming a `score.metric`
+fixes the direction (`tflops` max, `time` min), so regret is always computed in the
+metric's direction. Regret is asserted non-negative; a negative one means the direction
+is backwards, and `evaluate` fails instead of printing a plausible small number.
+
+### `eval_report.json`
+
+| Key | Contents |
+|-----|----------|
+| `schema` | `uhd_gen.eval_report/1` |
+| `corpus` | path, row count, problem count |
+| `metric`, `target`, `objective` | the descriptor's `score.metric` (null for a metric-less ranker), and what regret was measured in, in which direction |
+| `grouping` | the problem-identity columns, `degraded`, and why |
+| `split` | method, unit, seed, fraction, train/eval problem counts, and the evaluated problem keys |
+| `slice` | that `V(p)` is what the sweep measured rather than every applicable configuration, so `v*(p)` is a lower bound (§11.1) |
+| `exclusions` | counts by reason, plus the policy that produced them |
+| `metrics` | `problems_scored`, `top1_regret` (mean/p50/p95/max), `regret_tail`, `topk_recall` (`strict`/`tie_aware`/`trivial`), `per_regime`, `per_regime_status`, and `references` |
+| `metrics.references` | §11.4's `oracle`, `static_order` and `random`, each carrying the same `top1_regret`/`regret_tail`/`topk_recall`/`per_regime` block plus a note on how it was derived |
+| `ties` | tolerance, sigma, whether the noise band applied, and the policy |
+| `model` | artifact, features, what it was trained on, how many rows |
+| `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason |
+| `not_implemented` | the parts of §11.2/§11.3/§11.4 this command does not compute |
+| `warnings` | every loud condition, in the order printed |
+| `per_problem` | with `--include-per-problem`: key, regime, candidate count, oracle, pick, regret, ranks |
+
+`per_regime` is `null` when the corpus has no regime column, and `per_regime_status`
+says so — an absent metric someone expected is worse than a stated gap.
+
+`not_implemented` names what is missing rather than leaving a reader to infer it:
+§11.2's regime-weighted aggregates (nothing declares weights yet), its calibration
+metrics (required only when `score.calibrated` is true), §11.3's leave-one-regime-out
+and leave-variants-out splits (both need retraining per fold), §5.6.3's round-0
+core versus full slice and steering versus reserved portions (properties of a corpus
+collected by the campaign loop, which does not exist yet), and two of §11.4's
+obligations — MUST 4's regression check against a previously promoted UHD, which has no
+loader here, and item 5's scoring-time comparison, which §11.4 itself notes is blocked
+on the §11.6 (B5) harness.
+
+§11.4's static-order reference is read off the corpus: a problem's rows are in the
+order the engine enumerated its catalog, which is the `priority`/`id` order Stage 1
+ships, so the static pick is the first row carrying a usable measurement. A corpus
+re-sorted after collection no longer carries that order, and the reference then
+describes a permutation rather than the shipped one; the note in the report says so.
+The random reference is an exact expectation over `V(p)`, never a sampled draw, so the
+sanity floor does not move between runs.
+
+## Input Format
+
+`--input` takes three forms and the suffix decides, for `train`, `evaluate`, `knobs` and
+`merge` alike:
+
+| Suffix | What it is | When |
+|--------|------------|------|
+| `.parquet` | The dataset `uhd_gen/dataset` publishes from collected shards (§8.3) | The route a model anyone ships should come by |
+| `.csv` | A collected corpus, read directly | A quick local run |
+| `.json` | The same rows as records | Hand-written corpora and fixtures |
+
+**Collection stays CSV; publication is Parquet.** The format that has to survive a
+two-day sweep and the format a trainer wants are not the same format. Parquet writes
+its footer last, so a run killed mid-flight leaves a file that cannot be read at all,
+against §8's requirement that the benchmark step be resumable from a partial result;
+and a Parquet file cannot be appended to, so §8.8's "shard outputs merge by appending"
+would become a full rewrite. CSV has both properties. So `hipdnn_bench` and
+`export-benchmarks` keep writing CSV, and `uhd_gen.dataset` reads the merged shards
+once, derives `tflops` and `gbs` from the engine's published counts, and writes the
+typed dataset:
+
+```bash
+python -m uhd_gen.dataset \
+    --csv shards/*.csv \
+    --out dataset.parquet
+
+python -m uhd_gen train --input dataset.parquet ...
+```
+
+Prefer the dataset for the reason that argued for Parquet in the first place: it
+carries its own column types, so a column that is empty in one shard and populated in
+another cannot concatenate to `object` and quietly change what the trainer sees. The
+CSV branch is the escape hatch, not the route -- nothing §8.3 specifies is checked on
+it (no measurement-or-error rule, no completeness agreement, no candidate-set
+comparison across a merge), which is what the importer exists for.
+
+**A failure is spelled differently at the two ends, and the importer is where it is
+translated.** The collector writes what the runtime record carries at the moment of
+failure: `is_valid=False`, a `skip_reason`, and empty timing columns. §8.3's published
+dataset carries no validity flag at all -- a failed candidate is a null measurement plus
+a non-empty `error` -- so that no two columns can disagree about whether a row was
+measured. `uhd_gen.dataset` rewrites the one into the other and then drops `is_valid` and
+`skip_reason` as collection bookkeeping, which is why the chain above composes: a sweep
+containing a failure is a normal sweep, not a corpus the importer refuses.
+
+**A candidate checked wrong is a failure too, with its verdict kept.** The bench's timing
+flag is independent of its correctness check, so a kernel that computed the wrong answer
+quickly arrives `is_valid` with a fast time. A row with `numerically_valid=False` is
+published with its timings and `tflops`/`gbs` null, its `validation` reason copied into
+`error` (or `numerically_valid=False` when it gave none), and its problem marked
+incomplete -- but unlike the collector's flag, `numerically_valid` and `validation` stay as
+columns, so evaluation and promotion see the same verdict generation recorded. A row
+`generate` already suppressed publishes the same way. Null is undecided, not wrong: it
+stays a measurement. Every entrance -- `generate`, `train`, `uhd_gen.dataset`,
+`import-immediate`, `evaluate`, `promote` -- reads the verdict through one helper,
+`uhd_gen/correctness.py`, so none of them can disagree about which rows it covers.
+
+`train` drops a row that carries no measurement in either spelling -- the flag, a
+non-empty `error`, or a target that is not a finite number -- and a row checked
+numerically wrong whatever it carries, and logs how many went by each. The failed rows
+stay in the dataset, because a candidate that could not run is information about feature
+space and §8.3 keeps it; they are excluded at the fit, exactly as `evaluate` excludes
+them from the oracle.
+
+**Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`
+and `device_id` name something; nothing computes with them. Left to inference a device
+called `0007` becomes the integer 7 from one format and the string `"0007"` from the
+other, and one problem becomes two.
+
+Whichever form it arrives in, the corpus must carry:
+- Feature columns (problem dimensions, kernel config, device properties)
+- Target column (typically TFLOPS or time)
+
+The §11.2 label rule is applied to all three alike: a `--calibrated` model must be
+trained with `--timing-statistic avgTimeMs`, and the published dataset earns no
+exemption from it.
+
+Example CSV:
+```csv
+M,N,K,tile_m,tile_n,tile_k,cu_count,tflops
+1024,1024,1024,128,128,32,120,50.5
+2048,2048,2048,256,128,32,120,75.2
+...
+```
+
+### Inline computed features and device coverage
+
+Pass `--feature-signature features.json` instead of `--features`:
+
+```json
+[
+  "$kernel.tile_m",
+  "$device.cu_count",
+  {"ceil_div": ["$q.dims[2]", "$kernel.tile_m"]}
+]
+```
+
+Build `hipdnn_uhd_features`. Training and runtime use the same descriptor expression
+language (the kernel ingestor's `jsonexpr`), and the tool also owns `features_hash`: RFC 0019 §6.3
+gives that digest one definition, `FeatureExtractor::computeHash`, which the tool
+asks for rather than reimplements. So the binary is needed for every training run,
+not only for signatures containing expressions, and a run that cannot find it fails
+naming what to supply instead of stamping a digest nothing verified. Expressions and
+categorical vocabularies are part of the feature hash; there is no separate named
+`derived` block.
+
+Every evaluator response also carries `feature_semantics_revision`, the build's
+`FEATURE_SEMANTICS_REVISION` (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`): what the
+values behind published feature names *mean*. `features_hash` fingerprints which names a
+model reads, not how the C++ computes them, so a change to a FLOP or byte convention, an
+operand encoding or a feature name bumps this revision instead. `train` records the
+evaluator's revision in `trained_against.feature_semantics_revision`; `promote` and
+`evaluate` refuse a model whose recorded revision differs from their evaluator's, naming
+both; and the loader refuses it at bind time for every role, logging both revisions (an
+opaque engine's declared `predict_engine` model reports `UNAVAILABLE` with that reason, and a
+UED role-mapped model is disabled like any other provenance refusal, the engine keeping its
+declared-order fallback). A document recording no revision — every model trained before it
+existed — is revision 1, and so is an evaluator whose responses carry none. Only models with a
+`features_signature` are subject to it: a
+signature-less ranker reads no published feature.
+
+An explicit computed expression using a device field that never varied in the
+training corpus is rejected. Automatic feature proposals omit such expressions
+and retain the raw device field — which training then drops on the same evidence,
+by the variance rule above, naming it with its value. `device_coverage` in
+`train_manifest.json` records the observed values of every device field either way.
+
+A value a row does not publish is **absent**, never zero and never NaN: a conv-fwd row
+has no `dy`, and pandas fills that hole with NaN, which `evaluate_feature_rows` turns back
+into JSON `null` before the evaluator sees it (a column no row publishes goes over as
+`null` too). The evaluator treats `null` as unbound, exactly like the runtime: a bare
+`$graph.nodes[0].dy.dims[0]` makes that row unscorable, while
+`{"value_or_default": ["$graph.nodes[0].dy.dims[0]", 0]}` or `present` state what an
+absent input means. Aggregates follow the same rule: "no node of this type" may sum to 0,
+but "work unknown" stays absent and is never silently 0. Whether a signature is usable on
+a corpus is therefore the evaluator's answer over the published feature maps
+(`check_signature_evaluates`), not a check that every referenced name is published.
+
+### Reproducible generation
+
+`python -m uhd_gen generate --help` describes the combined workflow. It accepts
+graph files or corpus directories, enumerates matched candidates through
+`hipdnn_bench enumerate`, checks identities and knob tuples during timing, then
+trains, evaluates a held-out problem/device split, and promotes.
+`--no-promote` validates installation without changing the shipping tree.
+
+`--metric` names the ranking metrics to train (`tflops`, `time`; repeatable or
+space-separated; default `tflops`). One run emits **one UHD per metric** (RFC 0019
+§13.4): with a single metric the model lands in `model/` exactly as before; with several,
+each lands in `model_<metric>/`, is evaluated on its own, and is promoted in turn — each
+promotion adds its UHD to the arch's role list and replaces only that metric's entry.
+The catalog sweep is timed once and feeds every metric. `--uhd-id METRIC=UUID`
+(repeatable) names a metric's UHD id; a bare UUID names the UHD of a single-metric run
+and is refused when more than one metric is requested. An engine with no UED (MIOpen,
+AITER) reads only the ids its provider declares per metric, and its description reports
+the one for the requested metric as `binding.uhd_id`: `generate` trains and promotes
+under that id, refuses a `--uhd-id` that contradicts it, and — when the engine reports
+none and no `--uhd-id` names one — stops after the first graph rather than minting an id
+the engine would never read. `generation_manifest.json` (`uhd_gen.generation/2`) records
+a `models` entry per UHD with its metric, id, directory, corpus and the exact
+train/evaluate commands.
+
+A catalog ranker is fitted only on axes the **shipping** UED admits. Collection exposes
+every KMD field so every catalog entry is reachable, but `generate` offers `$kernel.*`
+features only for the shipping UED's knobs. A field the matcher binds from the graph
+(dtype, head counts, causal, ...) is read from its problem-side twin column instead.
+`generation_manifest.json`'s `withheld_kernel_fields` lists every KMD field that was not
+offered, with the reason (`graph_bound` and the column to read instead, or
+`not_a_shipping_knob`). An authored `--feature-signature`/`--features` that reads any other
+kernel field is refused before training.
+
+`--graphs` takes both serialized forms: hand-written or exported `*.json`, and the
+binary FlatBuffers `hipdnn_corpus_gen` writes as `graphs/<operation>_<n>.fb`, so a
+generated corpus composes with `generate` directly. A `hipdnn_corpus_gen` root (or its
+`manifest.json` itself) is read through the manifest's `graphs[].file` list — the
+manifest is never collected as a graph, and a listed file that is missing is an error;
+any other directory is searched recursively, skipping `manifest.json`. Form is decided
+by content rather than extension, the same way `hipdnn_bench` decides it, so a renamed
+file still loads. An ID-less JSON graph is given a reproducible UUID5 of its canonical
+content; a serialized graph already carries its own id and the bench preserves it, so
+nothing is injected there.
+
+**One bad graph costs that graph, not the run.** A graph whose collection fails (the
+bench crashes, or its response fails validation) is skipped for every device and metric
+and recorded with its error under `failed_graphs` in `generation_manifest.json`. Up to
+`--max-graph-failures` of the graphs (a fraction, default `0.05`) may fail; more fails
+the run and lists them, since failures that common are systematic, not incidental.
+
+Collection times **one invocation per graph**: `hipdnn_bench enumerate` decides the
+candidate set, then a single `hipdnn_bench --sweep --json` times every candidate in
+that set, in one process. Plugin load, graph build and kernel compilation are paid
+once per graph instead of once per row, which is most of the wall time on kernels
+that run in well under a millisecond. Collection pins restrict which candidates are
+enrolled; they are never combined with a candidate's own settings, so one enrolled
+tuple still times exactly one candidate. The sweep must return exactly the
+enumerated candidates — a subset is silent data loss and fails the run.
+
+The trade is crash granularity: a candidate that fails to build or run is reported
+as an unsuccessful result and still reaches the corpus, but a candidate that crashes
+the process now costs its graph's remaining rows rather than only its own.
+
+Each candidate is timed with STANDARD autotune; an internal exhaustive sweep must
+not substitute a different kernel. Providers that do not implement enumeration
+report unsupported, not an empty catalog. `is_valid` keeps its timing-based meaning
+— "a measurement was obtained" — and `numerically_valid` carries the separate
+per-candidate correctness verdict beside it.
+
+Every collected row carries §8.3's envelope, `stddevMs` and `iters` included, so
+`evaluate`'s noise band works on a generated corpus rather than being inert on it.
+
+**A failure never destroys the measurements.** Collection is the expensive half of a
+run, and §8.7 is explicit that measurements outlive the strategy that requested them,
+so a failure anywhere after collection — training, evaluation, an empty holdout,
+installation validation — leaves the staging directory in place and names it in the
+error. It is only consumed by the rename into `--output-dir` that a successful run
+performs, so nothing accumulates from runs that worked. Delete a reported stage once
+you no longer need what it measured.
+
+**What the catalog model is scored in.** Each metric fixes its label (RFC 0019 §13.4):
+`tflops` is `graph.flops / (avgTimeMs * 1e9)`, derived per candidate from the engine's
+published `graph.flops`; `time` is `avgTimeMs` itself. Either is trained as
+`sort_kernel_catalog` with `score.calibrated: true` and the metric's objective (`max`,
+`min`) — `avgTimeMs` because RFC 0019.13 §11.2 pins a calibrated score to the mean. That
+is what gives the role the cross-engine standing RFC 0019 §11.1 describes, and with it
+§11.2's `B only` ranking row. When no `--metric` was given and the engine publishes no
+work count, it falls back to `robustMeanMs`/`min`/uncalibrated with **no** `score.metric`
+— the engine's metric-less default ranker, which is legal (§2.5, §15.1), ranks this
+engine's own catalog just as well, and warns that the score is no longer comparable with
+another engine's; the thorough policy then falls back to the engine's L1 prediction. An
+explicitly requested `--metric tflops` without a work count fails instead.
+
+`generate` takes the work count from the engine's own published `graph.flops`, which is
+the effective count the runtime computed for the graph it just ran. A corpus that was
+collected as CSV and published by `uhd_gen.dataset` instead carries `tflops` and `gbs`
+derived from the `<root>.flops` and `<root>.bytes` that same engine logged beside the
+problem, and the row's own `avgTimeMs` -- the statistic a calibrated label is defined on,
+in both paths. Both take the count from the engine and differ only in which of its
+outputs they read. `--resolve-duplicates` keys a problem on its shape, graph and device
+together, so one shape measured on two boards stays two problems.
+
+### Engine-level immediate predictions
+
+`predict_engine` trains an engine's **normal untuned performance**, not the best
+configuration found by a sweep. Collection builds only that engine's plan with
+`global.benchmarking=0`, warms it up, and measures ordinary execution with HIP events.
+It does not enumerate configurations or invoke autotune; normal engine cache behavior is
+unchanged. Full-graph work and elapsed time determine the TFLOPS label; unsupported work
+accounting is not replaced with a guessed label. Only a `tflops` collection needs
+`graph.flops`: a `time` collection over graphs whose provider publishes no FLOP count is
+complete, and its rows carry no `tflops`.
+
+The `tflops` label is `graph.flops / (avgTimeMs * 1e9)`; the `time` label is `avgTimeMs`.
+RFC 0019.13 §11.2 (:2003) requires a UHD declaring `calibrated: true` to train on
+`avgTimeMs`, and §10.6.2 repeats it for this role specifically; L1 always declares it, so
+the mean is the label and never the minimum or the robust mean. `robustMeanMs` stays on
+every corpus row as §8.5's informational statistic, alongside `stddevMs` and `iters`.
+Which statistic produced the label is recorded as `timing_statistic` in
+`train_manifest.json`, because §11.2 refuses cross-engine comparison between models
+trained on different ones.
+
+The engine picks its kernel at plan build with its ranker for the request's metric
+(RFC 0019 §11.4), so an immediate measurement belongs to one metric: collection passes
+`--ranking-metric <metric>` and checks the response names it, and a multi-metric L1 run
+collects once per metric into `corpus_<metric>.json`. Every row's `binding.metric` names
+the metric it was described under; normalization refuses a row without one, and `train`
+and `evaluate` refuse rows whose metric (or selector revision) differs from the model's,
+naming both.
+
+An immediate row keeps its `numerically_valid` verdict and `validation` reason through
+import and readback. A pick checked wrong (`false`) keeps its row with every timing and
+derived label null, and `generate`, `train` and `evaluate` leave it out of the labels and
+the oracle; null -- what today's collector writes, since one engine's single pick has no
+reference to compare against -- is undecided and trains.
+
+The bench measures against `--descriptor-tree` and nothing else, for both roles: it is
+passed as `HIPDNN_DESCRIPTOR_DIR` (the replacement root; L2 passes its knob-expanded copy
+of it), and any inherited `HIPDNN_DESCRIPTOR_RUNTIME_DIR`/`HIPDNN_DESCRIPTOR_PATH` is
+cleared. Those add roots, and the loader keeps the first definition of an id, so an
+earlier root's selector would otherwise produce labels for a tree this run never
+installs into. The tree must therefore be a complete root the engine can load from (for a
+kpack-backed provider, the arch root that owns `kpack`), exactly as for L2.
+
+```bash
+hipdnn_bench --graph graph.json --engine-name vendor:gemm \
+    --describe-engine-prediction --workspace-limit 67108864
+hipdnn_bench --graph graph.json --engine-name vendor:gemm \
+    --collect-immediate --ranking-metric tflops --workspace-limit 67108864
+
+python -m uhd_gen generate \
+    --graphs ./graphs --descriptor-tree ./descriptors \
+    --engine vendor:gemm --engine-id <ENGINE-ID> \
+    --role predict_engine --metric tflops time --arch gfx942 \
+    --workspace-limit 67108864 \
+    --features graph.flops device.cu_count \
+    --output-dir ./immediate-model
+
+HIPDNN_DESCRIPTOR_PATH=./descriptors hipdnn_bench \
+    --graph graph.json --engine-name vendor:gemm --predict-engine \
+    --ranking-metric time --workspace-limit 67108864
+```
+
+Choose features from the description's published graph, device, and constraint
+fields. L1 signatures cannot consume candidate metadata. A workspace bound must
+be identical during collection and prediction when the model depends on it.
+The example feature set demonstrates the workflow, not an accuracy recommendation.
+
+Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-less
+JSON inputs. It records the physical device ID, selector revision, commands,
+constraints, warmup, timing statistics, and disjoint training/evaluation graph-device
+identities. L1 evaluation reports calibration errors and cross-engine immediate
+selection regret, in the model's metric and direction (keys such as
+`signed_bias_tflops` / `signed_bias_time`); every compared model must predict the same
+metric, and a corpus with only one measured engine cannot establish cross-engine
+selection quality.
+
+The cross-engine oracle is every valid measurement, scored or not. An engine whose model
+declines a graph (an `INVALID`/`UNAVAILABLE` answer, or a value the metric cannot take) is
+placed as the runtime places it — after every scored engine, in the static engine order
+(`sortEngineIds`; engines it does not name are ordered by public ID, and
+`HIPDNN_HEUR_FALLBACK_ENGINE_ORDER` is not applied) — so selection regret includes the loss
+of a declined fastest engine. Calibration is over scored rows only, and
+`prediction_coverage` reports how many rows and problems were scored, and how many picks
+fell to static order.
+UED role-map keys use the bare architecture (for example, `gfx942`); candidate
+collection retains feature-suffixed architecture strings in `device_arch`.
+
+The runtime lives in `hipdnn_plugin_sdk/heuristics/uhd/` and, like the descriptor expression
+language it evaluates, exists only with `HIPDNN_ENABLE_KERNEL_INGESTOR`; an engine reaches it
+through a binding that
+lives in compiled code: a `predict_engine` UED role for a descriptor-backed
+engine, or, for an engine that ships no UED, the UHD UUID its provider declares in its
+own engine definition (RFC 0019 Open Question 7, RESOLVED). Authoring an L1 model for an
+opaque engine therefore means publishing a UHD carrying one of the ids that engine
+already declares — `AsmSdpaEngine::L1_MODEL_IDS` for ASM SDPA,
+`MIOPEN_ENGINE_L1_MODELS` / `MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS` in `MiopenContainer.cpp`
+for MIOpen — into a descriptor root that provider reads. The document itself declares no
+engine, role or arch; an id no engine declares is unreachable, and an engine whose
+declared id resolves to nothing contributes no score and falls back to static ordering.
+An opaque engine's UHD must not name a descriptor set in `trained_against` -- it has no UED,
+KMD or UMD to be trained against, and one that names them is refused. It must instead record
+`trained_against.selector_revision`: the exact selector-revision string the engine reports in
+its prediction binding, which is the provider build the measurements were taken on. A model
+recording a different revision, or none, is refused -- the engine stays applicable and reports
+UNAVAILABLE naming both revisions.
+Start a fresh consumer process after installing a model: a compiled model is cached
+for the lifetime of the engine that owns it.
+
+Install the intended catalog-ranking model before collecting L1 measurements.
+Changing that model changes the descriptor engine's immediate selector and can
+invalidate an existing L1 model. Collect and train L1 against the final selector;
+do not reuse labels from the previous ranking policy.
+
+### Prediction queries and engine-selection policies
+
+Predictions are a generation-tool surface, not a consumer API: there is no `Graph`
+method for them (RFC 0019 Open Question 12, RFC 0017 §2). `hipdnn_bench` publishes
+them for a finalized graph, and a C++ tool can read the same descriptor attributes
+through `hipdnn_frontend::detail::getEnginePrediction()`:
+
+```bash
+# L1 (engine kind), described without evaluating a model:
+hipdnn_bench --graph graph.json --engine-name <engine> --describe-engine-prediction
+# L1 evaluated:
+hipdnn_bench --graph graph.json --engine-name <engine> --predict-engine
+# L2 (configuration kind): add the knob constraints that name the configuration.
+hipdnn_bench --graph graph.json --engine-name <engine> --predict-engine --knob tile=128
+```
+
+Under the hood the engine descriptor answers the engine-kind query
+(`HIPDNN_ATTR_ENGINE_PREDICTION_EXT`) and an engine config descriptor answers the
+configuration-kind query (`HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT`); the descriptor
+queried states the kind, and the `*_PREDICTION_EVALUATE_EXT` input selects describe
+(0) versus evaluate (1). Consumers still select engines the ordinary way:
+
+```python
+error = graph.create_execution_plans([hipdnn.HeuristicMode.B,
+                                      hipdnn.HeuristicMode.FALLBACK])
+```
+
+- The quick policy (**Mode A**) ranks applicable engines by their L1 prediction in the
+  request's ranking metric, without querying L2 or materializing losing engines'
+  configuration catalogs. The chosen engine picks its kernel at plan build with its
+  ranker for that metric, tuning disabled.
+- The thorough policy (**Mode B**) uses an engine's calibrated L2 configuration
+  prediction in that metric when available, otherwise its L1 prediction. The L2 result
+  owns an `EngineVariant` containing the engine ID and explicit knob settings. Plan
+  construction preserves those settings to execute the scored configuration.
+- Engines without a usable prediction in the metric remain eligible after scored
+  engines. If no engine has a usable score, the prediction policy declines rather than
+  fabricating a ranking. An explicitly supplied fallback mode can then run.
+
+`AVAILABLE` carries a `value` in the requested `metric`'s units (TFLOPS for `tflops`,
+milliseconds for `time`); an engine never answers in another metric. `UNAVAILABLE` and
+`INVALID` do not remove engine applicability. Description queries do not evaluate a model; evaluated
+queries can omit binding/features metadata to keep the policy path lightweight.
+Neither prediction kind times GPU work; L2 may prepare a candidate to ensure the
+returned selection is executable.
+
+A configuration-kind query scores the configuration its knob constraints name, so
+replaying an `AVAILABLE` result is replaying those same knobs:
+
+```python
+knobs = [hipdnn.KnobSetting("tile", 128)]
+error = graph.create_execution_plan_ext(engine_id, knobs)
+```
+
+Check the returned error, then call `build_plans()` before execution.
+Preserving a configuration does not confer compiled-plan serialization support.
+Graph serialization embeds a built plan only when the engine advertises that
+capability; otherwise it stores the graph alone. For an engine without that
+capability, restore the graph and explicitly reapply the owned configuration.
+
+L2 cross-engine comparison requires a model trained against the metric's own label with
+`--metric <m> --calibrated --timing-statistic avgTimeMs`. `generate` produces exactly
+that for every requested metric it can label, and for the default run on an engine that
+publishes no `graph.flops` says in a warning that the model it produced ranks a catalog
+without being a calibrated L2 estimate. Do not relabel a latency or arbitrary-score model
+as TFLOPS.
+
+## Growing a training set
+
+Measuring and training are separate steps, so measurements outlive the model they were
+taken for and a later model can train on all of them:
+
+```bash
+# Measure a corpus once; the collection is the measurements plus everything training reads.
+python -m uhd_gen generate --collect-only --graphs corpus/sdpa_fwd/graphs \
+    --descriptor-tree tree --engine-id 4714091817493728420 --role predict_engine --output-dir col_1
+
+# Or across N GPUs: --shard K/N measures every N-th graph, one collection per shard.
+python -m uhd_gen generate --collect-only --shard 0/4 --graphs corpus/sdpa_fwd/graphs ... --output-dir col_1_s0
+
+# Train on any number of collections.
+python -m uhd_gen generate --collection col_1 col_2 col_3 --descriptor-tree tree ... --output-dir model
+```
+
+Training takes **one measurement of each configuration on each shape**: the newest session's
+(a session is one collection on one device). The same shape measured on two GPUs of an arch is
+one problem, not two. Kept twice, it would be weighted twice, and the held-out split, which is
+keyed on (graph, device), would score the model on a shape it trained on. For a catalog sweep,
+distinct kernel configurations on one shape are distinct rows. A repeat taken under another
+engine binding is refused rather than superseded. `superseded_rows` in the generation manifest
+counts what training set aside.
+
+A collected row carries its regime (`regime`, `regime.<facet>`, `regime.operation`) from the
+`manifest.csv` `hipdnn_corpus_gen` wrote beside the graphs. These are envelope columns, never
+features.
+
+### `size`: how many more shapes, and from which regimes
+
+```bash
+python -m uhd_gen size --collection col_1 col_2 col_3 \
+    --test-set store/test_set.json --create-test-set --target 0.70 --tolerance 0.10 \
+    --descriptor-tree tree --engine-id 4714091817493728420 --arch gfx950 --uhd-id <id> \
+    --output-dir sizing_1
+```
+
+1. **A pinned test set.** It is stratified by regime and created once. It is reused every
+   round, so rounds are comparable, and never replaced.
+2. **A learning curve.** `generate --collection` trains on nested subsets of the other shapes
+   (`--draws` random subsets per size), and `evaluate` scores each model on the test set.
+3. **A measured ceiling.** A repeat measurement (another collection or GPU) disagrees with the
+   label by two measurement errors, where a perfect model faces only one. The ceiling is how
+   often the disagreement over sqrt(2) is within the tolerance. When no shape was measured
+   twice, the ceiling is reported as unknown. When the curve already exceeds it, it is marked
+   as not binding and the fit estimates its own floor.
+4. **A fit.** miss(n) = floor + a·n^-b, with an interval from resampling the draws, solved for
+   `--target`. A target at or past the ceiling is refused, because better measurement reaches
+   it and more shapes cannot. Without a target, the plan is the next doubling.
+5. **Regime quotas.** Every regime is first brought to `--floor` training shapes (30). The rest
+   is split in proportion to each regime's test misses, shrunk toward the global rate for thin
+   regimes, and scaled up by the rate of usable rows.
+
+`sizing_report.json` (`uhd_gen.sizing/1`) holds the curve, the ceiling, the fit, the per-regime
+table, the recommendation and the prediction. `--previous` checks the last round's prediction
+against this round's result. `regime_quotas.json` is the input `hipdnn_corpus_gen` takes:
+
+```bash
+hipdnn_corpus_gen ... --regime-quotas sizing_1/regime_quotas.json \
+    --exclude-corpus corpus_1/sdpa_fwd/manifest.json --seed <new>
+```
+
+With quotas, corpus_gen fills each named regime first. A regime its first pass under-fills is
+searched again with the regime's declared equalities pinned (`seqlen_q == 1`) or tied
+(`heads_kv == heads`), so a walk can reach populations it would otherwise almost never meet.
+Every point still passes the engine, the constraints, `--keep` and `--exclude-corpus`.
+`manifest.json` `reports.regime_quota` records asked, delivered and saturated per regime, and
+the tool exits 3 when a quota is short without being shown saturated.
+
+L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
+
+## Output
+
+`train` generates:
+
+```
+output_dir/
+├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
+└── train_manifest.json # training provenance
+```
+
+`<stem>` comes from `--descriptor-name` (default `heuristic`).
+
+`DescriptorLoader` globs `<stem>.uhd.json` and reads `tree_data.artifact` as a
+path relative to that file, so the directory relocates as a unit.
+
+For a descriptor-backed engine, the UED names the heuristic by id. `train` prints
+the id and records it in `train_manifest.json`; `promote` updates the UED and
+isolates model files by engine, role, architecture and metric:
+
+```
+descriptor_tree/
+├── <engine>.ued.json   # <role>.<arch> lists the UHDs, one per metric
+└── heuristics/
+    └── <engine-uuid>/
+        └── <role>/
+            └── <arch>/
+                ├── <stem>.uhd.json      # a metric-less ranker, if any
+                ├── model.bin
+                └── <metric>/
+                    ├── <stem>.uhd.json
+                    └── model.bin
+```
+
+L1 and L2, and each metric's model, may all use the default source filenames without
+overwriting each other: `<role>` and `<metric>` keep them in separate directories, and
+each is referenced from its own entry in the UED role map.
+
+### The artifact is content-addressed, and reproducible
+
+`train` writes `tree_data.hash` — the SHA-256 of `model.bin`, bare hex, which is the form
+`TreeDataAdapter` recomputes before parsing and refuses on mismatch (RFC 0019 §7.2). That
+answers the question `features_hash` does not: `features_hash` fingerprints the *input
+contract*, so two models over one signature and different training hash identically.
+`train_manifest.json` records both halves RFC 0019.13 §10.5 asks for, `model_sha256` and
+`uhd_sha256` over the emitted descriptor document.
+
+`evaluate` runs the loader's checks before scoring (`uhd_gen/artifact.py`): declared
+`tree_data.hash`, the `HGBM` file identifier, and the structural checks
+`TreeDataAdapter::prepareTrees` applies, so a file the engine would refuse — and silently
+replace with static order — is an error here rather than a regret figure. A grouped
+artifact chooses its group in the objective's direction (the smallest layer-1 score under
+`min`), as the runtime does.
+
+A content hash is only worth recording if the bytes can be rebuilt, so conversion is
+deterministic: converting one `.lgbm` twice produces identical files. Nothing stamps the
+wall clock into the buffer. `training_date` is taken from an explicit argument, or from
+`SOURCE_DATE_EPOCH` when the environment sets one, and is otherwise **omitted** rather
+than invented — an absent optional field costs a reader nothing, while a `datetime.now()`
+costs them the ability to check a shipped artifact against its source. A
+`SOURCE_DATE_EPOCH` that is not an integer count of seconds is an error, not a silently
+dropped stamp.
+
+```bash
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m uhd_gen train ...
+sha256sum model.bin   # equals tree_data.hash, and equals it again on the next conversion
+```
+
+## Generated FlatBuffers bindings
+
+`model.bin` is written through flatc-generated Python bindings that
+live in `_generated/`, committed alongside the tool the same way the C++
+`*_generated.h` headers are committed alongside the SDK.
+
+```
+_generated/hipdnn_flatbuffers_sdk/data_objects/
+└── GbdtModel.py, GbdtTree.py                                        # gbdt_model.fbs
+```
+
+`uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
+hipdnn_flatbuffers_sdk.data_objects.GbdtModel` resolves to the bindings that
+match the schema shipping beside this tool rather than to any other copy
+installed on the system.
+
+Regenerate after editing the schema — a build with `HIPDNN_GENERATE_SDK_HEADERS=ON`
+does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
+
+```bash
+python projects/hipdnn/scripts/run_flatc.py \
+    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs
+```
+
+That command emits both the C++ header and these bindings from one invocation, so
+the two cannot drift. Requires flatc 25.9.23 on PATH (see
+`projects/hipdnn/CONTRIBUTING.md`).
+
+**Do not hand-write FlatBuffers vtables here.** The writer this tool replaced did,
+declaring `StartObject(11)` against a 13-field table: every field from
+`features_signature` on landed one slot low, so every descriptor it produced failed
+verification. Nothing caught it, because the only structural assertion in the test
+suite was the four-byte file identifier — which sits before the root table and
+survives any vtable error. The descriptor is JSON now; `model.bin` is the only
+FlatBuffer this tool writes, and it goes through generated bindings.
+
+### `<stem>.uhd.json`
+
+```json
+{
+  "version": "1.0",
+  "id": "...",
+  "name": "GEMM UHD",
+  "adapter": "tree_data",
+  "features_signature": ["$q.M", "$q.N", "$q.K", "$kernel.tile_m", ...],
+  "features_hash": "sha256:...",
+  "objective": "max",
+  "score": {"metric": "tflops", "calibrated": false, "transform": "log1p"},
+  "categorical_encoding": {"$kernel.dtype": {"bf16": 0, "fp16": 1}},
+  "tree_data": {"artifact": "model.bin"}
+}
+```
+
+`score.metric` is the registered ranking metric the score estimates (`tflops` or `time`,
+RFC 0019 §4.4), and `objective` is always that metric's direction. A metric-less
+ranker omits `metric`, and cannot declare `calibrated: true`.
+
+`categorical_encoding` maps each string-valued feature to the codes the model was
+fitted with. It is derived from the training corpus, keyed by the full `$reference`
+from `features_signature` (never the trailing field name — `kernel.dtype` and
+`q.attention_dense.dtype` are two vocabularies, not one), and holds the values exactly
+as the corpus spells them; codes run from 0 in sorted order. It is written only when
+the corpus has a string column, and it is folded into `features_hash`, so changing the
+map is a contract change even though the signature text is unchanged. The same dict is
+recorded in `train_manifest.json` (as `{}` when there is none) and is the one
+`evaluate` scores through, so evaluation encodes exactly as the fit did.
+
+## Training Details
+
+- **Target transform**: `log1p(target)` for scale-invariant training
+- **Cross-validation**: GroupKFold when `--group-by` specified
+- **Early stopping**: Prevents overfitting
+- **Model format**: LightGBM → FlatBuffer GbdtModel
+
+## Testing
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+## Integration
+
+The output files are loaded by hipDNN's UHD system:
+
+`DescriptorLoader` parses `<stem>.uhd.json` while walking a descriptor tree, and
+`makeKernelHeuristic` builds the scorer from it: `TreeDataAdapter` loads
+`tree_data.artifact` relative to the descriptor, and `FeatureExtractor`
+recomputes `features_hash` from `features_signature` and refuses the pair if the
+two disagree.

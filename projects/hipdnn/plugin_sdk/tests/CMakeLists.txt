@@ -12,6 +12,30 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# TestUhdGenArtifact runs tools/uhd_gen and loads its output, so it needs the trainer's Python
+# dependencies. Build it only when they import, and warn otherwise so the gap stays visible.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import lightgbm, numpy, flatbuffers, pandas, sklearn"
+            RESULT_VARIABLE _uhd_gen_deps_missing
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_uhd_gen_deps_missing EQUAL 0)
+            set(HIPDNN_UHD_GEN_RUNNABLE ON)
+        else()
+            message(WARNING
+                    "TestUhdGenArtifact NOT built: uhd_gen's dependencies are not importable "
+                    "by ${Python3_EXECUTABLE}. Nothing then checks that a real uhd_gen "
+                    "artifact loads at run time. Install "
+                    "projects/hipdnn/tools/uhd_gen/requirements.txt, or use the hipDNN dev "
+                    "image, which does.")
+        endif()
+    else()
+        message(WARNING "TestUhdGenArtifact NOT built: no Python3 interpreter found")
+    endif()
+endif()
+
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
     TestArchMatch.cpp
@@ -35,6 +59,21 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCategoricalEncoding.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestCustomLibraryAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestInlineExpressions.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestFeatureExtractor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestNativeAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestScoreTransform.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTableAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestTreeDataAdapter.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestSha256.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestUhdAdapters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/uhd/TestEnginePredictor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:heuristics/TestEngineFeatures.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
+    $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
@@ -52,6 +91,36 @@ add_executable(hipdnn_plugin_sdk_tests
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
+# Passed as a definition, not searched for at run time, so a missing fixture fails
+# instead of skipping.
+target_compile_definitions(
+    hipdnn_plugin_sdk_tests
+    PRIVATE HIPDNN_UHD_GENERATED_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures"
+)
+# Loaded by TestCustomLibraryAdapter via dlopen from HIPDNN_TEST_PLUGIN_DIR.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
+    set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_test_scorer_lib)
+
+    set_target_properties(
+        hipdnn_test_scorer_lib
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+    )
+
+    install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+            RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+    )
+
+    target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
+        HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}")
+endif()
+
 target_link_libraries(
     hipdnn_plugin_sdk_tests
     GTest::gtest
@@ -67,6 +136,22 @@ target_link_libraries(
 # include path exposes cross-SDK test headers, so add it explicitly.
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
+if(HIPDNN_UHD_GEN_RUNNABLE)
+    # The interpreter that passed the probe above, and the directory `python -m uhd_gen` must
+    # run from (the tool is a source tree, not an installed package).
+    target_compile_definitions(hipdnn_plugin_sdk_tests
+        PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
+                HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
+
+    # uhd_gen reads the evaluator path from this variable, so every invocation gets it.
+    # Appended, not set: Sanitizers.cmake also populates TEST_ENVIRONMENT, and
+    # add_hipdnn_test() replaces the test property rather than adding to it.
+    list(APPEND TEST_ENVIRONMENT
+         "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
+endif()
+
 
 # Fault the HIP boundary without adding hooks to the installed SDK.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

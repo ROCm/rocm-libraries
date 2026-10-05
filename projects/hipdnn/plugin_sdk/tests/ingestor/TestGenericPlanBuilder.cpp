@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -26,6 +29,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -33,7 +37,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -487,9 +491,18 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
+/// Admits every kernel, so the catalog holds both dtypes.
+inline bool acceptEveryKernel(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/)
 {
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    return true;
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsAnOrdinal)
+{
+    // The two block_size=64 kernels differ only in dtype, so it must be advertised.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
     const TestDeviceResolver resolver;
@@ -498,8 +511,43 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     const TestGraph graph(makeGraphId(0x95));
     const auto knobs = builder.getCustomKnobs(0, graph);
 
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs.front().knob_id, BLOCK_SIZE);
+    ASSERT_EQ(knobs.size(), 2U);
+    const auto dtype = std::find_if(
+        knobs.begin(), knobs.end(), [](const auto& knob) { return knob.knob_id == DTYPE; });
+    ASSERT_NE(dtype, knobs.end());
+    ASSERT_TRUE(dtype->constraint.AsIntConstraint() != nullptr);
+    // Ordinals number the engine's distinct values: 0 is "FLOAT", 1 is "HALF".
+    auto advertised = dtype->constraint.AsIntConstraint()->valid_values;
+    std::sort(advertised.begin(), advertised.end());
+    EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
+    // The caller is told these are indices; 0 and 1 are not dtypes.
+    EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
+}
+
+TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} and the score is the block size, so
+    // unpinned the winner is 256 FLOAT; block_size alone cannot reach 64 HALF.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, DTYPE, 1);
+    const TestGraph graph(makeGraphId(0x96));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getStringMetadata(DTYPE), "HALF");
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
@@ -1970,6 +2018,76 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
            "filtered set re-benchmarked, not served from the narrow subset";
 }
 
+/// RFC 0019 §5 step 8: coverage is decided against the canonical candidate set, before any
+/// knob filter, so a record covering only a narrowed run is refused for it too. Narrowed by
+/// the workspace limit because a block_size pin always leaves a single kernel.
+TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarrowedRunToo)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD8));
+    const auto properties = testDeviceProperties();
+
+    // The record covers only the two small kernels and ranks kernel_128 first, against the
+    // heuristic's order, so the returned plan's workspace shows which order was used.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+        << "this test needs the heuristic front to differ from the record's";
+    WinnerRecord partial;
+    for(const auto& kernel : catalog)
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == 128)
+        {
+            partial.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    for(const auto& kernel : catalog)
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        {
+            partial.push_back(rankedEntryFor(kernel, 9.0));
+        }
+    }
+    ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
+    manager->recordWinner(winnerKeyFor(graph, properties), partial, WinnerWriteCause::FRESH_MISS);
+
+    flatbuffers::FlatBufferBuilder wideBuilder;
+    const auto wideConfig = makeEmptyEngineConfig(wideBuilder);
+    KnobFilterSettings wideSettings;
+    builder.initializeExecutionSettings(0, graph, wideConfig, wideSettings);
+    ASSERT_FALSE(wideSettings.ingestorSettings.workspaceLimit.has_value());
+    KnobFilterContext wideRun;
+    wideRun.setExecutionSettings(wideSettings);
+    builder.buildPlan(0, graph, wideConfig, wideRun);
+
+    // 200 bytes admits kernel_64 and kernel_128 and excludes kernel_256, leaving exactly
+    // the set the record covers.
+    flatbuffers::FlatBufferBuilder narrowBuilder;
+    const auto narrowConfig = makeIntKnobEngineConfig(
+        narrowBuilder, hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 200);
+    KnobFilterSettings narrowSettings;
+    builder.initializeExecutionSettings(0, graph, narrowConfig, narrowSettings);
+    ASSERT_EQ(narrowSettings.ingestorSettings.workspaceLimit, 200);
+    KnobFilterContext narrowRun;
+    narrowRun.setExecutionSettings(narrowSettings);
+    builder.buildPlan(0, graph, narrowConfig, narrowRun);
+
+    EXPECT_EQ(wideRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a record that does not cover the whole catalog cannot order it";
+    EXPECT_EQ(narrowRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "the narrowed run must read the same order source as the wide one: the record "
+           "covers what survived the limit, but orderability is the full catalog's question";
+}
+
 /// Two buildPlan calls for the same graph and device: the first populates the cache by
 /// benchmarking, the second is served from it with no BenchmarkPlan built -- the shape
 /// an EXHAUSTIVE autotune() run takes, minus autotune itself.
@@ -2400,6 +2518,395 @@ TEST(TestIngestorGenericPlanBuilder,
            "just kernel_128 the narrow record held";
     EXPECT_EQ(stored->size(), 3U)
         << "the superset write-back must carry all three benchmarked candidates";
+}
+
+/// One arch-keyed UHD serves every board of that arch, so each row carries the device's
+/// facts, written through the same deviceFeatureValues() the extractor binds.
+TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheDeviceFacts)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
+
+    const TestGraph graph(makeGraphId(0xD9));
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    nlohmann::json row;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        if(start == std::string::npos)
+        {
+            continue;
+        }
+        auto parsed = nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(!parsed.is_discarded() && parsed.contains("event")
+           && parsed["event"] == "ingestor.benchmark.candidate")
+        {
+            row = std::move(parsed);
+            break;
+        }
+    }
+    ASSERT_FALSE(row.is_null()) << "no candidate record was logged at all";
+
+    const auto properties = testDeviceProperties();
+    ASSERT_TRUE(row.contains("device.cu_count"));
+    EXPECT_EQ(row["device.cu_count"].get<int64_t>(), properties.multiProcessorCount);
+    ASSERT_TRUE(row.contains("device.total_global_mem"));
+    EXPECT_EQ(row["device.total_global_mem"].get<int64_t>(),
+              static_cast<int64_t>(properties.totalGlobalMem));
+    ASSERT_TRUE(row.contains("device.peak_memory_bandwidth"));
+    EXPECT_DOUBLE_EQ(row["device.peak_memory_bandwidth"].get<double>(),
+                     peakMemoryBandwidth(properties));
+
+    // The device identity stays envelope: a model splitting on it memorises the fleet.
+    EXPECT_FALSE(row.contains("device.arch"));
+    EXPECT_FALSE(row.contains("device.gcn_arch_name"));
+}
+
+TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCandidate)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter benchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "0");
+    const ScopedSymbols symbols(
+        "test.graph",
+        [](const MatchContext& context) {
+            auto bound = acceptGraph(context);
+            (*bound)["$attention.dims"] = std::vector<int64_t>{32, 128};
+            (*bound)["$attention.dims[0]"] = int64_t{99};
+            return bound;
+        },
+        "test.kernel",
+        countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    auto schema = makeSchema();
+    schema.fields.push_back({"vector_width", MetadataType::INT, MetadataValue{int64_t{1}}});
+    auto pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels[1].metadata["vector_width"] = int64_t{4};
+    // A device-inapplicable tuple must not appear, even though all its knob values exist.
+    auto otherDevice = makeKernel(testId(0x70), "other_device", 128, "FLOAT");
+    otherDevice.arch = {"gfx999"};
+    pack.kernels.push_back(std::move(otherDevice));
+    const StateManager manager(
+        std::move(schema),
+        {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, "vector_width"});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, manager, resolver);
+    const TestGraph graph(makeGraphId(0xDA));
+    flatbuffers::FlatBufferBuilder empty;
+    const auto all = makeEmptyEngineConfig(empty);
+    const auto first = builder.enumerateCandidates(0, graph, all, 0, 1);
+    const auto second = builder.enumerateCandidates(0, graph, all, 1, 1);
+    ASSERT_EQ(first.total_count, 2U); // Not the four-point Cartesian product.
+    ASSERT_EQ(first.candidates.size(), 1U);
+    ASSERT_EQ(second.candidates.size(), 1U);
+    EXPECT_EQ(first.candidates.front()->id, toString(testId(0x64)));
+    EXPECT_EQ(second.candidates.front()->id, toString(testId(0x65)));
+    EXPECT_EQ(first.graph_id, second.graph_id);
+    EXPECT_EQ(first.device_id, second.device_id);
+    EXPECT_EQ(nlohmann::json::parse(first.problem_features).at("test.bound_token"),
+              BOUND_TOKEN_VALUE);
+    EXPECT_FALSE(nlohmann::json::parse(first.problem_features).contains("q.test.bound_token"));
+    const auto problemFeatures = nlohmann::json::parse(first.problem_features);
+    EXPECT_EQ(problemFeatures.at("attention.dims[0]"), 99);
+    EXPECT_EQ(problemFeatures.at("attention.dims[1]"), 128);
+
+    for(const auto* page : {&first, &second})
+    {
+        const auto& candidate = *page->candidates.front();
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT enrolled;
+        enrolled.engine_id = ENGINE_ID.front();
+        for(const auto& knob : candidate.knob_settings)
+        {
+            enrolled.knobs.push_back(
+                std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>(*knob));
+        }
+        flatbuffers::FlatBufferBuilder serialized;
+        serialized.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(serialized, &enrolled));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configuration(
+            serialized.GetBufferPointer(), serialized.GetSize());
+        KnobFilterSettings settings;
+        builder.initializeExecutionSettings(0, graph, configuration, settings);
+        KnobFilterContext context;
+        context.setExecutionSettings(settings);
+        builder.buildPlan(0, graph, configuration, context);
+        EXPECT_EQ(toString(context.plan().kernel().kernelId), candidate.id);
+    }
+    flatbuffers::FlatBufferBuilder scopedBuffer;
+    const auto scope = makeIntKnobEngineConfig(scopedBuffer, "vector_width", 4);
+    const auto scoped = builder.enumerateCandidates(0, graph, scope, 0, 10000);
+    ASSERT_EQ(scoped.total_count, 1U);
+    EXPECT_EQ(scoped.candidates.front()->id, second.candidates.front()->id);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 3, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorCandidateEnumeration, RejectsAmbiguityBeforeReturningTheFirstPage)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDB));
+    flatbuffers::FlatBufferBuilder serialized;
+    const auto all = makeEmptyEngineConfig(serialized);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorCandidateEnumeration, EmptyScopedCatalogIsNotUnsupportedOrAnInvalidScope)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDC));
+    flatbuffers::FlatBufferBuilder absentBuffer;
+    const auto absent = makeIntKnobEngineConfig(absentBuffer, BLOCK_SIZE, 777);
+    const auto empty = builder.enumerateCandidates(0, graph, absent, 0, 1);
+    EXPECT_EQ(empty.total_count, 0U);
+    EXPECT_TRUE(empty.candidates.empty());
+    flatbuffers::FlatBufferBuilder invalidBuffer;
+    const auto invalid = makeIntKnobEngineConfig(invalidBuffer, "unknown_knob", 1);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, invalid, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ---------------------------------------------------------------------------
+// One problem feature set for collection and for the live ranker
+// ---------------------------------------------------------------------------
+
+/// Every value shape a matcher can publish, plus two names in namespaces the engine owns
+/// that no matcher may claim: the corpus and the ranker must both carry the canonical value.
+std::optional<BoundTokens> bindEveryTokenShape(const MatchContext& context)
+{
+    auto bound = acceptGraph(context);
+    (*bound)["$attention.dims"] = std::vector<int64_t>{32, 128};
+    (*bound)["$attention.causal"] = true;
+    (*bound)["$attention.scale"] = 0.125;
+    (*bound)["$attention.layout"] = std::string("bshd");
+    (*bound)["$graph.flops"] = 1.0;
+    (*bound)["device.cu_count"] = int64_t{1};
+    return bound;
+}
+
+/// The rows the live ranker hands its scorer, in catalog order.
+std::vector<std::vector<double>>& capturedRankerRows()
+{
+    static std::vector<std::vector<double>> s_rows;
+    return s_rows;
+}
+
+double captureRankerRow(const double* features, size_t count)
+{
+    capturedRankerRows().emplace_back(features, features + count);
+    return 1.0;
+}
+
+/// The sweep record's envelope: identity and measurement, never a feature.
+bool isSweepEnvelope(const std::string& key)
+{
+    static const std::set<std::string> s_envelope = {"event",
+                                                     "benchmark",
+                                                     "device",
+                                                     "kernel",
+                                                     "pack",
+                                                     "dispatch",
+                                                     "status",
+                                                     "reason",
+                                                     "min_ms",
+                                                     "avg_ms",
+                                                     "stddev_ms",
+                                                     "robust_mean_ms",
+                                                     "iters"};
+    return s_envelope.count(key) != 0;
+}
+
+TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSweepPublish)
+{
+    // A `sort_kernel_catalog` model is fitted on enumeration pages and sweep rows and scored
+    // through the live ranker, so all three must bind every name to the same value.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const ScopedSymbols symbols(
+        "test.graph", bindEveryTokenShape, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
+    const MatmulTestGraph matmul(16, 32, 8);
+    const auto& graph = matmul.graph();
+    const TestHandle handle;
+
+    // Collection, first half: the enumeration page.
+    flatbuffers::FlatBufferBuilder emptyBuffer;
+    const auto page
+        = builder.enumerateCandidates(handle, graph, makeEmptyEngineConfig(emptyBuffer), 0, 100);
+    ASSERT_EQ(page.candidates.size(), 3U);
+    const auto problem = nlohmann::json::parse(page.problem_features);
+    const auto device = nlohmann::json::parse(page.device_features);
+    EXPECT_DOUBLE_EQ(problem.at("graph.flops").get<double>(), 2.0 * 16 * 32 * 8)
+        << "a matmul page must carry the work model's graph.flops, not a matcher's";
+    EXPECT_EQ(device.at("device.cu_count"), testDeviceProperties().multiProcessorCount)
+        << "a matcher's device.cu_count replaced the device fact";
+    EXPECT_EQ(problem.at("attention.dims"), nlohmann::json::array({32, 128}));
+    for(const auto& entry : problem.items())
+    {
+        EXPECT_NE(entry.key().rfind("device.", 0), 0U) << entry.key() << " is not a problem fact";
+    }
+    for(const auto& entry : device.items())
+    {
+        EXPECT_EQ(entry.key().rfind("device.", 0), 0U) << entry.key() << " is not a device fact";
+    }
+    std::map<std::string, nlohmann::json> published; // candidate id -> its full feature row
+    for(const auto& candidate : page.candidates)
+    {
+        auto row = problem;
+        row.update(device);
+        row.update(nlohmann::json::parse(candidate->kernel_features));
+        published[candidate->id] = std::move(row);
+    }
+
+    // Collection, second half: the sweep rows.
+    flatbuffers::FlatBufferBuilder benchmarkBuffer;
+    const auto benchmarking
+        = makeIntKnobEngineConfig(benchmarkBuffer, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarking, settings);
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarking, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+    size_t sweepRows = 0;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        const auto row
+            = start == std::string::npos
+                  ? nlohmann::json()
+                  : nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(!row.is_object() || row.value("event", "") != "ingestor.benchmark.candidate")
+        {
+            continue;
+        }
+        ++sweepRows;
+        const auto& expected = published.at(row.at("kernel").get<std::string>());
+        for(const auto& entry : expected.items())
+        {
+            EXPECT_EQ(row.value(entry.key(), nlohmann::json()), entry.value())
+                << "sweep row disagrees with the page on " << entry.key();
+        }
+        for(const auto& entry : row.items())
+        {
+            EXPECT_TRUE(expected.contains(entry.key()) || isSweepEnvelope(entry.key()))
+                << "sweep row publishes " << entry.key() << ", which the page does not";
+        }
+    }
+    EXPECT_EQ(sweepRows, 3U);
+
+    // Runtime: a model reading every scalar the corpus carries. A list has no scalar binding;
+    // its indexed elements are read instead.
+    std::vector<nlohmann::json> signature;
+    std::vector<std::string> names;
+    hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding;
+    for(const auto& entry : published.begin()->second.items())
+    {
+        if(entry.value().is_array())
+        {
+            continue;
+        }
+        names.push_back(entry.key());
+        signature.emplace_back("$" + entry.key());
+        for(const auto& row : published)
+        {
+            if(const auto& value = row.second.at(entry.key()); value.is_string())
+            {
+                encoding["$" + entry.key()].emplace(value.get<std::string>(),
+                                                    encoding["$" + entry.key()].size());
+            }
+        }
+    }
+    constexpr const char* CAPTURE_SYMBOL = "hipdnn.kernel_ingestor.test.capture_ranker_row";
+    const hipdnn_plugin_sdk::uhd::ScopedNativeScorer capture(CAPTURE_SYMBOL, &captureRankerRow);
+    HeuristicDescriptor model;
+    model.id = testId(0xAB);
+    model.name = "feature parity probe";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = CAPTURE_SYMBOL;
+    model.featuresSignature = signature;
+    model.categoricalEncoding = encoding;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding);
+    const auto ranker = UhdKernelHeuristic::tryCreate(
+        model, "parity probe", {BLOCK_SIZE, DTYPE}, {BLOCK_SIZE, DTYPE});
+    ASSERT_NE(ranker, nullptr);
+
+    const auto properties = testDeviceProperties();
+    const MatchContext match{graph, 0, properties};
+    const auto catalog = manager->unsortedCatalog(match);
+    capturedRankerRows().clear();
+    (void)ranker->rankScored(catalog, match);
+    ASSERT_EQ(capturedRankerRows().size(), catalog.entries.size())
+        << "the ranker could not bind every published name, so its model never scored";
+    for(size_t index = 0; index < catalog.entries.size(); ++index)
+    {
+        const auto& expected = published.at(toString(catalog.entries[index].kernelId));
+        const auto& row = capturedRankerRows()[index];
+        ASSERT_EQ(row.size(), names.size());
+        for(size_t slot = 0; slot < names.size(); ++slot)
+        {
+            const auto& value = expected.at(names[slot]);
+            const double want = [&] {
+                if(value.is_string())
+                {
+                    return static_cast<double>(
+                        encoding.at("$" + names[slot]).at(value.get<std::string>()));
+                }
+                if(value.is_boolean())
+                {
+                    return value.get<bool>() ? 1.0 : 0.0;
+                }
+                return value.get<double>();
+            }();
+            EXPECT_DOUBLE_EQ(row[slot], want)
+                << "the ranker reads " << names[slot] << " differently";
+        }
+    }
 }
 
 } // namespace

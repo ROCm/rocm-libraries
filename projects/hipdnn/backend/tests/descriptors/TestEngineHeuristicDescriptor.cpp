@@ -20,11 +20,14 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <array>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -775,7 +778,8 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->finalize());
 
     // With no descriptor-level override and no env var, resolveHeuristicPolicyOrder
-    // returns the built-in default: Config first, then StaticOrdering.
+    // returns the built-in default, Config then StaticOrdering; a heuristic mode adds
+    // nothing. Keep in step with EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
@@ -788,6 +792,42 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     EXPECT_EQ(buffer[0], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
     EXPECT_EQ(buffer[1],
               hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
+}
+
+// The backend never synthesizes prediction policies from a heuristic mode.
+TEST_F(TestGpuEngineHeuristicDescriptor, PredictionPoliciesTravelThroughPolicyOrderAttribute)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
+        "HIPDNN_HEUR_POLICY_ORDER", "");
+    auto heur = getEngineHeuristicDescriptor();
+    setGraph();
+    setHeuristicMode();
+
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    const std::vector<int64_t> requested{
+        policyNameToId("SelectionHeuristic::Config"),
+        policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
+        policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
+        policyNameToId("SelectionHeuristic::StaticOrdering"),
+    };
+    ASSERT_NO_THROW(heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       static_cast<int64_t>(requested.size()),
+                                       requested.data()));
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{1}));
+    ASSERT_NO_THROW(heur->finalize());
+
+    int64_t count = 0;
+    std::vector<int64_t> policies(requested.size());
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       static_cast<int64_t>(policies.size()),
+                                       &count,
+                                       policies.data()));
+    EXPECT_EQ(count, static_cast<int64_t>(requested.size()));
+    EXPECT_EQ(policies, requested);
 }
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderCountOnly)
@@ -1286,4 +1326,112 @@ TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithEmptyPolicyListThrows)
         .WillRepeatedly(Return(std::vector<int64_t>{1, 2}));
 
     ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_INTERNAL_ERROR);
+}
+
+// ========== Ranking Metric (RFC 0019 §11.4) ==========
+
+namespace
+{
+void setRankingMetric(EngineHeuristicDescriptor& heur, const std::string& metric)
+{
+    heur.setAttribute(HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT,
+                      HIPDNN_TYPE_CHAR,
+                      static_cast<int64_t>(metric.size()),
+                      metric.data());
+}
+
+std::string readRankingMetric(const EngineHeuristicDescriptor& heur)
+{
+    std::array<char, 32> buffer{};
+    int64_t count = 0;
+    heur.getAttribute(HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT,
+                      HIPDNN_TYPE_CHAR,
+                      static_cast<int64_t>(buffer.size()),
+                      &count,
+                      buffer.data());
+    return buffer.data();
+}
+} // namespace
+
+// The metric resolves before candidates are gathered, so finalizing with no applicable
+// engine is enough to observe it.
+TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenDefault)
+{
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{}));
+    const auto finalizeWith = [this](const char* env, const char* attribute) {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+            "HIPDNN_HEUR_RANKING_METRIC", env);
+        _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();
+        auto heur = getEngineHeuristicDescriptor();
+        if(attribute != nullptr)
+        {
+            setRankingMetric(*heur, attribute);
+        }
+        setGraph();
+        setHeuristicMode();
+        heur->finalize();
+        return readRankingMetric(*heur);
+    };
+    EXPECT_EQ(finalizeWith("", nullptr), "tflops");
+    EXPECT_EQ(finalizeWith("", "time"), "time");
+    EXPECT_EQ(finalizeWith("time", nullptr), "time");
+    EXPECT_EQ(finalizeWith("tflops", "time"), "tflops");
+}
+
+// Refused at set for the attribute, at finalize for the environment (RFC 0019 §4.4).
+TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricIsRejected)
+{
+    auto heur = getEngineHeuristicDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(setRankingMetric(*heur, "flops"), HIPDNN_STATUS_BAD_PARAM);
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_HEUR_RANKING_METRIC", "flops");
+    setGraph();
+    setHeuristicMode();
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{}));
+    ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// With or without a policy-supplied configuration (RFC 0019 §11.4).
+TEST_F(TestGpuEngineHeuristicDescriptor, EveryResultConfigCarriesTheRankingMetric)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_HEUR_RANKING_METRIC", "");
+    auto heur = getEngineHeuristicDescriptor();
+    setRankingMetric(*heur, "time");
+    makeEngineHeuristicFinalized();
+
+    EXPECT_CALL(*getMockGraph(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
+        .WillRepeatedly(
+            Invoke([this](int64_t engineId, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
+                *d = this->serializeEngineDetails(engineId);
+            }));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _))
+        .WillRepeatedly(Return());
+
+    std::vector<ScopedDescriptor> ownedConfigs(3);
+    std::vector<hipdnnBackendDescriptor_t> configs;
+    for(auto& owned : ownedConfigs)
+    {
+        owned = ScopedDescriptor(createDescriptorPtr<EngineConfigDescriptor>());
+        configs.push_back(owned.get());
+    }
+    int64_t count = 0;
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       3,
+                                       &count,
+                                       static_cast<void*>(configs.data())));
+    ASSERT_EQ(count, 3);
+    for(auto* config : configs)
+    {
+        const auto bytes
+            = config->asDescriptor<EngineConfigDescriptor>()->getSerializedEngineConfig();
+        const auto* serialized = hipdnn_flatbuffers_sdk::data_objects::GetEngineConfig(bytes.ptr);
+        ASSERT_NE(serialized->ranking_metric(), nullptr);
+        EXPECT_EQ(serialized->ranking_metric()->string_view(), "time");
+    }
 }

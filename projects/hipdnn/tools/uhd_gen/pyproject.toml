@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uhd_gen"
+version = "0.1.0"
+description = "UHD Generation Tool - Train and export heuristic models for hipDNN"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "AMD", email = "hipdnn@amd.com"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "lightgbm>=4.0.0",
+    "flatbuffers>=24.3.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    # `--input dataset.parquet` reads what uhd_gen.dataset publishes, and pandas carries
+    # no Parquet engine of its own. Declared rather than left to whatever an environment
+    # happens to have, because its absence surfaces as an ImportError deep inside
+    # read_parquet rather than as a missing dependency.
+    "pyarrow>=12",
+    "scikit-learn>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+uhd-gen = "uhd_gen.__main__:main"
+
+[tool.setuptools.packages.find]
+# Looks one level up and keeps only this package, because that is the only way to see it: this
+# file sits *inside* `uhd_gen/`, so searching `.` finds the subdirectories rather than the
+# package they belong to, and installs them as top-level `dataset` and `tests` while
+# `uhd_gen.__main__:main` above resolves to nothing. The filter is what keeps the wider search
+# from also picking up `corpus_gen` and the other tools sharing that directory.
+where = [".."]
+include = ["uhd_gen*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

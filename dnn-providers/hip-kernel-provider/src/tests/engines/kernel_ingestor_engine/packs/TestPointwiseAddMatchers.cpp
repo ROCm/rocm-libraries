@@ -5,6 +5,8 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -33,6 +35,20 @@ bool matches(const MatchContext& context)
 {
     return matchesGraph(POINTWISE_ADD, context).has_value();
 }
+
+/// String twin of the SDK's tryGetBoundInt: nullopt when absent or not a string.
+std::optional<std::string> boundString(const BoundTokens& bound, std::string_view token)
+{
+    const auto entry = bound.find(std::string(token));
+    if(entry == bound.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&entry->second);
+    return value == nullptr ? std::nullopt : std::make_optional(*value);
+}
+
+using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
 // Graph-scoped matcher: acceptances
 
@@ -316,6 +332,140 @@ TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
 
     // A refused graph yields no token map at all, so a later pack has nothing stale to
     // read.
+    EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context()).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Problem binding: the dims, dtypes and cost fields a UHD ranks on
+// ---------------------------------------------------------------------------
+//
+// Token names are literals: they are the contract a UHD's features_signature references.
+
+TEST(TestPointwiseAddBinding, BindsEveryOperandDimPositionallyAndNoneItDoesNotHave)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    for(const auto* root : {"pointwise.input_a", "pointwise.input_b", "pointwise.output"})
+    {
+        const std::string prefix(root);
+        EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[0]"), 1);
+        EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[1]"), 1);
+        EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[2]"), 1);
+        EXPECT_EQ(tryGetBoundInt(*bound, prefix + ".dims[3]"), 1);
+        // Rank 4: no fifth axis.
+        EXPECT_FALSE(tryGetBoundInt(*bound, prefix + ".dims[4]").has_value());
+    }
+}
+
+TEST(TestPointwiseAddBinding, BindsTheFifthDimOfARankFiveGraph)
+{
+    const GraphFixture fixture(buildPointwiseGraph(
+        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 1, 1, 1}));
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // Dims follow the tensor's own rank.
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.input_a.dims[4]"), 1);
+}
+
+TEST(TestPointwiseAddBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnumName)
+{
+    const GraphFixture floatFixture(buildPointwiseGraph());
+    const GraphFixture doubleFixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::DOUBLE));
+
+    const auto floatBound = matchesGraph(POINTWISE_ADD, floatFixture.context());
+    const auto doubleBound = matchesGraph(POINTWISE_ADD, doubleFixture.context());
+    ASSERT_TRUE(floatBound.has_value());
+    // This matcher gates no dtype, so dtypes beyond the shipped kernels' must still bind.
+    ASSERT_TRUE(doubleBound.has_value());
+
+    // to_string(DataType)'s spelling, the vocabulary `categorical_encoding` is fitted on
+    // (not EnumNameDataType's "FLOAT"/"DOUBLE").
+    EXPECT_EQ(boundString(*floatBound, "pointwise.input_a.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "pointwise.input_b.dtype"), "fp32");
+    EXPECT_EQ(boundString(*floatBound, "pointwise.output.dtype"), "fp32");
+    EXPECT_EQ(boundString(*doubleBound, "pointwise.input_a.dtype"), "fp64");
+
+    // A string, never a pre-encoded number.
+    EXPECT_FALSE(tryGetBoundInt(*floatBound, "pointwise.input_a.dtype").has_value());
+}
+
+TEST(TestPointwiseAddBinding, BindsFlopsAndBytesForTheOneElementTheKernelTouches)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // By hand: one output element, one flop; three fp32 elements moved = 12 bytes.
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.bytes"), 12);
+}
+
+TEST(TestPointwiseAddBinding, ByteCountFollowsTheOperandDtypeWidth)
+{
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::DOUBLE));
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    // The same three elements at 8 bytes each.
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.bytes"), 24);
+    // flops is a pure shape count.
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
+}
+
+/// RFC 0019 §13.6: a sub-byte dtype has no per-element width, so `bytes` is omitted rather
+/// than rounded up.
+TEST(TestPointwiseAddBinding, OmitsBytesForADtypeWithNoStatableElementWidth)
+{
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::FP4_E2M1));
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_FALSE(tryGetBoundInt(*bound, "pointwise.bytes").has_value());
+    // dtype and flops do not depend on element width.
+    EXPECT_EQ(boundString(*bound, "pointwise.input_a.dtype"), "fp4_e2m1");
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
+}
+
+/// An unrecognized dtype has no spelling a `categorical_encoding` can know, so it is absent.
+TEST(TestPointwiseAddBinding, OmitsDtypeAndBytesForAnUnsetDtype)
+{
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::UNSET));
+
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_FALSE(boundString(*bound, "pointwise.input_a.dtype").has_value());
+    EXPECT_FALSE(tryGetBoundInt(*bound, "pointwise.bytes").has_value());
+    // Shape does not depend on the element type.
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.input_a.dims[0]"), 1);
+    EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.flops"), 1);
+}
+
+/// The pack's kernel has one element type, so mixed-dtype graphs never reach the binding and
+/// per-operand byte widths (RFC 0019 §13.6) cannot be observed here.
+TEST(TestPointwiseAddBinding, AMixedPrecisionGraphIsRefusedSoPerOperandWidthCannotBeObservedHere)
+{
+    const GraphFixture fixture(
+        buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                            data_objects::DataType::FLOAT,
+                            {1, 1, 1, 1},
+                            std::nullopt,
+                            /*binary=*/true,
+                            /*explicitStrides=*/std::nullopt,
+                            /*inputBDataType=*/data_objects::DataType::HALF));
+
     EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context()).has_value());
 }
 

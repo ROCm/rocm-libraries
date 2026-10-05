@@ -20,6 +20,19 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
 
+/// Built-in heuristic policies a manager registers. Counts policy IDs, not plugins, because
+/// getHeuristicPolicyInfos() reports one entry per policy.
+static size_t builtInPolicyCount()
+{
+    const HeuristicPluginManager manager;
+    size_t policies = 0;
+    for(const auto& plugin : manager.getPlugins())
+    {
+        policies += plugin->getAllPolicyIds().size();
+    }
+    return policies;
+}
+
 class TestHeuristicPluginResourceManager : public ::testing::Test
 {
 protected:
@@ -59,7 +72,7 @@ TEST_F(TestHeuristicPluginResourceManager, MoveConstructorTransfersOwnership)
     // rm2 should be usable. The shared plugin manager always contains the
     // Config + StaticOrdering built-ins, so the policy-info list is not empty.
     const auto infos = rm2.getHeuristicPolicyInfos();
-    EXPECT_EQ(infos.size(), 2u);
+    EXPECT_EQ(infos.size(), builtInPolicyCount());
 }
 
 TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
@@ -75,7 +88,7 @@ TEST_F(TestHeuristicPluginResourceManager, MoveAssignmentTransfersOwnership)
     // StaticOrdering built-in, so the policy-info list is not empty.
     const HeuristicPluginResourceManager& constRm2 = *rm2;
     const auto infos = constRm2.getHeuristicPolicyInfos();
-    EXPECT_EQ(infos.size(), 2u);
+    EXPECT_EQ(infos.size(), builtInPolicyCount());
 }
 
 // ========== Policy Lookup Tests ==========
@@ -112,7 +125,7 @@ TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosWhenNoPluginsLoaded)
     // No external plugin paths configured, but the Config + StaticOrdering built-ins
     // are always registered in the plugin manager's constructor.
     const auto infos = rm->getHeuristicPolicyInfos();
-    EXPECT_EQ(infos.size(), 2u);
+    EXPECT_EQ(infos.size(), builtInPolicyCount());
 }
 
 TEST_F(TestHeuristicPluginResourceManager, GetPolicyInfosCachesResult)
@@ -261,9 +274,9 @@ TEST_F(TestHeuristicPluginResourceManager, MultipleInstancesCanCoexist)
 
     // Each should work independently. The shared plugin manager always contains
     // the StaticOrdering built-in, so each resource manager observes it.
-    EXPECT_EQ(rm1->getHeuristicPolicyInfos().size(), 2u);
-    EXPECT_EQ(rm2->getHeuristicPolicyInfos().size(), 2u);
-    EXPECT_EQ(rm3->getHeuristicPolicyInfos().size(), 2u);
+    EXPECT_EQ(rm1->getHeuristicPolicyInfos().size(), builtInPolicyCount());
+    EXPECT_EQ(rm2->getHeuristicPolicyInfos().size(), builtInPolicyCount());
+    EXPECT_EQ(rm3->getHeuristicPolicyInfos().size(), builtInPolicyCount());
 }
 
 // ========== Copy Prevention Tests ==========
