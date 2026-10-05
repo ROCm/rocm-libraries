@@ -226,12 +226,6 @@ endif()
 include(GenerateExportHeader)
 generate_export_header(rocsparse EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-export.h)
 
-# Force installation of .f module file
-rocm_install(FILES "${CMAKE_SOURCE_DIR}/library/src/rocsparse.f90"
-              "${CMAKE_SOURCE_DIR}/library/src/rocsparse_enums.f90"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
-)
-
 # Get all header files from the source include directory
 file(GLOB_RECURSE ROCSPARSE_SOURCE_HEADERS "${PROJECT_SOURCE_DIR}/library/include/*")
 
