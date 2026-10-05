@@ -101,9 +101,9 @@ property of signed attention inputs. Deterministic rounding may be correlated
 across identical rows. Those metrics remain diagnostics and are compared with
 same-input stock `qr_tdm` controls in the PR evidence.
 
-The formal generated-dispatch tests run each of their 38 shapes with signed,
-constant and nonnegative V, with LSE off/on, for FP16 and BF16: 228 tests per
-dtype, 456 total. This covers the existing batch/group, layouts, masks, tails,
+The formal generated-dispatch tests run each of their 40 shapes with signed,
+constant and nonnegative V, with LSE off/on, for FP16 and BF16: 240 tests per
+dtype, 480 total. This covers the existing batch/group, layouts, masks, tails,
 virtual sinks and selector boundaries without duplicating kernel geometry.
 Constant channels use several exactly representable signed mantissas based on
 `{0.75, -1.25, 1.5, -1.75}`, with head variation. Without a virtual sink, exact
