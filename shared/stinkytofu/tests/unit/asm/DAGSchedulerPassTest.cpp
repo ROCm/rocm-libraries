@@ -1223,6 +1223,70 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
+// WMMA batch (dagFeatures.wmmaBatchSize): up to N independent, data-ready WMMAs
+// issue back-to-back before any fill; the default (1) keeps interleaving.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaBatch_IndependentWmmasIssueBackToBack) {
+    auto build = [&] {
+        for (int i = 0; i < 4; ++i)
+            createVAddInBlock(bb, arch, 100 + 3 * i, 101 + 3 * i, 102 + 3 * i);
+        for (int i = 0; i < 4; ++i) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+    };
+    auto run = [&](int batch) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.wmmaBatchSize = batch;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    };
+    auto isWmma = [](const std::string& m) { return m.find("wmma") != std::string::npos; };
+
+    build();
+    run(/*batch=*/4);
+    std::vector<std::string> seq = mnemonicSequence(*bb);
+    ASSERT_EQ(seq.size(), 8u);
+    for (int i = 0; i < 4; ++i) EXPECT_TRUE(isWmma(seq[i])) << "pick " << i << ": " << seq[i];
+
+    SetUp();
+    build();
+    run(/*batch=*/0);  // arch default = 1
+    seq = mnemonicSequence(*bb);
+    ASSERT_EQ(seq.size(), 8u);
+    EXPECT_TRUE(isWmma(seq[0]));
+    EXPECT_FALSE(isWmma(seq[1])) << "without batching a fill follows each WMMA";
+}
+
+// A WMMA reading a batch member's D cannot join; an independent one still does,
+// and the batch stops at wmmaBatchSize.
+TEST_F(DAGSchedulerPassTest, WmmaBatch_DependentWmmaDoesNotJoin) {
+    for (int i = 0; i < 4; ++i) createVAddInBlock(bb, arch, 100 + 3 * i, 101 + 3 * i, 102 + 3 * i);
+    StinkyInstruction* w0 = createWmmaF32_16x16x16_bf16(200, 300);
+    StinkyInstruction* w1 = createWmmaF32_16x16x16_bf16(208, 200);  // A/B = w0's D
+    StinkyInstruction* w2 = createWmmaF32_16x16x16_bf16(216, 316);
+    StinkyInstruction* w3 = createWmmaF32_16x16x16_bf16(224, 324);
+    ASSERT_TRUE(w0 && w1 && w2 && w3);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.wmmaBatchSize = 2;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    std::vector<const StinkyInstruction*> order;
+    for (const IRBase& ir : *bb)
+        if (ir.getType() == IRBase::IRType::StinkyTofu)
+            order.push_back(cast<StinkyInstruction>(&ir));
+    ASSERT_GE(order.size(), 3u);
+    EXPECT_EQ(order[0], w0);
+    EXPECT_EQ(order[1], w2) << "independent WMMA joins w0's batch, dependent w1 does not";
+    EXPECT_FALSE(isMatrixInstruction(*order[2])) << "batch of 2 is full; a fill follows";
+}
+
+// ---------------------------------------------------------------------------
 // Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
 // issued inside that WMMA's latency window, because the load could clobber a
@@ -1663,6 +1727,33 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanDefaultsToTheRegionsRealWmmaLatency
 // opcode's base cost of {1,8} applies -- which happens to equal the arch
 // fallback, so this also covers the "no matrix op" / "unrollGemm off" cases
 // falling back to the same 8.
+// With wmmaBatchSize N the span is the whole batch window, L + (N-1)*(L-I).
+TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanCoversTheWmmaBatchWindow) {
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    createMovableDsLoad(0, 80, 1);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.wmmaBatchSize = 5;
+    ctx.setPassFeatureConfig(pfc);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    pass->run(*func, ctx, am);
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const size_t pos = captured.str().find("[CDNA5 dsCap] dsReadPerCap=");
+    ASSERT_NE(pos, std::string::npos) << captured.str();
+    const size_t spanPos = captured.str().find("span=", pos);
+    ASSERT_NE(spanPos, std::string::npos);
+    EXPECT_EQ(std::stoi(captured.str().substr(spanPos + 5)), 8 + 4 * 7)
+        << "{1,8} WMMA, batch of 5: 8 + (5-1)*(8-1)";
+}
+
 TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanIsEightForTheDefaultFormat) {
     createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
     createMovableDsLoad(0, 80, 1);
