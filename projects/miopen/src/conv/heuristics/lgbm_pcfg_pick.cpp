@@ -9,7 +9,7 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
 #include <miopen/conv/heuristics/lgbm_common.hpp>
-#include <miopen/conv/heuristics/ai_heuristics.hpp> // common::LgbmOnly
+#include <miopen/conv/heuristics/ai_heuristics.hpp> // common::PreferLgbm
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/env.hpp>
@@ -187,12 +187,15 @@ std::vector<std::string> RankBucket(const LgbmForest& forest,
 // (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
 // there; the LGBM perf-config picker is the fallback for solvers/architectures
 // the two-tower does not cover. This predicate mirrors that model's coverage so
-// the picker defers rather than competing with it. Under MIOPEN_DEBUG_LGBM_ONLY
-// the two-tower is bypassed, so nothing is deferred.
-bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx_id)
+// the picker defers rather than competing with it. Nothing is deferred for problems
+// the dual-heuristics gate routes LGBM-first (small/mid-size problems on
+// gfx942/gfx950, or everything under MIOPEN_DEBUG_LGBM_ONLY): the LGBM pick then
+// preempts the two-tower, which still runs as the fallback if no ranked config is
+// valid.
+bool TwoTowerCoversSolver(const std::string& solver_name,
+                          const std::string& gfx_id,
+                          const conv::ProblemDescription& problem)
 {
-    if(common::LgbmOnly())
-        return false;
     const bool arch_covered = gfx_id.starts_with("gfx90a") || gfx_id.starts_with("gfx942") ||
                               gfx_id.starts_with("gfx950");
     if(!arch_covered)
@@ -204,8 +207,10 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
         "ConvHipImplicitGemm3DGroupFwdXdlops",
         "ConvHipImplicitGemm3DGroupBwdXdlops",
         "ConvHipImplicitGemm3DGroupWrwXdlops"};
-    return std::find(kTwoTowerSolvers.begin(), kTwoTowerSolvers.end(), solver_name) !=
-           kTwoTowerSolvers.end();
+    if(std::find(kTwoTowerSolvers.begin(), kTwoTowerSolvers.end(), solver_name) ==
+       kTwoTowerSolvers.end())
+        return false;
+    return !common::PreferLgbm(problem, gfx_id);
 }
 
 } // namespace
@@ -235,7 +240,7 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
     // default-config path (which runs it) rather than preempting it here.
-    if(TwoTowerCoversSolver(solver_name, gfx_id))
+    if(TwoTowerCoversSolver(solver_name, gfx_id, problem))
     {
         MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id
                                               << " to the two-tower KTN model");
