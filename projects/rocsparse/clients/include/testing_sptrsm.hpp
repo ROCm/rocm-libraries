@@ -1,8 +1,9 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
+ * of this software and associated documentation files (the Software), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
@@ -11,7 +12,7 @@
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -21,19 +22,12 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured rocSPARSE version. Build-time
- * feature configuration lives in rocsparse-config.h.
- */
+#pragma once
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
+#include "rocsparse_arguments.hpp"
 
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-#endif /* ROCSPARSE_VERSION_H */
+template <typename I, typename J, typename T>
+void testing_sptrsm_bad_arg(const Arguments& arg);
+void testing_sptrsm_extra(const Arguments& arg);
+template <typename I, typename J, typename T>
+void testing_sptrsm(const Arguments& arg);

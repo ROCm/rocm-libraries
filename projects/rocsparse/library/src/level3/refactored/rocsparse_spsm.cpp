@@ -150,7 +150,6 @@ namespace rocsparse
                                                                        nullptr));
                 break;
             }
-
             case rocsparse_format_csr:
             {
 

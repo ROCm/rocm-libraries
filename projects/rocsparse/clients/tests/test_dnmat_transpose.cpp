@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,19 +22,17 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured rocSPARSE version. Build-time
- * feature configuration lives in rocsparse-config.h.
- */
+#include "test.hpp"
+#include "testing_dnmat_transpose.hpp"
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
-
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-#endif /* ROCSPARSE_VERSION_H */
+TEST_ROUTINE(dnmat_transpose,
+             auxiliary,
+             arg.M,
+             arg.N,
+             arg.orderC,
+             arg.batch_count_C,
+             arg.alpha,
+             arg.batch_count_A,
+             arg.orderB,
+             arg.batch_count_B,
+             arg.direction);

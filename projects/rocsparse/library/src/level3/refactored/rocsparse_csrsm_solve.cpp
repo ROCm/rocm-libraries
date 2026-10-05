@@ -406,9 +406,6 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                           void*                       buffer,
                                           rocsparse_error*            p_error)
 {
-    //
-    // It is assumed that B is transposed and has dimension nrhs x M
-    //
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)
                                                ? rocsparse_status_internal_error
@@ -485,7 +482,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     }
     blockdim <<= 1;
 
-    const int narrays = (nrhs - 1) / blockdim + 1;
+    const int64_t narrays = (nrhs - 1) / blockdim + 1;
     //
     // Buffer
     // header: 256
@@ -556,7 +553,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  A->data_type,
                                  buf,
                                  buf,
-                                 A->nnz,
+                                 (A->batch_stride > 0) ? A->nnz : 0,
                                  trm_info->get_offset_indextype(),
                                  trm_info->get_transposed_row_ptr(),
                                  trm_info->get_transposed_row_ptr(),
