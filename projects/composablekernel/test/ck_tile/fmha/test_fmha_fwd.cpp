@@ -1750,6 +1750,106 @@ TEST_P(SinkWindowMask, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+// ============================================================================
+// GPT-OSS sink (init_sink_value) numerical correctness under BLOCKSCALE.
+// ----------------------------------------------------------------------------
+// The sink logit seeds the online-softmax running max `m` and denominator `l`
+// before the K-tile loop starts, as if it were tile zero. BLOCKSCALE rescales
+// every real tile's P/rowsum by a constant 2^SHIFT to keep values inside FP8's
+// accurate range (see OCP_FP8_SHIFT/FNUZ_FP8_SHIFT in the qr_ks_vs[_async]
+// pipelines); if the sink's `l` seed is not scaled by that same factor, the
+// sink's share of the softmax denominator is silently diluted relative to
+// every real token's contribution. init_method "3" (uniform [-max,max] fill)
+// is required to surface this - the old fixed [30,60] sink test value swamped
+// the softmax and hid the bug (see fmha_fwd_runner.hpp sink init comment).
+// Only meaningful for fp8bf16, the only config with a working BLOCKSCALE path.
+//
+// Kept to mask_str "1"/"2" on purpose. Local-window masks ("t:...") reach the
+// pre-existing gfx9 systematic OUT gain, which this fix does not address and
+// which is why the QuantScale suite above stays behind CK_TILE_TEST_FMHA_QSCALE_SWEEP.
+// ============================================================================
+
+// hdim, mask_str, qscale, nhead_k (-1 -> nhead_k=nhead, plain MHA)
+using SinkQuantParam = std::tuple<int, std::string, std::string, int>;
+
+static const std::vector<SinkQuantParam> kSinkQuantParams = {
+    {64, "1", "pt", -1},
+    {64, "1", "bs", -1},
+    {128, "1", "pt", -1},
+    {128, "1", "bs", -1},
+    {256, "1", "pt", -1},
+    {256, "1", "bs", -1},
+    {64, "2", "pt", -1},
+    {64, "2", "bs", -1},
+    {128, "2", "pt", -1},
+    {128, "2", "bs", -1},
+    {256, "2", "pt", -1},
+    {256, "2", "bs", -1},
+    // GQA (nhead_ratio=4): sink+blockscale must compose with shared-KV head mapping.
+    {128, "1", "pt", 2},
+    {128, "1", "bs", 2},
+    {128, "2", "pt", 2},
+    {128, "2", "bs", 2},
+};
+
+class SinkQuantMode : public TestWithParam<std::tuple<bool, mode_enum, SinkQuantParam>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SinkQuantMode);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SinkQuantMode,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                                 ModeValues,
+                                 ValuesIn(kSinkQuantParams)));
+
+TEST_P(SinkQuantMode, DataTypeConfig)
+{
+    auto [_, mode, sink_param]             = GetParam();
+    auto [hdim, mask_str, qscale, nhead_k] = sink_param;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        2,       // batch
+        8,       // nhead
+        nhead_k, // nhead_k
+        {adjust_seqlen(1024)},
+        {adjust_seqlen(1024)},
+        adjust_hdim(hdim),
+        adjust_hdim(hdim),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse, // lse
+        0,       // page_block_size
+        false,   // use_cache_batch_idx
+        "n",     // bias_str
+        0.0f,    // p_drop
+        0,       // drop_seed
+        0,       // drop_offset
+        false,   // drop_prefs
+        mask_str,
+        qscale,
+        true,        // is_rotary_interleaved
+        1,           // num_splits
+        init_method, // uniform, not the sink-swamping default
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        1, // init_sink_value
+        1, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+
 // The tiny-scale_s rows below need the sink kept out of the fp8 P quantization frame,
 // which only the gfx125x qr_tdm pipeline does; every other target dispatches qr_async_vr
 // and still carries the systematic OUT gain. So the suite is compiled in there alone.
