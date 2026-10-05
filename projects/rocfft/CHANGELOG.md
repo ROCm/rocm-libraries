@@ -15,6 +15,8 @@ Documentation for rocFFT is available at
   with large batch sizes, where 32-bit kernel indexing could overflow.
 * Fixed `rocfft_plan_create` failures for 1D complex transforms of lengths involving large prime
   factors when the output data layout uses a batch distance larger than the transform length.
+* Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
+  lengths involving large prime factors when batches are interleaved (unit batch distance).
 
 ## rocFFT 1.0.40 for ROCm 10.1
 
