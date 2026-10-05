@@ -498,6 +498,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;
     }
+    // Extra cycles between an after-barrier and the before-side ds_loads on
+    // the gap placement path. 0 disables the extra gap.
+    int tensorLoadDsLoadGapCycles() const {
+        return std::max(
+            0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadDsLoadGapCycles);
+    }
     // Whether to run the per-window hide-budget policy at the top of each region.
     // The gfx1250 production backend enables it; the standalone pass keeps an
     // explicit flag so tests and custom pipelines can opt in.
@@ -2531,9 +2537,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Some signal/wait-like pairs are split: one member only lands in the
         // "after" model while its counterpart only lands in the "before" model.
         // For those cross-map-only pairs, compare their implied WMMA ranges.
-        // On overlap, split totalWmma proportionally: pull after earlier (min)
-        // and push before later (max) so the two exclusive groups stop fighting
-        // for the same windows.
+        // On overlap, leave before in place and pull after to before minus the
+        // separation slack when both issue demands plus that slack fit in the
+        // region and in front of the before threshold. Otherwise split
+        // totalWmma proportionally: pull after earlier (min) and push before
+        // later (max).
         struct BarrierGroupThresholdSummary {
             StinkyInstruction* anchor = nullptr;
             std::vector<StinkyInstruction*> barriers;
@@ -2546,11 +2554,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             // Proportional-split demand. After intentionally uses issue-only
             // windows (no drain); before uses the same value as claimWindow.
             int splitNeeded = 0;
-            // Conservative Layer-2 target across all overlapping pairs
-            // (after: min, before: max), applied after the pair loop.
+            // Layer-2 target across overlapping pairs. After keeps the earliest
+            // target (min). Before moves later only on the proportional-split
+            // path.
             int pendingThreshold = 0;
             // Descendants used when publishing hard orderings on overlap.
             std::vector<StinkyInstruction*> descendantLoads;
+            // Pair-half slack (±2) is only for a group whose overlap placements
+            // were all gap. A proportional placement keeps signal/wait together.
+            bool sawGapPlacement = false;
+            bool sawProportionalPlacement = false;
         };
         auto setGroupThreshold = [&](const BarrierGroupThresholdSummary& group, int threshold) {
             for (StinkyInstruction* barrier : group.barriers) {
@@ -2686,19 +2699,43 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 beforeGroup.barriers, [](StinkyInstruction& inst) { return isDSRead(inst); });
         }
 
-        // Compute every after-before overlap from the same unmodified group
-        // thresholds. Split the available WMMA windows in proportion to each
-        // side's demand, then apply the most conservative target after all pairs
-        // have been evaluated so the result is independent of iteration order.
+        // Performance placement only; dependencies stay valid either way.
+        // Gap vs proportional reads pendingThreshold while the loop updates
+        // it, so the intended spacing is for one exclusive after group and
+        // one exclusive before group. With more groups, an earlier
+        // proportional pair can raise the shared before threshold and change
+        // a later pair's demandFits / afterAtGap. The schedule stays legal;
+        // the overlap gap may just be tighter or looser than each pair's own
+        // threshold would choose.
+        // TODO: multiple after or before groups. Compute each pair from the
+        // unmodified group threshold, then combine candidates after the loop.
+        // When the issue demands plus the separation slack fit, leave before
+        // in place and pull after to before minus that slack. Otherwise split
+        // the WMMA windows in proportion to each side's demand.
         for (auto& afterGroup : exclusiveAfterGroups) {
             for (auto& beforeGroup : exclusiveBeforeGroups) {
+                // Slack is 2 + 2 WMMA windows of before/after barrier budget,
+                // plus 1 for the tensor load. It is a gap between the two
+                // thresholds, so the claim windows themselves stay unchanged.
+                const int separationSlack = 2 + 2 + 1;
+                // Extra gap so a tensor load is not issued next to the
+                // before-side ds_loads. ModuleOptions::TensorLoadDsLoadGapCycles
+                // cycles, rounded up to whole WMMA windows of this region's
+                // matrix latency. 0 disables the extra gap.
+                const int tensorLoadDsLoadGapCycles = this->tensorLoadDsLoadGapCycles();
+                const int wmmaLatency = wmmaIssueConfig.latency > 0
+                                            ? wmmaIssueConfig.latency
+                                            : std::max(1, config_.dsIssueCapSpanCycles);
+                const int tensorLoadDsLoadGapWmma =
+                    (tensorLoadDsLoadGapCycles + wmmaLatency - 1) / wmmaLatency;
                 const int baseAfterEnd = afterGroup.baseThreshold;
                 const int baseBeforeBegin = beforeGroup.baseThreshold;
                 const int baseAfterBegin = std::max(0, baseAfterEnd - afterGroup.claimWindow);
                 const int baseBeforeEnd = baseBeforeBegin + beforeGroup.claimWindow;
-                const bool overlap =
-                    (baseAfterBegin < baseBeforeEnd) && (baseBeforeBegin <= baseAfterEnd);
+                const bool overlap = (baseAfterBegin < baseBeforeEnd) &&
+                                     (baseBeforeBegin < baseAfterEnd + separationSlack);
                 int proportionalSplit = -1;
+                const char* placement = "none";
                 if (overlap) {
                     overlappingHideBudgetBarriers.insert(afterGroup.barriers.begin(),
                                                          afterGroup.barriers.end());
@@ -2750,10 +2787,38 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     }
                     layer2BarrierOverlapCandidates_.push_back(std::move(overlapCandidate));
 
-                    afterGroup.pendingThreshold =
-                        std::min(afterGroup.pendingThreshold, afterTarget);
-                    beforeGroup.pendingThreshold =
-                        std::max(beforeGroup.pendingThreshold, beforeTarget);
+                    const bool demandFits =
+                        totalNeeded + separationSlack < totalWmma &&
+                        beforeGroup.pendingThreshold >= afterNeeded + separationSlack;
+                    if (demandFits) {
+                        // Room for both issue windows and the slack: keep before,
+                        // and pull after earlier by the slack plus the configured
+                        // TensorLoadDsLoadGapCycles (default 64) worth of WMMA
+                        // windows so tensor loads stay off the ds_loads.
+                        placement = "gap";
+                        afterGroup.sawGapPlacement = true;
+                        beforeGroup.sawGapPlacement = true;
+                        // Do not pull the after barrier earlier than the issue
+                        // windows it needs (splitNeeded is wmmaWindowsNeeded, no
+                        // drain). The configured gap (TensorLoadDsLoadGapCycles,
+                        // default 64) is extra separation, not a reason to drop
+                        // below that floor.
+                        const int afterFloor = std::clamp(afterGroup.splitNeeded, 0, totalWmma);
+                        const int afterAtGap =
+                            std::clamp(beforeGroup.pendingThreshold - separationSlack -
+                                           tensorLoadDsLoadGapWmma,
+                                       afterFloor, totalWmma);
+                        afterGroup.pendingThreshold =
+                            std::max(afterFloor, std::min(afterGroup.pendingThreshold, afterAtGap));
+                    } else {
+                        placement = "proportional";
+                        afterGroup.sawProportionalPlacement = true;
+                        beforeGroup.sawProportionalPlacement = true;
+                        afterGroup.pendingThreshold =
+                            std::min(afterGroup.pendingThreshold, afterTarget);
+                        beforeGroup.pendingThreshold =
+                            std::max(beforeGroup.pendingThreshold, beforeTarget);
+                    }
                 }
 
                 PASS_DEBUG(std::cerr
@@ -2773,6 +2838,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " overlap=" << overlap << " baseAfterEnd=" << baseAfterEnd
                            << " baseBeforeBegin=" << baseBeforeBegin
                            << " proportionalSplit=" << proportionalSplit
+                           << " tensorLoadDsLoadGapWmma=" << tensorLoadDsLoadGapWmma
+                           << " placement=" << placement
                            << " pendingAfterThreshold=" << afterGroup.pendingThreshold
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
@@ -2809,8 +2876,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (const auto& group : exclusiveAfterGroups) setGroupThreshold(group, group.threshold);
         for (const auto& group : exclusiveBeforeGroups) setGroupThreshold(group, group.threshold);
 
-        // Final pair normalization: keep barrier_signal/barrier_wait pairs on the
-        // same threshold.
+        // Final pair normalization: first put each barrier_signal/barrier_wait
+        // pair on one threshold. The 2 WMMA windows reserved for each pair are
+        // applied once after both groupings.
         auto normalizeBarrierPairs = [&](bool useSrcTokens) {
             auto barrierGroups =
                 groupBarrierTokens(collectBarrierTokens(regionStart, regionEnd, useSrcTokens));
@@ -2839,10 +2907,40 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Layer 3/3 (final pair normalize):
         // Run once with source-token grouping and once with destination-token
         // grouping, because different barrier forms expose their pseudo token on
-        // different operand sides. This final pass guarantees each grouped
-        // barrier_signal/barrier_wait pair shares one threshold.
+        // different operand sides. Both passes only average a pair onto one
+        // threshold. The half slack below runs once, so a pair found by both
+        // groupings is not shifted twice.
         normalizeBarrierPairs(/*useSrcTokens=*/true);
         normalizeBarrierPairs(/*useSrcTokens=*/false);
+
+        // Gap placement reserves 2 WMMA windows inside each signal/wait pair.
+        // Proportional placement leaves the averaged threshold on both halves
+        // so the later merge pass can still see an adjacent signal/wait pair.
+        //   after:  signal stays, wait = threshold + 2
+        //   before: signal = threshold - 2, wait stays
+        const int barrierHalfSlack = 2;
+        auto shiftPairHalf = [&](const BarrierGroupThresholdSummary& group, bool waitHalf,
+                                 int delta) {
+            for (StinkyInstruction* barrier : group.barriers) {
+                const bool match = waitHalf ? isBarrierWait(*barrier) : isBarrierSignal(*barrier);
+                if (!match) continue;
+                auto it = barrierWmmaThresholds_.find(barrier);
+                if (it == barrierWmmaThresholds_.end()) continue;
+                const int baseThreshold = it->second;
+                it->second = std::clamp(baseThreshold + delta, 0, totalWmma);
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion pair half slack] barrier=" << barrier
+                                     << " waitHalf=" << waitHalf
+                                     << " baseThreshold=" << baseThreshold
+                                     << " threshold=" << it->second << " delta=" << delta << "\n");
+            }
+        };
+        auto spreadGapPair = [](const BarrierGroupThresholdSummary& group) {
+            return group.sawGapPlacement && !group.sawProportionalPlacement;
+        };
+        for (const auto& group : exclusiveAfterGroups)
+            if (spreadGapPair(group)) shiftPairHalf(group, /*waitHalf=*/true, barrierHalfSlack);
+        for (const auto& group : exclusiveBeforeGroups)
+            if (spreadGapPair(group)) shiftPairHalf(group, /*waitHalf=*/false, -barrierHalfSlack);
 
         // Publish the final, normalized threshold together with each barrier
         // estimator's DS-load demand. Publish once per split-barrier group:
