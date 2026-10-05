@@ -1,0 +1,26 @@
+{
+  "claims": {
+    "hipkernel:Gfx950ConvFwd": [
+      {
+        "cases": [
+          "direct_c96_3x3_half",
+          "direct_c96_3x3_bfloat16",
+          "direct_c96_3x3_s2_odd_half",
+          "direct_c96_3x3_s2_odd_bfloat16",
+          "direct_c96_3x3_s2_even_half",
+          "direct_c96_3x3_s2_even_bfloat16",
+          "direct_c64_3x3_tall_half",
+          "direct_c64_3x3_tall_bfloat16",
+          "direct_spatial_c5_17x17_half",
+          "direct_spatial_c5_17x17_bfloat16"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

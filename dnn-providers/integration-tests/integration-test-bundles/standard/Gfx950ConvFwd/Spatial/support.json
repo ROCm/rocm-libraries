@@ -1,0 +1,36 @@
+{
+  "claims": {
+    "hipkernel:Gfx950ConvFwd": [
+      {
+        "cases": [
+          "pointwise_half",
+          "pointwise_bfloat16",
+          "strided_half",
+          "strided_bfloat16",
+          "dilated_half",
+          "dilated_bfloat16",
+          "nonsquare_half",
+          "nonsquare_bfloat16",
+          "grouped_g2_3x3_half",
+          "grouped_g2_3x3_bfloat16",
+          "grouped_g4_cpg3_3x3_half",
+          "grouped_g4_cpg3_3x3_bfloat16",
+          "depthwise_c32_3x3_s2_half",
+          "depthwise_c32_3x3_s2_bfloat16",
+          "depthwise_c5_7x7_half",
+          "depthwise_c5_7x7_bfloat16",
+          "depthwise_mult2_3x3_half",
+          "depthwise_mult2_3x3_bfloat16",
+          "grouped_g2_5x5_dil2_half",
+          "grouped_g2_5x5_dil2_bfloat16"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

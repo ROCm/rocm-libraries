@@ -2269,6 +2269,18 @@ class TestRuntimeContractRejections:
                 r"default_value \[1, 'two'\], which contradicts its declared type 'int_list'",
                 id="kmd-default-value-mixed-int-list",
             ),
+            pytest.param(
+                lambda r: r["kmd_fields"].append(
+                    {"name": "dtype", "type": "string", "builder_default": True}
+                ),
+                r"entry 'dtype' declares builder_default without a default_value",
+                id="kmd-builder-default-on-mandatory-field",
+            ),
+            pytest.param(
+                lambda r: r["kmd_fields"][0].__setitem__("builder_default", "yes"),
+                r"entry 'block_size' declares builder_default 'yes'; it must be true",
+                id="kmd-builder-default-not-bool",
+            ),
             # T1(b) -- requireNoDuplicates, DescriptorLoader.hpp:634-645, 750, 753.
             pytest.param(
                 lambda r: r["engine"].__setitem__(
