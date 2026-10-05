@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -12,11 +13,12 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -28,7 +30,6 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -65,9 +66,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise.dispatch";
 
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
-constexpr std::string_view INPUT_A_TOKEN = "pointwise.input_a.uid";
-constexpr std::string_view INPUT_B_TOKEN = "pointwise.input_b.uid";
-constexpr std::string_view OUTPUT_TOKEN = "pointwise.output.uid";
+constexpr std::string_view INPUT_A_TOKEN = "input_a";
+constexpr std::string_view INPUT_B_TOKEN = "input_b";
+constexpr std::string_view OUTPUT_TOKEN = "output";
 
 /// Scratch reported by the larger-block kernel; keeps max-across-survivors non-zero.
 constexpr size_t LARGE_BLOCK_WORKSPACE_BYTES = 1024;
@@ -95,77 +96,77 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// Channel-first or channel-last stride order, the only orders compile options classify.
-bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
+/// Packedness alone is not enough: require one element and a supported rank and layout.
+/// Use the shared stride order for singleton axes.
+bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 {
-    try
-    {
-        static_cast<void>(core::utils::isChannelLastLayout(&tensor));
-        return true;
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    const auto rank = tryGetBoundInt(bound, tensorField(root, "rank"));
+    if(!rank || *rank < MIN_SUPPORTED_RANK || *rank > MAX_SUPPORTED_RANK)
     {
         return false;
     }
-}
-
-/// Runs on an unvalidated graph, so must be total: a caller can present a tensor the
-/// frontend would have rejected.
-bool isSingleElement(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    // isChannelLastLayout below dereferences strides unchecked; this predicate must
-    // not crash.
-    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
+    for(int64_t i = 0; i < *rank; ++i)
     {
-        return false;
-    }
-
-    // Every dim must be 1, not merely multiply to 1 -- the claim is about extent, not
-    // a product.
-    for(const auto dim : *dims)
-    {
-        if(dim != 1)
+        if(tryGetBoundInt(bound, tensorElement(root, "dims", static_cast<size_t>(i))) != 1)
         {
             return false;
         }
     }
-
-    return hasSupportedLayout(tensor);
+    const auto* order
+        = tryGetBoundValue<std::vector<int64_t>>(bound, tensorField(root, "stride_order"));
+    using hipdnn_data_sdk::utilities::TensorLayout;
+    if(order == nullptr
+       || (*rank == 4 && *order != TensorLayout::NCHW.strideOrder
+           && *order != TensorLayout::NHWC.strideOrder)
+       || (*rank == 5 && *order != TensorLayout::NCDHW.strideOrder
+           && *order != TensorLayout::NDHWC.strideOrder))
+    {
+        return false;
+    }
+    const auto* isVirtual = tryGetBoundValue<bool>(bound, tensorField(root, "virtual"));
+    const auto* runtime
+        = tryGetBoundValue<bool>(bound, tensorField(root, "is_runtime_pass_by_value"));
+    return isVirtual != nullptr && !*isVirtual && runtime != nullptr && !*runtime
+           && tryGetBoundValue<double>(bound, tensorField(root, "value_f32")) == nullptr;
 }
 
-std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
+bool publishPointwiseNode(BoundTokens& bound,
+                          const data_objects::PointwiseAttributes& attributes,
+                          data_objects::DataType computeType)
 {
-    if(context.graph.nodeCount() != 1)
+    const auto* operation = data_objects::EnumNamePointwiseMode(attributes.operation());
+    const auto* compute = data_objects::EnumNameDataType(computeType);
+    if(operation == nullptr || *operation == '\0' || compute == nullptr || *compute == '\0')
     {
-        return std::nullopt;
+        return false;
     }
-
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes)
+    bound.emplace("pointwise.operation", std::string(operation));
+    bound.emplace("pointwise.compute_data_type", std::string(compute));
+    const auto publishFloat = [&bound](const char* key, flatbuffers::Optional<float> value) {
+        if(!value.has_value())
+        {
+            return true;
+        }
+        if(!std::isfinite(*value))
+        {
+            return false;
+        }
+        bound.emplace(key, static_cast<double>(*value));
+        return true;
+    };
+    if(attributes.axis_tensor_uid().has_value())
     {
-        return std::nullopt;
+        bound.emplace("pointwise.axis_tensor_uid", *attributes.axis_tensor_uid());
     }
-
-    const auto& attributes = node.attributesAs<data_objects::PointwiseAttributes>();
-    const auto* input = findTensor(context, attributes.in_0_tensor_uid());
-    if(input == nullptr)
-    {
-        return std::nullopt;
-    }
-    return input->data_type();
+    return publishFloat("pointwise.relu_lower_clip", attributes.relu_lower_clip())
+           && publishFloat("pointwise.relu_upper_clip", attributes.relu_upper_clip())
+           && publishFloat("pointwise.relu_lower_clip_slope", attributes.relu_lower_clip_slope())
+           && publishFloat("pointwise.swish_beta", attributes.swish_beta())
+           && publishFloat("pointwise.elu_alpha", attributes.elu_alpha())
+           && publishFloat("pointwise.softplus_beta", attributes.softplus_beta());
 }
 
-std::string dataTypeName(data_objects::DataType dataType)
-{
-    return data_objects::EnumNameDataType(dataType);
-}
-
-/// The node this engine's matchers read, or nullptr if the graph isn't a single
-/// pointwise node. Shared so the operation check doesn't depend on matcher order,
-/// which the descriptor controls.
+/// Return attributes for a single-node pointwise graph, or nullptr.
 const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -174,7 +175,8 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
     }
 
     const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes)
+    if(node.attributesType() != data_objects::NodeAttributes::PointwiseAttributes
+       || node.attributes() == nullptr)
     {
         return nullptr;
     }
@@ -214,32 +216,27 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
         return std::nullopt;
     }
 
-    if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
-    {
-        return std::nullopt;
-    }
-
-    if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
-    {
-        return std::nullopt;
-    }
-
-    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
-    {
-        return std::nullopt;
-    }
-
-    if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
-    {
-        return std::nullopt;
-    }
-
     BoundTokens bound;
-    bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
-    bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
-    bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
+    if(!publishGraph(bound, context.graph) || !publishTensor(bound, INPUT_A_TOKEN, inputA)
+       || !publishTensor(bound, INPUT_B_TOKEN, inputB)
+       || !publishTensor(bound, OUTPUT_TOKEN, output)
+       || !publishPointwiseNode(
+           bound, attributes, context.graph.getNodeWrapper(0).computeDataType()))
+    {
+        return std::nullopt;
+    }
+    if(!isSupportedOperand(bound, INPUT_A_TOKEN) || !isSupportedOperand(bound, INPUT_B_TOKEN)
+       || !isSupportedOperand(bound, OUTPUT_TOKEN))
+    {
+        return std::nullopt;
+    }
+    if(*tryGetBoundValue<std::string>(bound, "input_a.dtype")
+           != *tryGetBoundValue<std::string>(bound, "input_b.dtype")
+       || *tryGetBoundValue<std::string>(bound, "input_a.dtype")
+              != *tryGetBoundValue<std::string>(bound, "output.dtype"))
+    {
+        return std::nullopt;
+    }
     return bound;
 }
 
@@ -249,43 +246,34 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
  * Listing this second matcher is the whole cost of a pack, and two packs claiming the
  * same operation would be the authoring mistake, not two packs sharing the graph check.
  */
-bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
+bool pointwiseOperationMatches(const BoundTokens& bound, data_objects::PointwiseMode operation)
 {
-    const auto* attributes = pointwiseNode(context);
-    return attributes != nullptr && attributes->operation() == operation;
+    const auto* published = tryGetBoundValue<std::string>(bound, "pointwise.operation");
+    return published != nullptr && *published == data_objects::EnumNamePointwiseMode(operation);
 }
 
-bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& /*bound*/)
+bool pointwiseAddMatches(const MatchContext& /*context*/, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::ADD);
+    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::ADD);
 }
 
-bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& /*bound*/)
+bool pointwiseMulMatches(const MatchContext& /*context*/, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
+    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::MUL);
 }
 
-bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& /*bound*/)
+bool pointwiseSubMatches(const MatchContext& /*context*/, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
+    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::SUB);
 }
 
-/**
- * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
- *        Evaluated once per candidate kernel; without it an f32 graph could reach an
- *        f16 binary and return wrong numbers rather than failing.
- */
-bool pointwiseKernelMatches(const MatchContext& context,
-                            const BoundTokens& /*bound*/,
+/// Match each kernel using the published dtype.
+bool pointwiseKernelMatches(const MatchContext& /*context*/,
+                            const BoundTokens& bound,
                             const KernelDefinition& kernel)
 {
-    const auto dataType = graphDataType(context);
-    if(!dataType.has_value())
-    {
-        return false;
-    }
-
-    return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
+    const auto* dataType = tryGetBoundValue<std::string>(bound, "input_a.dtype");
+    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType;
 }
 
 double pointwiseScore(const MatchContext& /*context*/,

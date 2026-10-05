@@ -416,13 +416,72 @@ def _validate_kdp(desc, log=print):
         _validate_inline_ukd(ukd, path, log)
 
 
+def _require_known_keys(doc, allowed, where):
+    """Allow known fields and the runtime's extension keys."""
+    for key in doc:
+        if key not in allowed and not (
+            key.startswith(("x-", "_")) or key == "provenance"
+        ):
+            raise HkpPackError(f"{where} has unknown key '{key}'")
+
+
+def _require_string(doc, key, where):
+    _require(doc, [key], where)
+    value = doc[key]
+    if not isinstance(value, str) or not value:
+        raise HkpPackError(f"{where} field '{key}' must be a nonempty string")
+    return value
+
+
 def _validate_ued(desc):
-    name = desc.doc.get("name")
-    if not isinstance(name, str) or not _UED_NAME_RE.match(name):
+    """Validate native UED fields; runtime admission is checked separately."""
+    doc = desc.doc
+    where = f"UED {desc.path.name}"
+    _require_known_keys(
+        doc,
+        {
+            "version",
+            "id",
+            "name",
+            "sdk_version",
+            "heuristic",
+            "metadata",
+            "knobs",
+            "behavior_notes",
+            "numerical_notes",
+            "graph_match",
+        },
+        where,
+    )
+    name = _require_string(doc, "name", where)
+    if not _UED_NAME_RE.fullmatch(name):
         raise HkpPackError(
-            f"UED {desc.path.name} name '{name}' must be scoped 'namespace:local' "
+            f"{where} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
+    # The packer permits non-UUID IDs; the runtime requires UUIDs.
+    for key in ("id", "metadata"):
+        _require_string(doc, key, where)
+    if "heuristic" in doc:
+        _require_string(doc, "heuristic", where)
+    for key in ("knobs", "behavior_notes", "numerical_notes"):
+        values = doc.get(key, [])
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) for value in values
+        ):
+            raise HkpPackError(f"{where} field '{key}' must be an array of strings")
+        if len(set(values)) != len(values):
+            raise HkpPackError(f"{where} field '{key}' contains duplicates")
+    for note in doc.get("behavior_notes", []):
+        if note != "runtime_compilation":
+            raise HkpPackError(f"{where} has unknown behavior note '{note}'")
+    if "graph_match" in doc:
+        graph_match = doc["graph_match"]
+        graph_where = f"{where} graph_match"
+        if not isinstance(graph_match, dict):
+            raise HkpPackError(f"{graph_where} must be an object")
+        _require_known_keys(graph_match, {"native"}, graph_where)
+        _require_string(graph_match, "native", graph_where)
 
 
 # The loader's enum vocabularies, mirrored so a bad spelling is a pack-time

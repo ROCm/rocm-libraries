@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -599,6 +600,53 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     EXPECT_EQ(counters().graphMatchCalls, afterMatching);
     EXPECT_EQ(tryGetBoundInt(secondRead, "test.bound_token"), BOUND_TOKEN_VALUE);
     EXPECT_EQ(tryGetBoundInt(thirdRead, "test.bound_token"), BOUND_TOKEN_VALUE);
+}
+
+TEST(TestKernelIngestorStateManager, ResidentCanonicalPublicationOutlivesItsSourceGraph)
+{
+    const auto publish = [](const MatchContext& context) -> std::optional<BoundTokens> {
+        ++counters().graphMatchCalls;
+        BoundTokens bound;
+        if(!publishGraph(bound, context.graph)
+           || !publishTensor(bound, "input", context.graph.getTensorMap().at(1)))
+        {
+            return std::nullopt;
+        }
+        return bound;
+    };
+    const auto dtypeMatches
+        = [](const MatchContext&, const BoundTokens& bound, const KernelDefinition& kernel) {
+              const auto* dtype = tryGetBoundValue<std::string>(bound, "input.dtype");
+              return dtype != nullptr && *dtype == kernel.getStringMetadata(DTYPE);
+          };
+    const ScopedSymbols symbols("test.graph", publish, "test.kernel", dtypeMatches);
+    const auto manager = makeStateManager();
+    using ContentGraph
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
+    ContentGraph::Spec spec;
+    spec.graphId = makeGraphId(0x71);
+    const auto properties = testDeviceProperties();
+    {
+        const ContentGraph graph(spec);
+        const auto catalog = manager->unsortedCatalog(MatchContext{graph, 0, properties});
+        ASSERT_EQ(catalog.entries.size(), 2U);
+        EXPECT_EQ(tryGetBoundInt(catalog.bound, "input"), 1);
+    }
+
+    // The same finalized graph may arrive through a new serialized wrapper.
+    const ContentGraph restored(spec);
+    const MatchContext context{restored, 0, properties};
+    auto snapshot = manager->sortedCatalog(context);
+    ASSERT_EQ(snapshot.entries.size(), 2U);
+    EXPECT_EQ(std::get<std::string>(snapshot.bound.at("input.dtype")), "FLOAT");
+    EXPECT_EQ(std::get<std::vector<int64_t>>(snapshot.bound.at("input.stride_order")),
+              (std::vector<int64_t>{1, 0}));
+    EXPECT_EQ(tryGetBoundInt(snapshot.bound, "input.dims[1]"), 8);
+    EXPECT_EQ(snapshot.bound.count("input.value_f32"), 0U);
+    snapshot.bound.at("input.dtype") = std::string("HALF");
+    const auto resident = manager->unsortedCatalog(context);
+    EXPECT_EQ(std::get<std::string>(resident.bound.at("input.dtype")), "FLOAT");
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)

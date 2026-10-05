@@ -95,6 +95,29 @@ TREE, not by that directory. Writing the value arch-root-relative instead is
 correct only for a descriptor sitting flat at the arch root, and silently wrong
 for every nested one.
 
+**Universal Engine Descriptors (UEDs) support native graph matching only.** The
+optional `graph_match` object must contain a nonempty `native` symbol registered
+by the provider. Tensor and node declarations, declarative graph patterns, and
+unknown fields are rejected. Extensions use `x-` or `_` prefixes or the key
+`provenance`; they do not declare bindings.
+
+**Preserve producer identity and generic descriptor bytes.** Generic descriptors
+must be byte-identical across architecture shards. Native code defines tensor
+binding names. UEDs name native symbols, not binding keys, so renaming bindings
+does not require UED edits.
+
+**Use a matching provider and descriptor package.** The runtime skips malformed or
+unsupported files individually, not whole packages. Identical accepted JSON
+definitions count as one. Conflicting accepted definitions within one root
+invalidate that UUID; across roots, the first accepted definition wins. If the
+winner fails native-symbol checks, the loader does not try a later root. A pack
+can still resolve a UUID in another root if an earlier malformed file was skipped.
+
+`HIPDNN_DESCRIPTOR_RUNTIME_DIR` adds a tree without overriding installed
+definitions. For a replacement tree, set `HIPDNN_DESCRIPTOR_DIR` and use a
+matching provider. Start a fresh process to load descriptor or environment changes;
+discovery does not reload them.
+
 ## Why this rocKE builder
 
 `build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both

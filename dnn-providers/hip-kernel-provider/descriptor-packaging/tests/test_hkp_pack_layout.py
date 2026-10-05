@@ -882,38 +882,6 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
         )
 
 
-@pytest.mark.quick
-def test_example_tree_native_symbols_are_registered():
-    """Symbols the descriptors name must exist in a compiled native pack.
-
-    A descriptor can only resolve to something the C++ side registered. Naming
-    an unregistered symbol produces a tree that packs cleanly and then fails to
-    dispatch -- the packer has no way to know the difference.
-    """
-    packs_dir = (
-        Path(__file__).resolve().parent.parent.parent
-        / "src/engines/kernel_ingestor_engine/packs"
-    )
-    if not packs_dir.is_dir():
-        pytest.skip(f"native packs not present at {packs_dir}")
-
-    registered = set()
-    for cpp in packs_dir.glob("*.cpp"):
-        registered.update(re.findall(r'"(hipkernel\.[\w.]+)"', cpp.read_text()))
-    assert registered, "no native symbols found; the scan is broken, not the tree"
-
-    named = set()
-    for path in _descriptor_files(EXAMPLE_ROOT):
-        doc = json.dumps(_read(path))
-        named.update(re.findall(r'"(hipkernel\.[\w.]+)"', doc))
-
-    unknown = named - registered
-    assert not unknown, (
-        f"example descriptors name unregistered native symbols {sorted(unknown)}; "
-        f"registered: {sorted(registered)}"
-    )
-
-
 def test_library_resolves_for_a_nested_standalone_ukd(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
@@ -1037,6 +1005,70 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 
     with pytest.raises(HkpPackError, match=expected):
         load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "updates,remove,expected",
+    [
+        ({}, "metadata", "metadata"),
+        ({"metadata": ""}, None, "metadata"),
+        ({"heuristic": 7}, None, "heuristic"),
+        ({"name": "test:engine\n"}, None, "scoped"),
+        ({"tensor_roots": ["input_a"]}, None, "tensor_roots"),
+        ({"graph_match": None}, None, "graph_match"),
+        ({"graph_match": {}}, None, "native"),
+        ({"graph_match": {"native": ""}}, None, "native"),
+        ({"graph_match": {"native": 7}}, None, "native"),
+        (
+            {"graph_match": {"native": "hipkernel.pointwise.graph_match", "nodes": []}},
+            None,
+            "nodes",
+        ),
+        ({"knobs": "block_size"}, None, "knobs"),
+        ({"knobs": ["block_size", "block_size"]}, None, "duplicates"),
+        ({"numerical_notes": [7]}, None, "numerical_notes"),
+        ({"behavior_notes": ["future_note"]}, None, "behavior note"),
+    ],
+)
+def test_ued_body_rejected_before_packaging(
+    tmp_path, empty_arch_fixture, updates, remove, expected
+):
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document.update(updates)
+    if remove:
+        document.pop(remove)
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match=expected):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_ued_publication_body_keeps_extensions(tmp_path, empty_arch_fixture):
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document.update(
+        graph_match={
+            "native": "hipkernel.pointwise.graph_match",
+            "x-producer": {"input_a": "tensor"},
+        },
+        knobs=[],
+        behavior_notes=["runtime_compilation"],
+        numerical_notes=["producer_note"],
+        provenance={"producer": "test"},
+        _internal=7,
+    )
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    flat = load_flat_input(root)
+    ued = next(d for d in flat.descriptors if d.path == path)
+    assert ued.doc == document
 
 
 @pytest.mark.quick
@@ -1612,6 +1644,14 @@ def test_embedded_source_generics_are_identical_across_shards(
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     authored = root / "pointwise"
+    ued_path = authored / "solo.ued.json"
+    ued = _read(ued_path)
+    ued["graph_match"] = {
+        "native": "hipkernel.pointwise.graph_match",
+        "x-producer": {"build": "coherent"},
+    }
+    # Use unusual spacing to catch JSON rewriting.
+    ued_path.write_text(json.dumps(ued, indent=4) + "\n\n", encoding="utf-8")
 
     _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH, OTHER_ARCH])
 

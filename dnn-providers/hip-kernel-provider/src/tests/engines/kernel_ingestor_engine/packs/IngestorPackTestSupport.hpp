@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -145,10 +146,10 @@ inline bool matchesOperation(const PackSymbols& pack,
 
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
 {
-    return kernelMatcher(pack)(context, bound, kernel);
+    const auto bound = matchesGraph(pack, context);
+    return bound.has_value() && kernelMatcher(pack)(context, *bound, kernel);
 }
 
 inline double scoreKernel(const PackSymbols& pack,
@@ -182,6 +183,20 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
         resolved.multiProcessorCount = properties.multiProcessorCount;
     }
     return resolved;
+}
+
+/// Apply changes to a graph fixture, then serialize it.
+template <typename Mutate>
+inline flatbuffers::FlatBufferBuilder transformGraph(flatbuffers::FlatBufferBuilder builder,
+                                                     Mutate mutate)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    std::unique_ptr<data_objects::GraphT> graph(
+        data_objects::GetGraph(builder.GetBufferPointer())->UnPack());
+    mutate(*graph);
+    builder.Clear();
+    builder.Finish(data_objects::Graph::Pack(builder, graph.get()));
+    return builder;
 }
 
 /// Wraps a built graph buffer so a test reads it the way an engine does.

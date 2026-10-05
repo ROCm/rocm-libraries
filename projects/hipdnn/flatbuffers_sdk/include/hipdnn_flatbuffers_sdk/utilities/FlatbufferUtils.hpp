@@ -3,13 +3,16 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -48,106 +51,175 @@ inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vect
     return out;
 }
 
-template <typename TargetType>
-TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
-                                       const char* paramName)
+namespace detail
 {
-    if(tensorAttr.value.value == nullptr)
+
+// The object and table APIs share the same TensorValue structs.
+template <typename Value>
+auto readTensorValue(data_objects::TensorValue valueType, const void* value, const char* paramName)
+{
+    if(valueType != data_objects::TensorValueTraits<Value>::enum_value)
+    {
+        throw std::runtime_error(std::string(paramName) + " has a mismatched tensor value type");
+    }
+    return static_cast<const Value*>(value)->value();
+}
+
+template <typename Convert>
+auto convertTensorValue(data_objects::DataType dataType,
+                        data_objects::TensorValue valueType,
+                        const void* value,
+                        const char* paramName,
+                        Convert convert)
+{
+    if(value == nullptr)
     {
         throw std::runtime_error(std::string(paramName) + " must be a pass-by-value tensor");
     }
 
-    switch(tensorAttr.data_type)
+    switch(dataType)
     {
     case data_objects::DataType::DOUBLE:
-        if(auto val = tensorAttr.value.AsFloat64Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Float64Value>(valueType, value, paramName));
     case data_objects::DataType::FLOAT:
-        if(auto val = tensorAttr.value.AsFloat32Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Float32Value>(valueType, value, paramName));
     case data_objects::DataType::HALF:
-        if(auto val = tensorAttr.value.AsFloat16Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Float16Value>(valueType, value, paramName));
     case data_objects::DataType::BFLOAT16:
-        if(auto val = tensorAttr.value.AsBFloat16Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::BFloat16Value>(valueType, value, paramName));
     case data_objects::DataType::INT32:
-        if(auto val = tensorAttr.value.AsInt32Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Int32Value>(valueType, value, paramName));
     case data_objects::DataType::INT64:
-        if(auto val = tensorAttr.value.AsInt64Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Int64Value>(valueType, value, paramName));
     case data_objects::DataType::BOOLEAN:
-        if(auto val = tensorAttr.value.AsBoolValue())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::BoolValue>(valueType, value, paramName));
     case data_objects::DataType::UINT8:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+        return convert(readTensorValue<data_objects::Float8Value>(valueType, value, paramName));
     case data_objects::DataType::INT8:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            return static_cast<TargetType>(val->value());
-        }
-        break;
+    {
+        const auto bits = readTensorValue<data_objects::Float8Value>(valueType, value, paramName);
+        int8_t signedValue;
+        std::memcpy(&signedValue, &bits, sizeof(signedValue));
+        return convert(signedValue);
+    }
     case data_objects::DataType::FP8_E4M3:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3::from_bits(val->value());
-            return static_cast<TargetType>(static_cast<float>(fp8));
-        }
-        break;
+        return convert(static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3::from_bits(
+            readTensorValue<data_objects::Float8Value>(valueType, value, paramName))));
     case data_objects::DataType::FP8_E5M2:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2::from_bits(val->value());
-            return static_cast<TargetType>(static_cast<float>(bfp8));
-        }
-        break;
+        return convert(static_cast<float>(hipdnn_data_sdk::types::fp8_e5m2::from_bits(
+            readTensorValue<data_objects::Float8Value>(valueType, value, paramName))));
     case data_objects::DataType::FP8_E4M3_FNUZ:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(val->value());
-            return static_cast<TargetType>(static_cast<float>(fp8));
-        }
-        break;
+        return convert(static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(
+            readTensorValue<data_objects::Float8Value>(valueType, value, paramName))));
     case data_objects::DataType::FP8_E5M2_FNUZ:
-        if(auto val = tensorAttr.value.AsFloat8Value())
-        {
-            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(val->value());
-            return static_cast<TargetType>(static_cast<float>(bfp8));
-        }
-        break;
+        return convert(static_cast<float>(hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(
+            readTensorValue<data_objects::Float8Value>(valueType, value, paramName))));
     case data_objects::DataType::UNSET:
         throw std::runtime_error(std::string(paramName) + " tensor has UNSET data type");
     default:
         throw std::runtime_error(std::string(paramName) + " has unsupported data type");
     }
+}
 
-    throw std::runtime_error(std::string(paramName) + " must be a pass-by-value tensor");
+// Integer arithmetic preserves ties-to-even rounding and subnormals regardless
+// of the host's floating-point settings. Shifts must be in [1, 53].
+inline uint64_t roundRightToEven(uint64_t value, unsigned int shift)
+{
+    const auto result = value >> shift;
+    const auto remainder = value & ((uint64_t{1} << shift) - 1);
+    const auto midpoint = uint64_t{1} << (shift - 1);
+    return result + (remainder > midpoint || (remainder == midpoint && (result & 1) != 0));
+}
+
+inline float floatFromBits(uint32_t bits)
+{
+    static_assert(sizeof(float) == sizeof(bits) && std::numeric_limits<float>::is_iec559);
+    float result;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
+inline float finiteFloat(float value, const char* paramName)
+{
+    if(!std::isfinite(value))
+    {
+        throw std::runtime_error(std::string(paramName) + " has a nonfinite tensor value");
+    }
+    return value;
+}
+
+inline float finiteFloat(double value, const char* paramName)
+{
+    if(!std::isfinite(value)
+       || std::abs(value) > static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        throw std::runtime_error(std::string(paramName)
+                                 + " tensor value is outside finite float range");
+    }
+
+    static_assert(sizeof(double) == sizeof(uint64_t) && std::numeric_limits<double>::is_iec559);
+    uint64_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const auto sign = static_cast<uint32_t>(bits >> 32) & 0x80000000U;
+    const auto exponent = static_cast<int>((bits >> 52) & 0x7ffU) - 1023;
+    if(exponent < -150)
+    {
+        return floatFromBits(sign);
+    }
+    const auto significand = (bits & 0x000fffffffffffffULL) | (uint64_t{1} << 52);
+    if(exponent < -126)
+    {
+        // Round in units of the minimum binary32 subnormal, 2^-149.
+        return floatFromBits(sign
+                             | static_cast<uint32_t>(roundRightToEven(
+                                 significand, static_cast<unsigned int>(-exponent - 97))));
+    }
+    // The leading significand bit and any rounding carry add to the exponent.
+    // The range check above keeps the result finite.
+    return floatFromBits(sign
+                         | ((static_cast<uint32_t>(exponent + 126) << 23)
+                            + static_cast<uint32_t>(roundRightToEven(significand, 29))));
+}
+
+template <typename Integer, std::enable_if_t<std::is_integral_v<Integer>, int> = 0>
+float finiteFloat(Integer value, const char*)
+{
+    const auto signedValue = static_cast<int64_t>(value);
+    const bool negative = signedValue < 0;
+    const auto magnitude = negative ? uint64_t{0} - static_cast<uint64_t>(signedValue)
+                                    : static_cast<uint64_t>(signedValue);
+    if(magnitude <= (uint64_t{1} << 24))
+    {
+        return static_cast<float>(signedValue); // Exact, including bool and 8-bit integers.
+    }
+
+    // Find the highest bit without converting the integer through double.
+    auto leading = magnitude;
+    unsigned int exponent = 0;
+    for(const unsigned int shift : {32U, 16U, 8U, 4U, 2U, 1U})
+    {
+        if((leading >> shift) != 0)
+        {
+            leading >>= shift;
+            exponent += shift;
+        }
+    }
+    const auto significand = static_cast<uint32_t>(roundRightToEven(magnitude, exponent - 23));
+    const auto sign = negative ? 0x80000000U : 0U;
+    return floatFromBits(sign | (((exponent + 126) << 23) + significand));
+}
+
+} // namespace detail
+
+template <typename TargetType>
+TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
+                                       const char* paramName)
+{
+    return detail::convertTensorValue(tensorAttr.data_type,
+                                      tensorAttr.value.type,
+                                      tensorAttr.value.value,
+                                      paramName,
+                                      [](auto value) { return static_cast<TargetType>(value); });
 }
 
 template <typename TargetType>
@@ -158,11 +230,40 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributes* ten
     {
         throw std::runtime_error(std::string(paramName) + " tensor attribute is null");
     }
+    return detail::convertTensorValue(tensorAttr->data_type(),
+                                      tensorAttr->value_type(),
+                                      tensorAttr->value(),
+                                      paramName,
+                                      [](auto value) { return static_cast<TargetType>(value); });
+}
 
-    data_objects::TensorAttributesT unpacked;
-    tensorAttr->UnPackTo(&unpacked);
+/// Convert a stored scalar to finite float32 using round-to-nearest, ties-to-even.
+/// Check the dtype/union pair and double range before conversion.
+/// Stored runtime defaults are read too; callers decide whether to publish them.
+inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
+                                               const char* paramName)
+{
+    return detail::convertTensorValue(
+        tensorAttr.data_type,
+        tensorAttr.value.type,
+        tensorAttr.value.value,
+        paramName,
+        [paramName](auto value) { return detail::finiteFloat(value, paramName); });
+}
 
-    return extractValueFromTensorValue<TargetType>(unpacked, paramName);
+inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributes* tensorAttr,
+                                               const char* paramName)
+{
+    if(tensorAttr == nullptr)
+    {
+        throw std::runtime_error(std::string(paramName) + " tensor attribute is null");
+    }
+    return detail::convertTensorValue(
+        tensorAttr->data_type(),
+        tensorAttr->value_type(),
+        tensorAttr->value(),
+        paramName,
+        [paramName](auto value) { return detail::finiteFloat(value, paramName); });
 }
 
 inline double extractDoubleFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,

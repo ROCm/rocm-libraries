@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,117 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
         data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 1, 1, 1}));
 
     EXPECT_TRUE(matches(fixture.context()));
+}
+
+TEST(TestPointwiseAddGraphMatcher, RetainsSingletonStrideAndDtypeAdmission)
+{
+    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                                   data_objects::DataType::INT32,
+                                                   {1, 1, 1, 1},
+                                                   std::nullopt,
+                                                   true,
+                                                   std::vector<int64_t>{0, 0, 0, 0}));
+    EXPECT_TRUE(matches(fixture.context()));
+    EXPECT_FALSE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(64, "FLOAT")));
+}
+
+TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
+{
+    // Every state below mutates this baseline; were it refused, each refusal would be
+    // vacuous.
+    EXPECT_TRUE(matches(GraphFixture(buildPointwiseGraph()).context()));
+
+    for(size_t operand = 0; operand < 3; ++operand)
+    {
+        for(int state = 0; state < 4; ++state)
+        {
+            const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [=](auto& graph) {
+                auto& tensor = *graph.tensors[operand];
+                tensor.virtual_ = state == 0;
+                tensor.is_runtime_pass_by_value = state == 1 || state == 3;
+                if(state >= 2)
+                {
+                    tensor.value.Set(data_objects::Float32Value(2.0f));
+                }
+            }));
+            EXPECT_FALSE(matches(fixture.context())) << operand << ":" << state;
+        }
+    }
+}
+
+TEST(TestPointwiseAddBinding, PublishesActualNodeScalarsWithoutTensorEdgesOrGraphDefaults)
+{
+    const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [](auto& graph) {
+        graph.compute_data_type = data_objects::DataType::HALF;
+        graph.is_override_shape_enabled = true;
+        graph.nodes[0]->compute_data_type = data_objects::DataType::DOUBLE;
+        auto* attributes = graph.nodes[0]->attributes.AsPointwiseAttributes();
+        attributes->relu_lower_clip = 0.0f;
+        attributes->relu_upper_clip = 6.0f;
+        attributes->relu_lower_clip_slope = 0.25f;
+        attributes->axis_tensor_uid = 0;
+        attributes->swish_beta = 1.0f;
+        attributes->elu_alpha = 2.0f;
+        attributes->softplus_beta = 3.0f;
+    }));
+    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(std::get<std::string>(bound->at("pointwise.operation")), "ADD");
+    EXPECT_EQ(std::get<std::string>(bound->at("pointwise.compute_data_type")), "DOUBLE");
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_lower_clip")), 0.0);
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_upper_clip")), 6.0);
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_lower_clip_slope")), 0.25);
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.swish_beta")), 1.0);
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.elu_alpha")), 2.0);
+    EXPECT_EQ(std::get<double>(bound->at("pointwise.softplus_beta")), 3.0);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "pointwise.axis_tensor_uid"), 0);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "graph.node_count"), 1);
+    EXPECT_TRUE(std::get<bool>(bound->at("graph.is_override_shape_enabled")));
+    EXPECT_EQ(bound->count("pointwise.in_0_tensor_uid"), 0U);
+    EXPECT_EQ(bound->count("pointwise.out_0_tensor_uid"), 0U);
+}
+
+TEST(TestPointwiseAddBinding, RejectsInvalidOptionalNodeScalarRatherThanOmittingIt)
+{
+    const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [](auto& graph) {
+        graph.nodes[0]->attributes.AsPointwiseAttributes()->swish_beta
+            = std::numeric_limits<float>::quiet_NaN();
+    }));
+    EXPECT_FALSE(matches(fixture.context()));
+}
+
+TEST(TestPointwiseAddBinding, ResidentFactsRetainUidZeroAndSubtractionOrderWithoutRawGraphReads)
+{
+    const auto bound = [] {
+        const GraphFixture fixture(
+            transformGraph(buildPointwiseGraph(data_objects::PointwiseMode::SUB), [](auto& graph) {
+                graph.tensors[0]->uid = 0;
+                auto* attributes = graph.nodes[0]->attributes.AsPointwiseAttributes();
+                attributes->in_0_tensor_uid = INPUT_B_UID;
+                attributes->in_1_tensor_uid = 0;
+            }));
+        return matchesGraph(POINTWISE_SUB, fixture.context());
+    }();
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a.uid"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b"), 0);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b.uid"), 0);
+    EXPECT_EQ(std::get<std::vector<int64_t>>(bound->at("input_b.stride_order")),
+              (std::vector<int64_t>{3, 2, 1, 0}));
+
+    // Matchers must use the saved binding, not the different graph supplied here.
+    const GraphFixture other(
+        buildPointwiseGraph(data_objects::PointwiseMode::MUL, data_objects::DataType::HALF));
+    EXPECT_TRUE(matchesOperation(POINTWISE_SUB, other.context(), *bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, other.context(), *bound));
+    EXPECT_TRUE(kernelMatcher(POINTWISE_SUB)(other.context(), *bound, makeKernel(64, "FLOAT")));
+    EXPECT_FALSE(kernelMatcher(POINTWISE_SUB)(other.context(), *bound, makeKernel(64, "HALF")));
+    EXPECT_EQ(bound->count("pointwise.swish_beta"), 0U);
+    for(const auto* root : {"input_a", "input_b", "output"})
+    {
+        EXPECT_EQ(bound->count(std::string(root) + ".value_f32"), 0U);
+    }
 }
 
 // Graph-scoped matcher: refusals
@@ -230,12 +342,15 @@ TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
     const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
     const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
 
-    const BoundTokens bound;
-    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
-    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), bound));
+    const auto addBound = matchesGraph(POINTWISE_ADD, add.context());
+    const auto mulBound = matchesGraph(POINTWISE_MUL, mul.context());
+    ASSERT_TRUE(addBound.has_value());
+    ASSERT_TRUE(mulBound.has_value());
+    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), *addBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), *mulBound));
 
-    EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), bound));
-    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), bound));
+    EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), *mulBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), *addBound));
 }
 
 /// The shared half of the split, stated as its own claim: the expensive checks do not
@@ -308,6 +423,13 @@ TEST(TestPointwiseAddBinding, TheGraphMatchBindsTheOperandUidsItResolved)
               INPUT_B_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_ADD.outputToken),
               OUTPUT_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a.uid"), INPUT_A_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b.uid"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "output.uid"), OUTPUT_UID);
+    for(const auto* root : {"input_a", "input_b", "output"})
+    {
+        EXPECT_EQ(bound->count(std::string(root) + ".value_f32"), 0U);
+    }
 }
 
 TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)

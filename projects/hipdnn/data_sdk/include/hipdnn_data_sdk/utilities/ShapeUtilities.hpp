@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -290,9 +291,9 @@ inline std::vector<int64_t>
     return generateStrides(targetDims, strideOrder);
 }
 
-// Checks if the tensor defined by dims and strides is packed (contiguous in memory).
-// Note: Assumes dims are positive (validated at graph level).
-// Strides can be negative (for reversed dimensions).
+// Check for dense, non-overlapping storage in any axis order.
+// Ignore strides on size-one axes. Other strides and all sizes must be positive,
+// and the element count must fit in int64_t. Empty shapes are packed.
 inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     if(dims.size() != strides.size())
@@ -300,30 +301,41 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
         throw std::invalid_argument("Dimensions and strides must have the same number of elements");
     }
 
-    // Handle edge case: empty tensor
-    if(dims.empty())
+    std::vector<size_t> activeAxes;
+    for(size_t i = 0; i < dims.size(); ++i)
     {
-        return true;
+        if(dims[i] <= 0)
+        {
+            return false;
+        }
+        if(dims[i] > 1)
+        {
+            if(strides[i] <= 0)
+            {
+                return false;
+            }
+            if(activeAxes.empty())
+            {
+                activeAxes.reserve(dims.size());
+            }
+            activeAxes.push_back(i);
+        }
     }
+    std::sort(activeAxes.begin(), activeAxes.end(), [&strides](size_t a, size_t b) {
+        return strides[a] < strides[b];
+    });
 
-    // Calculate total element count
-    const auto count
-        = std::accumulate(dims.begin(), dims.end(), static_cast<int64_t>(1), std::multiplies<>());
-
-    // Calculate memory span: the offset from first to last element
-    // For each dimension i, the maximum offset is (dims[i] - 1) * strides[i]
-    // This works correctly with negative strides (for reversed tensor dimensions)
-    const auto space
-        = std::inner_product(dims.begin(),
-                             dims.end(),
-                             strides.begin(),
-                             static_cast<int64_t>(0),
-                             std::plus<>(),
-                             [](int64_t len, int64_t stride) { return (len - 1) * stride; });
-
-    // A tensor is packed if all elements are contiguous:
-    // total_elements == (max_offset + 1)
-    return count == space + 1;
+    int64_t expectedStride = 1;
+    for(const auto axis : activeAxes)
+    {
+        if(strides[axis] != expectedStride
+           || dims[axis] > std::numeric_limits<int64_t>::max() / expectedStride)
+        {
+            return false;
+        }
+        expectedStride *= dims[axis];
+    }
+    return true;
 }
 
 // Gets the derived (per channel) shape from a full Tensor shape.

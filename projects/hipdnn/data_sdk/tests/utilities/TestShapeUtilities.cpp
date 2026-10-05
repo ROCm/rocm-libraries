@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <limits>
 
 using namespace hipdnn_data_sdk::utilities;
 
@@ -750,13 +751,9 @@ TEST(TestShapeUtils, IsTensorPackedRowMajorVsColumnMajor)
 
 TEST(TestShapeUtils, IsTensorPackedWithNegativeStrides)
 {
-    // Negative strides are valid for reversed tensor dimensions
-    // A 2x3 tensor with reversed first dimension: strides = [-3, 1]
-    // The math still works: count = 6, space = (2-1)*(-3) + (3-1)*1 = -3 + 2 = -1
-    // So count != space + 1 (6 != 0), which means it's not packed
+    // Negative strides on axes with more than one element are not packed.
     const std::vector<int64_t> dims = {2, 3};
     const std::vector<int64_t> negativeStrides = {-3, 1};
-    // With negative strides, the tensor is typically not packed in the standard sense
     EXPECT_FALSE(isTensorPacked(dims, negativeStrides));
 }
 
@@ -773,7 +770,6 @@ TEST(TestShapeUtils, IsTensorPackedOverlappingStrides)
     // Strides that cause overlap (e.g., both dimensions have stride 1)
     const std::vector<int64_t> dims = {2, 3};
     const std::vector<int64_t> overlappingStrides = {1, 1};
-    // count = 6, space = (2-1)*1 + (3-1)*1 = 1 + 2 = 3, count != space+1 (6 != 4)
     EXPECT_FALSE(isTensorPacked(dims, overlappingStrides));
 }
 
@@ -801,6 +797,64 @@ TEST(TestShapeUtils, IsTensorPackedCustomPackedLayout)
     const std::vector<int64_t> customOrder = {2, 0, 1};
     auto customStrides = generateStrides(dims, customOrder);
     EXPECT_TRUE(isTensorPacked(dims, customStrides));
+}
+
+TEST(TestShapeUtils, IsTensorPackedRejectsEqualSpanOverlap)
+{
+    // The span and element count are both eight, but offsets 1 and 6 overlap;
+    // offsets 3 and 4 are unused.
+    EXPECT_FALSE(isTensorPacked({2, 2, 2}, {1, 1, 5}));
+    EXPECT_FALSE(isTensorPacked({2, 2, 2}, {5, 1, 1}));
+}
+
+TEST(TestShapeUtils, IsTensorPackedIgnoresEverySingletonStride)
+{
+    for(const auto singletonStride : {int64_t{0},
+                                      int64_t{-7},
+                                      int64_t{1},
+                                      std::numeric_limits<int64_t>::min(),
+                                      std::numeric_limits<int64_t>::max()})
+    {
+        EXPECT_TRUE(isTensorPacked({2, 1, 3}, {3, singletonStride, 1}));
+        EXPECT_TRUE(isTensorPacked({1, 2, 3}, {singletonStride, 1, 2}));
+        EXPECT_TRUE(isTensorPacked({2, 3, 1}, {1, 2, singletonStride}));
+        EXPECT_TRUE(isTensorPacked({1}, {singletonStride}));
+    }
+    EXPECT_TRUE(isTensorPacked({1, 1, 1}, {0, -7, std::numeric_limits<int64_t>::max()}));
+}
+
+TEST(TestShapeUtils, IsTensorPackedAcceptsDenseAxisPermutations)
+{
+    for(const auto& strides : std::vector<std::vector<int64_t>>{
+            {12, 4, 1}, {12, 1, 3}, {4, 8, 1}, {1, 8, 2}, {3, 1, 6}, {1, 2, 6}})
+    {
+        EXPECT_TRUE(isTensorPacked({2, 3, 4}, strides));
+    }
+}
+
+TEST(TestShapeUtils, IsTensorPackedRejectsInvalidActiveStrides)
+{
+    EXPECT_FALSE(isTensorPacked({2, 3}, {0, 1}));
+    EXPECT_FALSE(isTensorPacked({2, 3}, {-3, 1}));
+    EXPECT_FALSE(isTensorPacked({2, 3}, {4, 1}));
+    EXPECT_FALSE(isTensorPacked({2, 3}, {3, 2}));
+    EXPECT_FALSE(isTensorPacked({2}, {std::numeric_limits<int64_t>::min()}));
+    EXPECT_FALSE(isTensorPacked({2}, {std::numeric_limits<int64_t>::max()}));
+}
+
+TEST(TestShapeUtils, IsTensorPackedRejectsMalformedExtentsAndCheckedOverflow)
+{
+    EXPECT_FALSE(isTensorPacked({0}, {1}));
+    EXPECT_FALSE(isTensorPacked({-1, -1}, {1, 1}));
+    EXPECT_FALSE(isTensorPacked({std::numeric_limits<int64_t>::min()}, {1}));
+    EXPECT_THROW(isTensorPacked({}, {1}), std::invalid_argument);
+    EXPECT_THROW(isTensorPacked({1}, {}), std::invalid_argument);
+
+    constexpr auto MAX = std::numeric_limits<int64_t>::max();
+    EXPECT_TRUE(isTensorPacked({MAX}, {1}));
+    EXPECT_TRUE(isTensorPacked({2, MAX / 2}, {MAX / 2, 1}));
+    EXPECT_FALSE(isTensorPacked({2, MAX / 2 + 1}, {MAX / 2 + 1, 1}));
+    EXPECT_FALSE(isTensorPacked({MAX, MAX}, {1, MAX}));
 }
 
 TEST(TestShapeUtils, GetDerivedShape5DValid)

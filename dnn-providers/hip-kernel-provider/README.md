@@ -31,6 +31,53 @@ HipKernelEngine
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
+### Native kernel-ingestor bindings
+
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, the pointwise and convolution reference
+engines publish bindings through the plugin SDK's `BindingPublication.hpp`.
+Pointwise tensor roots are `input_a`, `input_b`, and `output`; convolution roots are
+`x`, `w`, and `y`. Each root holds its tensor's unique identifier (UID), also
+available at `.uid`. UID zero is valid.
+
+Each tensor publishes `.rank`, `.dtype` (an enum name), `.stride_order`, `.packed`,
+`.virtual`, `.is_runtime_pass_by_value`, and indexed `.dims[i]` and `.strides[i]`.
+Packed tensors have dense, non-overlapping storage with positive strides except
+on singleton dimensions, whose strides are ignored. Ragged tensors are not packed.
+Stride-order ties follow the shared SDK rule: four unit strides give `[3, 2, 1, 0]`.
+Malformed shapes and element-count overflow are rejected.
+
+The shared publisher exposes `.value_f32` only for stored, non-runtime scalars,
+rounded to finite binary32 and stored as a Float. Runtime defaults are validated
+but not published as constants. Virtual scalars, unsupported dtype/value pairs,
+and nonfinite or out-of-range values are rejected. Both reference engines reject
+pass-by-value (stored or runtime) and virtual operands, so their bindings never
+contain `.value_f32`.
+
+`graph.node_count` and `graph.is_override_shape_enabled` describe the whole graph.
+Node roots are separate from tensor roots: `pointwise` exposes `operation`,
+`compute_data_type`, and scalar pointwise attributes present on the node
+(including `axis_tensor_uid`, an axis index); `conv` exposes `conv_mode` and
+`compute_data_type`. Compute types come from the node, not graph defaults.
+Vector attributes and tensor-edge UIDs are omitted.
+
+Reference-engine limits:
+
+- **Pointwise:** binary operations on single-element, rank-four or rank-five
+    tensors, with channel-first or channel-last stride order. Graph matching requires
+    uniform dtype; kernel criteria select the matching dtype.
+- **Convolution:** rank-four FLOAT/HALF tensors, unit stride and dilation, no
+    padding, cross-correlation, and exact row-major strides, including singletons.
+
+Packedness does not relax these limits. Launch dimensions and grid sizes must
+fit their kernel and HIP argument types.
+
+Bindings own their data and are created once per engine reached during a catalog
+build. Cached catalogs reuse them for criteria, ranking, workspace queries, and
+plan construction. Operation and dtype criteria read published values; dispatch
+uses bound UIDs and dimensions, accessing raw tensors only for compile options.
+Prepared dispatch owns its launch state and can run after the graph and bindings
+are destroyed. Eviction or an uncacheable graph requires a new catalog build.
+
 ## Building
 
 This plugin is built as a standalone project outside of the main hipDNN build. It depends on the hipDNN SDK packages (`hipdnn_data_sdk` and `hipdnn_plugin_sdk`), which must be available on the system before building.

@@ -293,10 +293,7 @@ inline std::string
     return text;
 }
 
-/// A descriptor's declared `major.minor`. Deliberately not `hipdnn_data_sdk::Version`
-/// (`major.minor.patch`): RFC 0020 §4.2 spells this field with exactly two components,
-/// and the two types gate different things -- this one a file at load, `Version` a graph
-/// against an engine at match time.
+/// Descriptor-file version components.
 struct DescriptorVersion
 {
     int major = 0;
@@ -801,10 +798,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         }
     }
 
-    // The graph-topology match this engine declares. Absent leaves the symbol empty,
-    // meaning this engine binds no tokens and is admitted or declined by its UMDs
-    // alone. The only inner key today is the native escape hatch; a declarative
-    // `nodes`/`criteria` pattern is a future sibling of `native`, not a replacement.
+    // Without graph_match, UMDs decide applicability and no graph tokens are bound.
+    // Only native graph matching is supported.
     if(const auto it = root.find("graph_match"); it != root.end())
     {
         const std::string graphMatchWhere = where + " graph_match";

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,9 +15,9 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -61,9 +62,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_fwd.dispatch";
 // KMD fields this pack varies along, and the tokens matching binds for dispatch.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
-constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
-constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
-constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
+constexpr std::string_view X_TOKEN = "x";
+constexpr std::string_view W_TOKEN = "w";
+constexpr std::string_view Y_TOKEN = "y";
 
 /// x and y are 4-D NCHW/NKPQ; w is 4-D KCRS. All three are rank 4, which is the only
 /// fact this constant states -- the per-tensor role is fixed by which uid is read.
@@ -109,51 +110,39 @@ bool allEqual(const flatbuffers::Vector<int64_t>* values, size_t expectedSize, i
     return true;
 }
 
-/// True when @p tensor is a supported rank, holds packed row-major strides for its own
-/// dims, is real device data, and is a dtype this pack's kernel is compiled for. The
-/// packed-strides check matters because the kernel takes no stride arguments at all --
-/// a tensor merely ordered NCHW but not contiguous would be read at the wrong offset
-/// without ever failing to match.
-bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
+/// The kernel has no stride arguments, so require exact row-major strides,
+/// even on size-one axes. Packedness alone is not enough.
+bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 {
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || dims->size() != SUPPORTED_RANK)
+    if(tryGetBoundInt(bound, tensorField(root, "rank")) != SUPPORTED_RANK)
     {
         return false;
     }
-
     int64_t expectedStride = 1;
-    for(size_t i = dims->size(); i-- > 0;)
+    for(size_t i = SUPPORTED_RANK; i-- > 0;)
     {
-        const auto axis = static_cast<flatbuffers::uoffset_t>(i);
-        if(strides->Get(axis) != expectedStride)
+        const auto dim = tryGetBoundInt(bound, tensorElement(root, "dims", i));
+        if(!dim || *dim <= 0 || *dim > std::numeric_limits<int>::max()
+           || tryGetBoundInt(bound, tensorElement(root, "strides", i)) != expectedStride
+           || expectedStride > std::numeric_limits<int64_t>::max() / *dim)
         {
             return false;
         }
-        expectedStride *= dims->Get(axis);
+        expectedStride *= *dim;
     }
-
-    if(tensor.virtual_())
-    {
-        return false;
-    }
-
-    // A rank-4 tensor is also the shape a pass-by-value scalar can take; that variant-
-    // pack slot holds a host pointer, not a device one.
-    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
-    {
-        return false;
-    }
-
-    const auto dataType = tensor.data_type();
-    return dataType == data_objects::DataType::FLOAT || dataType == data_objects::DataType::HALF;
+    const auto* isVirtual = tryGetBoundValue<bool>(bound, tensorField(root, "virtual"));
+    const auto* runtime
+        = tryGetBoundValue<bool>(bound, tensorField(root, "is_runtime_pass_by_value"));
+    const auto* dtype = tryGetBoundValue<std::string>(bound, tensorField(root, "dtype"));
+    return isVirtual != nullptr && !*isVirtual && runtime != nullptr && !*runtime
+           && tryGetBoundValue<double>(bound, tensorField(root, "value_f32")) == nullptr
+           && dtype != nullptr && (*dtype == "FLOAT" || *dtype == "HALF");
 }
 
-std::string dataTypeName(data_objects::DataType dataType)
+/// Requires a published tensor and an in-range axis.
+int64_t dimension(const BoundTokens& bound, std::string_view root, size_t axis)
 {
-    return data_objects::EnumNameDataType(dataType);
+    return *tryGetBoundInt(bound, tensorElement(root, "dims", axis));
 }
 
 /// The node this engine's matchers read, or nullptr if the graph is not a single
@@ -166,26 +155,13 @@ const data_objects::ConvolutionFwdAttributes* convFwdNode(const MatchContext& co
     }
 
     const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::ConvolutionFwdAttributes)
+    if(node.attributesType() != data_objects::NodeAttributes::ConvolutionFwdAttributes
+       || node.attributes() == nullptr)
     {
         return nullptr;
     }
 
     return &node.attributesAs<data_objects::ConvolutionFwdAttributes>();
-}
-
-/// The graph's element type, from the x operand; the matcher below requires every
-/// operand to agree, so any of them would answer the same.
-std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
-{
-    const auto* attributes = convFwdNode(context);
-    if(attributes == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const auto* x = findTensor(context, attributes->x_tensor_uid());
-    return x == nullptr ? std::nullopt : std::make_optional(x->data_type());
 }
 
 /**
@@ -202,11 +178,6 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
-
-    if(attributes.conv_mode() != data_objects::ConvMode::CROSS_CORRELATION)
-    {
-        return std::nullopt;
-    }
 
     // Deliberately narrow: stride 1, dilation 1, no padding is the only shape the
     // in-kernel p = h - r + 1 / q = width - s + 1 formula is correct for.
@@ -226,32 +197,49 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
         return std::nullopt;
     }
 
-    if(!isSupportedOperand(*x) || !isSupportedOperand(*w) || !isSupportedOperand(*y))
+    BoundTokens bound;
+    if(!publishGraph(bound, context.graph) || !publishTensor(bound, X_TOKEN, x)
+       || !publishTensor(bound, W_TOKEN, w) || !publishTensor(bound, Y_TOKEN, y))
+    {
+        return std::nullopt;
+    }
+    const auto* mode = data_objects::EnumNameConvMode(attributes.conv_mode());
+    const auto* compute
+        = data_objects::EnumNameDataType(context.graph.getNodeWrapper(0).computeDataType());
+    if(mode == nullptr || *mode == '\0' || compute == nullptr || *compute == '\0')
+    {
+        return std::nullopt;
+    }
+    bound.emplace("conv.conv_mode", std::string(mode));
+    bound.emplace("conv.compute_data_type", std::string(compute));
+    if(*tryGetBoundValue<std::string>(bound, "conv.conv_mode") != "CROSS_CORRELATION"
+       || !isSupportedOperand(bound, X_TOKEN) || !isSupportedOperand(bound, W_TOKEN)
+       || !isSupportedOperand(bound, Y_TOKEN))
     {
         return std::nullopt;
     }
 
     // Uniform dtype across operands; mixed precision is a different kernel.
-    if(x->data_type() != w->data_type() || x->data_type() != y->data_type())
+    if(*tryGetBoundValue<std::string>(bound, "x.dtype")
+           != *tryGetBoundValue<std::string>(bound, "w.dtype")
+       || *tryGetBoundValue<std::string>(bound, "x.dtype")
+              != *tryGetBoundValue<std::string>(bound, "y.dtype"))
     {
         return std::nullopt;
     }
 
-    const auto* xDims = x->dims();
-    const auto* wDims = w->dims();
-    const auto* yDims = y->dims();
-    const auto xC = xDims->Get(1);
-    const auto xH = xDims->Get(2);
-    const auto xW = xDims->Get(3);
-    const auto wK = wDims->Get(0);
-    const auto wR = wDims->Get(2);
-    const auto wS = wDims->Get(3);
+    const auto xC = dimension(bound, X_TOKEN, 1);
+    const auto xH = dimension(bound, X_TOKEN, 2);
+    const auto xW = dimension(bound, X_TOKEN, 3);
+    const auto wK = dimension(bound, W_TOKEN, 0);
+    const auto wR = dimension(bound, W_TOKEN, 2);
+    const auto wS = dimension(bound, W_TOKEN, 3);
 
     // Filter channels vs. input channels -- this also refuses grouped conv, which is
     // encoded purely as a smaller w channel count; the kernel has no notion of groups
     // and indexes w using c from x alone, so a filter with fewer channels would read
     // past the end.
-    if(wDims->Get(1) != xC)
+    if(dimension(bound, W_TOKEN, 1) != xC)
     {
         return std::nullopt;
     }
@@ -266,18 +254,13 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
     // and w alone, and the kernel writes every index < total into y, so a smaller y
     // overflows.
-    if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != wK || yDims->Get(2) != xH - wR + 1
-       || yDims->Get(3) != xW - wS + 1)
+    if(dimension(bound, Y_TOKEN, 0) != dimension(bound, X_TOKEN, 0)
+       || dimension(bound, Y_TOKEN, 1) != wK || dimension(bound, Y_TOKEN, 2) != xH - wR + 1
+       || dimension(bound, Y_TOKEN, 3) != xW - wS + 1)
     {
         return std::nullopt;
     }
 
-    // Binds operand uids for the dispatch handler to read back rather than re-deriving
-    // them from the graph.
-    BoundTokens bound;
-    bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
-    bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
-    bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
     return bound;
 }
 
@@ -286,17 +269,12 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  */
-bool convFwdKernelMatches(const MatchContext& context,
-                          const BoundTokens& /*bound*/,
+bool convFwdKernelMatches(const MatchContext& /*context*/,
+                          const BoundTokens& bound,
                           const KernelDefinition& kernel)
 {
-    const auto dataType = graphDataType(context);
-    if(!dataType.has_value())
-    {
-        return false;
-    }
-
-    return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
+    const auto* dataType = tryGetBoundValue<std::string>(bound, "x.dtype");
+    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType;
 }
 
 double convFwdScore(const MatchContext& /*context*/,
@@ -511,18 +489,14 @@ public:
         const auto binding = convFwdBinding(bound);
 
         const auto& xTensor = requireTensor(context, binding.x);
-        const auto& wTensor = requireTensor(context, binding.w);
-
-        // Dims were validated NCHW/KCRS-shaped, packed, rank 4 by the graph matcher.
-        const auto* xDims = xTensor.dims();
-        const auto* wDims = wTensor.dims();
-        const auto n = static_cast<int>(xDims->Get(0));
-        const auto c = static_cast<int>(xDims->Get(1));
-        const auto h = static_cast<int>(xDims->Get(2));
-        const auto width = static_cast<int>(xDims->Get(3));
-        const auto k = static_cast<int>(wDims->Get(0));
-        const auto r = static_cast<int>(wDims->Get(2));
-        const auto s = static_cast<int>(wDims->Get(3));
+        // Read dimensions from the cached binding; keep xTensor for compile options.
+        const auto n = static_cast<int>(dimension(bound, X_TOKEN, 0));
+        const auto c = static_cast<int>(dimension(bound, X_TOKEN, 1));
+        const auto h = static_cast<int>(dimension(bound, X_TOKEN, 2));
+        const auto width = static_cast<int>(dimension(bound, X_TOKEN, 3));
+        const auto k = static_cast<int>(dimension(bound, W_TOKEN, 0));
+        const auto r = static_cast<int>(dimension(bound, W_TOKEN, 2));
+        const auto s = static_cast<int>(dimension(bound, W_TOKEN, 3));
 
         const auto blockSize
             = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
@@ -540,8 +514,13 @@ public:
         // product would wrap, corrupting both the grid size and the kernel's own bounds
         // guard (ConvFwd.cpp).
         const int64_t total = static_cast<int64_t>(n) * k * p * q;
-        const auto gridSize = static_cast<unsigned int>(
-            (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
+        const auto blocks = total / blockSize + (total % blockSize != 0 ? 1 : 0);
+        if(blocks > std::numeric_limits<unsigned int>::max())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "conv_fwd grid size exceeds the launch range");
+        }
+        const auto gridSize = static_cast<unsigned int>(blocks);
 
         code.setBlockSize(blockSize, 1, 1);
         code.setGridSize(gridSize, 1, 1);

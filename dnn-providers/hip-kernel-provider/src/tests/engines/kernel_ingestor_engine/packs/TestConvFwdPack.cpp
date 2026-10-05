@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -86,6 +87,107 @@ TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
               CONV_W_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.outputToken),
               CONV_Y_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x.uid"), CONV_X_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "w.uid"), CONV_W_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "y.uid"), CONV_Y_UID);
+    for(const auto* root : {"x", "w", "y"})
+    {
+        EXPECT_EQ(bound->count(std::string(root) + ".value_f32"), 0U);
+    }
+    EXPECT_EQ(std::get<std::string>(bound->at("conv.conv_mode")), "CROSS_CORRELATION");
+    EXPECT_EQ(std::get<std::string>(bound->at("conv.compute_data_type")), "FLOAT");
+    EXPECT_EQ(bound->count("conv.dilation"), 0U);
+    EXPECT_EQ(bound->count("conv.x_tensor_uid"), 0U);
+}
+
+TEST(TestConvFwdGraphMatcher, RejectsSingletonStrideRelaxationEvenWhenCanonicallyPacked)
+{
+    const GraphFixture fixture(transformGraph(
+        buildConvFwdGraph(), [](auto& graph) { graph.tensors[0]->strides[0] = 999; }));
+    EXPECT_FALSE(matches(fixture.context()));
+}
+
+TEST(TestConvFwdGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
+{
+    for(size_t operand = 0; operand < 3; ++operand)
+    {
+        for(int state = 0; state < 4; ++state)
+        {
+            const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [=](auto& graph) {
+                for(auto& tensor : graph.tensors)
+                {
+                    tensor->dims = {1, 1, 1, 1};
+                    tensor->strides = {1, 1, 1, 1};
+                }
+                auto& tensor = *graph.tensors[operand];
+                tensor.virtual_ = state == 0;
+                tensor.is_runtime_pass_by_value = state == 1 || state == 3;
+                if(state >= 2)
+                {
+                    tensor.value.Set(data_objects::Float32Value(2.0f));
+                }
+            }));
+            EXPECT_FALSE(matches(fixture.context())) << operand << ":" << state;
+        }
+    }
+}
+
+TEST(TestConvFwdGraphMatcher, RejectsMalformedAndUnrepresentableTensorShapes)
+{
+    for(int state = 0; state < 6; ++state)
+    {
+        const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [=](auto& graph) {
+            auto& tensor = *graph.tensors[0];
+            switch(state)
+            {
+            case 0:
+                tensor.dims.clear();
+                break;
+            case 1:
+                tensor.strides.clear();
+                break;
+            case 2:
+                tensor.dims[2] = 0;
+                break;
+            case 3:
+                tensor.dims[2] = -1;
+                break;
+            case 4:
+                tensor.dims[0] = std::numeric_limits<int64_t>::max();
+                break;
+            case 5:
+                tensor.dims[0] = static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
+                break;
+            default:
+                ADD_FAILURE() << "Unhandled tensor shape fixture state " << state;
+                break;
+            }
+        }));
+        EXPECT_FALSE(matches(fixture.context())) << state;
+    }
+}
+
+TEST(TestConvFwdBinding, PublishesUidZeroAndNodeComputeTypeIndependentlyOfGraphDefaults)
+{
+    const auto bound = [] {
+        const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [](auto& graph) {
+            graph.tensors[0]->uid = 0;
+            graph.nodes[0]->attributes.AsConvolutionFwdAttributes()->x_tensor_uid = 0;
+            graph.nodes[0]->compute_data_type = data_objects::DataType::DOUBLE;
+            graph.compute_data_type = data_objects::DataType::HALF;
+        }));
+        return matchesGraph(CONV_FWD, fixture.context());
+    }();
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x"), 0);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x.uid"), 0);
+    EXPECT_EQ(std::get<std::string>(bound->at("conv.compute_data_type")), "DOUBLE");
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x.dims[2]"), 3);
+    const GraphFixture other(buildConvFwdGraph(data_objects::DataType::HALF));
+    EXPECT_TRUE(
+        kernelMatcher(CONV_FWD)(other.context(), *bound, makeKernel(64, "FLOAT", "ConvFwd")));
+    EXPECT_FALSE(
+        kernelMatcher(CONV_FWD)(other.context(), *bound, makeKernel(64, "HALF", "ConvFwd")));
 }
 
 // ---------------------------------------------------------------------------

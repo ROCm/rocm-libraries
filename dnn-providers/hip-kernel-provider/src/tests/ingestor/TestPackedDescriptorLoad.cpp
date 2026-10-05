@@ -16,6 +16,8 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "TestDescriptorRoot.hpp"
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
  * @file TestPackedDescriptorLoad.cpp
@@ -174,31 +176,22 @@ TEST(TestPackedDescriptorLoad, EveryPackedDescriptorInTheShardIsLoaded)
     }
 }
 
-/// The parsed descriptors resolve into at least one complete engine.
+/// Validate every packaged engine against the registered native symbols.
 ///
-/// Distinct from the case above and separately necessary: a catalog can be non-empty and
-/// still resolve to nothing, because `resolveDescriptorSets` drops any engine whose
-/// matcher / dispatch / metadata cross-references do not all resolve. A packer that
-/// renumbered an id or dropped one file of a set would pass the parse check and fail here.
-TEST(TestPackedDescriptorLoad, PackedDescriptorsResolveIntoCompleteSets)
+/// The emptiness guard comes first: on a shard with no UED, "every engine was admitted"
+/// holds vacuously, so a packer that dropped every engine file would otherwise pass.
+TEST(TestPackedDescriptorLoad, PackedDescriptorsPassNativeAdmission)
 {
     REQUIRE_PACKED_SHARDS(shards);
+    kernel_ingestor_engine::registerNativeIngestorSymbols();
 
     for(const auto& shard : shards)
     {
-        const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
-
-        ASSERT_FALSE(sets.empty())
-            << shard
-            << " parsed, but no engine's references all resolved -- a descriptor set "
-               "is incomplete or its cross-references disagree.";
-
-        for(const auto& set : sets)
-        {
-            EXPECT_FALSE(set.engine.name.empty()) << shard << " resolved an unnamed engine.";
-            EXPECT_FALSE(set.packs.empty())
-                << shard << " resolved engine '" << set.engine.name << "' with no kernel packs.";
-        }
+        const auto catalog = loadDescriptorCatalog(shard);
+        ASSERT_FALSE(catalog.engines.empty()) << shard << " holds no engine descriptor.";
+        const auto sets = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(shard);
+        ASSERT_EQ(sets.size(), catalog.engines.size())
+            << shard << " contains a UED that cannot pass native admission.";
     }
 }
 

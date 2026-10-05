@@ -59,7 +59,7 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
-    /// @throws std::invalid_argument if a knob names no field in the metadata schema.
+    /// @throws std::invalid_argument for a knob absent from the metadata schema.
     GenericEngine(EngineDescriptor engine,
                   std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
                   const IDeviceResolver<THandle>& deviceResolver)
