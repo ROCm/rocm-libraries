@@ -93,7 +93,24 @@ miner:
   --include-windowed --out "$SHAPES"
 ```
 
-Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each source's
+Add `--rocke-bench <actual-benchmark-tree>` when applicable. A dense prefill
+benchmark (`benchmark_dense_prefill_live.py`) keeps its shapes in Python, so the tree
+alone misses them. `--rocke-bench` takes one tree, and a repeated flag keeps only the
+last one, so copy the benchmark tree, emit the dense shapes into the copy and mine the
+copy in place of the original tree. Emitting needs no GPU and no torch, only an
+interpreter that imports the rocKE library (numpy):
+
+```bash
+OWNER_BENCH=/absolute/path/to/owner-bench-tree   # a new directory; cp creates it
+cp -r "$PROVIDER/rocke/library/benchmarks/$ARCH/attention" "$OWNER_BENCH"
+"$PY" "$PROVIDER/rocke/library/benchmarks/$ARCH/attention/prefill/benchmark_dense_prefill_live.py" \
+  --emit-shapes "$OWNER_BENCH/dense_prefill_live_shapes.json" \
+  --dtype bf16 --hq 128 --hkv 8 --d 128
+```
+
+Repeat the emit with another file name per dtype or head configuration the owner
+measures, then pass `--rocke-bench "$OWNER_BENCH"`. Packed varlen rows are skipped and
+counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
