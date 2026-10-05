@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <ostream>
 #include <string>
@@ -22,6 +23,64 @@ namespace {
 int ceilDivPositive(int num, int den) {
     assert(den > 0);
     return (num + den - 1) / den;
+}
+
+int perCapForThrottleOf(int dsLoadCount, int wmmaCount) {
+    return std::min(kStaticDefaultDsReadPerCap, ceilDivPositive(dsLoadCount, wmmaCount));
+}
+
+// Latency-budget throttle. Not combined with dsReadThrottleLatency.
+//
+//   dsIssueSpace   = sumWmmaLatency - unrollLoopCopies * firstDsLoadLatency
+//   basicWmmaUsage = ceil(queueDepth / perCapForThrottle)
+//   throttleSpace  = dsIssueSpace - basicWmmaUsage * firstWmmaLatency
+//   remainingDs    = dsLoadCount - queueDepth
+//   cyclePerDs     = float(throttleSpace) / remainingDs   (only when remainingDs > 0)
+//   latency        = lround(cyclePerDs * queueDepth)
+struct OptimisticDsReadThrottle {
+    int unrollLoopCopies = 0;
+    int dsIssueSpace = 0;
+    int basicWmmaUsage = 0;
+    int throttleSpace = 0;
+    int remainingDs = 0;
+    float cyclePerDs = 0;
+    int latency = 0;
+    bool defined = false;
+};
+
+OptimisticDsReadThrottle estimateOptimisticDsReadThrottle(int sumWmmaLatencyCycles,
+                                                          int unrollLoopCopies,
+                                                          int firstWmmaLatency,
+                                                          int firstDsLoadLatency, int queueDepth,
+                                                          int perCapForThrottle, int dsLoadCount) {
+    OptimisticDsReadThrottle out;
+    out.unrollLoopCopies = std::max(0, unrollLoopCopies);
+    const int first = std::max(0, firstWmmaLatency);
+    const int firstDs = std::max(0, firstDsLoadLatency);
+    const int depth = std::max(1, queueDepth);
+    const int perCap = std::max(1, perCapForThrottle);
+    out.dsIssueSpace = sumWmmaLatencyCycles - out.unrollLoopCopies * firstDs;
+    out.basicWmmaUsage = ceilDivPositive(depth, perCap);
+    out.throttleSpace = out.dsIssueSpace - out.basicWmmaUsage * first;
+    out.remainingDs = dsLoadCount - depth;
+    out.defined = out.remainingDs > 0;
+    if (out.defined) {
+        out.cyclePerDs =
+            static_cast<float>(out.throttleSpace) / static_cast<float>(out.remainingDs);
+        out.latency = static_cast<int>(std::lround(out.cyclePerDs * static_cast<float>(depth)));
+    }
+    return out;
+}
+
+OptimisticDsReadThrottle estimateOptimisticDsReadThrottle(const SchedulingFeatures& features,
+                                                          const HWModel& hw) {
+    if (features.stats.degenerate()) return {};
+    const int queueDepth = std::max(1, hw.lds.readQueueDepth);
+    const int perCap = perCapForThrottleOf(features.stats.dsLoadCount, features.stats.wmmaCount);
+    return estimateOptimisticDsReadThrottle(
+        features.stats.sumWmmaLatencyCycles, features.unrollLoopCopies,
+        features.stats.firstWmmaLatencyCycles, features.stats.firstDsLoadLatencyCycles, queueDepth,
+        perCap, features.stats.dsLoadCount);
 }
 
 }  // namespace
@@ -54,6 +113,7 @@ SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) 
             ++stats.wmmaCount;
             stats.sumWmmaLatencyCycles += inst->latencyCycles;
         } else if (isDSRead(*inst)) {
+            if (stats.dsLoadCount == 0) stats.firstDsLoadLatencyCycles = inst->latencyCycles;
             ++stats.dsLoadCount;
         }
     }
@@ -91,6 +151,7 @@ SchedulingFeatures schedulingFeaturesFromModule(const StinkyAsmModule& module) {
     features.waveGroup1 = opts.WaveGroup1;
     features.prefetchGlobalRead = opts.PrefetchGlobalRead;
     features.prefetchLocalRead = opts.PrefetchLocalRead;
+    features.unrollLoopCopies = opts.UnrollLoopCopies;
     return features;
 }
 
@@ -116,7 +177,7 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     // Independent of the dsReadPerCap knob above: recompute the same capped
     // ceil ratio, then (firstWmmaLatency / perCap) * queueDepth, floored at
     // the arch's static readThrottleLatency (72 on gfx1250; queueDepth is 16).
-    const int perCapForThrottle = std::min(perCapCeiling, ceilDivPositive(ds, wmma));
+    const int perCapForThrottle = perCapForThrottleOf(ds, wmma);
     const int queueDepth = std::max(1, hw.lds.readQueueDepth);
     const int throttleFloor =
         hw.lds.readThrottleLatency > 0 ? hw.lds.readThrottleLatency : 4 * queueDepth;
@@ -124,6 +185,14 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     const int computedThrottle = (firstWmmaLatency / perCapForThrottle) * queueDepth;
     out.dsReadThrottleLatency = std::max(throttleFloor, computedThrottle);
     out.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
+
+    // Diagnostic only. Logged by logResolvedSchedulingKnobs; not folded into
+    // dsReadThrottleLatency above.
+    out.optimisticDsReadThrottleLatency =
+        estimateOptimisticDsReadThrottle(
+            features.stats.sumWmmaLatencyCycles, features.unrollLoopCopies, firstWmmaLatency,
+            features.stats.firstDsLoadLatencyCycles, queueDepth, perCapForThrottle, ds)
+            .latency;
 
     // Longer main-loop WMMA latency budgets get a larger Rule3 signal lead.
     out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
@@ -178,6 +247,11 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
+    // Diagnostic. Stays -1 when propose() did not run.
+    if (!features.stats.degenerate()) {
+        out.optimisticDsReadThrottleLatency = proposed.optimisticDsReadThrottleLatency;
+    }
+
     return out;
 }
 
@@ -217,13 +291,36 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
     os << "[SchedulingKnobs] module=" << moduleName << " wmma=" << features.stats.wmmaCount
        << " dsLoad=" << features.stats.dsLoadCount
        << " firstWmmaLat=" << features.stats.firstWmmaLatencyCycles
+       << " firstDsLat=" << features.stats.firstDsLoadLatencyCycles
        << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
        << " dsReadThrottleLatency=" << resolved.dsReadThrottleLatency << "("
        << schedulingKnobSourceName(resolved.dsReadThrottleLatencySource) << ")"
        << " dsReadPerCap=" << resolved.dsReadPerCap << "("
        << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
-       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")\n";
+       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")";
+    // optimisticDsReadThrottleLatency is this logger's heuristic recompute.
+    // policyOptimisticDsReadThrottleLatency is whatever propose() stored.
+    // A custom policy can disagree; applyResolvedSchedulingKnobs ignores both.
+    const OptimisticDsReadThrottle optimistic =
+        estimateOptimisticDsReadThrottle(features, hwModelForArch(features.arch));
+    const int policyOptimistic = resolved.optimisticDsReadThrottleLatency;
+    if (!optimistic.defined && features.stats.degenerate()) {
+        os << " optimisticDsReadThrottleLatency=n/a"
+           << " policyOptimisticDsReadThrottleLatency=" << policyOptimistic
+           << " optimisticThrottleMatchesPolicy=n/a";
+    } else {
+        const bool matches = policyOptimistic == optimistic.latency;
+        os << " optimisticDsReadThrottleLatency=" << optimistic.latency
+           << " policyOptimisticDsReadThrottleLatency=" << policyOptimistic
+           << " optimisticThrottleMatchesPolicy=" << (matches ? 1 : 0)
+           << " unrollLoopCopies=" << optimistic.unrollLoopCopies
+           << " dsIssueSpace=" << optimistic.dsIssueSpace
+           << " basicWmmaUsage=" << optimistic.basicWmmaUsage
+           << " throttleSpace=" << optimistic.throttleSpace
+           << " remainingDs=" << optimistic.remainingDs << " cyclePerDs=" << optimistic.cyclePerDs;
+    }
+    os << "\n";
 }
 
 void logResolvedSchedulingKnobsIfDebug(std::string_view moduleName,

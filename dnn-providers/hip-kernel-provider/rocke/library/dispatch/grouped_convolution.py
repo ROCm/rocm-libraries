@@ -1754,6 +1754,118 @@ def dispatch_conv_grouped_all(
     return _registry_for(req).dispatch_all(req, kernel_id=_kernel_id)
 
 
+def _signature_for(req: ConvGroupedRequest, spec: ConvGroupedSpec) -> tuple:
+    """Launch signature for a dispatched kernel, including its variant extras.
+
+    The trailing args are not cosmetic: dgrad always carries the tilde record
+    buffer, wgrad always carries ``ks``/``ks_count``, and a two-stage wgrad
+    also carries the workspace pair. Kernargs pack positionally, so omitting
+    one shifts every argument after it.
+    """
+    from kernels.common.conv_abi import conv_args_signature
+
+    p = _problem(req)
+    dtype = req.dtype
+    if req.direction == "wgrad":
+        # Two-stage is decided by the resolver, not carried on the dispatcher
+        # spec: it is what to_wgrad_spec builds the kernel from, so asking
+        # anything else would drop ws_ptr/ws_bytes from a two-stage ABI.
+        _split_k, two_stage, _requested = _resolve_wgrad_split_k(spec, p)
+        return tuple(
+            conv_args_signature(
+                dtype,
+                direction="wgrad",
+                is_3d=p.is_3d,
+                two_stage=two_stage,
+            )
+        )
+    if req.direction == "dgrad":
+        return tuple(conv_args_signature(dtype, direction="dgrad", is_3d=p.is_3d))
+    return tuple(conv_args_signature(dtype, is_3d=p.is_3d))
+
+
+def launch_values_for(
+    req: ConvGroupedRequest,
+    spec: ConvGroupedSpec,
+    *,
+    A_ptr: int,
+    B_ptr: int,
+    D_ptr: int,
+    A_bytes: int,
+    B_bytes: int,
+    D_bytes: int,
+    ws_ptr: Optional[int] = None,
+    ws_bytes: Optional[int] = None,
+    sub_gemm_buf: Optional[int] = None,
+    num_sub_gemms: Optional[int] = None,
+) -> dict:
+    """Compute the full AOT ``values`` dict for a dispatch request.
+
+    Operand roles by direction:
+      fwd   -- A = activation, B = filter,  D = output
+      wgrad -- A = dY,         B = X,       D = dW
+      dgrad -- A = dY,         B = W,       D = dX
+
+    The tile size comes from ``spec`` because the chiplet-swizzle path decodes
+    the workgroup id against ``p_num_pid_m/n``, which are tile-count values.
+    """
+    from kernels.common.conv_args import ConvArgs
+
+    p = _problem(req)
+    tile_m, tile_n = spec.tile_m, spec.tile_n
+    if req.direction == "wgrad":
+        # The resolved degree, not spec.split_k: the latter may be -1 (auto)
+        # or exceed the clamp, while the kernel and _wgrad_grid both use the
+        # resolver's value -- ks_count has to match the z extent it decodes.
+        split_k, two_stage, _requested = _resolve_wgrad_split_k(spec, p)
+        # Both workspace fields or neither: a two-stage launch missing only
+        # ws_bytes would otherwise encode a zero-byte workspace, and Stage 1's
+        # bounded stores would be silently dropped.
+        has_ws_ptr = ws_ptr is not None
+        has_ws_bytes = ws_bytes is not None
+        if has_ws_ptr != has_ws_bytes or two_stage != has_ws_ptr:
+            raise ValueError(
+                "wgrad resolved to the "
+                + ("two-stage" if two_stage else "single-stage")
+                + " kernel; ws_ptr/ws_bytes must be passed exactly when it is "
+                "two-stage"
+            )
+        return ConvArgs.from_problem(
+            p, direction="wgrad", tile_m=tile_m, tile_n=tile_n, tile_k=spec.tile_k
+        ).to_launch_values(
+            A_ptr,
+            B_ptr,
+            D_ptr,
+            A_bytes,
+            B_bytes,
+            D_bytes,
+            split_k=split_k,
+            ws_ptr=ws_ptr,
+            ws_bytes=ws_bytes,
+        )
+    if req.direction == "dgrad":
+        if sub_gemm_buf is None or num_sub_gemms is None:
+            raise ValueError(
+                "dgrad needs sub_gemm_buf/num_sub_gemms: the tilde record "
+                "buffer is always part of the dgrad kernarg ABI"
+            )
+        return ConvArgs.from_problem(
+            p, direction="dgrad", tile_m=tile_m, tile_n=tile_n
+        ).to_launch_values(
+            A_ptr,
+            B_ptr,
+            D_ptr,
+            A_bytes,
+            B_bytes,
+            D_bytes,
+            sub_gemm_buf=sub_gemm_buf,
+            num_sub_gemms=num_sub_gemms,
+        )
+    return ConvArgs.from_problem(p, tile_m=tile_m, tile_n=tile_n).to_launch_values(
+        A_ptr, B_ptr, D_ptr, A_bytes, B_bytes, D_bytes
+    )
+
+
 def dispatch_conv_grouped(
     req: ConvGroupedRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
@@ -1778,6 +1890,8 @@ def dispatch_conv_grouped(
                 f"exceed the {_MAX_WGRAD_WS_BYTES}-byte i32 limit, so the "
                 f"plain store is used instead"
             )
+    # AOT: signature includes all runtime problem-dim args.
+    _sig = _signature_for(req, spec)
     return DispatchResult(
         request=req,
         candidate=candidate,
@@ -1785,6 +1899,6 @@ def dispatch_conv_grouped(
         kernel_id=kid,
         grid=candidate.grid(spec, req),
         block=candidate.block(spec),
-        signature=tuple(candidate.signature(spec)),
+        signature=_sig,
         explanation=tuple(explanation),
     )

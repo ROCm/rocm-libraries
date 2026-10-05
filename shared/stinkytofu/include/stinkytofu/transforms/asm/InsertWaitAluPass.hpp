@@ -29,6 +29,8 @@
 namespace stinkytofu {
 class Pass;
 class ModulePass;
+class PassContext;
+struct StinkyInstruction;
 
 /// Pass policy.
 ///
@@ -47,6 +49,44 @@ struct InsertWaitAluOptions {
 /// Function pass: full scoreboard analysis when run on the entry, conservative
 /// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
 /// mode and unit tests.
+/// The options the gfx1250 pipeline runs InsertWaitAlu with. A scheduler querying
+/// WaitAluTracker must use the same ones to predict the waits the pass will emit.
+inline InsertWaitAluOptions gfx1250InsertWaitAluOptions(bool enableESM2TrackValuVsrc) {
+    return {enableESM2TrackValuVsrc, /*sharedOrderCountFollowers=*/true,
+            /*xdlCountFromNextWmma=*/true};
+}
+
+/// The s_wait_alu InsertWaitAlu would emit before an instruction; -1 = no wait on that
+/// counter.
+struct WaitAluNeed {
+    int vaVdst = -1;
+    int vmVsrc = -1;
+    bool any() const {
+        return vaVdst >= 0 || vmVsrc >= 0;
+    }
+};
+
+/// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
+/// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
+/// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
+/// predecessors.
+class STINKYTOFU_EXPORT WaitAluTracker {
+   public:
+    WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
+    ~WaitAluTracker();
+    WaitAluTracker(const WaitAluTracker&) = delete;
+    WaitAluTracker& operator=(const WaitAluTracker&) = delete;
+
+    /// The wait `inst` would need if it were issued next.
+    WaitAluNeed query(const StinkyInstruction& inst) const;
+    /// Issue `inst`: apply the wait it needs, then record what it produces.
+    void commit(const StinkyInstruction& inst);
+
+   private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts = {});
 
 /// Whole-kernel driver: full analysis on the entry function, then the conservative

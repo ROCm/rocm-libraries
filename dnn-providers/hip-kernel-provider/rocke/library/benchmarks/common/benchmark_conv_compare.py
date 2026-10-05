@@ -24,18 +24,31 @@ Forward pass using a MIOpenDriver command:
       --miopen-cmd "./MIOpenDriver convfp16 -n 8 -c 64 -H 56 -W 56 \\
           -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 4 -F 1 -in_layout=NHWC"
 
-The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` flags are
-forwarded to both scripts where applicable.  Flags that apply only to one script
-(e.g. ``--direction`` for implicit-GEMM) are silently ignored by the other.
+Both scripts can also run purely ahead-of-time: compile each cache once with
+the scripts' own ``--compile-all``, then compare out of the caches -- nothing is
+compiled during the comparison:
+
+  python benchmark_direct_conv.py --compile-all --cache-dir kernel_cache
+  python benchmark_implicit_gemm_conv.py --compile-all --cache-dir kernel_cache
+  python benchmark_conv_compare.py --run-from-cache kernel_cache \\
+      --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --groups 4
+
+The two scripts' entries have distinct identities, so one directory can hold
+both caches.
+
+The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
+``--dtype`` / ``--direction`` / ``--run-from-cache`` flags are forwarded to both
+scripts.  ``--dtype`` / ``--direction`` default to fp16 / fwd for explicit shapes;
+with a MIOpenDriver command they are taken from the command unless given.
 
 Notes
 -----
-- Direct conv only supports fp16 and the forward direction; the comparison
-  therefore always uses the fwd implicit-GEMM path and fp16 regardless of
-  ``--dtype`` / ``--direction``.
-- Direct conv requires ``cpg == kpg`` (C/groups == K/groups) and cpg ∈
-  {1, 4, 8, 16, 32}.  If the requested shape does not meet these constraints,
-  the direct-conv run is skipped and only implicit-GEMM results are shown.
+- The direct-conv cache holds fwd and dgrad kernels only, so a wgrad comparison
+  out of the cache runs implicit-GEMM alone.
+- Without a cache, direct conv requires ``cpg == kpg`` (C/groups == K/groups)
+  and cpg = 1 or a multiple of 4; other forward shapes skip the direct-conv
+  run. Out of the cache, each script filters its cached kernels by the shape's
+  capabilities instead and reports when none fits.
 """
 
 from __future__ import annotations
@@ -160,6 +173,18 @@ def _build_shape_args(args) -> list[str]:
     ]
     if args.verify:
         a.append("--verify")
+    return a + _build_mode_args(args)
+
+
+def _build_mode_args(args) -> list[str]:
+    """dtype / direction / AOT-cache args forwarded to both scripts."""
+    a: list[str] = []
+    if args.dtype is not None:
+        a += ["--dtype", args.dtype]
+    if args.direction is not None:
+        a += ["--direction", args.direction]
+    if args.run_from_cache is not None:
+        a += ["--run-from-cache", args.run_from_cache]
     return a
 
 
@@ -197,7 +222,7 @@ def _build_miopen_args(args) -> list[str]:
         a += ["--miopen-cmd", args.miopen_cmd]
     elif args.miopen_file:
         a += ["--miopen-file", args.miopen_file]
-    return a
+    return a + _build_mode_args(args)
 
 
 def _print_summary(
@@ -266,6 +291,28 @@ def main() -> int:
         "--verify",
         action="store_true",
         help="forward --verify to both benchmark scripts",
+    )
+    parser.add_argument(
+        "--dtype",
+        default=None,
+        choices=["fp16", "bf16"],
+        help="operand dtype forwarded to both scripts (default: fp16, or the "
+        "MIOpenDriver command's)",
+    )
+    parser.add_argument(
+        "--direction",
+        default=None,
+        choices=["fwd", "dgrad", "wgrad"],
+        help="convolution direction forwarded to both scripts (default: fwd, or "
+        "the MIOpenDriver command's)",
+    )
+    parser.add_argument(
+        "--run-from-cache",
+        default=None,
+        metavar="DIR",
+        dest="run_from_cache",
+        help="AOT: benchmark the kernels both scripts pre-compiled into DIR "
+        "(their --compile-all) instead of compiling during the comparison",
     )
     parser.add_argument(
         "--skip-direct",
@@ -360,30 +407,41 @@ def main() -> int:
 
     implicit_only = _build_implicit_only_args(args)
 
+    if not using_miopen:
+        # Explicit shapes carry no dtype/direction of their own.
+        args.dtype = args.dtype or "fp16"
+        args.direction = args.direction or "fwd"
+
     if using_miopen:
         shared_args = _build_miopen_args(args)
-        direct_args = list(shared_args)
-        implicit_args = list(shared_args) + implicit_only
     else:
         shared_args = _build_shape_args(args)
-        direct_args = list(shared_args)
-        # implicit-GEMM needs --dtype (always fp16 for comparison)
-        implicit_args = (
-            list(shared_args)
-            + ["--dtype", "fp16", "--direction", "fwd"]
-            + implicit_only
-        )
+    direct_args = list(shared_args)
+    implicit_args = list(shared_args) + implicit_only
 
+    if not args.skip_direct and args.run_from_cache and args.direction == "wgrad":
+        print(
+            "[info] direct-conv skipped: its cache holds no wgrad kernels",
+            file=sys.stderr,
+        )
+        args.skip_direct = True
+    if (
+        not args.skip_direct
+        and not using_miopen
+        and not args.run_from_cache
+        and args.direction == "fwd"
+    ):
         # Validate cpg constraints for direct conv up-front so we can skip
         # gracefully rather than propagating errors through the subprocess.
-        if not args.skip_direct:
-            ok, reason = _cpg_valid_for_direct(args.C, args.K, args.groups)
-            if not ok:
-                print(
-                    f"[info] direct-conv skipped for this shape: {reason}",
-                    file=sys.stderr,
-                )
-                args.skip_direct = True
+        # A cache run needs no pre-check: the script filters its cached
+        # kernels by the shape's capabilities itself.
+        ok, reason = _cpg_valid_for_direct(args.C, args.K, args.groups)
+        if not ok:
+            print(
+                f"[info] direct-conv skipped for this shape: {reason}",
+                file=sys.stderr,
+            )
+            args.skip_direct = True
 
     direct_result: tuple[float | None, str] = (None, "")
     implicit_result: tuple[float | None, str] = (None, "")
@@ -392,7 +450,8 @@ def main() -> int:
         tflops, name, _ = _run_script(
             _SCRIPT_DIR / "benchmark_direct_conv.py",
             direct_args,
-            timeout=240,
+            # The JIT sweep compiles; a cache run only launches.
+            timeout=None if args.run_from_cache else 240,
         )
         direct_result = (tflops, name)
 
