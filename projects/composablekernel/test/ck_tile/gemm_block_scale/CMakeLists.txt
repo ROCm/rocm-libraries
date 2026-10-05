@@ -270,6 +270,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_tensor PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    # All gfx1250 GEMM pipelines per quant type
+    if(GPU_TARGETS MATCHES "gfx1250")
+        add_gtest_executable(test_tile_gemm_quant_pipelines_gfx1250
+            test_gemm_quant_pipelines_gfx1250.cpp
+        )
+        target_compile_options(test_tile_gemm_quant_pipelines_gfx1250 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+    endif()
+
     # Collect all test targets for umbrella label
     set(CK_TILE_GEMM_BLOCK_SCALE_TEST_TARGETS
         # AQuant tests
