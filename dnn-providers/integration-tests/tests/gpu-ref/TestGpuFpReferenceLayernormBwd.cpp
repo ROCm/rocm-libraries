@@ -14,6 +14,9 @@ using namespace hipdnn_gpu_ref;
 using namespace gpu_layernorm_ref_test;
 using namespace gpu_layernorm_bwd_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 TEST(TestGpuLayernormBwdRefValidation, AcceptsValidParams4D)
 {
     SKIP_IF_NO_DEVICES();
@@ -416,88 +419,104 @@ TEST(TestGpuLayernormBwdRefMixedType, FloatInputHalfScaleBias)
 
     Tensor<float> dyTensor({2, 3, 4, 4});
     Tensor<float> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
     Tensor<float> dxCpu({2, 3, 4, 4});
     Tensor<float> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
-    Tensor<half> dbiasCpu({1, 3, 4, 4});
-    Tensor<half> dbiasGpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasCpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
 
-    CpuFpReferenceLayernorm::bprop<float, half, float, double, double>(dyTensor,
-                                                                       xTensor,
-                                                                       scaleTensor,
-                                                                       dxCpu,
-                                                                       dscaleCpu,
-                                                                       dbiasCpu,
-                                                                       LAYERNORM_DEFAULT_EPSILON,
-                                                                       nullptr,
-                                                                       nullptr,
-                                                                       3);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
-    GpuFpReferenceLayernorm::bprop<float, half, float, double, double>(dyTensor,
-                                                                       xTensor,
-                                                                       scaleTensor,
-                                                                       dxGpu,
-                                                                       dscaleGpu,
-                                                                       dbiasGpu,
-                                                                       LAYERNORM_DEFAULT_EPSILON,
-                                                                       nullptr,
-                                                                       nullptr,
-                                                                       3);
+    CpuFpReferenceLayernorm::bprop<float, HalfType, float, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxCpu,
+        dscaleCpu,
+        dbiasCpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
+
+    GpuFpReferenceLayernorm::bprop<float, HalfType, float, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxGpu,
+        dscaleGpu,
+        dbiasGpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
 
     assertAllClose(dxCpu, dxGpu, getTolerance<float>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
-    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<half>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuLayernormBwdRefMixedType, HalfInputFloatScaleBias)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> dyTensor({2, 3, 4, 4});
-    Tensor<half> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> dyTensor({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
     Tensor<float> scaleTensor({1, 3, 4, 4});
-    Tensor<half> dxCpu({2, 3, 4, 4});
-    Tensor<half> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dxCpu({2, 3, 4, 4});
+    Tensor<HalfType> dxGpu({2, 3, 4, 4});
     Tensor<float> dscaleCpu({1, 3, 4, 4});
     Tensor<float> dscaleGpu({1, 3, 4, 4});
     Tensor<float> dbiasCpu({1, 3, 4, 4});
     Tensor<float> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(dyTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
 
-    CpuFpReferenceLayernorm::bprop<half, float, half, double, double>(dyTensor,
-                                                                      xTensor,
-                                                                      scaleTensor,
-                                                                      dxCpu,
-                                                                      dscaleCpu,
-                                                                      dbiasCpu,
-                                                                      LAYERNORM_DEFAULT_EPSILON,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      3);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
-    GpuFpReferenceLayernorm::bprop<half, float, half, double, double>(dyTensor,
-                                                                      xTensor,
-                                                                      scaleTensor,
-                                                                      dxGpu,
-                                                                      dscaleGpu,
-                                                                      dbiasGpu,
-                                                                      LAYERNORM_DEFAULT_EPSILON,
-                                                                      nullptr,
-                                                                      nullptr,
-                                                                      3);
+    CpuFpReferenceLayernorm::bprop<HalfType, float, HalfType, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxCpu,
+        dscaleCpu,
+        dbiasCpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<half>());
+    GpuFpReferenceLayernorm::bprop<HalfType, float, HalfType, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxGpu,
+        dscaleGpu,
+        dbiasGpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
+
+    assertAllClose(dxCpu, dxGpu, getTolerance<HalfType>());
     assertAllClose(dscaleCpu, dscaleGpu, getTolerance<float>());
     assertAllClose(dbiasCpu, dbiasGpu, getTolerance<float>());
 }
@@ -506,46 +525,55 @@ TEST(TestGpuLayernormBwdRefMixedType, HalfInputHalfScaleBias)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> dyTensor({2, 3, 4, 4});
-    Tensor<half> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
-    Tensor<half> dxCpu({2, 3, 4, 4});
-    Tensor<half> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
-    Tensor<half> dbiasCpu({1, 3, 4, 4});
-    Tensor<half> dbiasGpu({1, 3, 4, 4});
+    Tensor<HalfType> dyTensor({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
+    Tensor<HalfType> dxCpu({2, 3, 4, 4});
+    Tensor<HalfType> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasCpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
+    fillWithRandomValues(dyTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
 
-    CpuFpReferenceLayernorm::bprop<half, half, half, double, double>(dyTensor,
-                                                                     xTensor,
-                                                                     scaleTensor,
-                                                                     dxCpu,
-                                                                     dscaleCpu,
-                                                                     dbiasCpu,
-                                                                     LAYERNORM_DEFAULT_EPSILON,
-                                                                     nullptr,
-                                                                     nullptr,
-                                                                     3);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
-    GpuFpReferenceLayernorm::bprop<half, half, half, double, double>(dyTensor,
-                                                                     xTensor,
-                                                                     scaleTensor,
-                                                                     dxGpu,
-                                                                     dscaleGpu,
-                                                                     dbiasGpu,
-                                                                     LAYERNORM_DEFAULT_EPSILON,
-                                                                     nullptr,
-                                                                     nullptr,
-                                                                     3);
+    CpuFpReferenceLayernorm::bprop<HalfType, HalfType, HalfType, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxCpu,
+        dscaleCpu,
+        dbiasCpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<half>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
-    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<half>());
+    GpuFpReferenceLayernorm::bprop<HalfType, HalfType, HalfType, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxGpu,
+        dscaleGpu,
+        dbiasGpu,
+        LAYERNORM_DEFAULT_EPSILON,
+        nullptr,
+        nullptr,
+        3);
+
+    assertAllClose(dxCpu, dxGpu, getTolerance<HalfType>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuLayernormBwdRefMixedType, BfloatInputFloatOutput)
@@ -553,23 +581,28 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputFloatOutput)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> dyTensor({2, 3, 4, 4});
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
-    Tensor<bfloat16> scaleTensor({1, 3, 4, 4});
-    Tensor<bfloat16> dxCpu({2, 3, 4, 4});
-    Tensor<bfloat16> dxGpu({2, 3, 4, 4});
-    Tensor<bfloat16> dscaleCpu({1, 3, 4, 4});
-    Tensor<bfloat16> dscaleGpu({1, 3, 4, 4});
-    Tensor<bfloat16> dbiasCpu({1, 3, 4, 4});
-    Tensor<bfloat16> dbiasGpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> scaleTensor({1, 3, 4, 4});
+    Tensor<BFloat16Type> dxCpu({2, 3, 4, 4});
+    Tensor<BFloat16Type> dxGpu({2, 3, 4, 4});
+    Tensor<BFloat16Type> dscaleCpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dscaleGpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dbiasCpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 2);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 2);
 
-    CpuFpReferenceLayernorm::bprop<float, bfloat16, bfloat16, double, double>(
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
+    CpuFpReferenceLayernorm::bprop<float, BFloat16Type, BFloat16Type, double, double>(
         dyTensor,
         xTensor,
         scaleTensor,
@@ -581,7 +614,7 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputFloatOutput)
         nullptr,
         3);
 
-    GpuFpReferenceLayernorm::bprop<float, bfloat16, bfloat16, double, double>(
+    GpuFpReferenceLayernorm::bprop<float, BFloat16Type, BFloat16Type, double, double>(
         dyTensor,
         xTensor,
         scaleTensor,
@@ -593,32 +626,39 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputFloatOutput)
         nullptr,
         3);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<bfloat16>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<bfloat16>());
-    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<bfloat16>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<BFloat16Type>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<BFloat16Type>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<BFloat16Type>());
 }
 
 TEST(TestGpuLayernormBwdRefMixedType, BfloatInputHalfScaleBias)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> dyTensor({2, 3, 4, 4});
-    Tensor<bfloat16> xTensor({2, 3, 4, 4});
-    Tensor<half> scaleTensor({1, 3, 4, 4});
-    Tensor<bfloat16> dxCpu({2, 3, 4, 4});
-    Tensor<bfloat16> dxGpu({2, 3, 4, 4});
-    Tensor<half> dscaleCpu({1, 3, 4, 4});
-    Tensor<half> dscaleGpu({1, 3, 4, 4});
-    Tensor<half> dbiasCpu({1, 3, 4, 4});
-    Tensor<half> dbiasGpu({1, 3, 4, 4});
+    Tensor<BFloat16Type> dyTensor({2, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 4, 4});
+    Tensor<HalfType> scaleTensor({1, 3, 4, 4});
+    Tensor<BFloat16Type> dxCpu({2, 3, 4, 4});
+    Tensor<BFloat16Type> dxGpu({2, 3, 4, 4});
+    Tensor<HalfType> dscaleCpu({1, 3, 4, 4});
+    Tensor<HalfType> dscaleGpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasCpu({1, 3, 4, 4});
+    Tensor<HalfType> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
-    xTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 1);
-    scaleTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 2);
+    fillWithRandomValues(
+        dyTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 2);
 
-    CpuFpReferenceLayernorm::bprop<bfloat16, half, bfloat16, double, double>(
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+
+    CpuFpReferenceLayernorm::bprop<BFloat16Type, HalfType, BFloat16Type, double, double>(
         dyTensor,
         xTensor,
         scaleTensor,
@@ -630,7 +670,7 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputHalfScaleBias)
         nullptr,
         3);
 
-    GpuFpReferenceLayernorm::bprop<bfloat16, half, bfloat16, double, double>(
+    GpuFpReferenceLayernorm::bprop<BFloat16Type, HalfType, BFloat16Type, double, double>(
         dyTensor,
         xTensor,
         scaleTensor,
@@ -642,9 +682,9 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputHalfScaleBias)
         nullptr,
         3);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<bfloat16>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
-    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<half>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<BFloat16Type>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<HalfType>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<HalfType>());
 }
 
 // --- Optional argument tests ---
@@ -666,13 +706,20 @@ TEST(TestGpuLayernormBwdRefOptionalArgs, WithMeanAndRstd)
     Tensor<float> dbiasGpu({1, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    meanTensor.fillWithRandomValues(
-        static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 3);
-    rstdTensor.fillWithRandomValues(
-        static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 4);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(
+        meanTensor, static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 3);
+    fillWithRandomValues(
+        rstdTensor, static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 4);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    meanTensor.memory().hostData();
+    rstdTensor.memory().hostData();
 
     CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(dyTensor,
                                                                         xTensor,
@@ -718,9 +765,14 @@ TEST(TestGpuLayernormBwdRefChannelLast, MatchesCpuRef)
     Tensor<float> dbiasGpu({1, 4, 8, 8}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
 
     CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(dyTensor,
                                                                         xTensor,
@@ -766,13 +818,20 @@ TEST(TestGpuLayernormBwdRefChannelLast, MatchesCpuRefWithMeanAndRstd)
     Tensor<float> dbiasGpu({1, 1, 8, 8}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scaleTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
-    meanTensor.fillWithRandomValues(
-        static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 3);
-    rstdTensor.fillWithRandomValues(
-        static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 4);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scaleTensor, -1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(
+        meanTensor, static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 3);
+    fillWithRandomValues(
+        rstdTensor, static_cast<double>(-1.0f), static_cast<double>(1.0f), seed + 4);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    xTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    meanTensor.memory().hostData();
+    rstdTensor.memory().hostData();
 
     CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(dyTensor,
                                                                         xTensor,
@@ -804,11 +863,13 @@ TEST(TestGpuLayernormBwdRefChannelLast, MatchesCpuRefWithMeanAndRstd)
 // --- Test suite instantiations ---
 
 using TestGpuLayernormBwdRef4DFp32 = LayernormBwdTestSuite<float, float, float, double>;
-using TestGpuLayernormBwdRef4DFp16 = LayernormBwdTestSuite<half, half, half, double>;
-using TestGpuLayernormBwdRef4DBfp16 = LayernormBwdTestSuite<bfloat16, bfloat16, bfloat16, double>;
+using TestGpuLayernormBwdRef4DFp16 = LayernormBwdTestSuite<HalfType, HalfType, HalfType, double>;
+using TestGpuLayernormBwdRef4DBfp16
+    = LayernormBwdTestSuite<BFloat16Type, BFloat16Type, BFloat16Type, double>;
 using TestGpuLayernormBwdRef5DFp32 = LayernormBwdTestSuite<float, float, float, double>;
-using TestGpuLayernormBwdRef5DFp16 = LayernormBwdTestSuite<half, half, half, double>;
-using TestGpuLayernormBwdRef5DBfp16 = LayernormBwdTestSuite<bfloat16, bfloat16, bfloat16, double>;
+using TestGpuLayernormBwdRef5DFp16 = LayernormBwdTestSuite<HalfType, HalfType, HalfType, double>;
+using TestGpuLayernormBwdRef5DBfp16
+    = LayernormBwdTestSuite<BFloat16Type, BFloat16Type, BFloat16Type, double>;
 
 TEST_P(TestGpuLayernormBwdRef4DFp32, MatchesCpuRef)
 {
@@ -1067,9 +1128,14 @@ TEST(TestGpuLayernormBwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMe
     }
 
     const unsigned int seed = getGlobalTestSeed();
-    dy.fillWithRandomValues(-1.0f, 1.0f, seed);
-    x.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
-    scale.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
+    fillWithRandomValues(dy, -1.0f, 1.0f, seed);
+    fillWithRandomValues(x, -1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(scale, -1.0f, 1.0f, seed + 2);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dy.memory().hostData();
+    x.memory().hostData();
+    scale.memory().hostData();
 
     CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(
         dy, x, scale, dxCpu, dscaleCpu, dbiasCpu, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 3);

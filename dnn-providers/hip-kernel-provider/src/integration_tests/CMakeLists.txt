@@ -39,7 +39,6 @@ target_link_libraries(
 # Ensure that the hip_kernel_plugin is built before the integration tests
 add_dependencies(hip_kernel_provider_integration_tests hip_kernel_provider)
 
-set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV "")
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -49,6 +48,7 @@ if(ENABLE_ASM_SDPA_ENGINE)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
+            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
@@ -58,11 +58,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
         )
         # Ensure codegen runs before compiling the integration tests
         add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
-        target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
-            AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
-        )
-        set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV
-            "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
     endif()
 endif()
 
@@ -83,6 +78,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
@@ -99,6 +95,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
+    # The production descriptor tree, loaded beside the integration set so the shipped
+    # engines load in this binary too; the gfx950 dense attention knob suite needs its
+    # engine. A fixed binary-relative offset like the set above, so it holds in the build
+    # and the install tree alike, and main() uses it only when the directory exists at run
+    # time. The definition must not depend on this build's GPU targets: a multi-arch
+    # install pairs this binary with another build's device content, so a build that packs
+    # no production tree still names where one would be. The dependency applies only when
+    # this configuration packs one (the top-level install rule keys on the same target).
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+    )
+    if(TARGET hkp_packaging_product)
+        add_dependencies(hip_kernel_provider_integration_tests hkp_packaging_product)
+    endif()
     # The shared descriptor-root resolver lives with the unit tests
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests
@@ -148,8 +158,7 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # installed copy in an install tree. Naming one explicitly would pin the build path into
 # the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
-    LABELS slow
-    ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
+    LABELS slow)
 
 # Forward the merged raw-test environment (published by add_integration_test_target)
 # to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
@@ -167,15 +176,46 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
+# Gated on the same predicate as the census and the external integration target:
+# ENGINE_NAME pins this target, so a build that does not ship the engine registers one
+# whose engine never appears. The predicate lives in HkpPackaging.cmake, which only an
+# ingestor build includes.
+set(_hkp_gfx950_attention_dense FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_ENABLE_ROCKE
+   AND _hkp_gfx950_attention_dense
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    # Routed into the gfx950 shard, not the common arch-neutral directory: the handler
+    # prunes by the first gfx directory in the path, so the entry goes when the engine
+    # does. Left in the common file it survives into a gfx942-only package, where the
+    # engine ranks nothing, every case declines and the entry reports success having run
+    # nothing.
+    #
+    # hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
+    # in both YAML modes: src/ hands it whichever common entrypoint that configuration
+    # produced, and the discovery stub goes there, so a sharded entry is reachable
+    # whether or not categorization is on.
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950AttentionDense"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+    )
+endif()
+
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    set(_synthetic_root "/__hipdnn_install_root__")
-    set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider")
-    set(_install_asm_abs
-        "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
-    )
-    file(RELATIVE_PATH _install_asm_dir "${_install_cwd_abs}" "${_install_asm_abs}")
-
     add_external_integration_test_target(
         TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
         PLUGIN_TARGET hip_kernel_provider
@@ -184,9 +224,5 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
             Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
-        ENVIRONMENT
-            ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV}
-        INSTALL_ENVIRONMENT
-            "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
     )
 endif()

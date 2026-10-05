@@ -130,17 +130,21 @@ function(hipblaslt_detect_sanitizer_runtime out_options out_lib_dirs)
     set(${out_lib_dirs} "${_lib_dirs}" PARENT_SCOPE)
 endfunction()
 
+# When ON, a build that requests gfx1250 also produces library/gfx1250v0/
+# (gfx1250-strict's kernels built for gfx1250). Never add gfx1250v0 to GPU_TARGETS.
+option(HIPBLASLT_BUILD_GFX1250V0 "Build library/gfx1250v0/ alongside gfx1250 for A0 parts reporting gfx1250." ON)
+
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
         TARGET LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
         ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL GEMM_A2A_FUSION LAZY_LOAD ASM_COMMENTS
-        KEEP_BUILD_TMP ASM_DEBUG REQUIRE_GFX1250V0_OVERLAY)
+        KEEP_BUILD_TMP ASM_DEBUG)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
     if(_cdl_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keyword: ARCHES)")
+        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG; multi-value keyword: ARCHES)")
     endif()
     if(NOT _cdl_LOGIC_PATH)
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is required")
@@ -293,23 +297,59 @@ function(create_device_library)
     if(NOT _cdl_ASM_COMMENTS)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
+    set(_logic_arches ${_cdl_ARCHES})
+    if(HIPBLASLT_BUILD_GFX1250V0)
+        list(APPEND _opts_list "--gfx1250v0")
+        # gfx1250v0 is built from gfx1250-strict's logic, so validate that too.
+        if("gfx1250" IN_LIST _cdl_ARCHES AND NOT "gfx1250-strict" IN_LIST _cdl_ARCHES)
+            list(APPEND _logic_arches "gfx1250-strict")
+        endif()
+    endif()
+    list(JOIN _logic_arches "$<SEMICOLON>" _logic_arches_semi)
 
     set(_tensile_logic_args
         "${_cdl_LOGIC_PATH}"
         --architecture
-        "${_arches_semi}"
+        "${_logic_arches_semi}"
         --use-bundled-known-bugs
         --check-all
     )
-    if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
-        list(APPEND _tensile_logic_args --require-gfx1250v0-overlay)
-    endif()
     set(_codegen_dependencies "${_known_bugs_resource}")
     if(TARGET _rocisa)
         list(APPEND _codegen_dependencies _rocisa)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
+
+    # Both codegen steps glob their inputs at run time, so without an explicit
+    # file list nothing invalidates the stamps and edits ship stale kernels.
+    # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
+    file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_cdl_LOGIC_PATH}/*.yaml")
+    # .py generators, plus the packaged static headers (resources.py) and the
+    # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
+    file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_codegen_dir}/Tensile/*.py"
+         "${_codegen_dir}/Tensile/*.h"
+         "${_codegen_dir}/Tensile/*.s")
+    list(FILTER _codegen_sources EXCLUDE REGEX "/Tensile/Tests/")
+    list(APPEND _codegen_dependencies
+         ${_logic_files}
+         ${_codegen_sources}
+         "${_codegen_dir}/Tensile/bin/TensileLogic")
+
+    # ninja only compares mtimes of inputs that still exist, so a *removed* file
+    # leaves the stamp clean (nothing is newer), as does a file added with an
+    # older mtime. CONFIGURE_DEPENDS keeps the list accurate but ninja never acts
+    # on membership alone. Depend on a sorted manifest of the list as well: it is
+    # rewritten only when the set changes, and that rewrite dirties the stamp.
+    # file(GLOB_RECURSE) orders results lexicographically.
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
+    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
+    # file(CONFIGURE) rewrites only when the content differs.
+    file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
+    list(APPEND _codegen_dependencies "${_manifest}")
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
@@ -323,6 +363,11 @@ function(create_device_library)
         USES_TERMINAL
     )
 
+    # All architectures go to this one command, a stepping included. Covering a
+    # stepping and the architecture it steps from takes more than one run, since
+    # a run names its target by the ISA and the two spell one ISA -- but that
+    # split is TensileCreateLibrary's: it cannot happen at configure time, when
+    # Tensile is not yet importable.
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
         ${_python_command} -m Tensile.TensileCreateLibrary
