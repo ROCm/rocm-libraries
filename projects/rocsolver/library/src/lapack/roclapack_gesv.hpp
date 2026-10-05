@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #include "roclapack_getrf.hpp"
 #include "roclapack_getrs.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -71,59 +72,51 @@ rocblas_status rocsolver_gesv_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_gesv_getMemorySize(const rocblas_int n,
+template <bool BATCHED, bool STRIDED, typename T, typename U>
+void rocsolver_gesv_getMemorySize(rocblas_handle handle,
+                                  const rocblas_int n,
                                   const rocblas_int nrhs,
+                                  U A,
+                                  const rocblas_int shiftA,
+                                  const rocblas_int lda,
+                                  const rocblas_stride strideA,
+                                  rocblas_int* ipiv,
+                                  const rocblas_stride strideP,
+                                  U B,
+                                  const rocblas_int shiftB,
+                                  const rocblas_int ldb,
+                                  const rocblas_stride strideB,
+                                  rocblas_int* info,
                                   const rocblas_int batch_count,
-                                  size_t* size_scalars,
-                                  size_t* size_work,
-                                  size_t* size_work1,
-                                  size_t* size_work2,
-                                  size_t* size_work3,
-                                  size_t* size_work4,
-                                  size_t* size_pivotval,
-                                  size_t* size_pivotidx,
-                                  size_t* size_iipiv,
-                                  size_t* size_iinfo,
-                                  bool* optim_mem)
+                                  rocsolver_workspace_helper* work_helper)
 {
     // if quick return, no workspace is needed
     if(n == 0 || nrhs == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_pivotval = 0;
-        *size_pivotidx = 0;
-        *size_iipiv = 0;
-        *size_iinfo = 0;
-        *optim_mem = true;
         return;
-    }
 
-    bool opt1, opt2;
-    size_t w1, w2, w3, w4;
+    work_helper->set_nested_capacity(2);
 
+    // PHASE 1
     // workspace required for calling GETRF
-    rocsolver_getrf_getMemorySize<BATCHED, STRIDED, T>(
-        n, n, true, batch_count, size_scalars, size_work1, size_work2, size_work3, size_work4,
-        size_pivotval, size_pivotidx, size_iipiv, size_iinfo, &opt1);
+    rocsolver_workspace_helper* getrf_work = work_helper->add_nested("getrf");
+    rocsolver_getrf_getMemorySize<BATCHED, STRIDED, T>(handle, n, n, A, shiftA, 1, lda, strideA,
+                                                       ipiv, 0, strideP, info, batch_count,
+                                                       getrf_work, true);
+
+    // PHASE 2
+    rocsolver_workspace_helper* phase2_work = work_helper->add_nested("phase2");
+    phase2_work->set_nested_capacity(1);
 
     // workspace required for calling GETRS
-    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(rocblas_operation_none, n, nrhs, batch_count,
-                                                       &w1, &w2, &w3, &w4, &opt2);
-
-    *size_work1 = std::max(*size_work1, w1);
-    *size_work2 = std::max(*size_work2, w2);
-    *size_work3 = std::max(*size_work3, w3);
-    *size_work4 = std::max(*size_work4, w4);
-    *optim_mem = opt1 && opt2;
+    rocsolver_workspace_helper* getrs_work = phase2_work->add_nested("getrs");
+    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(
+        handle, rocblas_operation_none, n, nrhs, A, shiftA, 1, lda, strideA, ipiv, strideP, B,
+        shiftB, 1, ldb, strideB, batch_count, getrs_work, true);
 
     // extra space to copy B
-    *size_work = sizeof(T) * n * nrhs * batch_count;
+    size_t size_copyB = sizeof(T) * n * nrhs * batch_count;
+
+    phase2_work->assign_sizes({{"copyB", size_copyB}});
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename U>
@@ -142,17 +135,7 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
                                        const rocblas_stride strideB,
                                        rocblas_int* info,
                                        const rocblas_int batch_count,
-                                       T* scalars,
-                                       T* work,
-                                       void* work1,
-                                       void* work2,
-                                       void* work3,
-                                       void* work4,
-                                       T* pivotval,
-                                       rocblas_int* pivotidx,
-                                       rocblas_int* iipiv,
-                                       rocblas_int* iinfo,
-                                       bool optim_mem)
+                                       rocsolver_workspace_helper* work_helper)
 {
     ROCSOLVER_ENTER("gesv", "n:", n, "nrhs:", nrhs, "shiftA:", shiftA, "lda:", lda,
                     "shiftB:", shiftB, "ldb:", ldb, "bc:", batch_count);
@@ -164,6 +147,7 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    // prepare kernels
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
@@ -175,29 +159,34 @@ rocblas_status rocsolver_gesv_template(rocblas_handle handle,
     if(n == 0 || nrhs == 0)
         return rocblas_status_success;
 
+    // prepare workspace
+    rocsolver_workspace_helper* getrf_work = work_helper->get_nested("getrf");
+    rocsolver_workspace_helper* phase2_work = work_helper->get_nested("phase2");
+    rocsolver_workspace_helper* getrs_work = phase2_work->get_nested("getrs");
+    T* copyB = (T*)(*phase2_work)["copyB"];
+
     // constants in host memory
     const rocblas_int copyblocksx = (n - 1) / BS2 + 1;
     const rocblas_int copyblocksy = (nrhs - 1) / BS2 + 1;
 
     // compute LU factorization of A
-    rocsolver_getrf_template<BATCHED, STRIDED, T>(
-        handle, n, n, A, shiftA, 1, lda, strideA, ipiv, 0, strideP, info, batch_count, scalars,
-        work1, work2, work3, work4, pivotval, pivotidx, iipiv, iinfo, optim_mem, true);
+    rocsolver_getrf_template<BATCHED, STRIDED, T>(handle, n, n, A, shiftA, 1, lda, strideA, ipiv, 0,
+                                                  strideP, info, batch_count, getrf_work, true);
 
     // save elements of B that will be overwritten by GETRS for cases where info is nonzero
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocksx, copyblocksy, batch_count),
                             dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, nrhs, B, shiftB, ldb,
-                            strideB, (T*)work, info_mask(info));
+                            strideB, (T*)copyB, info_mask(info));
 
     // solve AX = B, overwriting B with X
-    rocsolver_getrs_template<BATCHED, STRIDED, T>(
-        handle, rocblas_operation_none, n, nrhs, A, shiftA, 1, lda, strideA, ipiv, strideP, B,
-        shiftB, 1, ldb, strideB, batch_count, work1, work2, work3, work4, optim_mem, true);
+    rocsolver_getrs_template<BATCHED, STRIDED, T>(handle, rocblas_operation_none, n, nrhs, A,
+                                                  shiftA, 1, lda, strideA, ipiv, strideP, B, shiftB,
+                                                  1, ldb, strideB, batch_count, getrs_work, true);
 
     // restore elements of B that were overwritten by GETRS in cases where info is nonzero
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocksx, copyblocksy, batch_count),
                             dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, nrhs, B, shiftB, ldb,
-                            strideB, (T*)work, info_mask(info));
+                            strideB, (T*)copyB, info_mask(info));
 
     return rocblas_status_success;
 }

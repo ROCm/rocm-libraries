@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,33 +31,37 @@
 #include "rocblas.hpp"
 #include "roclapack_getrs.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_getri_outofplace_getMemorySize(const rocblas_int n,
+template <bool BATCHED, bool STRIDED, typename T, typename U>
+void rocsolver_getri_outofplace_getMemorySize(rocblas_handle handle,
+                                              const rocblas_int n,
+                                              U A,
+                                              const rocblas_int shiftA,
+                                              const rocblas_int lda,
+                                              const rocblas_stride strideA,
+                                              rocblas_int* ipiv,
+                                              const rocblas_int shiftP,
+                                              const rocblas_stride strideP,
+                                              U C,
+                                              const rocblas_int shiftC,
+                                              const rocblas_int ldc,
+                                              const rocblas_stride strideC,
+                                              rocblas_int* info,
                                               const rocblas_int batch_count,
-                                              size_t* size_work1,
-                                              size_t* size_work2,
-                                              size_t* size_work3,
-                                              size_t* size_work4,
-                                              bool* optim_mem)
+                                              rocsolver_workspace_helper* work_helper,
+                                              const bool pivot)
 {
     // if quick return, no need of workspace
     if(n == 0 || batch_count == 0)
-    {
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *optim_mem = true;
         return;
-    }
 
     // requirements for calling GETRS
-    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(rocblas_operation_none, n, n, batch_count,
-                                                       size_work1, size_work2, size_work3,
-                                                       size_work4, optim_mem);
+    rocsolver_getrs_getMemorySize<BATCHED, STRIDED, T>(
+        handle, rocblas_operation_none, n, n, A, shiftA, 1, lda, strideA, ipiv, strideP, C, shiftC,
+        1, ldc, strideC, batch_count, work_helper, pivot);
 }
 
 template <typename T>
@@ -108,11 +112,7 @@ rocblas_status rocsolver_getri_outofplace_template(rocblas_handle handle,
                                                    const rocblas_stride strideC,
                                                    rocblas_int* info,
                                                    const rocblas_int batch_count,
-                                                   void* work1,
-                                                   void* work2,
-                                                   void* work3,
-                                                   void* work4,
-                                                   const bool optim_mem,
+                                                   rocsolver_workspace_helper* work_helper,
                                                    const bool pivot)
 {
     ROCSOLVER_ENTER("getri_outofplace", "n:", n, "shiftA:", shiftA, "lda:", lda, "shiftP:", shiftP,
@@ -144,9 +144,9 @@ rocblas_status rocsolver_getri_outofplace_template(rocblas_handle handle,
                             stream, n, n, C, shiftC, ldc, strideC);
 
     // compute inverse
-    rocsolver_getrs_template<BATCHED, STRIDED, T>(
-        handle, rocblas_operation_none, n, n, A, shiftA, 1, lda, strideA, ipiv, strideP, C, shiftC,
-        1, ldc, strideC, batch_count, work1, work2, work3, work4, optim_mem, pivot);
+    rocsolver_getrs_template<BATCHED, STRIDED, T>(handle, rocblas_operation_none, n, n, A, shiftA,
+                                                  1, lda, strideA, ipiv, strideP, C, shiftC, 1, ldc,
+                                                  strideC, batch_count, work_helper, pivot);
 
     return rocblas_status_success;
 }
