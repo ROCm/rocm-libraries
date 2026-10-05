@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: "CI run-id of the gfx1250 build to fetch (manual runs only)"
+        description: "CI run-id of the gfx1250 build to fetch and test"
         type: string
-        required: false
+        required: true
       build_repo:
         description: "Repo that produced the artifact (e.g. ROCm/TheRock for validation)"
         type: string
@@ -44,7 +44,10 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Dedup by artifact (build_run_id), not git ref: fork PRs sharing a dispatch ref
+  # run concurrently, while a re-dispatch of the same build supersedes its stale run.
+  # github.event.inputs.* — inputs.* isn't reliable in a concurrency expression.
+  group: ${{ github.workflow }}-${{ github.event.inputs.build_run_id }}
   cancel-in-progress: true
 
 jobs:
