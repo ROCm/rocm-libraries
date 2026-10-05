@@ -67,16 +67,32 @@ if(NOT TARGET hipsolver)
   find_package(hipsolver REQUIRED CONFIG PATHS ${ROCM_PATH} /opt/rocm)
 endif()
 
-if(BUILD_FORTRAN_BINDINGS)
+# In-tree, fortran/ reports whether it built the bindings; a standalone clients
+# build uses the installed ones when BUILD_FORTRAN_BINDINGS asks for them.
+if(NOT DEFINED HIPSOLVER_HAVE_FORTRAN_BINDINGS)
+  set(HIPSOLVER_HAVE_FORTRAN_BINDINGS FALSE)
+  if(BUILD_FORTRAN_BINDINGS AND (BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS))
+    find_package(hipsolver-fortran QUIET CONFIG PATHS ${ROCM_PATH} /opt/rocm)
+    if(NOT TARGET roc::hipsolver_fortran)
+      message(FATAL_ERROR
+        "BUILD_FORTRAN_BINDINGS is ON but the hipSOLVER Fortran bindings were not "
+        "found. Point CMAKE_PREFIX_PATH at a prefix where they are installed for "
+        "${CMAKE_Fortran_COMPILER}, or configure with -DBUILD_FORTRAN_BINDINGS=OFF.")
+    endif()
+    set(HIPSOLVER_HAVE_FORTRAN_BINDINGS TRUE)
+  endif()
+endif()
+
+if(HIPSOLVER_HAVE_FORTRAN_BINDINGS)
   set(hipsolver_f90_source_clients
     include/hipsolver_fortran.f90
   )
 endif()
 
 if(BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
-  if(BUILD_FORTRAN_BINDINGS)
+  if(HIPSOLVER_HAVE_FORTRAN_BINDINGS)
     add_library(hipsolver_fortran_client STATIC ${hipsolver_f90_source_clients})
-    target_link_libraries(hipsolver_fortran_client hipsolver_fortran)
+    target_link_libraries(hipsolver_fortran_client roc::hipsolver_fortran)
     include_directories(${CMAKE_BINARY_DIR}/include/hipsolver)
     include_directories(${CMAKE_BINARY_DIR}/include/hipsolver/internal)
     target_compile_definitions(hipsolver_fortran_client INTERFACE HAVE_HIPSOLVER_FORTRAN_CLIENT)

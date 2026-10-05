@@ -36,9 +36,43 @@ if(NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel.")
 endif()
 
-if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+# Decided before project(): enable_language(Fortran) fixes the compiler for the whole tree.
+# Prefer amdflang unless the host LAPACK, a gfortran build, is linked (CUDA backend or
+# HIPSOLVER_INTERNAL_LAPACK_BUILD=OFF); the in-tree OpenBLAS is built with NOFORTRAN.
+# USE_CUDA/HIP_PLATFORM mirror the later backend resolution; fortran/ repeats this test.
+set(_hipsolver_cuda_backend OFF)
+if(DEFINED USE_CUDA)
+  if(USE_CUDA)
+    set(_hipsolver_cuda_backend ON)
+  endif()
+elseif("$ENV{HIP_PLATFORM}" STREQUAL "nvidia" OR "${HIP_PLATFORM}" STREQUAL "nvidia")
+  set(_hipsolver_cuda_backend ON)
+endif()
+
+set(_hipsolver_host_lapack ${_hipsolver_cuda_backend})
+if(DEFINED HIPSOLVER_INTERNAL_LAPACK_BUILD AND NOT HIPSOLVER_INTERNAL_LAPACK_BUILD)
+  set(_hipsolver_host_lapack ON)
+endif()
+
+set(_hipsolver_fortran_on ON)
+if(DEFINED HIPSOLVER_BUILD_FORTRAN_BINDINGS)
+  set(_hipsolver_fortran_on ${HIPSOLVER_BUILD_FORTRAN_BINDINGS})
+elseif(DEFINED BUILD_FORTRAN_BINDINGS)
+  set(_hipsolver_fortran_on ${BUILD_FORTRAN_BINDINGS})
+endif()
+
+if(_hipsolver_fortran_on AND NOT _hipsolver_host_lapack)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/fortran/cmake/ROCmFortranCompiler.cmake)
+  rocm_fortran_prefer_amdflang()
+endif()
+# Only for the clients, which require Fortran: a preset compiler would make fortran/
+# skip its probe and fail on a host without one instead of skipping the bindings.
+if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC}
+   AND (BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS))
   set(CMAKE_Fortran_COMPILER  "gfortran")
 endif()
+unset(_hipsolver_host_lapack)
+unset(_hipsolver_fortran_on)
 
 project(hipsolver LANGUAGES CXX)
 
@@ -87,18 +121,22 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
-option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
-option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
+# Off on the CUDA backend, where hipsolver.F90 is untested; ROCm ships no Fortran
+# compiler on Windows. fortran/ repeats this option for a standalone configure.
+if(_hipsolver_cuda_backend)
+  set(_hipsolver_fortran_default OFF)
+else()
+  set(_hipsolver_fortran_default "${UNIX}")
+endif()
+option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings"
+       "${_hipsolver_fortran_default}")
+unset(_hipsolver_fortran_default)
 
 # Feature flags
 option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
-endif()
-
-if(BUILD_FORTRAN_BINDINGS)
-  enable_language(Fortran)
 endif()
 
 add_library(hipsolver-common INTERFACE)
@@ -335,6 +373,13 @@ endif()
 add_subdirectory(library)
 
 include(clients/cmake/build-options.cmake)
+
+# ctest only sees the Fortran binding tests, registered under these switches, if testing is enabled here.
+if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
+  enable_testing()
+endif()
+# After the client options, which it reads, and before clients/, which links its target.
+add_subdirectory(fortran)
 
 if(NOT SYSTEM_OS)
   rocm_set_os_id(SYSTEM_OS)
