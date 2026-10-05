@@ -4492,6 +4492,185 @@ Tests:
   unit_check: 0
   fast_check: 1
 
+###############################################################################
+# fast_check edge, bookkeeping and per-kernel configurations (AIHPBLAS-5020).
+#
+# Classes E, F and G on AIHPBLAS-4988 need specific configurations rather than
+# big sizes: K shorter than the prefetch depth (ROCM-31105), Stream-K partials
+# spread across workspace batches (GitHub PR 11962), partial tiles, mixed fp8
+# formats (ROCM-31905), a particular output type selecting a different kernel
+# (ROCM-32072), and shapes between a known-good and a known-bad size. Every
+# solution or the heuristic's first 16 run, each launched and checked several
+# times, because these defects live in particular kernels and some are
+# intermittent.
+###############################################################################
+
+# K shorter than, equal to and just past common prefetch depths (PGR 1 or 2 with
+# DepthU 16 to 64), so the loop runs fewer iterations than the prefetch issues.
+# ROCM-31105 read past the end of K with PrefetchGL2 on gfx1250; every solution
+# runs, so kernels with PrefetchGL2 on and off are both covered where they exist.
+# Runtime on gfx90a: 24 cases, about 80 s.
+- name: matmul_fast_check_short_k
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 517, N: 263, K: 1 }
+    - { M: 517, N: 263, K: 15 }
+    - { M: 517, N: 263, K: 16 }
+    - { M: 517, N: 263, K: 33 }
+    - { M: 517, N: 263, K: 64 }
+    - { M: 517, N: 263, K: 129 }
+  transA: [ N, T ]
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Partial tiles in every dimension, including driftcheck's ragged shape from
+# ROCM-31901, with two strided batches.
+# Runtime on gfx90a: 12 cases, about 8 s.
+- name: matmul_fast_check_ragged
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 8191, N: 8193, K: 4097 }
+    - { M: 1, N: 4099, K: 2049 }
+    - { M: 4099, N: 1, K: 2049 }
+    - { M: 257, N: 255, K: 3 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 2
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Every output type for one input type: in ROCM-32072 a bf16 output selected a
+# Stream-K + TDM kernel that failed where an f32 output at the same shape did
+# not, so each output type is its own configuration.
+# Runtime on gfx90a: 8 cases, about 3 s.
+- name: matmul_fast_check_output_types
+  category: nightly
+  function:
+    matmul:
+      - *hpa_bf16_precision
+      - *hpa_half_bf16_fp32dst_precision
+      - *hpa_half_precision
+      - *hpa_half_fp32dst_precision
+  matrix_size:
+    - { M: 8192, N: 16384, K: 512 }
+    - { M: 4097, N: 3071, K: 1025 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Stream-K partials stored across several workspace batches, with LocalSplitU
+# above 1 where the kernel uses it (GitHub PR 11962 fixed reused batch-0
+# accumulators). Every Stream-K solution, several batches, ragged shapes. Needs
+# TENSILE_SOLUTION_SELECTION_METHOD=2 except on gfx950.
+# Runtime on gfx90a with the variable set: 4 cases, about 40 s.
+- name: matmul_fast_check_streamk_batches
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 2049 }
+    - { M: 4099, N: 2053, K: 1025 }
+  batch_count: 3
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  requires_streamk: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Mixed fp8 formats (E4M3 x E5M2 and the reverse) are their own kernels: in
+# ROCM-31905 only they failed, with a single LDS buffer and no local-read
+# prefetch, at 2560 x 16384 x 2560 and 5120 x 12288 x 5120, and passed at 10240
+# cubed. The sweep fills in between the known-bad and known-good sizes.
+- name: matmul_fast_check_mixed_fp8_fnuz
+  category: nightly
+  function:
+    matmul:
+      - *f8bf8_fnuz_precision_dst_fp32
+      - *bf8f8_fnuz_precision_dst_fp32
+      - *f8bf8_fnuz_precision_dst_bf16
+      - *bf8f8_fnuz_precision_dst_bf16
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+    - { M: 6144, N: 12288, K: 6144 }
+    - { M: 7680, N: 10240, K: 7680 }
+    - { M: 10240, N: 10240, K: 10240 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '942'
+
+- name: matmul_fast_check_mixed_fp8
+  category: nightly
+  function:
+    matmul:
+      - *f8bf8_precision_dst_fp32
+      - *bf8f8_precision_dst_fp32
+      - *f8bf8_precision_dst_bf16
+      - *bf8f8_precision_dst_bf16
+  matrix_size:
+    - { M: 2560, N: 16384, K: 2560 }
+    - { M: 5120, N: 12288, K: 5120 }
+    - { M: 6144, N: 12288, K: 6144 }
+    - { M: 7680, N: 10240, K: 7680 }
+    - { M: 10240, N: 10240, K: 10240 }
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  integer_exact_pattern: sparse_k
+  requested_solution_num: 16
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
 - name: matmul_96_complex
   category: pre_checkin
   function:
