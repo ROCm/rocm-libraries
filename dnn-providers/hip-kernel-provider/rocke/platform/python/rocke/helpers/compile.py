@@ -144,19 +144,7 @@ def compile_kernel(
     per-family wiring is needed (the legacy ``spec`` argument is accepted
     for backward compatibility but is no longer consulted).
     """
-    if arch is not None:
-        _lower_arch = base_arch_from_target_id(arch)
-        compiler_target = compiler_target_from_target_id(arch)
-        base_isa = ArchTarget.from_gfx(_lower_arch).isa_triple
-        isa = f"{base_isa[: -len(_lower_arch)]}{compiler_target}"
-    else:
-        # Derive both names from the caller's ISA name. Use the base architecture
-        # for lowering and preserve compiler features in the COMGR ISA name.
-        target_id = target_id_from_isa(isa)
-        compiler_target = compiler_target_from_target_id(target_id)
-        isa = f"{isa[: -len(target_id)]}{compiler_target}"
-        _gfx = arch_from_isa(isa)
-        _lower_arch = _gfx if _gfx in known_arches() else None
+    _lower_arch, isa = _resolve_compile_target(arch, isa)
 
     timings: Dict[str, float] = {}
 
@@ -190,6 +178,62 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+    )
+
+
+def _resolve_compile_target(arch: Optional[str], isa: str):
+    """``(lowering arch, COMGR ISA name)`` for :func:`compile_kernel` inputs."""
+    if arch is not None:
+        lower_arch = base_arch_from_target_id(arch)
+        compiler_target = compiler_target_from_target_id(arch)
+        base_isa = ArchTarget.from_gfx(lower_arch).isa_triple
+        return lower_arch, f"{base_isa[: -len(lower_arch)]}{compiler_target}"
+    # Derive both names from the caller's ISA name. Use the base architecture
+    # for lowering and preserve compiler features in the COMGR ISA name.
+    target_id = target_id_from_isa(isa)
+    compiler_target = compiler_target_from_target_id(target_id)
+    isa = f"{isa[: -len(target_id)]}{compiler_target}"
+    gfx = arch_from_isa(isa)
+    return (gfx if gfx in known_arches() else None), isa
+
+
+@dataclass(frozen=True)
+class ComgrInput:
+    """Everything :func:`build_hsaco_from_llvm_ir` needs to compile a kernel.
+
+    The HSACO is a pure function of these three fields and the COMGR library
+    that compiles them, which is what lets a caller key a binary cache on them
+    and skip the (expensive) COMGR step when they have not changed.
+    """
+
+    kernel_name: str
+    llvm_text: str
+    isa: str
+    options: tuple
+
+
+def lower_kernel_for_comgr(
+    kernel: KernelDef,
+    *,
+    arch: Optional[str] = None,
+    isa: str = "amdgcn-amd-amdhsa--gfx950",
+    backend: Optional[str] = None,
+) -> ComgrInput:
+    """The lowering half of :func:`compile_kernel`, without running COMGR.
+
+    Resolves the target the same way and lowers through the same backend, so
+    ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options))``
+    produces the binary ``compile_kernel(kernel, arch=arch)`` would.
+    """
+    lower_arch, isa = _resolve_compile_target(arch, isa)
+    llvm_text = _lower_llvm_via_backend(
+        kernel, arch=lower_arch, backend=backend, spec=None
+    )
+    return ComgrInput(
+        kernel_name=kernel.name,
+        llvm_text=llvm_text,
+        isa=isa,
+        options=tuple(_comgr_options_for_kernel(kernel)),
     )
 
 

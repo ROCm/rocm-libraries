@@ -5,6 +5,7 @@
 
 #include "ReductionShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceReduction.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceReduction.hpp>
@@ -19,6 +20,7 @@ namespace gpu_reduction_ref_test
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 template <typename InputDataType,
           typename OutputDataType = InputDataType,
@@ -35,8 +37,13 @@ void runGpuVsCpuReduction(const std::vector<int64_t>& inputDims,
     auto outputTensorCpu = Tensor<OutputDataType>(outputDims, layout);
     auto outputTensorGpu = Tensor<OutputDataType>(outputDims, layout);
 
-    inputTensor.fillWithRandomValues(
-        static_cast<InputDataType>(-fillRange), static_cast<InputDataType>(fillRange), seed);
+    fillWithRandomValues(inputTensor,
+                         static_cast<InputDataType>(-fillRange),
+                         static_cast<InputDataType>(fillRange),
+                         seed);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
 
     CpuFpReferenceReduction::reduce<InputDataType, OutputDataType, ComputeDataType>(
         inputTensor, outputTensorCpu, mode);

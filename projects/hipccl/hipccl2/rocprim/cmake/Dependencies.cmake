@@ -91,7 +91,19 @@ if(BUILD_TEST)
   #        mode targets. Otherwise if MODULE or CONFIG succeeded, then it prints the result to the
   #        console via a non-QUIET find_package call and if CONFIG succeeded, creates ALIAS targets
   #        with the MODULE IMPORTED names.
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  # NOTE(hipccl2): EXTERNAL_DEPS_FORCE_DOWNLOAD is honoured here in addition to
+  # rocPRIM's own DEPENDENCIES_FORCE_DOWNLOAD. hipCUB and rocThrust renamed this
+  # option to EXTERNAL_DEPS_FORCE_DOWNLOAD (see their CHANGELOGs) to separate
+  # "force download of external test deps like GTest" from "force download of
+  # rocm-cmake"; rocPRIM still uses the single older name for both. That was
+  # invisible while the three projects configured separately, but in the unified
+  # build they share one configure, so a user passing either name would
+  # otherwise get it applied to some components and silently ignored by others.
+  # Accepting both here makes EXTERNAL_DEPS_FORCE_DOWNLOAD mean the same thing
+  # across all three without breaking existing DEPENDENCIES_FORCE_DOWNLOAD
+  # callers. rocPRIM's rocm-cmake lookup further down is deliberately left on
+  # DEPENDENCIES_FORCE_DOWNLOAD alone, matching hipCUB and rocThrust.
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     if(WIN32)
       # Older versions of gtest on Windows does not support printing of 128-bit values,
       # Causing compilation errors.
@@ -104,7 +116,7 @@ if(BUILD_TEST)
     option(BUILD_GTEST "Builds the googletest subproject" ON)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
-    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
       FetchContent_Declare(
         googletest
         SOURCE_DIR /usr/src/googletest
@@ -121,7 +133,18 @@ if(BUILD_TEST)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   else()
-    find_package(GTest REQUIRED)
+    # NOTE(hipccl2): only look GTest up if we don't already have the target.
+    # Reaching this else() means GTest::GTest or GTest::gtest already exists -
+    # but it may have been created by a *sibling* project's FetchContent
+    # rather than by the find_package(GTest QUIET) above (in the unified
+    # hipCCL build the components are add_subdirectory()'d into one configure,
+    # so whichever runs first fetches googletest and defines these targets for
+    # everyone after it). In that case GTest is not installed on the system at
+    # all, and an unguarded find_package(GTest REQUIRED) here fails the entire
+    # configure even though usable targets are already present.
+    if(NOT TARGET GTest::GTest)
+      find_package(GTest REQUIRED)
+    endif()
     if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
       add_library(GTest::GTest ALIAS GTest::gtest)
       add_library(GTest::Main  ALIAS GTest::gtest_main)

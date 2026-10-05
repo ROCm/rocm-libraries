@@ -40,6 +40,12 @@ from raw byte patterns with the common bit packer.
 Scale-format validation remains separate from matrix alias normalization:
 E5M3 is not BF8 E5M2. Registering a scale dtype does not enable a backend selector.
 
+Logical `tf32` (`xf32` alias) is a distinct 32-bit type carried as I32.
+Fragment loading can reinterpret FP32 storage into I32 without conversion;
+`bitcast` then wraps those bits as logical TF32. Explicit `cvt_f32_to_tf32`
+performs RNE preparation. Packing itself never rounds. See the
+[TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md).
+
 ## Common packing
 
 `BitPacking` / `rocke_bit_packing_t` describes unsigned bit patterns with an
@@ -49,6 +55,7 @@ bit first in a little-endian byte stream.
 
 | Format | Dense group occupying whole 32-bit words |
 |---|---|
+| TF32 | 1 element in 1 word |
 | FP16/BF16 | 2 elements in 1 word |
 | FP8/BF8 | 4 elements in 1 word |
 | FP6/BF6 | 16 elements across 3 words |
@@ -123,8 +130,9 @@ A/B layouts. Existing `a_frag_len`/`b_frag_len` retain their ABI-vector meaning.
 
 The current gfx1250 scaled matrix layouts have 64 elements per lane and sixteen
 i32 carriers. FP8 occupies all sixteen words. FP4 occupies eight and pads eight.
-The FP6 transport descriptor occupies twelve and pads four, without enabling
-FP6 catalog entries or numerical conversions.
+FP6 occupies twelve and pads four. The FP6 consumer adds homogeneous E2M3 and
+E3M2 catalog entries with E8M0 scales; the packing descriptor alone does not
+enable an instruction or numerical conversion.
 
 `ScalePacking(count, block_k)` records how many source K elements share one
 scale in `block_k` and exposes the byte layout through a shared `FragmentPacking`.
@@ -145,10 +153,13 @@ FP4/FP6/FP8 matrix payloads, and scale word packing. Existing GEMM signatures
 remain compatible. HIP emits declarations for any encountered vector widths
 absent from its fixed compatibility prologue.
 
-The shared descriptor/helper changes can be consumed by both FP4 and FP6
-branches. FP4/FP8 builder migration can use them directly. Future FP6 numerical
-integration should consume the six-bit packing and fragment descriptors and
-retain separate target and conversion validation.
+The [FP6 GEMM builder](../../python/rocke/instances/gfx1250/block_scaled_gemm.py)
+consumes the shared bit packing, matrix-fragment loader, and scale bit packer.
+It owns row strides, bounds, and row alignment. Its E2M3/E3M2 numerical support
+is specific to the selected gfx1250 atoms. FP4 is an independent consumer of
+the same foundation; it is not a prerequisite for FP6. Target-independent
+packing does not establish gfx950 numerical support.
+
 
 First-class tensor-view/fragment IR nodes, arbitrary packed axes, masked partial
 tiles, concurrent packed stores, and scalar low-bit conversions are separate

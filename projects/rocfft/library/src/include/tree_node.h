@@ -1037,18 +1037,10 @@ public:
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
 
-    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    size_t GetU32IntegerLimit() const
-    {
-
-        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
-                                                         : static_cast<size_t>(UINT32_MAX);
-    };
-
     // Return the integer type for this node's kernel.
     KIntType GetKIntType() const
     {
-        auto idx_limit = GetU32IntegerLimit();
+        auto idx_limit = static_cast<size_t>(UINT32_MAX);
 
         // The strides and dists also have to fit, not just the indices the
         // kernel reaches.  A dist is packed into the argument buffer even

@@ -5,6 +5,7 @@
 
 #include "RMSNormShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
@@ -20,6 +21,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::rmsnorm;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_rmsnorm_ref_test;
 
 template <typename InputDataType,
@@ -41,10 +43,14 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
     auto outputCpu = Tensor<OutputDataType>(ioDims, layout);
     auto outputGpu = Tensor<OutputDataType>(ioDims, layout);
 
-    inputTensor.fillWithRandomValues(
-        static_cast<InputDataType>(-fillRange), static_cast<InputDataType>(fillRange), seed);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleDataType>(-fillRange), static_cast<ScaleDataType>(fillRange), seed + 1);
+    fillWithRandomValues(inputTensor,
+                         static_cast<InputDataType>(-fillRange),
+                         static_cast<InputDataType>(fillRange),
+                         seed);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleDataType>(-fillRange),
+                         static_cast<ScaleDataType>(fillRange),
+                         seed + 1);
 
     std::vector<int64_t> invRmsDims = ioDims;
     for(size_t i = 0; i < invRmsDims.size(); ++i)
@@ -63,9 +69,18 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
         = includeBias ? Tensor<ScaleDataType>(scaleDims, layout) : Tensor<ScaleDataType>({});
     if(includeBias)
     {
-        biasTensor.fillWithRandomValues(static_cast<ScaleDataType>(-fillRange),
-                                        static_cast<ScaleDataType>(fillRange),
-                                        seed + 2);
+        fillWithRandomValues(biasTensor,
+                             static_cast<ScaleDataType>(-fillRange),
+                             static_cast<ScaleDataType>(fillRange),
+                             seed + 2);
+    }
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+    scaleTensor.memory().hostData();
+    if(includeBias)
+    {
+        biasTensor.memory().hostData();
     }
 
     CpuFpReferenceRMSNorm::forward<InputDataType, ScaleDataType, OutputDataType, ComputeDataType>(

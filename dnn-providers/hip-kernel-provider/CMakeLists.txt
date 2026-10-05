@@ -432,13 +432,10 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # TheRock's test setup activates a virtual environment and installs the
-    # staged rocKE wheels before invoking CTest, so the focused installed Python
-    # checks can resolve both `python` and the rocKE packages. Defer the full
-    # platform pytest suite until the pinned TheRock supplies rocKE's NumPy and
-    # ml_dtypes component requirements.
+    # The pinned TheRock supplies NumPy and ml_dtypes and installs the staged
+    # rocKE wheels before invoking CTest, so the platform GPU tests can run.
     set(ROCKE_INSTALL_PYTHON_TESTS ON)
-    set(ROCKE_INSTALL_PLATFORM_PYTEST OFF)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
 
     add_subdirectory(rocke)
 else()
@@ -535,11 +532,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
-if(ENABLE_ASM_SDPA_ENGINE)
-    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
-            FILES_MATCHING PATTERN "*.co")
-endif()
+# .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The two descriptor trees are installed here and nowhere else. Every producer --

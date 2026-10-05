@@ -17,6 +17,9 @@ using namespace hipdnn_test_sdk::utilities::matmul;
 using namespace hipdnn_gpu_ref;
 using namespace gpu_matmul_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Valid configurations ---
 
 TEST(TestGpuMatmulRefValidation, AcceptsValidParams2D)
@@ -207,18 +210,22 @@ TEST(TestGpuMatmulRefValidation, HalfAFloatBFloatC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> aTensor({2, 3, 2});
+    Tensor<HalfType> aTensor({2, 3, 2});
     Tensor<float> bTensor({2, 2, 3});
     Tensor<float> cCpu({2, 3, 3});
     Tensor<float> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    bTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
 
-    GpuFpReferenceMatmul::matmul<half, float, float>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<half, float, float>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<HalfType, float, float>(aTensor, bTensor, cGpu);
+
+    CpuFpReferenceMatmul::matmul<HalfType, float, float>(aTensor, bTensor, cCpu);
 
     assertAllClose(cCpu, cGpu, getTolerance<float>(), "C");
 }
@@ -227,38 +234,47 @@ TEST(TestGpuMatmulRefValidation, HalfAFloatBHalfC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> aTensor({2, 3, 2});
+    Tensor<HalfType> aTensor({2, 3, 2});
     Tensor<float> bTensor({2, 2, 3});
-    Tensor<half> cCpu({2, 3, 3});
-    Tensor<half> cGpu({2, 3, 3});
+    Tensor<HalfType> cCpu({2, 3, 3});
+    Tensor<HalfType> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    bTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
 
-    GpuFpReferenceMatmul::matmul<half, float, half>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<half, float, half>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<HalfType, float, HalfType>(aTensor, bTensor, cGpu);
 
-    assertAllClose(cCpu, cGpu, getTolerance<half>(), "C");
+    CpuFpReferenceMatmul::matmul<HalfType, float, HalfType>(aTensor, bTensor, cCpu);
+
+    assertAllClose(cCpu, cGpu, getTolerance<HalfType>(), "C");
 }
 
 TEST(TestGpuMatmulRefValidation, HalfAHalfBFloatC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> aTensor({2, 3, 2});
-    Tensor<half> bTensor({2, 2, 3});
+    Tensor<HalfType> aTensor({2, 3, 2});
+    Tensor<HalfType> bTensor({2, 2, 3});
     Tensor<float> cCpu({2, 3, 3});
     Tensor<float> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    bTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
+    fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
-    GpuFpReferenceMatmul::matmul<half, half, float>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<half, half, float>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<HalfType, HalfType, float>(aTensor, bTensor, cGpu);
+
+    CpuFpReferenceMatmul::matmul<HalfType, HalfType, float>(aTensor, bTensor, cCpu);
 
     assertAllClose(cCpu, cGpu, getTolerance<float>(), "C");
 }
@@ -269,57 +285,71 @@ TEST(TestGpuMatmulRefValidation, FloatAFloatBHalfC)
 
     Tensor<float> aTensor({2, 3, 2});
     Tensor<float> bTensor({2, 2, 3});
-    Tensor<half> cCpu({2, 3, 3});
-    Tensor<half> cGpu({2, 3, 3});
+    Tensor<HalfType> cCpu({2, 3, 3});
+    Tensor<HalfType> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    bTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(aTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(bTensor, -1.0f, 1.0f, seed + 1);
 
-    GpuFpReferenceMatmul::matmul<float, float, half>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<float, float, half>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<float, float, HalfType>(aTensor, bTensor, cGpu);
 
-    assertAllClose(cCpu, cGpu, getTolerance<half>(), "C");
+    CpuFpReferenceMatmul::matmul<float, float, HalfType>(aTensor, bTensor, cCpu);
+
+    assertAllClose(cCpu, cGpu, getTolerance<HalfType>(), "C");
 }
 
 TEST(TestGpuMatmulRefValidation, HalfAHalfBHalfC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> aTensor({2, 3, 2});
-    Tensor<half> bTensor({2, 2, 3});
-    Tensor<half> cCpu({2, 3, 3});
-    Tensor<half> cGpu({2, 3, 3});
+    Tensor<HalfType> aTensor({2, 3, 2});
+    Tensor<HalfType> bTensor({2, 2, 3});
+    Tensor<HalfType> cCpu({2, 3, 3});
+    Tensor<HalfType> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
-    bTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
+    fillWithRandomValues(aTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    fillWithRandomValues(
+        bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
-    GpuFpReferenceMatmul::matmul<half, half, half>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<half, half, half>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<HalfType, HalfType, HalfType>(aTensor, bTensor, cGpu);
 
-    assertAllClose(cCpu, cGpu, getTolerance<half>(), "C");
+    CpuFpReferenceMatmul::matmul<HalfType, HalfType, HalfType>(aTensor, bTensor, cCpu);
+
+    assertAllClose(cCpu, cGpu, getTolerance<HalfType>(), "C");
 }
 
 TEST(TestGpuMatmulRefValidation, BfloatABfloatBFloatC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> aTensor({2, 3, 2});
-    Tensor<bfloat16> bTensor({2, 2, 3});
+    Tensor<BFloat16Type> aTensor({2, 3, 2});
+    Tensor<BFloat16Type> bTensor({2, 2, 3});
     Tensor<float> cCpu({2, 3, 3});
     Tensor<float> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
-    bTensor.fillWithRandomValues(
-        static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed + 1);
+    fillWithRandomValues(
+        aTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    fillWithRandomValues(
+        bTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed + 1);
 
-    GpuFpReferenceMatmul::matmul<bfloat16, bfloat16, float>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<bfloat16, bfloat16, float>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<BFloat16Type, BFloat16Type, float>(aTensor, bTensor, cGpu);
+
+    CpuFpReferenceMatmul::matmul<BFloat16Type, BFloat16Type, float>(aTensor, bTensor, cCpu);
 
     assertAllClose(cCpu, cGpu, getTolerance<float>(), "C");
 }
@@ -328,31 +358,37 @@ TEST(TestGpuMatmulRefValidation, BFloat16AHalfBBfloatC)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> aTensor({2, 3, 2});
-    Tensor<half> bTensor({2, 2, 3});
-    Tensor<bfloat16> cCpu({2, 3, 3});
-    Tensor<bfloat16> cGpu({2, 3, 3});
+    Tensor<BFloat16Type> aTensor({2, 3, 2});
+    Tensor<HalfType> bTensor({2, 2, 3});
+    Tensor<BFloat16Type> cCpu({2, 3, 3});
+    Tensor<BFloat16Type> cGpu({2, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    aTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
-    bTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed + 1);
+    fillWithRandomValues(
+        aTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    fillWithRandomValues(
+        bTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed + 1);
 
-    GpuFpReferenceMatmul::matmul<bfloat16, half, bfloat16>(aTensor, bTensor, cGpu);
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    aTensor.memory().hostData();
+    bTensor.memory().hostData();
 
-    CpuFpReferenceMatmul::matmul<bfloat16, half, bfloat16>(aTensor, bTensor, cCpu);
+    GpuFpReferenceMatmul::matmul<BFloat16Type, HalfType, BFloat16Type>(aTensor, bTensor, cGpu);
 
-    assertAllClose(cCpu, cGpu, getTolerance<bfloat16>(), "C");
+    CpuFpReferenceMatmul::matmul<BFloat16Type, HalfType, BFloat16Type>(aTensor, bTensor, cCpu);
+
+    assertAllClose(cCpu, cGpu, getTolerance<BFloat16Type>(), "C");
 }
 
 // --- Test suite instantiations ---
 
 using TestGpuMatmulRefPureFp32 = MatmulPureShapeSuite<float>;
-using TestGpuMatmulRefPureFp16 = MatmulPureShapeSuite<half>;
-using TestGpuMatmulRefPureBfp16 = MatmulPureShapeSuite<bfloat16>;
-using TestGpuMatmulRefMixedFp16 = MatmulMixedShapeSuite<half>;
-using TestGpuMatmulRefMixedBfp16 = MatmulMixedShapeSuite<bfloat16>;
-using TestGpuMatmulRefUpcastFp16 = MatmulUpcastShapeSuite<half>;
-using TestGpuMatmulRefUpcastBfp16 = MatmulUpcastShapeSuite<bfloat16>;
+using TestGpuMatmulRefPureFp16 = MatmulPureShapeSuite<HalfType>;
+using TestGpuMatmulRefPureBfp16 = MatmulPureShapeSuite<BFloat16Type>;
+using TestGpuMatmulRefMixedFp16 = MatmulMixedShapeSuite<HalfType>;
+using TestGpuMatmulRefMixedBfp16 = MatmulMixedShapeSuite<BFloat16Type>;
+using TestGpuMatmulRefUpcastFp16 = MatmulUpcastShapeSuite<HalfType>;
+using TestGpuMatmulRefUpcastBfp16 = MatmulUpcastShapeSuite<BFloat16Type>;
 
 TEST_P(TestGpuMatmulRefPureFp32, MatchesCpuRef)
 {
@@ -694,8 +730,12 @@ TEST(TestGpuMatmulRefEdgeCaseValidation, DISABLED_BeyondInt32MatrixIfMemoryAllow
     Tensor<float> cGpu({M, N});
 
     const unsigned int seed = getGlobalTestSeed();
-    a.fillWithRandomValues(-1.0f, 1.0f, seed);
-    b.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(a, -1.0f, 1.0f, seed);
+    fillWithRandomValues(b, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    a.memory().hostData();
+    b.memory().hostData();
 
     CpuFpReferenceMatmul::matmul(a, b, cCpu);
     GpuFpReferenceMatmul::matmul(a, b, cGpu);
