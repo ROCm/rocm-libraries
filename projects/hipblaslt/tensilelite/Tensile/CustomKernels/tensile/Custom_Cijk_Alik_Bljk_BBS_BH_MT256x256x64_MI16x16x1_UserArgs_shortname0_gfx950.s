@@ -1412,7 +1412,10 @@ s_xor_b32 s[sgprLocalWriteAddrA], s[sgprSwapA], s[sgprLocalWriteAddrA] // swap R
 /* local write swap b */
 s_xor_b32 s[sgprLocalWriteAddrB], s[sgprSwapB], s[sgprLocalWriteAddrB] // swap Red Blk SGPR
 s_cmp_eq_u32 s[sgprLoopCounterL], 0x1              // PGR=2 but only 1 loop
-s_cbranch_scc1 label_skipPGR2                      // PGR=2 but only 1 loop
+s_cbranch_scc0 label_PrefetchGlobalRead2           // Issue the second prefetch when present.
+s_waitcnt vmcnt(0)                                // Complete the only prefetch before LDS reads.
+s_branch label_skipPGR2
+label_PrefetchGlobalRead2:
 s_mov_b32 m0, s[sgprLocalWriteAddrA]               // m0 <- LDS write address
 
 buffer_load_dwordx4 v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0, lds // G -> Reg 0_0_0_0
@@ -2376,6 +2379,7 @@ s_cbranch_scc1 label_OptNLL_End                    // jump if edges required
 
   
 /*  mfmaIndex:0  */
+s_waitcnt lgkmcnt(0) // Complete LDS reads before the optimized final loop.
 v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+3], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+3], acc[0:3] // left value = acc[0+0:3+0]
 ds_read_b128 v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], v[vgprLocalReadAddrA] offset:64 // L -> Reg lro=32 swapByteOffset=0 ti=256 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0
 
