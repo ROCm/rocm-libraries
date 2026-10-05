@@ -2214,6 +2214,271 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
+/******************** GEQRF_BATCHED ********************/
+hipsolverStatus_t hipsolverSgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, float* A[], int lda, int* lwork, int batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgeqrfBatched_bufferSize(
+    hipsolverHandle_t handle, int m, int n, double* A[], int lda, int* lwork, int batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipFloatComplex*  A[],
+                                                    int               lda,
+                                                    int*              lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgeqrfBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               m,
+                                                    int               n,
+                                                    hipDoubleComplex* A[],
+                                                    int               lda,
+                                                    int*              lwork,
+                                                    int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+    if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+
+    *lwork = 0;
+    return HIPSOLVER_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverSgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         float*            A[],
+                                         int               lda,
+                                         float*            tau[],
+                                         float*            work,
+                                         int               lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasSgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         double*           A[],
+                                         int               lda,
+                                         double*           tau[],
+                                         double*           work,
+                                         int               lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(
+        cublasDgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipFloatComplex*  A[],
+                                         int               lda,
+                                         hipFloatComplex*  tau[],
+                                         hipFloatComplex*  work,
+                                         int               lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasCgeqrfBatched(
+        dn->blas_handle, m, n, (cuComplex**)A, lda, (cuComplex**)tau, &info, batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
+hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t handle,
+                                         int               m,
+                                         int               n,
+                                         hipDoubleComplex* A[],
+                                         int               lda,
+                                         hipDoubleComplex* tau[],
+                                         hipDoubleComplex* work,
+                                         int               lwork,
+                                         int*              hInfo,
+                                         int               batch_count)
+try
+{
+    if(!handle)
+        return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
+    return hipsolver::cuda2hip_status(cublasZgeqrfBatched(dn->blas_handle,
+                                                          m,
+                                                          n,
+                                                          (cuDoubleComplex**)A,
+                                                          lda,
+                                                          (cuDoubleComplex**)tau,
+                                                          &info,
+                                                          batch_count));
+}
+catch(...)
+{
+    return hipsolver::exception2hip_status();
+}
+
 /******************** GESV ********************/
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSSgesv_bufferSize(hipsolverHandle_t handle,
                                                               int               n,
