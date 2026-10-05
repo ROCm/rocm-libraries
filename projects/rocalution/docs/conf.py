@@ -42,10 +42,10 @@ html_theme = "rocm_docs_theme"
 html_theme_options = {
     "flavor": "rocm",
     "repository_url": "https://github.com/ROCm/rocm-libraries",
-    "repository_branch": "develop",
     "path_to_docs": "projects/rocalution/docs",
     "use_repository_button": True,
     "use_issues_button": True,
-    "use_source_button": True,
     "use_download_button": True,
 }
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
