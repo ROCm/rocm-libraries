@@ -53,13 +53,29 @@
           "32_3_1_14_fp32_nhwc_00ba43"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
             "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
@@ -81,6 +97,7 @@
           "2_3_1_1_fp32_nchw",
           "2_3_1_1_fp32_nhwc",
           "2_3_1_bfp16_ncl",
+          "2_3_1_bfp16_ncl_cd34ad",
           "2_3_1_bfp16_nlc",
           "2_3_1_fp16_ncl",
           "2_3_1_fp16_nlc",
@@ -106,24 +123,30 @@
           "32_3_1_14_fp32_nhwc"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1030": [
             "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
             "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "2_3_1_bfp16_ncl_cd34ad"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
