@@ -175,6 +175,11 @@ Definitions:
   <<: *conversion_shared
   indextype: *i32i32_i64i32_i64i64
 
+- &conversion_shared_spsort
+  <<: *conversion_shared
+  batch_count_A: [1, 4]
+  batch_count_B: [4]
+
 - &conversion_shared_formats
   <<: *conversion_shared
   <<: *formats
@@ -338,6 +343,7 @@ Tests:
     - sparse_to_dense_csr: *conversion_shared_mixed_index
     - sparse_to_sparse: *conversion_shared_formats
     - coosort: *conversion_shared
+    - spsort_coo: *conversion_shared_spsort
     - csrsort: *conversion_shared
     - cscsort: *conversion_shared
     - identity: *conversion_shared
