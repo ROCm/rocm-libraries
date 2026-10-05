@@ -44,6 +44,8 @@ html_theme_options = {
     "use_issues_button": True,
     "use_download_button": True,
 }
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
 
 external_projects_current_project = "hipthreads"
 
