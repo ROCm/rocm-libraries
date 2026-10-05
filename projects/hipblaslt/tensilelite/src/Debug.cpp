@@ -210,6 +210,13 @@ namespace TensileLite
         m_excludedFromGetAll = excludedSet;
     }
 
+    Debug& Debug::Instance()
+    {
+        static Debug instance;
+
+        return instance;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)

@@ -98,6 +98,11 @@ endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
 
+if(HIPBLASLT_ENABLE_YAML)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
+
 # LaunchDimGuard_test asserts different outcomes for a cluster launch depending
 # on whether SolutionAdapter::launchKernel was compiled with the cluster path,
 # so it needs the same answer the library got. Reuses the cached result of the
