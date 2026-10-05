@@ -42,6 +42,7 @@ import torch
 
 from builders.gfx950.gdn.gdn_decode import (
     TOL,
+    drain,
     launch,
     launcher_for,
     make_inputs,
@@ -187,7 +188,7 @@ def correctness_error(spec: GdnDecodeSpec, inp, batch: int) -> float:
     launcher = launcher_for(spec, arch=ARCH)
     values, cfg = prepare(spec, inp, batch)
     launch(launcher, values, cfg)
-    torch.cuda.synchronize()
+    drain()
     written = inp["write_indices"].long()
     return max(
         (values["out"].float() - ref_out).abs().max().item(),
@@ -207,6 +208,7 @@ def eager_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 200) -> float:
         call()
         torch.cuda.synchronize()
         samples.append((time.perf_counter_ns() - start) / 1e3)
+    drain()
     return statistics.median(samples)
 
 
@@ -226,7 +228,7 @@ def device_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 64) -> float | N
             f"    graph capture unavailable: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        torch.cuda.synchronize()
+        drain()
         return None
     for _ in range(5):
         graph.replay()
@@ -240,6 +242,7 @@ def device_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 64) -> float | N
         end.record()
         torch.cuda.synchronize()
         best = min(best, start.elapsed_time(end) * 1e3 / reps)
+    drain()
     return best
 
 

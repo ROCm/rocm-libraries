@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.StreamK import StreamKHybrid, streamKVariantClass
+from Tensile.Components.StreamK import StreamKHybrid
+from Tensile.Components.WorkAssignment import Hybrid
+from Tensile.ExecutionPolicy import normalize_execution_policy
 
 from rocisa.code import Module, RegSet
 
@@ -21,8 +23,8 @@ SK5_KERNARG_ALIASES = [
 ]
 
 SK5_PERSISTENT_ALIASES = [
-    ("sgprStreamKIter", "sgprStreamKTileIdx", 0),
-    ("sgprStreamKIterEnd", "sgprStreamKPartialIdx", 0),
+    ("sgprPersistentIteration", "sgprStreamKTileIdx", 0),
+    ("sgprPersistentIterationEnd", "sgprStreamKPartialIdx", 0),
 ]
 
 
@@ -36,7 +38,7 @@ def mock_streamk_writer():
 
     def _factory(streamk: int) -> MagicMock:
         writer = MagicMock()
-        writer.states = SimpleNamespace(kernel={"StreamK": streamk})
+        writer.states = SimpleNamespace(kernel=normalize_execution_policy({"StreamK": streamk}))
         return writer
 
     return _factory
@@ -44,7 +46,8 @@ def mock_streamk_writer():
 
 def emit_mode_extraction_module():
     writer = MagicMock()
-    return StreamKHybrid._emitModeExtraction(StreamKHybrid, writer, {"StreamK": 5})
+    kernel = normalize_execution_policy({"StreamK": 5})
+    return Hybrid().extractMode(writer, kernel)
 
 
 def reg_name(reg) -> str:
@@ -68,7 +71,7 @@ def setup_kwa_for_sk5_aliases() -> KernelWriterAssembly:
         "Beta": 22,
     }
     kwa.states = SimpleNamespace(
-        streamK=streamKVariantClass(5)(),
+        tileProcessing=StreamKHybrid(),
         startVgprSerial=0,
         numVgprBuffer=1,
         mxsa=SimpleNamespace(
@@ -152,7 +155,7 @@ def collect_sk5_regset_aliases() -> list[tuple[str, str, int]]:
 
     def patched_add(self, item):
         captured.append(item)
-        if isinstance(item, RegSet) and item.name == "sgprStreamKIterEnd":
+        if isinstance(item, RegSet) and item.name == "sgprPersistentIterationEnd":
             raise _StopAfterSk5Aliases()
         return orig_add(self, item)
 
