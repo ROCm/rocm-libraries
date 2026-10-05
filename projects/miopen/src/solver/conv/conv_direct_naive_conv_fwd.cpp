@@ -81,6 +81,13 @@ bool ConvDirectNaiveConvFwd::IsApplicable(const ExecutionContext& ctx,
     return true;
 }
 
+SolverSpeedClass ConvDirectNaiveConvFwd::GetSpeedClass(const ExecutionContext& ctx,
+                                                       const ProblemDescription& problem) const
+{
+    return ConvDirectNaiveConvExceedsWorkLimit(ctx, problem) ? SolverSpeedClass::ExceedsLaunchBudget
+                                                             : SolverSpeedClass::Normal;
+}
+
 ConvSolution ConvDirectNaiveConvFwd::GetSolution(const ExecutionContext& ctx,
                                                  const ProblemDescription& problem) const
 {

@@ -32,9 +32,13 @@
 #include <miopen/invoke_params.hpp>
 #include <miopen/problem_description_base.hpp>
 #include <miopen/search_options.hpp>
+#include <miopen/solver.hpp>
 #include <miopen/solver_id.hpp>
 
+#include <map>
 #include <memory>
+#include <set>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -164,14 +168,30 @@ struct FindCoreResult
     bool is_optimal;
 };
 
-std::vector<Solution> EvaluateInvokers(const Handle& handle,
-                                       const std::vector<solver::ConvSolution>& solutions,
-                                       const AlgorithmName& algorithm_name,
-                                       const NetworkConfig& network_config,
-                                       const AnyInvokeParams& invoke_ctx,
-                                       FindCoreResult& core_result,
-                                       bool force_attach_binary,
-                                       bool& non_naive_succeeded);
+/// Whether the solver speed-class policy is active (MIOPEN_DEBUG_DEFER_SLOW_SOLVERS,
+/// default on). Exposed so Find and immediate mode consult one definition; when it is off
+/// both behave as though SolverSpeedClass did not exist.
+MIOPEN_INTERNALS_EXPORT bool IsDeferSlowSolversEnabled();
+
+std::vector<Solution>
+EvaluateInvokers(const Handle& handle,
+                 const std::vector<solver::ConvSolution>& solutions,
+                 const AlgorithmName& algorithm_name,
+                 const NetworkConfig& network_config,
+                 const AnyInvokeParams& invoke_ctx,
+                 FindCoreResult& core_result,
+                 bool force_attach_binary,
+                 /// What each solver reported from
+                 /// SolverInterface::GetSpeedClass for this problem. Only
+                 /// non-Normal entries need to be present; anything absent
+                 /// is treated as Normal, so an empty map disables the
+                 /// policy entirely.
+                 const std::map<std::string, solver::SolverSpeedClass>& speed_classes = {},
+                 /// The worst class to benchmark: solvers in a worse class
+                 /// are skipped. Callers pass the best class that has an
+                 /// applicable member, so a sole candidate is never
+                 /// dropped however slow it declares itself to be.
+                 solver::SolverSpeedClass benchmark_class = solver::SolverSpeedClass::Normal);
 
 FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const ExecutionContext& ctx,

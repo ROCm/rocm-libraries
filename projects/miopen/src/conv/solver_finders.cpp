@@ -4,23 +4,27 @@
 #include <miopen/conv/solver_finders.hpp>
 
 #include <algorithm>
-#include <chrono>
+#include <map>
 #include <numeric>
-#include <thread>
+#include <set>
+#include <string>
 
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/hipoc_kernel.hpp>
 
 #include <hip/hip_runtime.h>
+#include <miopen/any_solver.hpp>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
+#include <miopen/generic_search_controls.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/solution.hpp>
 #include <miopen/utility/modified_z.hpp>
 
@@ -30,15 +34,19 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_WINOGRAD)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_FFT)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEVICE_ARCH)
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_TIMEOUT, true)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_NAIVE_TIMEOUT_FACTOR, 300)
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
+// MIOPEN_DEBUG_COMPILE_ONLY and MIOPEN_SEARCH_CUTOFF come from generic_search_controls.hpp.
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
+
+/// Master kill switch for the whole speed-class mechanism. Default on; set to 0 to restore
+/// the pre-gate behaviour of benchmarking and offering every applicable solver regardless
+/// of how slow it declares itself to be. Present so that a mis-classification -- a solver
+/// deferred on a shape where it was in fact the right choice -- is a one-variable
+/// workaround rather than a rebuild, at the cost of re-exposing the watchdog reset (TDR)
+/// this mechanism exists to prevent.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DEFER_SLOW_SOLVERS)
 
 namespace miopen {
 
@@ -211,156 +219,88 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 
 } // namespace conv
 
-namespace {
+bool IsDeferSlowSolversEnabled() { return !env::disabled(MIOPEN_DEBUG_DEFER_SLOW_SOLVERS); }
 
-struct NaiveWarmup
+/// The speed class a solver reported for this problem, defaulting to Normal for anything
+/// the caller did not record (which is everything, when the policy is disabled).
+static solver::SolverSpeedClass
+SpeedClassOf(const std::map<std::string, solver::SolverSpeedClass>& speed_classes,
+             const std::string& solver_id)
 {
-    enum class Status
-    {
-        Completed,
-        TimedOut,
-        ScratchUnavailable,
-        UnsupportedInvokeParams,
-    };
-
-    Status status;
-    float elapsed;
-};
-
-/// Redirects the handle onto a tracker-owned stream with profiling off, restoring
-/// both on scope exit so no early return can strand the handle off the root stream.
-struct AutoExclusiveStream
-{
-    AutoExclusiveStream(const Handle& h, hipStream_t stream)
-        : handle(h), prev_profiling(h.IsProfilingEnabled())
-    {
-        handle.SetExclusiveStream(stream);
-        handle.EnableProfiling(false);
-    }
-
-    ~AutoExclusiveStream()
-    {
-        handle.SetExclusiveStream(nullptr);
-        handle.EnableProfiling(prev_profiling);
-    }
-
-    AutoExclusiveStream(const AutoExclusiveStream&)            = delete;
-    AutoExclusiveStream& operator=(const AutoExclusiveStream&) = delete;
-
-private:
-    const Handle& handle;
-    bool prev_profiling;
-};
-
-std::string NaiveSkipReason(NaiveWarmup::Status status, float best_time)
-{
-    switch(status)
-    {
-    case NaiveWarmup::Status::TimedOut:
-        return "exceeded " + std::to_string(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) +
-               "% of best non-naive time (" + std::to_string(best_time) + " ms)";
-    case NaiveWarmup::Status::ScratchUnavailable:
-        return "output tensor exceeds the scratch buffer cap";
-    case NaiveWarmup::Status::UnsupportedInvokeParams:
-        return "invoke params type does not support scratch redirection";
-    case NaiveWarmup::Status::Completed: break;
-    }
-    return "completed";
+    const auto it = speed_classes.find(solver_id);
+    return it == speed_classes.end() ? solver::SolverSpeedClass::Normal : it->second;
 }
 
-} // namespace
-
-static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
-                                       const Invoker& invoker,
-                                       const AnyInvokeParams& invoke_ctx,
-                                       float best_time)
+/// Decide whether a solver should be skipped -- i.e. not executed at all in Find's
+/// mini-benchmark -- because something better-classed is available.
+///
+/// Why this exists: some solvers are deliberately *applicable* far outside the region
+/// where they are a sensible choice. Naive convolution is MIOpen's universal fallback and
+/// must stay applicable at any problem size, but its kernel is un-tiled, so on a large
+/// problem a single launch runs for multiple seconds. Explicit GEMM stays applicable into
+/// shapes where im2col expansion and per-batch BLAS calls make it wildly uncompetitive.
+/// Find times every applicable solver by actually *executing* it, so merely benchmarking
+/// such a solver costs real time -- and in the naive case trips the OS GPU watchdog
+/// (a TDR / driver reset) even when a fast solver also applies and would ultimately win.
+/// The solver does not have to be *selected* to cause the hang; being *benchmarked* is
+/// enough.
+///
+/// A solver classifies itself via SolverInterface::GetSpeedClass(ctx, problem), which sees
+/// the concrete problem and the device. That keeps the *criterion* with the solver that
+/// understands it (MAC work vs. a device-derived limit for naive, arch-aware shape
+/// heuristics for GEMM) while this function owns the one thing a per-solver hook cannot
+/// see: what else is available.
+///
+/// The rule is a single comparison: benchmark everything in the best (lowest) class that
+/// has an applicable member, skip everything worse. benchmark_class is that class,
+/// computed by the caller over the full solution list across *all* algorithms and *before*
+/// workspace filtering -- so a fast-but-workspace-limited alternative still counts, which
+/// is what closes the leak where the alternative never gets to time itself.
+///
+/// Consequences of that one rule (the whole policy in one place):
+///   * Any Normal candidate exists -> every deferred solver is skipped and behaviour is
+///     exactly as if this mechanism did not exist.
+///   * No Normal, several Slow -> all the Slow ones are benchmarked and the least slow
+///     wins on measurement. Deferral ranks candidates; it does not discard a whole tier
+///     in favour of an arbitrary survivor.
+///   * Only ExceedsLaunchBudget left -> it is benchmarked, preserving the universal-
+///     fallback guarantee. A huge sole-naive shape may then still TDR -- an honest
+///     "extend coverage here" signal we deliberately do not mask.
+///   * Crucially, Slow and ExceedsLaunchBudget are *separate* classes rather than one
+///     "slow" flag, so a merely wasteful solver outranks a watchdog risk: naive is never
+///     launched just because GEMM also declared itself off the pace. With a single flag
+///     that case -- all candidates slow, which is most likely exactly when the problem is
+///     huge -- would have fallen through the gate and launched naive anyway.
+///   * A solver outside its deferred regime (Normal) competes and wins on merit wherever
+///     it is fastest. For naive this notably covers *all* real depthwise convs
+///     (group == C == K => c_per_group == 1 => ~C x less work), which never approach the
+///     work limit and for which naive is often the fastest option: they keep competing
+///     with no special case.
+///
+/// This is deliberately a *pre-launch* gate. Bounding how long Find *waits* on a slow
+/// solver cannot avert a TDR, because the dispatch has already happened and the kernel
+/// keeps occupying the GPU after the wait is abandoned -- which is exactly what the OS
+/// watchdog measures.
+///
+/// Golden references are unaffected: GpuConvReference compiles and launches the naive
+/// kernel directly, bypassing the solver framework, so verification never reaches here.
+static bool ShouldSkipSlowBenchmark(solver::SolverSpeedClass speed_class,
+                                    solver::SolverSpeedClass benchmark_class)
 {
-    std::shared_ptr<ScratchAllocation> scratch;
-    AnyInvokeParams scratch_ctx;
-
-    if(invoke_ctx.IsOfType<conv::DataInvokeParams>())
-    {
-        auto params = invoke_ctx.CastTo<conv::DataInvokeParams>();
-        scratch     = handle.GetScratchBuffer(params.tensors.outDesc.GetNumBytes());
-        if(!scratch)
-            return {NaiveWarmup::Status::ScratchUnavailable, 0.0f};
-        params.tensors.out = scratch->buffer.get();
-        scratch_ctx        = AnyInvokeParams{params};
-    }
-    else if(invoke_ctx.IsOfType<conv::WrWInvokeParams>())
-    {
-        auto params = invoke_ctx.CastTo<conv::WrWInvokeParams>();
-        scratch     = handle.GetScratchBuffer(params.tensors.dwDesc.GetNumBytes());
-        if(!scratch)
-            return {NaiveWarmup::Status::ScratchUnavailable, 0.0f};
-        params.tensors.dw = scratch->buffer.get();
-        scratch_ctx       = AnyInvokeParams{params};
-    }
-    else
-        return {NaiveWarmup::Status::UnsupportedInvokeParams, 0.0f};
-
-    auto& tracker = handle.GetStreamTracker();
-    auto slot     = tracker.acquire(handle);
-    slot.scratch  = scratch;
-
-    AutoExclusiveStream stream_guard{handle, slot.stream};
-
-    HipEventPtr ev_start = make_hip_event();
-    HipEventPtr ev_stop  = make_hip_event();
-
-    try
-    {
-        auto ev_status = hipEventRecord(ev_start.get(), slot.stream);
-        if(ev_status != hipSuccess)
-            MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive start event");
-        invoker(handle, scratch_ctx);
-        ev_status = hipEventRecord(ev_stop.get(), slot.stream);
-        if(ev_status != hipSuccess)
-            MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive stop event");
-    }
-    catch(...)
-    {
-        tracker.abandon(slot);
-        throw;
-    }
-
-    const float timeout_factor =
-        static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
-    const float naive_budget = best_time * timeout_factor;
-    const auto deadline      = std::chrono::steady_clock::now() +
-                          std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
-    bool finished = false;
-    while(std::chrono::steady_clock::now() < deadline)
-    {
-        if(hipEventQuery(ev_stop.get()) == hipSuccess)
-        {
-            finished = true;
-            break;
-        }
-        std::this_thread::yield();
-    }
-
-    if(finished)
-    {
-        tracker.release(slot);
-        float warmup_elapsed = 0.0f;
-        (void)hipEventElapsedTime(&warmup_elapsed, ev_start.get(), ev_stop.get());
-        return {NaiveWarmup::Status::Completed, warmup_elapsed};
-    }
-
-    tracker.abandon(slot);
-    return {NaiveWarmup::Status::TimedOut, 0.0f};
+    return speed_class > benchmark_class;
 }
 
 /// Register invoker only for the best solution within algorithm.
-std::vector<Solution> EvaluateInvokers(const Handle& handle,
-                                       const std::vector<solver::ConvSolution>& solutions,
-                                       const AlgorithmName& algorithm_name,
-                                       const NetworkConfig& network_config,
-                                       const AnyInvokeParams& invoke_ctx,
-                                       FindCoreResult& core_result,
-                                       bool force_attach_binary,
-                                       bool& non_naive_succeeded)
+std::vector<Solution>
+EvaluateInvokers(const Handle& handle,
+                 const std::vector<solver::ConvSolution>& solutions,
+                 const AlgorithmName& algorithm_name,
+                 const NetworkConfig& network_config,
+                 const AnyInvokeParams& invoke_ctx,
+                 FindCoreResult& core_result,
+                 bool force_attach_binary,
+                 const std::map<std::string, solver::SolverSpeedClass>& speed_classes,
+                 solver::SolverSpeedClass benchmark_class)
 {
     std::vector<Solution> ret;
 
@@ -368,39 +308,44 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
-    const auto is_naive_solver = [](const solver::ConvSolution& s) {
-        return s.solver_id.find("Naive") != std::string::npos;
+    const auto speed_class_of = [&](const solver::ConvSolution& s) {
+        return SpeedClassOf(speed_classes, s.solver_id);
     };
 
-    bool naive_timeout       = env::value(MIOPEN_NAIVE_TIMEOUT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
-    // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
-    const bool defer_naive =
-        naive_timeout &&
-        (non_naive_succeeded || std::any_of(solutions.begin(), solutions.end(), [&](const auto& s) {
-             return !is_naive_solver(s);
-         }));
+
     auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
     auto best         = std::numeric_limits<float>::max();
     auto best_invoker = Invoker{};
     std::vector<float> samples;
 
-    // Iterate non-Naive solutions first, Naive last
+    // Benchmark in speed-class order, best first, so that the cheap candidates establish
+    // find_search_best_time (and hence the measured-time cutoff below) before an expensive
+    // one is timed against it. Stable, so solvers within a class keep finder order.
     std::vector<std::size_t> order(solutions.size());
     std::iota(order.begin(), order.end(), 0);
-    if(defer_naive)
-    {
-        std::stable_partition(order.begin(), order.end(), [&](std::size_t i) {
-            return !is_naive_solver(solutions[i]);
-        });
-    }
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return speed_class_of(solutions[a]) < speed_class_of(solutions[b]);
+    });
 
     for(std::size_t idx : order)
     {
         const auto& sol = solutions[idx];
 
-        const bool is_naive     = is_naive_solver(sol);
-        const bool cutoff_naive = defer_naive && is_naive && non_naive_succeeded;
+        const auto speed_class = speed_class_of(sol);
+        if(ShouldSkipSlowBenchmark(speed_class, benchmark_class))
+        {
+            MIOPEN_LOG_I("Skipping last-resort (slow) Solver: " << algorithm_name.ToString() << ":"
+                                                                << sol.solver_id);
+            continue;
+        }
+        if(speed_class != solver::SolverSpeedClass::Normal)
+        {
+            // A last-resort solver is being benchmarked anyway because nothing better-classed
+            // applies. Name the reason so this reads as an expected retention, not an anomaly.
+            MIOPEN_LOG_I("Retaining last-resort (slow) Solver (no better alternative applies): "
+                         << algorithm_name.ToString() << ":" << sol.solver_id);
+        }
 
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
@@ -469,22 +414,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             int i                           = 0;
             samples.clear();
 
-            if(cutoff_naive)
-            {
-                const auto warmup = TryNaiveWithTimeout(
-                    handle, invoker, invoke_ctx, core_result.find_search_best_time);
-                if(warmup.status != NaiveWarmup::Status::Completed)
-                {
-                    MIOPEN_LOG_I(
-                        "Skipped naive solver "
-                        << algorithm_name.ToString() << ":" << sol.solver_id << ": "
-                        << NaiveSkipReason(warmup.status, core_result.find_search_best_time));
-                    continue;
-                }
-                first_elapsed = warmup.elapsed;
-                i             = 1;
-            }
-
             while(i < N_RUNS_MAX && elapsed < TIME_MS_MAX)
             {
                 invoker(handle, invoke_ctx);
@@ -551,8 +480,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             else
                 solution.SetInvoker(invoker, {}, {});
             ret.emplace_back(std::move(solution));
-            if(!is_naive)
-                non_naive_succeeded = true;
         }
         catch(const miopen::Exception& ex)
         {
@@ -635,21 +562,85 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     ret.solutions.reserve(total);
 
-    bool non_naive_succeeded = false;
-    for(const auto& ss : solutions)
+    // Ask every candidate how far off the pace it considers itself for *this* problem on
+    // *this* device (SolverInterface::GetSpeedClass), and record the ones that are not
+    // Normal. Computed here rather than inside EvaluateInvokers for two reasons:
+    // EvaluateInvokers sees one algorithm group at a time, whereas "what is the best class
+    // available" is a question about the whole candidate set; and this evaluates
+    // GetSpeedClass once per solver instead of once per benchmark iteration.
+    //
+    // The scan runs over the full solution list *before* per-solver workspace filtering,
+    // so a fast-but-workspace-limited alternative still counts and the deferred solver is
+    // skipped rather than benchmarked -- that is the leak this closes, since otherwise the
+    // alternative never gets to time itself and the deferred solver runs anyway.
+    //
+    // Non-conv (fusion) problems yield nullptr and leave the map empty, making the whole
+    // mechanism inert for them -- as does MIOPEN_DEBUG_DEFER_SLOW_SOLVERS=0. An empty map
+    // means every candidate reads back as Normal, so classes_present is {Normal}, the loop
+    // below runs exactly once and nothing is skipped: the pre-gate behaviour, restored by
+    // not gathering the data rather than by a second code path.
+    std::map<std::string, solver::SolverSpeedClass> speed_classes;
+    const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
+    if(conv_problem != nullptr && IsDeferSlowSolversEnabled())
     {
-        auto evaluated = EvaluateInvokers(handle,
-                                          ss.second,
-                                          ss.first,
-                                          network_config,
-                                          invoke_ctx,
-                                          ret,
-                                          force_attach_binary,
-                                          non_naive_succeeded);
+        for(const auto& group : solutions)
+        {
+            for(const auto& s : group.second)
+            {
+                const auto any = solver::Id{s.solver_id}.GetSolver();
+                if(any.IsEmpty())
+                    continue;
+                const auto speed_class = any.GetSpeedClass(ctx, *conv_problem);
+                if(speed_class != solver::SolverSpeedClass::Normal)
+                    speed_classes.emplace(s.solver_id, speed_class);
+            }
+        }
+    }
 
-        ret.solutions.insert(ret.solutions.end(),
-                             std::make_move_iterator(evaluated.begin()),
-                             std::make_move_iterator(evaluated.end()));
+    // The distinct classes present among the candidates, ascending (std::set is ordered),
+    // i.e. the sequence of benchmark_class values to try. Normally this is just {Normal}
+    // and the loop below runs once.
+    std::set<solver::SolverSpeedClass> classes_present;
+    for(const auto& group : solutions)
+        for(const auto& s : group.second)
+            classes_present.insert(SpeedClassOf(speed_classes, s.solver_id));
+    if(classes_present.empty())
+        classes_present.insert(solver::SolverSpeedClass::Normal);
+
+    // Universal-fallback guarantee. The gate benchmarks only the best class present, but
+    // applicability is not success: every candidate in that class can still be rejected at
+    // evaluation (e.g. insufficient workspace). If that leaves no solution at all, we would
+    // otherwise fail the convolution outright even though a deferred solver could have
+    // served it. So descend one class at a time until something survives -- one class, not
+    // straight to "gate off", because dropping from Slow to ExceedsLaunchBudget wholesale
+    // is exactly the watchdog risk the classes exist to order. Past the first iteration
+    // this only triggers in the rare empty-result case, and the already-rejected candidates
+    // are re-rejected cheaply (workspace-filtered before any kernel launch).
+    for(const auto benchmark_class : classes_present)
+    {
+        for(const auto& ss : solutions)
+        {
+            auto evaluated = EvaluateInvokers(handle,
+                                              ss.second,
+                                              ss.first,
+                                              network_config,
+                                              invoke_ctx,
+                                              ret,
+                                              force_attach_binary,
+                                              speed_classes,
+                                              benchmark_class);
+
+            ret.solutions.insert(ret.solutions.end(),
+                                 std::make_move_iterator(evaluated.begin()),
+                                 std::make_move_iterator(evaluated.end()));
+        }
+
+        if(!ret.solutions.empty())
+            break;
+
+        if(benchmark_class != *classes_present.rbegin())
+            MIOPEN_LOG_I("No solver survived evaluation; descending to the next (slower) "
+                         "speed class as a fallback.");
     }
 
     return ret;
@@ -657,37 +648,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
 namespace conv {
 
-namespace detail {
-/// Determine if problem size exceeds threshold for Direct solver.
-///
-/// The result tensor is used to estimate problem size.
-/// The maximum size is determined by MIOPEN_CONV_DIRECT_MAX_SIZE environment variable.
-///
-/// @param problem The convolution problem description.
-bool IsDirectProblemTooLarge(const ProblemDescription& problem)
-{
-    const unsigned long long max_size = env::value(MIOPEN_CONV_DIRECT_MAX_SIZE);
-    // 0 means no limit
-    if(max_size == 0)
-        return false;
-
-    // For FWD/BWD: 'out' is the result (swapped in BWD)
-    // For WRW: 'weights' is the result (out is dy, not dw)
-    const size_t problem_size = problem.IsDirectionBackwardWrW()
-                                    ? problem.GetWeights().GetElementSize()
-                                    : problem.GetOut().GetElementSize();
-
-    // Problem size is within limit
-    if(problem_size <= max_size)
-        return false;
-
-    MIOPEN_LOG_I2("DirectSolverFinder disabled for problem size "
-                  << problem_size << " > " << max_size << " (MIOPEN_CONV_DIRECT_MAX_SIZE)");
-    return true;
-}
-} // namespace detail
-
-bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& problem)
+bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& /*problem*/)
 {
     switch(algo)
     { // clang-format off
@@ -698,7 +659,7 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
         return true;
 #endif
     case miopenConvolutionAlgoDirect:
-        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
+        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
     case miopenConvolutionAlgoFFT:
         return env::disabled(MIOPEN_DEBUG_CONV_FFT);
     case miopenConvolutionAlgoWinograd:

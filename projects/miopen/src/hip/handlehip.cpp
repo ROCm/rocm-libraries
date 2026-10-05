@@ -172,9 +172,6 @@ int set_default_device()
 
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local unsigned int miopenHandle_current_stream_id = 0;
-// Overrides the stream-pool index when set. See Handle::SetExclusiveStream.
-// NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-static thread_local hipStream_t miopenHandle_exclusive_stream = nullptr;
 struct HandleImpl
 {
     // typedef MIOPEN_MANAGE_PTR(hipStream_t, hipStreamDestroy) StreamPtr;
@@ -286,9 +283,6 @@ struct HandleImpl
     Allocator allocator{};
     KernelCache cache;
     TargetProperties target_properties;
-    mutable StreamTracker stream_tracker_;
-    std::weak_ptr<ScratchAllocation> active_scratch_;
-    std::size_t scratch_cap_ = 0;
 };
 
 Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleImpl>())
@@ -397,99 +391,13 @@ void Handle::ReserveExtraStreamsInPool(int cnt) const
     }
 }
 
-StreamTracker::StreamPtr Handle::CreateExclusiveStream() const
-{
-    impl->set_ctx();
-    return impl->create_stream_non_blocking();
-}
-
-void Handle::SetExclusiveStream(miopenAcceleratorQueue_t stream) const
-{
-    miopenHandle_exclusive_stream = stream;
-}
-
 miopenAcceleratorQueue_t Handle::GetStream() const
 {
-    if(miopenHandle_exclusive_stream != nullptr)
-        return miopenHandle_exclusive_stream;
     if(miopenHandle_current_stream_id == 0)
         return impl->root_stream.get();
     // locking only if handle in multistream mode
     std::shared_lock<std::shared_timed_mutex> lock(this->impl->stream_pool_mutex);
     return this->impl->ms_resourse_ptr->stream_pool.at(miopenHandle_current_stream_id - 1).get();
-}
-
-StreamTracker& Handle::GetStreamTracker() const { return impl->stream_tracker_; }
-
-std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) const
-{
-    if(sz == 0)
-        return nullptr;
-
-    if(impl->scratch_cap_ == 0)
-        impl->scratch_cap_ = GetGlobalMemorySize() / 8;
-
-    if(sz > impl->scratch_cap_)
-        return nullptr;
-
-    if(auto existing = impl->active_scratch_.lock(); existing && sz <= existing->size)
-        return existing;
-
-    auto alloc            = std::make_shared<ScratchAllocation>();
-    alloc->buffer         = impl->allocator(sz);
-    alloc->size           = sz;
-    impl->active_scratch_ = alloc;
-    return alloc;
-}
-
-void StreamTracker::sweep()
-{
-    if(draining_.empty())
-        return;
-
-    for(auto it = draining_.begin(); it != draining_.end();)
-    {
-        if(hipStreamQuery(it->stream) == hipSuccess)
-        {
-            it->scratch.reset();
-            available_.push_back(std::move(*it));
-            it = draining_.erase(it);
-        }
-        else
-            ++it;
-    }
-}
-
-StreamTracker::~StreamTracker()
-{
-    if(draining_.empty())
-        return;
-
-    MIOPEN_LOG_I("Waiting for " << draining_.size() << " abandoned stream(s) to drain");
-
-    const auto start = std::chrono::steady_clock::now();
-    for(auto& slot : draining_)
-        (void)hipStreamSynchronize(slot.stream);
-    const std::chrono::duration<double, std::milli> elapsed =
-        std::chrono::steady_clock::now() - start;
-
-    MIOPEN_LOG_I("Drained " << draining_.size() << " abandoned stream(s) in " << elapsed.count()
-                            << " ms");
-}
-
-StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
-{
-    sweep();
-
-    if(!available_.empty())
-    {
-        auto slot = std::move(available_.back());
-        available_.pop_back();
-        return slot;
-    }
-
-    owned_streams_.push_back(handle.CreateExclusiveStream());
-    return {owned_streams_.back().get(), {}};
 }
 
 void Handle::SetAllocator(miopenAllocatorFunction allocator,
@@ -621,9 +529,6 @@ std::vector<Kernel> Handle::GetKernelsImpl(const std::string& algorithm,
 KernelInvoke Handle::Run(Kernel k, bool coop_launch) const
 {
     this->impl->set_ctx();
-    // Reclaim scratch pinned by abandoned naive evaluations as soon as their
-    // streams go idle, rather than waiting for the next acquire().
-    this->impl->stream_tracker_.sweep();
     auto callback = (this->impl->enable_profiling || MIOPEN_GPU_SYNC)
                         ? this->impl->elapsed_time_handler()
                         : nullptr;
@@ -1030,9 +935,6 @@ Handle::CreateSubBuffer(ConstData_t data, std::size_t offset, std::size_t size) 
 
 const rocblas_handle_ptr& Handle::rhandle() const
 {
-    if(miopenHandle_exclusive_stream != nullptr)
-        MIOPEN_THROW("rocBLAS handles are bound to the stream pool and cannot be used while an "
-                     "exclusive stream is set");
     if(miopenHandle_current_stream_id == 0)
         return this->impl->rhandle_;
     // locking only if handle in multistream mode
@@ -1053,9 +955,6 @@ rocblas_handle_ptr Handle::CreateRocblasHandle(miopenAcceleratorQueue_t stream) 
 #if MIOPEN_USE_HIPBLASLT
 const hipblasLt_handle_ptr& Handle::HipblasLtHandle() const
 {
-    if(miopenHandle_exclusive_stream != nullptr)
-        MIOPEN_THROW("hipBLASLt handles are bound to the stream pool and cannot be used while an "
-                     "exclusive stream is set");
     if(miopenHandle_current_stream_id == 0)
         return this->impl->hip_blasLt_handle;
     // locking only if handle in multistream mode

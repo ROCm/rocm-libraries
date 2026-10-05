@@ -37,6 +37,19 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
 
+// Absolute runtime override (in MACs) for the naive-conv work-size gate. 0 (unset)
+// => derive the limit from the device's capabilities; set to a very large value to
+// effectively disable the gate. Wins over the time budget below.
+// See ConvDirectNaiveConvWorkLimit.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK);
+
+// Wall-time budget (in milliseconds) that one naive launch may occupy. This is the
+// quantity the gate actually cares about -- it is converted to a MAC budget using
+// the live device's throughput. 0 (unset) => NAIVE_CONV_DEFAULT_BUDGET_MS. Lower it
+// on a short-watchdog OS, raise it when the watchdog is disabled or TdrDelay was
+// extended. Ignored when MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK is set.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_TIME_MS);
+
 namespace miopen {
 
 namespace solver {
@@ -308,6 +321,150 @@ bool ConvDirectNaiveConvIsApplicableByKernelType(const ExecutionContext& ctx,
             return false;
     }
     return true;
+}
+
+// The naive kernel is un-tiled and saturates the GPU, so its wall-time is
+// proportional to the total MAC count: N * K * C_per_group * output_spatial_volume *
+// filter_volume. On very large problems (e.g. VAE-decode / 3D shapes) a single naive
+// launch runs for multiple seconds; when MIOpen *benchmarks* candidate solvers during
+// Find, or immediate mode ranks one without measuring it, executing naive trips the
+// OS GPU watchdog (TDR) -- even when a fast solver also applies and would ultimately
+// win. Naive stays *applicable* at any size so it can serve as the universal
+// fallback; the selection layers (EvaluateInvokers and GetSolutionsFallback) consume
+// this threshold to drop naive when it is over the limit AND a non-naive alternative
+// also applies. When naive is the sole applicable solver it still runs, so a shape
+// only naive can serve is served (and, if huge, may TDR on a short-watchdog OS -- an
+// honest "extend coverage here" signal, not masked).
+size_t ConvDirectNaiveConvWork(const ProblemDescription& problem)
+{
+    const size_t n           = problem.GetInBatchSize();
+    const size_t k           = problem.GetOutChannels();
+    const auto group         = static_cast<size_t>(problem.GetGroupCount());
+    const size_t c_per_group = (group == 0) ? problem.GetInChannels() //
+                                            : problem.GetInChannels() / group;
+
+    const size_t out_vol = problem.GetOutWidth() * problem.GetOutHeight() *
+                           (problem.Is2d() ? size_t{1} : problem.GetOutDepth());
+    const size_t fil_vol = problem.GetWeightsWidth() * problem.GetWeightsHeight() *
+                           (problem.Is2d() ? size_t{1} : problem.GetWeightsDepth());
+
+    return n * k * c_per_group * out_vol * fil_vol;
+}
+
+// Sustained MACs the *naive* kernel retires per lane per 1000 clocks. The naive inner
+// loop is a single FMA fed by two un-cached global loads, with no LDS staging and no
+// register blocking, so it is memory-latency bound and runs far below the
+// one-FMA-per-lane-per-clock issue peak (which in these units would be 1000).
+//
+// Calibrated against two measured sweeps totalling 109 timed shape/direction points:
+// gfx1151 (RDNA3.5, 80 hw CUs, wave32, 2.9 GHz) and gfx950 (CDNA4, 256 hw CUs, wave64,
+// 2.4 GHz). Over the 39 shape/direction pairs measured on both, gfx950 ran a median
+// 5.04x faster on shapes >= 5 GMAC against a 5.30x lane-cycle ratio -- so the linear
+// device scaling this model assumes holds to within ~5% across a 5x spread of part size
+// and across both wavefront widths. That scaling, not the constant, is the load-bearing
+// claim; it is what lets one number cover CDNA and RDNA.
+//
+// 3 is the conservative end of the measured spread rather than its centre: implied rates
+// centre on a median of 11 on gfx1151 and 7 on gfx950, so the derived limit fires well
+// before naive reaches the budget on a typical shape. It also keeps the derived limits
+// in the same magnitude as the fixed 16 GMAC this model replaces, so the change
+// contributes device *scaling* without simultaneously moving the absolute calibration.
+// Too high risks a TDR; too low over-gates naive on shapes it would have won (the class
+// of regression #9513 was filed against).
+//
+// Known weakness, deliberately not addressed here: MAC count is not occupancy-aware.
+// Naive's grid is group * n * k_per_group blocks wide, so a shape whose (n, k_per_group)
+// product is below the part's CU count under-fills it and runs far under the modeled
+// throughput. Every measured point that fell short of the model is of this form -- 3D
+// convolutions at n=1, k=64 on a 256-CU part -- and one of them (32x128x128, bwd,
+// 58 GMAC) reached 1256 ms against the 1000 ms budget. Such shapes are *under*-gated:
+// safe for coverage, unsafe for TDR. Note that measurement predates the intra-grid
+// spatial tiling added in #7529, which widens exactly these grids.
+//
+// To re-measure: force naive with MIOPEN_DEBUG_FIND_ONLY_SOLVER, pin
+// MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK high so the gate does not skip what you are
+// timing, and run MIOpenDriver -t 1 over a range of shapes. Each shape then implies
+// work_macs * 1000 / (hw_cus * wavefront * clock_khz * measured_ms), which is this
+// constant. Note hw_cus is the doubled value from Handle::GetMaxHardwareComputeUnits()
+// on gfx1*. The spread of that quantity across shapes also indicates whether MAC count
+// is predictive at all, which is the assumption the whole gate rests on.
+constexpr size_t NAIVE_MAC_PER_1K_LANE_CYCLES = 3;
+
+// Wall-time a single naive launch may occupy, default and ceiling. Windows' default
+// TdrDelay is 2 s, so 1 s leaves 2x margin. The ceiling exists only to keep an
+// outlandish env value from overflowing the multiply below.
+constexpr size_t NAIVE_CONV_DEFAULT_BUDGET_MS = 1000;
+constexpr size_t NAIVE_CONV_MAX_BUDGET_MS     = static_cast<size_t>(60) * 1000;
+
+// Limit used when the device cannot report the capabilities the model needs. This is
+// the fixed pre-device-aware default; it is conservative for every current part.
+constexpr size_t NAIVE_CONV_FALLBACK_MAX_WORK =
+    static_cast<size_t>(16) * 1000 * 1000 * 1000; // ~16 GMAC
+
+// Convert a wall-time budget into a MAC budget using the live device's throughput.
+// What we need to bound is the *duration* of one naive launch -- on a short-watchdog
+// OS, a launch that outlives the watchdog is a GPU reset, and by the time it fires it
+// is far too late to recover. We cannot measure the launch without running it, so we
+// bound the work instead:
+//
+//   lane_cycles/ms = hw_cus * wavefront_width * clock_khz
+//   naive_macs/ms  = lane_cycles/ms * NAIVE_MAC_PER_1K_LANE_CYCLES / 1000
+//   limit (MACs)   = naive_macs/ms * budget_ms
+//
+// Clock arrives in kHz, which is already "cycles per ms", so the whole computation
+// stays in integer math with no unit juggling. Every term but the throughput constant
+// is read from the device, so the limit tracks the part actually running the kernel --
+// a 304-CU MI300X earns ~123 GMAC at the default budget while a 32-WGP iGPU earns
+// ~8.9 GMAC, with no per-arch table to hand-maintain.
+//
+// Takes capabilities as plain integers rather than a Handle so the model is unit
+// testable on the CPU against synthetic devices.
+size_t ConvDirectNaiveConvWorkLimit(size_t hw_cus, size_t wavefront_width, size_t clock_khz)
+{
+    const size_t absolute_override = env::value(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_WORK);
+    if(absolute_override != 0)
+        return absolute_override;
+
+    // A device that cannot report its own capabilities gives the model nothing to
+    // scale from. Fall back to the fixed limit rather than deriving a nonsense
+    // (possibly zero) budget that would gate every shape.
+    if(hw_cus == 0 || wavefront_width == 0 || clock_khz == 0)
+    {
+        MIOPEN_LOG_I2("ConvDirectNaiveConv work limit: incomplete device capabilities (cus "
+                      << hw_cus << ", wavefront " << wavefront_width << ", clock " << clock_khz
+                      << " kHz); using fixed fallback " << NAIVE_CONV_FALLBACK_MAX_WORK << " MACs");
+        return NAIVE_CONV_FALLBACK_MAX_WORK;
+    }
+
+    size_t budget_ms = env::value(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_MAX_TIME_MS);
+    if(budget_ms == 0)
+        budget_ms = NAIVE_CONV_DEFAULT_BUDGET_MS;
+    budget_ms = std::min(budget_ms, NAIVE_CONV_MAX_BUDGET_MS);
+
+    // clock_khz is cycles/ms, so this product is lane-cycles/ms directly.
+    const size_t macs_per_ms =
+        hw_cus * wavefront_width * clock_khz * NAIVE_MAC_PER_1K_LANE_CYCLES / 1000;
+    return macs_per_ms * budget_ms;
+}
+
+bool ConvDirectNaiveConvExceedsWorkLimit(const ExecutionContext& ctx,
+                                         const ProblemDescription& problem)
+{
+    const auto& handle = ctx.GetStream();
+    const size_t work  = ConvDirectNaiveConvWork(problem);
+    const size_t limit = ConvDirectNaiveConvWorkLimit(
+        handle.GetMaxHardwareComputeUnits(), handle.GetWavefrontWidth(), handle.GetClockRateKhz());
+
+    if(work > limit)
+    {
+        MIOPEN_LOG_I2("ConvDirectNaiveConv over work limit: work "
+                      << work << " MACs exceeds limit " << limit << " for "
+                      << handle.GetDeviceName()
+                      << " -- defer from selection when an alternative applies (avoids "
+                         "TDR-prone naive launch)");
+        return true;
+    }
+    return false;
 }
 
 /// Figure out the index of C (channel) stride so we can expand it into

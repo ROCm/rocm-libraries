@@ -2307,6 +2307,15 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectNaiveConvFwd final : ConvSolver
     {
         return 0.01f;
     }
+    /// Naive stays *applicable* at any problem size -- it is MIOpen's universal
+    /// fallback and must never stop being available. But its kernel is un-tiled, so
+    /// past a certain amount of work a single launch runs for seconds and trips the
+    /// OS GPU watchdog (a TDR) merely by being benchmarked. Reporting
+    /// SolverSpeedClass::ExceedsLaunchBudget here lets Find and immediate mode demote it
+    /// to a last resort -- behind even a merely slow solver -- without touching
+    /// applicability. @see ConvDirectNaiveConvExceedsWorkLimit
+    SolverSpeedClass GetSpeedClass(const ExecutionContext&,
+                                   const miopen::conv::ProblemDescription&) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
@@ -2327,6 +2336,9 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectNaiveConvBwd final : ConvSolver
     {
         return 0.01f;
     }
+    /// @see ConvDirectNaiveConvFwd::GetSpeedClass
+    SolverSpeedClass GetSpeedClass(const ExecutionContext&,
+                                   const miopen::conv::ProblemDescription&) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
@@ -2347,6 +2359,9 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectNaiveConvWrw final : ConvSolver
     {
         return 0.01f;
     }
+    /// @see ConvDirectNaiveConvFwd::GetSpeedClass
+    SolverSpeedClass GetSpeedClass(const ExecutionContext&,
+                                   const miopen::conv::ProblemDescription&) const override;
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
 };
@@ -2375,8 +2390,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_2 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2414,8 +2429,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_1 final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2435,8 +2450,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2468,8 +2483,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride2 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2489,8 +2504,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwd1x1_stride1 final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription& problem) const override;
@@ -2510,8 +2525,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmBwdRest final : GemmBwdBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2537,8 +2552,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrw1x1_stride1 final : GemmWrwBase
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<GemmWrw1x1_stride1>(); }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -2563,8 +2578,8 @@ struct MIOPEN_INTERNALS_EXPORT GemmWrwUniversal final : GemmWrwBase
 
     bool MayNeedWorkspace() const override { return true; }
 
-    bool IsSlow(const ExecutionContext& context,
-                const miopen::conv::ProblemDescription& problem) const override;
+    SolverSpeedClass GetSpeedClass(const ExecutionContext& context,
+                                   const miopen::conv::ProblemDescription& problem) const override;
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
