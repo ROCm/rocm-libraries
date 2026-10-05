@@ -850,6 +850,9 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
     __host__ static index_t GetSharedMemoryNumberOfByteOnHost()
     {
+        // Note: using cshuffle epilogue to get shared memory on host is a way to be conservative on
+        // gfx12 that also supports direct store epilogue and it doesn't matter for other archs that
+        // only use cshuffle The cshuffle LDS shouldn't be a problem anyway
         using EpilogueCShuffle = EpilogueCShuffle<
             DsDataType,
             EDataType,
