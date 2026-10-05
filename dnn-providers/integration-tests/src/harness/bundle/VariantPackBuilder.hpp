@@ -38,13 +38,19 @@ VariantPack buildVariantPack(
 /// The output buffers one bundle is run into, each prefilled with the sentinel
 /// value so a tensor nobody wrote is visibly untouched rather than plausibly zero.
 ///
+/// `onDevice` says the buffers will be handed to an executor as device pointers. Their
+/// sentinel is then written straight into device memory where the element type allows
+/// it, rather than filled on the host and uploaded; the rest are filled on the host as
+/// before. False never touches the device.
+///
 /// Shared for the same reason buildVariantPack() is: both harnesses allocate the
 /// same buffers from the same attributes, and two copies of that would drift.
 OutputTensors allocateSentinelOutputs(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
-    const std::vector<int64_t>& outputTensorUids);
+    const std::vector<int64_t>& outputTensorUids,
+    bool onDevice);
 
 /// Tell each tensor which side now holds the fresh data. Without it the comparison
 /// reads the stale copy — silently, and in whichever direction is wrong.

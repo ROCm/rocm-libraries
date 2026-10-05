@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -188,8 +189,8 @@ void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::D
     auto bundle = makeMxMatmulBundle(xType);
     fillOnHost(harness, bundle);
 
-    ASSERT_TRUE(bundle->tensors.has_value());
-    const auto& unpacked = *bundle->tensors;
+    ASSERT_FALSE(harness.inputs().empty());
+    const auto& unpacked = harness.inputs();
     const auto& packed = harness.packedInputs();
     ASSERT_EQ(packed.size(), unpacked.size());
 
@@ -254,6 +255,76 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
     EXPECT_EQ(variantPack.at(3), inputs.at(3)->rawDeviceData());
     EXPECT_EQ(variantPack.at(K_UNKNOWN_UID), inputs.at(K_UNKNOWN_UID)->rawDeviceData());
     EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
+}
+
+// One output per element width the device fill handles (1, 2 and 4 bytes) and one it
+// leaves to the host (8 bytes: double), plus a type whose sentinel is its largest value
+// rather than a NaN.
+std::shared_ptr<IntegrationTestBundle> makeMixedTypeOutputBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {7};
+    const std::vector<int64_t> strides = {1};
+    const std::vector<DataType> types = {DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         DataType::INT32,
+                                         DataType::FP8_E4M3,
+                                         DataType::DOUBLE,
+                                         DataType::BOOLEAN};
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    for(size_t i = 0; i < types.size(); ++i)
+    {
+        const auto uid = static_cast<int64_t>(i) + 1;
+        tensors.push_back(
+            CreateTensorAttributesDirect(builder, uid, "output", types[i], &strides, &dims));
+        bundle->outputTensorUids.push_back(uid);
+    }
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    builder.Finish(CreateGraphDirect(builder,
+                                     "mixed_types",
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     &tensors,
+                                     &nodes));
+    bundle->graphBuffer = builder.Release();
+    return bundle;
+}
+
+// Writing the sentinel on the device instead of filling the host buffer and uploading
+// it must leave every output holding the same bytes, or a tensor an engine never wrote
+// would stop looking untouched.
+TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
+{
+    SKIP_IF_NO_DEVICES();
+    auto bundle = makeMixedTypeOutputBundle();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& attributes = wrapper.getTensorMap();
+
+    auto hostOutputs
+        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/false);
+    auto deviceOutputs
+        = detail::allocateSentinelOutputs(attributes, bundle->outputTensorUids, /*onDevice=*/true);
+
+    for(const int64_t uid : bundle->outputTensorUids)
+    {
+        auto& expected = *hostOutputs.at(uid);
+        auto& actual = *deviceOutputs.at(uid);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace()) << "uid " << uid;
+
+        // The first non-const host access migrates the device-written bytes back.
+        EXPECT_EQ(std::memcmp(expected.rawHostData(),
+                              actual.rawHostData(),
+                              expected.elementSpace() * expected.elementSize()),
+                  0)
+            << "uid " << uid;
+    }
 }
 } // namespace
 
@@ -322,8 +393,81 @@ TEST_F(TestGoldenHarnessFixture, NonSubByteBundleHasNoPackedInputs)
     auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
     fillOnHost(harness, bundle);
 
-    ASSERT_TRUE(bundle->tensors.has_value());
+    EXPECT_FALSE(harness.inputs().empty());
     EXPECT_TRUE(harness.packedInputs().empty());
+}
+
+// A registered bundle outlives its tests, so what a run generates has to belong to the
+// run: nothing is left on the bundle for the next one, and every run regenerates the
+// same values from the same seed.
+TEST_F(TestGoldenHarnessFixture, GeneratedInputsBelongToTheRunAndRepeatIdentically)
+{
+    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3);
+
+    testing_support::HarnessMocks firstMocks;
+    IntegrationBundleVerificationHarness first(
+        firstMocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    fillOnHost(first, bundle);
+
+    testing_support::HarnessMocks secondMocks;
+    IntegrationBundleVerificationHarness second(
+        secondMocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
+    fillOnHost(second, bundle);
+
+    EXPECT_FALSE(bundle->blobs.has_value());
+    ASSERT_FALSE(first.inputs().empty());
+    ASSERT_EQ(first.inputs().size(), second.inputs().size());
+    for(const auto& [uid, tensor] : first.inputs())
+    {
+        auto& other = *second.inputs().at(uid);
+        EXPECT_NE(tensor.get(), &other) << "uid " << uid;
+        EXPECT_EQ(std::memcmp(tensor->rawHostData(),
+                              other.rawHostData(),
+                              tensor->elementSpace() * tensor->elementSize()),
+                  0)
+            << "uid " << uid;
+    }
+}
+
+// Golden tensors are read by the run that needs them, so a bundle can be run again: the
+// second run reads its own copy instead of finding the first one's.
+TEST_F(TestGoldenHarnessFixture, GoldenBundleCanBeRunAgainBecauseEachRunReadsItsTensors)
+{
+    auto bundle = loadRunnableBundle("golden_run_twice");
+
+    for(int run = 0; run < 2; ++run)
+    {
+        testing_support::HarnessMocks mocks;
+        testing_support::engineWrites(
+            mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+        ::testing::TestPartResultArray results;
+        runCapturing(mocks, bundle, &results);
+
+        EXPECT_FALSE(testing_support::anyFailed(results)) << "run " << run;
+        EXPECT_FALSE(testing_support::anySkipped(results)) << "run " << run;
+    }
+}
+
+// A blob that cannot be read fails the test that needs it, with the reason, instead of
+// the bundle having been dropped quietly when it was registered.
+TEST_F(TestGoldenHarnessFixture, UnreadableGoldenBlobFailsTheRunWithTheReason)
+{
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    auto bundle = loadRunnableBundle("golden_bad_blob");
+    ASSERT_TRUE(bundle->blobs.has_value());
+    const auto blob = bundle->blobs->pathForUid(bundle->blobs->inputUids.front());
+    std::ofstream(blob, std::ios::binary | std::ios::trunc) << "too short";
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, bundle, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("tensor data failed to load"),
+              std::string::npos);
 }
 
 // Was ExecutorThrowsYieldsSkip: IGraphEngineRunner::execute() now answers "not
@@ -356,16 +500,20 @@ TEST_F(TestGoldenHarnessFixture, DeclinedGraphSkipsWithoutFillingInputs)
         });
 
     auto bundle = makeRuntimePbvFillBundle();
-    ASSERT_FALSE(bundle->tensors.has_value());
+    ASSERT_FALSE(bundle->blobs.has_value());
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(bundle, "unit-test-bundle");
 
     ::testing::TestPartResultArray results;
-    runCapturing(mocks, bundle, &results);
+    testing_support::driveHarness(harness, &results);
 
     EXPECT_TRUE(testing_support::anySkipped(results));
     EXPECT_FALSE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("Engine could not execute bundle"),
               std::string::npos);
-    EXPECT_FALSE(bundle->tensors.has_value());
+    EXPECT_TRUE(harness.inputs().empty());
 }
 
 TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)

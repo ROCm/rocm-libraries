@@ -61,4 +61,12 @@ target_link_libraries(
     PRIVATE hiprtc::hiprtc hip::host
 )
 
+# rocRAND fills tensors on the device (GpuFpReferenceCommon.hpp). PUBLIC because that
+# header is inline: every target that includes it has to agree on USE_ROCRAND, or one
+# binary fills on the device while another silently falls back to the host.
+if(USE_ROCRAND)
+    target_link_libraries(hipdnn_gpu_ref PUBLIC roc::rocrand)
+    target_compile_definitions(hipdnn_gpu_ref PUBLIC USE_ROCRAND)
+endif()
+
 target_compile_options(hipdnn_gpu_ref PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

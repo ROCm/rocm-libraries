@@ -58,6 +58,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
+    TestGTestFilter.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
     TestInputFillRecipes.cpp
@@ -144,7 +145,6 @@ target_link_libraries(hipdnn_gpu_ref_tests
         GTest::gtest
         Threads::Threads
         hip::host
-        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
 )
 
 target_compile_options(hipdnn_gpu_ref_tests
@@ -153,7 +153,3 @@ target_compile_options(hipdnn_gpu_ref_tests
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
 add_integration_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
-
-if(USE_ROCRAND)
-    target_compile_definitions(hipdnn_gpu_ref_tests PRIVATE USE_ROCRAND)
-endif()

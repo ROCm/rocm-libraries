@@ -54,14 +54,15 @@ void BundleReferenceValidationHarness::SetUp()
     // registration bug rather than a property of the data.
     ASSERT_TRUE(_bundle->hasGoldenOutputs)
         << "reference validation registered for a bundle with no golden data: " << _bundlePath;
-    ASSERT_TRUE(_bundle->tensors.has_value())
+    ASSERT_TRUE(_bundle->blobs.has_value())
         << "reference validation registered for a bundle with no tensor data: " << _bundlePath;
 }
 
 OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
+    return detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice());
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a
@@ -73,11 +74,11 @@ bool BundleReferenceValidationHarness::useDevice() const
 }
 
 std::unordered_map<int64_t, void*>
-    BundleReferenceValidationHarness::buildVariantPack(OutputTensors& outputs) const
+    BundleReferenceValidationHarness::buildVariantPack(OutputTensors& outputs)
 {
     auto wrapper = _bundle->graphWrapper();
     return detail::buildVariantPack(
-        *_bundle->tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice());
+        _tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice());
 }
 
 void BundleReferenceValidationHarness::TestBody()
@@ -117,6 +118,19 @@ void BundleReferenceValidationHarness::TestBody()
             << "\n  Remove that entry so the bundle is validated against its golden data."
             << "\n  bundle: " << _bundlePath;
         return;
+    }
+
+    // Read here, after the known-gap check above, so a bundle that never runs never
+    // reads its blobs, and the tensors are freed with this test rather than held by the
+    // shared bundle for the rest of the run.
+    try
+    {
+        _tensors = _bundle->loadTensors();
+    }
+    catch(const std::exception& e)
+    {
+        FAIL() << "golden tensor data failed to load: " << e.what()
+               << "\n  bundle: " << _bundlePath;
     }
 
     auto referenceOutputs = allocateOutputs();
@@ -160,9 +174,7 @@ void BundleReferenceValidationHarness::TestBody()
     // judged — the opposite assignment from the engine harness, where golden is the
     // oracle. Same comparison either way, so it is the same code.
     const ExpectedTensorLookup goldenFor
-        = [this](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *_bundle->tensors->at(uid);
-    };
+        = [this](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_tensors.at(uid); };
 
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
     // engine and must not loosen the gate on our own data. For the same reason this

@@ -144,8 +144,8 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 }
 
 // The second guard covers a state the file-based fixtures cannot produce (the
-// loader only ever sets hasGoldenOutputs once tensors is already populated -- see
-// IntegrationTestBundle.hpp's loadTensorDataIfPresent), so this bundle is built by
+// loader only ever sets hasGoldenOutputs once blobs is already populated -- see
+// IntegrationTestBundle.hpp's describeTensorBlobs), so this bundle is built by
 // hand rather than through fixtures::loadBundle.
 TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithNoTensorData)
 {

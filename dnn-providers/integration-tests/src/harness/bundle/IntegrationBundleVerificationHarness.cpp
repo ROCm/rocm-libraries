@@ -302,10 +302,10 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
 
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
-    // _bundle->tensors. Filling first made a declined graph pay the full host-side
+    // _inputs. Filling first made a declined graph pay the full host-side
     // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
-    // seconds per skip, and left those inputs cached on the bundle for the rest of
-    // the run.
+    // seconds per skip, and reading a golden bundle's blobs first made it pay for
+    // those too.
     if(session.engines.accepted)
     {
         if(auto unavailable = prepareInputs())
@@ -484,14 +484,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepareInputs()
 {
-    if(!_bundle->tensors.has_value())
+    if(!_bundle->blobs.has_value())
     {
         return fillBundleInputs();
     }
 
-    // Tensors that are already present are unpacked, but the engine reads sub-byte
-    // operands packed, and only fillBundleInputs() builds the packed set
-    // (ALMIOPEN-2724).
+    // Tensors read from blobs are unpacked, but the engine reads sub-byte operands
+    // packed, and only fillBundleInputs() builds the packed set (ALMIOPEN-2724).
     const auto wrapper = _bundle->graphWrapper();
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
@@ -503,6 +502,21 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
             return unverifiable("sub-byte input " + std::to_string(uid)
                                 + " has no packed copy for the engine (ALMIOPEN-2724)");
         }
+    }
+
+    // Read here, not at registration, so a golden bundle holds its tensors only while
+    // its own test runs. A blob that is unreadable or the wrong size fails this test
+    // instead of quietly dropping it from the run.
+    try
+    {
+        _inputs = _bundle->loadTensors();
+    }
+    catch(const std::exception& e)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           std::string("tensor data failed to load: ") + e.what()
+                                               + " (" + _bundlePath.string() + ")");
     }
     return std::nullopt;
 }
@@ -528,8 +542,14 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         anySubByte = anySubByte || hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type());
     }
 
+    // Sub-byte graphs fill twice, once unpacked and once packed, and the two sets must
+    // hold the same values. rocRAND does not fill sub-byte types and its stream differs
+    // from the host's, so keeping both on the host is what keeps them identical.
+    const auto placement
+        = _deps.policy.useDevice() && !anySubByte ? FillPlacement::DEVICE : FillPlacement::HOST;
+
     auto fillResult = hipdnn_integration_tests::fillInputs(
-        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes);
+        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes, placement);
     if(!fillResult.filled)
     {
         return unverifiable(fillResult.reason);
@@ -545,7 +565,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         }
 
         auto packedFill = hipdnn_integration_tests::fillInputs(
-            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes);
+            wrapper.getGraph(), packed, leafInputUids, _inputFillRecipes, placement);
         if(!packedFill.filled)
         {
             return unverifiable(packedFill.reason);
@@ -553,23 +573,24 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         _packedInputs = std::move(packed);
     }
 
-    _bundle->tensors = std::move(inputs);
+    _inputs = std::move(inputs);
     return std::nullopt;
 }
 
 // ---- engine + reference runs -----------------------------------------------
 
-OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
+OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(wrapper.getTensorMap(), _bundle->outputTensorUids);
+    return detail::allocateSentinelOutputs(
+        wrapper.getTensorMap(), _bundle->outputTensorUids, onDevice);
 }
 
 std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs, bool useDevice)
 {
     const auto wrapper = _bundle->graphWrapper();
-    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : *_bundle->tensors;
+    TensorMap& inputs = (useDevice && !_packedInputs.empty()) ? _packedInputs : _inputs;
     return detail::buildVariantPack(
         inputs, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
@@ -595,7 +616,7 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
-    run.outputs = allocateSentinelOutputs();
+    run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
@@ -628,8 +649,6 @@ IntegrationBundleVerificationHarness::RefRunResult
     IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(ReferenceExecutorType type,
                                                                        OutputTensors& refOutputs)
 {
-    refOutputs = allocateSentinelOutputs();
-
     // Only an executor that asks for device pointers gets them. Handing host memory
     // to an executor that wants device memory — or the reverse — is a silent crash,
     // not an error, and the executor is the one that knows which it needs.
@@ -638,14 +657,19 @@ IntegrationBundleVerificationHarness::RefRunResult
     try
     {
         IReferenceGraphExecutor& executor = _deps.referenceExecutors->get(type);
-        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
-        auto variantPack = buildVariantPack(refOutputs, useDevice);
 
+        // Before any allocation: a reference that cannot run this graph is the common
+        // case in auto mode (GPU declines, CPU takes over), and it should cost nothing.
         if(!executor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
         {
             return {RefStatus::CAPABILITY_MISS,
                     refLabel(type) + " is not applicable for this graph"};
         }
+
+        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+        refOutputs = allocateSentinelOutputs(useDevice);
+        auto variantPack = buildVariantPack(refOutputs, useDevice);
+
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
     catch(const ReferenceCapabilityError& e)
@@ -673,9 +697,7 @@ VerificationOutcome
 {
     return compareAgainst(
         engineOutputs,
-        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *_bundle->tensors->at(uid);
-        },
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_inputs.at(uid); },
         ValidationSite::HOST,
         Verifier::GOLDEN);
 }

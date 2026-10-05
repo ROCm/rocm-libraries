@@ -5,9 +5,14 @@
 
 #include <algorithm>
 #include <random>
+#include <stdexcept>
 #include <string>
 
 #include <flatbuffers/flatbuffers.h>
+#include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
 
 namespace hipdnn_integration_tests
 {
@@ -16,12 +21,75 @@ namespace
 
 // ── Fill dispatch ───────────────────────────────────────────────────────────
 
-FillResult
-    fill(hipdnn_data_sdk::utilities::ITensor& tensor, const FillRecipe& recipe, unsigned int seed)
+#if defined(USE_ROCRAND)
+// Smallest tensor, in allocated elements, worth generating on the device.
+//
+// Measured on gfx1151: a warm rocRAND fill costs about 1.4 ms whatever its size, while
+// the host loop costs 0.23 ms at 4096 elements, 4.4 ms at 65536 and 1.1 s at 16 M, so
+// the two cross near 2^14 to 2^15. The first device fill in a process also pays about
+// 350 ms for generator and scaling-kernel setup, which a suite of tiny tensors never
+// earns back. Over the full suite, test bodies took 72.8 s with no threshold, 62.4 s at
+// 2^12, 64.6 s at 2^16 and 75.3 s at 2^20; 2^14 sits between the two best.
+constexpr size_t DEVICE_FILL_MIN_ELEMENTS = size_t{1} << 14;
+
+template <class T>
+bool fillOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor,
+                  const FillRecipe& recipe,
+                  unsigned int seed)
+{
+    auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+    if(typed == nullptr)
+    {
+        return false;
+    }
+
+    hipdnn_gpu_ref::common::gpu_fp_reference_tensor::fillWithRandomValues<T>(
+        *typed,
+        static_cast<T>(recipe.lo),
+        static_cast<T>(recipe.hi),
+        seed,
+        /*synchronize=*/false);
+    return true;
+}
+
+// Generates a FREE fill on the device when the tensor is big enough and of a type
+// rocRAND fills. Leaves the fill in flight: fillInputs() waits once for all of them.
+bool tryFillOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor,
+                     const FillRecipe& recipe,
+                     unsigned int seed)
+{
+    if(tensor.elementSpace() < DEVICE_FILL_MIN_ELEMENTS)
+    {
+        return false;
+    }
+
+    return fillOnDevice<float>(tensor, recipe, seed)
+           || fillOnDevice<hipdnn_data_sdk::types::half>(tensor, recipe, seed)
+           || fillOnDevice<hipdnn_data_sdk::types::bfloat16>(tensor, recipe, seed)
+           || fillOnDevice<double>(tensor, recipe, seed);
+}
+#endif // USE_ROCRAND
+
+// `deviceFillPending` is set when a fill was left running on the device.
+FillResult fill(hipdnn_data_sdk::utilities::ITensor& tensor,
+                const FillRecipe& recipe,
+                unsigned int seed,
+                FillPlacement placement,
+                bool& deviceFillPending)
 {
     switch(recipe.kind)
     {
     case FillRecipe::Kind::FREE:
+#if defined(USE_ROCRAND)
+        if(placement == FillPlacement::DEVICE && tryFillOnDevice(tensor, recipe, seed))
+        {
+            deviceFillPending = true;
+            return FillResult::ok();
+        }
+#else
+        static_cast<void>(placement);
+        static_cast<void>(deviceFillPending);
+#endif
         tensor.fillTensorWithRandomValues(recipe.lo, recipe.hi, seed);
         return FillResult::ok();
     case FillRecipe::Kind::FIXED:
@@ -254,7 +322,8 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
-                      InputFillRecipes& recipes)
+                      InputFillRecipes& recipes,
+                      FillPlacement placement)
 {
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
@@ -273,17 +342,40 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     std::sort(sortedUids.begin(), sortedUids.end());
 
     std::mt19937 rng(recipes.globalSeed());
+    bool deviceFillPending = false;
+
+    // One wait for every device fill, instead of one per tensor. Also on the way out
+    // of a failed fill: the tensors are about to be dropped and their fills must not
+    // still be writing into the memory being freed.
+    const auto waitForDeviceFills = [&deviceFillPending] {
+        if(!deviceFillPending)
+        {
+            return;
+        }
+        deviceFillPending = false;
+
+        const hipError_t status = hipDeviceSynchronize();
+        if(status != hipSuccess)
+        {
+            throw std::runtime_error(std::string("device input fill failed: ")
+                                     + hipGetErrorString(status));
+        }
+    };
+
     for(const int64_t uid : sortedUids)
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
-        auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed);
+        auto fillResult
+            = fill(*inputs.at(uid), recipes.fill(uid), seed, placement, deviceFillPending);
         if(!fillResult.filled)
         {
+            waitForDeviceFills();
             return FillResult::unsupported("uid " + std::to_string(uid) + ": " + fillResult.reason);
         }
     }
 
+    waitForDeviceFills();
     return FillResult::ok();
 }
 

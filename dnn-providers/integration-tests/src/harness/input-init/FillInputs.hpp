@@ -35,9 +35,23 @@ struct FillResult
     }
 };
 
+/// Where the filled inputs will be consumed.
+///
+/// DEVICE lets a large tensor be generated straight into device memory with rocRAND
+/// instead of by the host's serial RNG, which costs seconds per tensor at the largest
+/// shapes. Such a tensor is device-resident afterwards, so the first non-const host
+/// access migrates it; a const access cannot. HOST never touches the device, which is
+/// what the unit tests rely on, since they have none.
+enum class FillPlacement
+{
+    HOST,
+    DEVICE,
+};
+
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
-                      InputFillRecipes& recipes);
+                      InputFillRecipes& recipes,
+                      FillPlacement placement);
 
 } // namespace hipdnn_integration_tests
