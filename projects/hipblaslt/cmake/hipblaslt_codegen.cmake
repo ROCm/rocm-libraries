@@ -320,6 +320,36 @@ function(create_device_library)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
     endif()
+
+    # Both codegen steps glob their inputs at run time, so without an explicit
+    # file list nothing invalidates the stamps and edits ship stale kernels.
+    # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
+    file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_cdl_LOGIC_PATH}/*.yaml")
+    # .py generators, plus the packaged static headers (resources.py) and the
+    # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
+    file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
+         "${_codegen_dir}/Tensile/*.py"
+         "${_codegen_dir}/Tensile/*.h"
+         "${_codegen_dir}/Tensile/*.s")
+    list(FILTER _codegen_sources EXCLUDE REGEX "/Tensile/Tests/")
+    list(APPEND _codegen_dependencies
+         ${_logic_files}
+         ${_codegen_sources}
+         "${_codegen_dir}/Tensile/bin/TensileLogic")
+
+    # ninja only compares mtimes of inputs that still exist, so a *removed* file
+    # leaves the stamp clean (nothing is newer), as does a file added with an
+    # older mtime. CONFIGURE_DEPENDS keeps the list accurate but ninja never acts
+    # on membership alone. Depend on a sorted manifest of the list as well: it is
+    # rewritten only when the set changes, and that rewrite dirties the stamp.
+    # file(GLOB_RECURSE) orders results lexicographically.
+    set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
+    string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
+    # file(CONFIGURE) rewrites only when the content differs.
+    file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
+    list(APPEND _codegen_dependencies "${_manifest}")
+
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"

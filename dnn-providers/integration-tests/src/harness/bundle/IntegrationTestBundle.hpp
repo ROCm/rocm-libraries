@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SweepManifestCache.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -676,26 +677,6 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
     }
 }
 
-inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
-                                           const std::string& caseId)
-{
-    if(!sweepJson.contains("cases") || !sweepJson.at("cases").is_array())
-    {
-        return nullptr;
-    }
-
-    for(const auto& caseJson : sweepJson.at("cases"))
-    {
-        if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string()
-           && caseJson.at("id").get<std::string>() == caseId)
-        {
-            return &caseJson;
-        }
-    }
-
-    return nullptr;
-}
-
 inline std::optional<std::filesystem::path>
     resolveSweepGoldenDirectory(const std::filesystem::path& sweepPath,
                                 const nlohmann::json& caseJson)
@@ -798,29 +779,30 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
 // Load either a direct bundle or one logical template-sweep case.
 //
-// Sweep cases parse graph.template.json plus sweep.json, locate the discovered
-// case id, expand `${case...}` placeholders, load inline metadata, and resolve an
-// optional golden directory. Sweep authoring errors are reported as
+// Sweep cases take graph.template.json plus sweep.json from `sweeps`, locate the
+// discovered case id, expand `${case...}` placeholders, load inline metadata, and
+// resolve an optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
 // INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
 // RuntimePassByValueInvariantError from buildGraphBuffer() is the one
 // exception that propagates uncaught rather than being folded into
 // INVALID_GRAPH_SCHEMA.
-inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
+                                            SweepManifestCache& sweeps)
 {
     if(!discovered.isTemplateSweepCase())
     {
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto templateJson = detail::parseJsonFile(discovered.sweep->templatePath);
-    const auto sweepJson = detail::parseJsonFile(discovered.jsonPath);
-    if(!templateJson.has_value() || !sweepJson.has_value())
+    const auto& sweep = sweeps.get(discovered);
+    const auto& templateJson = sweep.templateJson;
+    if(!templateJson.has_value() || !sweep.manifest.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.sweep->caseId);
+    const auto* caseJson = sweep.manifest->findCase(discovered.sweep->caseId);
     if(caseJson == nullptr)
     {
         return LoadError::INVALID_SWEEP_CASE;
@@ -906,6 +888,14 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     }
 
     return bundle;
+}
+
+// Loads one bundle on its own. A pass over many sweep cases should share one
+// SweepManifestCache instead, so each manifest is parsed once.
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+{
+    SweepManifestCache sweeps;
+    return loadIntegrationTestBundle(discovered, sweeps);
 }
 
 } // namespace hipdnn_integration_tests::bundle

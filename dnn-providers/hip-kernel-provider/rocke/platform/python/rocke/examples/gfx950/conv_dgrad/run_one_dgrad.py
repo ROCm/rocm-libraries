@@ -122,6 +122,7 @@ def main(argv=None) -> int:
     import torch
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
     from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
@@ -130,7 +131,7 @@ def main(argv=None) -> int:
     )
     from rocke import compile_kernel
     from rocke.core.arch import ArchTarget
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -251,20 +252,20 @@ def main(argv=None) -> int:
         len(buf_bytes),
     )
 
-    ext_sig = conv_args_signature(a.dtype) + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
-    values = {
-        "A": dY_dev,
-        "B": W_dev,
-        "D": dX_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": W_t.nbytes,
-        "D_bytes": dX_t.nbytes,
-        "sub_gemm_buf": sgbuf_dev,
-        "num_sub_gemms": len(sub_gemms),
-    }
+    # The tilde record buffer is part of the dgrad AOT ABI, not an extension.
+    ext_sig = conv_args_signature(a.dtype, direction="dgrad")
+    values = ConvArgs.from_problem(
+        p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+    ).to_launch_values(
+        int(dY_dev),
+        int(W_dev),
+        int(dX_dev),
+        dY_t.nbytes,
+        W_t.nbytes,
+        dX_t.nbytes,
+        sub_gemm_buf=int(sgbuf_dev),
+        num_sub_gemms=len(sub_gemms),
+    )
     # Conv group rides blockIdx.y; the tilde sub-GEMM geometry is
     # channel-independent so block_end is per-group.
     grid = (sub_gemms[-1].block_end, max(int(p.groups), 1), a.split_k)
