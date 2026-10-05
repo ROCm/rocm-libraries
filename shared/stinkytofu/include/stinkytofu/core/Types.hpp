@@ -42,14 +42,25 @@ enum class StinkyErrorCode : int {
 ///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query
 ///       it.
 struct GemmTileConfig {
+    // Every member carries a default initializer. Only `arch` used to, so a
+    // default-initialized GemmTileConfig left the rest holding whatever was on
+    // the stack. Passes read these (NumWaves in RemoveDscntPass and in the CDNA5
+    // ds issue-cost model), so scheduling could depend on leftover memory --
+    // quiet, and different between runs. Sanitizers flag it as a read of an
+    // uninitialized value.
+    //
+    // NumWaves defaults to 1 rather than 0 because 1 is a real occupancy: a
+    // reader gets single-wave behaviour, not a sentinel it has to special-case.
+    // The tile sizes default to 0, which is NOT a valid tile, so 0 there means
+    // "nobody configured this" and is worth complaining about.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
-    uint32_t TileA0;                   ///< Tile size for A dimension 0
-    uint32_t TileB0;                   ///< Tile size for B dimension 0
-    uint32_t TileM0;                   ///< Tile size for M dimension 0
-    uint32_t NumGRA;                   ///< Number of global read A
-    uint32_t NumGRB;                   ///< Number of global read B
-    uint32_t NumGRM;                   ///< Number of global read M
-    uint32_t NumWaves;                 ///< Number of waves
+    uint32_t TileA0 = 0;               ///< Tile size for A dimension 0; 0 = unset
+    uint32_t TileB0 = 0;               ///< Tile size for B dimension 0; 0 = unset
+    uint32_t TileM0 = 0;               ///< Tile size for M dimension 0; 0 = unset
+    uint32_t NumGRA = 0;               ///< Number of global read A
+    uint32_t NumGRB = 0;               ///< Number of global read B
+    uint32_t NumGRM = 0;               ///< Number of global read M
+    uint32_t NumWaves = 1;             ///< Number of waves; 1 = single wave
 };
 
 /// Pass-specific feature configuration
@@ -89,8 +100,26 @@ struct PassFeatureConfig {
         /// before full throttling begins. 0 disables the transition; negative
         /// means one queue depth.
         int dsReadThrottleTransitionEntries = 0;
-        int dsReadPerWmma = INT_MAX;
+        /// Rule (4) ds_load ceiling: at most this many ds_loads per
+        /// dsIssueCapSpanCycles. INT_MAX = per-arch default; non-positive is
+        /// rejected. Was dsReadPerWmma, when the window was delimited by WMMA
+        /// issues; the old module-option key still works (SchedulingKnobHeuristics).
+        int dsReadPerCap = INT_MAX;
+        /// Cycle span the dsReadPerCap ceiling applies over: at most
+        /// dsReadPerCap ds_loads may issue in any dsIssueCapSpanCycles of the
+        /// real timeline. Tuned alongside dsReadPerCap -- the pair is the cap,
+        /// and neither means anything without the other.
+        ///
+        /// 0 = use the per-kernel default: the region's actual WMMA latency
+        /// (wmmaIssueConfig.latency), or the arch constant
+        /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
+        int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
+        /// Extra cycles kept between an after-barrier and the before-side
+        /// ds_loads when exclusive overlap uses gap placement. Converted to
+        /// WMMA windows by the region's matrix latency. 0 disables the extra
+        /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
+        int tensorLoadDsLoadGapCycles = 64;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
@@ -108,6 +137,39 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
+        /// share a PSEUDO memory token are chained into dsReadPriority order.
+        /// Loads on different tokens are not ordered against each other. Set
+        /// false to leave a ready lower-priority ds_load free to issue first.
+        bool lockDsReadOrder = true;
+        /// Mirrors moduleOptions.EnableESM2 && EnableESM2TrackValuVsrc. The mode2 WAR
+        /// gate only recovers waits va_vsrc tracking creates, so it is inert when false.
+        bool enableESM2TrackValuVsrc = false;
+        /// Spread SALU/VALU fillers evenly across WMMA windows: each window is
+        /// owed ceil(fillers / WMMAs) of its region and closes once that quota
+        /// is met, instead of being padded to its full co-issue length. ds_load
+        /// selection and coexec hazard padding are unaffected. See
+        /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
+        bool evenSpreadFillers = false;
+        /// In a ds stream of 2+ ds_loads per WMMA window, a ds_load that still fits the
+        /// window goes before fillers and prefetches, so no slot is lost and the
+        /// tensor_load does not slip (mirrors ModuleOptions::DsSlotFirst).
+        bool dsSlotFirst = false;
+        /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
+        /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
+        /// query) is held until just before the next s_barrier_wait; < 0 = off.
+        int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
+        /// this many WMMA windows before the tensor_load it precedes, staggered over its
+        /// group; below 8 marks a single-stage loop (whole group at the load's window,
+        /// ahead of the stage barrier); 0 = off.
+        int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no prefetch lead.
+        int prefetchLeadMinStageWmmas = 64;
+        /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
+        /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
+        int warGateWmmas = 0;
     };
 
     LoopConfig loopConfig;

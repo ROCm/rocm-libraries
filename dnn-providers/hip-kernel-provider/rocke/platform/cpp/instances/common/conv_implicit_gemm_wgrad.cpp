@@ -26,6 +26,11 @@
  */
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 
+/* Mirrors _DEFAULT_WS_REPLICAS in the Python instance. */
+#ifndef ROCKE_WGRAD_DEFAULT_WS_REPLICAS
+#define ROCKE_WGRAD_DEFAULT_WS_REPLICAS 8
+#endif
+
 #include <cstdint> /* int64_t */
 #include <cstdio> /* snprintf */
 #include <cstring> /* strcmp, memset, memcpy */
@@ -33,6 +38,7 @@
 #include "rocke/error_boundary.hpp"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir.h"
@@ -67,6 +73,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.chiplet_num_xcds = 8;
     s.chiplet_chunk_size = 64;
     s.split_k = 1;
+    s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
     return s;
 }
 
@@ -121,31 +128,33 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
     /* split_k == 1 (and the -1 auto sentinel, which only ever resolves to >= 1):
-     *   plain store, always deterministic.
-     * split_k > 1 + two_stage (or force_deterministic, which the builder
-     *   promotes to two_stage at split_k > 1): workspace-reduce, deterministic.
-     * split_k > 1 without either: atomic adds, non-deterministic.
-     * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
-     *   argument and the epilogue is always packed atomics. It can never be
-     *   promoted to two-stage -- both effective_two_stage_v and the builder's
-     *   promotion require sk > 1 -- so it is never deterministic, and
-     *   force_deterministic cannot make it so. Treating 0 as "<= 1" here would
-     *   tell a host that an atomic kernel produces reproducible dW. */
-    if(s->split_k == 0)
-        return false;
-    return (s->split_k <= 1) || s->two_stage || s->force_deterministic;
+     *   plain store, no atomics, deterministic.
+     * split_k > 1: non-deterministic, two_stage or not. The two-stage path is
+     *   NOT an exception. It used to be -- Stage 1 wrote one private slab per
+     *   K-slice and Stage 2 folded them in a fixed order -- but Stage 1 now
+     *   f32-atomic-adds into ws_replicas shared slabs, so the order in which a
+     *   group's slices land in a slab is scheduler-dependent and f32 addition
+     *   is not associative. Stage 2's fold over the replicas is ordered, which
+     *   does nothing for partial sums that were already reordered. */
+    return s->split_k <= 1;
 }
 
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
-    if(!s->two_stage && !s->force_deterministic)
+    if(!s->two_stage)
         return 0;
+    /* Two-stage needs a split (split_k > 1); the scratch does not depend on
+     * the degree. */
     if(s->split_k <= 1)
         return 0;
     int wg_M = rocke_wgrad_conv_spec_wg_M(s);
     int wg_N = rocke_wgrad_conv_spec_wg_N(s);
     int groups = s->problem.groups > 0 ? s->problem.groups : 1;
-    return (size_t)groups * (size_t)s->split_k * (size_t)wg_M * (size_t)wg_N * sizeof(float);
+    /* R replica slabs per group, no split_k factor: a group's K-slices
+     * atomic-add on top of each other inside those slabs rather than each
+     * getting its own. Mirrors Python wgrad_two_stage_workspace_nbytes. */
+    int reps = s->ws_replicas > 0 ? s->ws_replicas : 1;
+    return (size_t)groups * (size_t)reps * (size_t)wg_M * (size_t)wg_N * sizeof(float);
 }
 
 /* wg_K_padded = ceil(wg_K / (tile_k * split_k)) * (tile_k * split_k) */
@@ -175,7 +184,9 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
-     *     flags={"async": async_dma, "spk{N}": split_k>1, "spkauto": split_k==-1},
+     *     flags={"async": async_dma, "kouter": lds_k_outer, "pad{N}": ...,
+     *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
+     *            "wsr{N}": ..., "unroll": unroll_k},
      *   )
      */
     if(s == NULL || out == NULL)
@@ -203,11 +214,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, pad{N}, spk{N}, spkauto  -- Python boolean flags */
-    char spk_flag[32] = {0};
+    /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll */
     char pad_flag[32] = {0};
-    const char* flag_names[5];
-    int flag_on[5];
+    const char* flag_names[7];
+    int flag_on[7];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -230,10 +240,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         n_flags++;
     }
 
+    /* The split degree is a launch parameter, so the name records only that
+     * the kernel splits: every degree > 1 is one binary. Mirrors Python. */
     if(s->split_k > 1)
     {
-        snprintf(spk_flag, sizeof(spk_flag), "spk%d", s->split_k);
-        flag_names[n_flags] = spk_flag;
+        flag_names[n_flags] = "spk";
         flag_on[n_flags] = 1;
         n_flags++;
     }
@@ -243,25 +254,40 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         flag_on[n_flags] = 1;
         n_flags++;
     }
-    else if(s->split_k == 0)
-    {
-        flag_names[n_flags] = "spkrt";
-        flag_on[n_flags] = 1;
-        n_flags++;
-    }
 
     /* Tag the EFFECTIVE two-stage flag, not the raw field.  The builder promotes
-     * force_deterministic to two-stage at split_k > 1 into a local
-     * (effective_two_stage) without writing back to spec->two_stage, so naming
+     * two_stage into a local (effective_two_stage) without writing back to
+     * spec->two_stage, so naming
      * off s->two_stage would emit a two-stage body -- which carries an extra
      * `ws` workspace pointer parameter and needs a Stage-2 reduce launch --
      * under a symbol identical to the split-K atomic kernel built from the same
-     * spec with force_deterministic=false.  That is both an ABI collision for a
+     * spec with two_stage=false.  That is both an ABI collision for a
      * cache keyed on the kernel name (same hazard the lds_k_pad comment above
      * describes) and a byte-identity break against Python, which promotes by
      * rewriting the spec before the IRBuilder is named. */
     flag_names[n_flags] = "twostage";
-    flag_on[n_flags] = (s->two_stage || (s->force_deterministic && s->split_k > 1)) ? 1 : 0;
+    flag_on[n_flags] = s->two_stage ? 1 : 0;
+    n_flags++;
+
+    /* wsr<R>: same reasoning as gm/pad -- the replica count changes the scratch
+     * addressing and so the emitted body. Gated on two_stage as well as on the
+     * default, because there is no scratch at all on the atomic path; tagging
+     * it there renames every single-stage wgrad kernel over a knob its body
+     * never reads. Tracks the `twostage` flag above. */
+    char wsr_buf[32];
+    if(s->two_stage && s->ws_replicas > 1)
+    {
+        snprintf(wsr_buf, sizeof(wsr_buf), "wsr%d", s->ws_replicas);
+        flag_names[n_flags] = wsr_buf;
+        flag_on[n_flags] = 1;
+        n_flags++;
+    }
+
+    /* unroll_k hand-rolls a double-buffered K-loop -- a different body under
+     * the same name otherwise. Only tagged when set, so every other kernel
+     * keeps its name. Mirrors Python. */
+    flag_names[n_flags] = "unroll";
+    flag_on[n_flags] = s->unroll_k ? 1 : 0;
     n_flags++;
 
     return rocke_kernel_name_join(
@@ -332,13 +358,10 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     }
 
     int sk = s->split_k;
-    if(sk < -1)
+    if(sk < -1 || sk == 0)
     {
         if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "split_k must be -1 (auto), 0 (runtime), 1, or >1 (got %d)",
-                     sk);
+            snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
         return false;
     }
     /* two_stage=true requires split_k > 1 (or -1 for auto); mirrors Python validate(). */
@@ -351,15 +374,30 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      "with split_k=1 there is nothing to reduce and two_stage is a no-op");
         return false;
     }
+    /* Mirrors Python is_valid_wgrad_spec / WgradConvSpec.validate(). Without
+     * this a C++-built spec with a zero or negative count is accepted, the
+     * emitter's `reps > 1` guards elide the slab term, and Stage 1 silently
+     * writes a single slab -- a layout Stage 2 (which validates the same field)
+     * will not fold. */
+    if(s->ws_replicas < 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "ws_replicas must be >= 1 (got %d); it is the number of scratch "
+                     "slabs a group's K-slices spread over",
+                     s->ws_replicas);
+        return false;
+    }
 
-    /* split_k > 1 or split_k == 0 (runtime atomic) requires a MFMA arch
+    /* split_k > 1 (atomic) requires a MFMA arch
      * (ctx->atom != NULL at build time).
      *
      * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching
      * Python which uses family == "wmma") instead of the arch string, so
      * gfx10* and any future or unknown arch prefix cannot fall through.  This
      * is not reachable on today's supported targets but would be more robust. */
-    if(sk > 1 || sk == 0)
+    if(sk > 1)
     {
         /* Quick arch check: gfx11xx / gfx12xx are RDNA.
          * Note: gfx10* and any unknown prefix are not rejected here — they would
@@ -385,7 +423,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
          * The local per-group computation is deliberate: the shared
          * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
          * and is used for workspace sizing, so it is not interchangeable here. */
-        const bool effective_two_stage_gate = (s->two_stage || s->force_deterministic) && sk > 1;
+        const bool effective_two_stage_gate = s->two_stage && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
@@ -429,8 +467,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                              "wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
                              "<2 x dtype> atomic pairs are dword-aligned only on an even row, "
                              "and sv=1 leaves no partner); got wg_N=%lld, store_vec=%d "
-                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true (or "
-                             "force_deterministic=true) to reach split-K via the f32 "
+                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true "
+                             "to reach split-K via the f32 "
                              "workspace path, which emits no atomics.",
                              dt,
                              (long long)wg_N_v,
@@ -448,19 +486,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * the scattered MFMA layout, so it needs cshuffle's contiguous pairs.  This
      * is an atomic-epilogue constraint only, and there are two ways to not be
      * on it: at split_k == 1 the epilogue is a direct store, and under
-     * two_stage (or force_deterministic with split_k > 1) it is a
+     * two_stage (with split_k > 1) it is a
      * workspace store.  Neither emits packed atomics, so the default epilogue
      * is fine for both.  Guarding on sk rather than on dtype alone keeps the
      * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
      * can use, since WMMA rejects cshuffle.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
-    if(sk > 1 || sk == 0)
+    if(sk > 1)
     {
-        /* The `sk > 1` term applies to two_stage as well, not just to
-         * force_deterministic: the builder computes
-         * is_two_stage = split_k > 1 && two_stage, so at sk == 0 a two_stage
-         * spec still lands on the atomic epilogue and must stay gated. */
-        bool effective_two_stage_v = (s->two_stage || s->force_deterministic) && sk > 1;
+        /* Mirrors the builder's is_two_stage = is_split_k && two_stage: a
+         * two-stage spec takes the f32 scratch epilogue, not the packed atomic. */
+        bool effective_two_stage_v = s->two_stage;
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
@@ -486,21 +522,6 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * K_wg = N*Ho*Wo, which is stride-K in dY (NHWK) and stride-C in X (NHWC).
      * Emitting it produces numerically wrong dW.  Mirrors Python
      * is_valid_wgrad_spec / WgradConvSpec.validate(). */
-    /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
-     * length is unknown at build time; the async and unrolled k-loops both need
-     * a compile-time trip count. Mirrors the Python validator. */
-    if(s->split_k == 0
-       && (s->async_dma || s->unroll_k || (s->pipeline && strcmp(s->pipeline, "basic") == 0)))
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "wgrad split_k=0 (runtime degree) is incompatible with "
-                     "async_dma/unroll_k/pipeline='basic': those pipelines need a "
-                     "compile-time iteration count. Use a fixed split_k >= 1.");
-        return false;
-    }
-
     /* The K-outer row stride comes from ROCKE_WGRAD_KOUTER_PAD in the builder,
      * so an explicit pad changes the kernel name and the LDS budget charged
      * here without changing a single emitted op. Reject rather than ignore.
@@ -570,35 +591,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* Both loops are unrolled at build time, one full load+mfma body per K
-     * iteration, so a deep reduction explodes compile time and code size. A
-     * build-practicality bound, not a hardware one. This used to guard 'basic'
-     * only, which left async uncapped and let a low split-K degree unroll five
-     * figures of bodies into one kernel. Mirrors Python. */
+    /* The wgrad builder has no load/math wave split, so "wavelet" would build
+     * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
+    if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
     {
-        const bool is_basic = s->pipeline && strcmp(s->pipeline, "basic") == 0;
-        if(is_basic || s->async_dma)
-        {
-            const char* label = is_basic ? "pipeline='basic'" : "async_dma";
-            const int spk = (s->split_k > 1) ? s->split_k : 1;
-            const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
-            const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
-            if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
-            {
-                if(reason && reason_cap)
-                    snprintf(reason,
-                             reason_cap,
-                             "%s would unroll to %d K iterations "
-                             "(slice_k=%d, tile_k=%d), over the %d limit; "
-                             "raise split_k or tile_k",
-                             label,
-                             k_iters,
-                             slice_k,
-                             s->tile_k,
-                             ROCKE_MAX_UNROLLED_K_ITERS);
-                return false;
-            }
-        }
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "pipeline='wavelet' is not implemented for wgrad (it would build "
+                     "the 'mem' kernel); use pipeline='mem'");
+        return false;
     }
 
     /* lds_k_outer: ds_read_b64_tr_b16 is a gfx950 wave64 16-bit transpose read.
@@ -1180,26 +1182,30 @@ static void wgrad_a_load_override(rocke_ir_builder_t* b,
 // ---------------------------------------------------------------------------
 
 /*
- * Emit per-lane plain f32 stores to the workspace buffer for two_stage=True.
+ * Emit per-lane f32 atomic-adds into the scratch accumulator for two_stage=True.
  * Mirrors Python _emit_wgrad_workspace_store_epilogue.
  *
- * Each CTA (blockIdx.z = k_id) writes its partial f32 accumulator to its own
- * private slice of the workspace: ws_ptr[k_id * wg_M * wg_N + c_m * wg_N + c_n].
- * Because every k_id writes to a distinct, non-overlapping slice, no atomics are
- * needed.  Stage 2 (conv_wgrad_workspace_reduce) then reduces the slices
- * sequentially, guaranteeing bit-exact, deterministic output.
+ * Every CTA adds its partial into one of its group's R replica slabs:
+ *   ws_ptr[(group * R + blockIdx.z % R) * wg_M * wg_N + c_m * wg_N + c_n]
+ * so the reduction over split_k is done by the hardware atomics and Stage 2
+ * (conv_wgrad_workspace_reduce) only folds the R slabs and casts.  R > 1 exists
+ * because a dW-sized scratch is a few dozen cache lines and pointing every CTA
+ * at one slab serialises the atomics in L2.
  *
- * The output is always f32 regardless of dtype_d; the dtype conversion happens in
- * Stage 2.  Out-of-bounds elements are guarded by scf_if rather than a sentinel
- * offset (global_store to a sentinel would compute a real address and fault).
+ * The scratch is always f32 regardless of dtype_d; the dtype conversion happens
+ * in Stage 2.  The caller must zero the scratch first -- these are adds.
+ * Out-of-bounds elements are guarded by scf_if rather than a sentinel offset
+ * (an atomic to a sentinel would compute a real address and fault).
  */
 static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                                                 const rocke_conv_build_ctx_t* ctx,
                                                 const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
                                                 rocke_value_t* ws_ptr,
-                                                int wg_M,
-                                                int wg_N)
+                                                int wg_M /*unused: bounds are kernargs*/,
+                                                int wg_N /*unused: bounds are kernargs*/)
 {
+    (void)wg_M; /* bounds come from the ctx kernargs now */
+    (void)wg_N;
     /* Mirrors Python _emit_wgrad_workspace_store_epilogue exactly.
      * Ordering of IR operations must match Python's line-by-line. */
     const rocke_mfma_atom_t* atom = ctx->atom;
@@ -1208,12 +1214,45 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     int c_per_lane = ctx->c_per_lane;
 
     /* 1. wg_M_v, wg_N_v -- Python: wg_M_v = b.const_i32(wg_M) */
-    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
-    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
+    /* AOT: the GEMM extents are kernargs, not folded constants. */
+    rocke_value_t* wg_M_v = ctx->p_wg_M;
+    rocke_value_t* wg_N_v = ctx->p_wg_N;
+    rocke_value_t* slab_v = rocke_b_mul(b, wg_M_v, wg_N_v);
 
-    /* 2. k_id = block_id_z, slice_off -- Python: k_id = b.to_sgpr_u32(b.block_id_z()) */
-    rocke_value_t* k_id = rocke_b_to_sgpr_u32(b, rocke_b_block_id_z(b));
-    rocke_value_t* slice_off = rocke_b_mul(b, k_id, rocke_b_const_i32(b, wg_M * wg_N));
+    /* 2. slab_off -- Python: slab index = group * R + (block_id_z % R), elided
+     *    entirely for the ungrouped R == 1 case so that path keeps its SSA
+     *    numbering. */
+    /* Every sub-expression is sequenced through a local: C++ leaves the
+     * evaluation order of call arguments unspecified, and the builder hands
+     * out SSA ids in call order, so an inline nest renumbers the module
+     * against Python (which evaluates left-to-right). The order below is
+     * Python's, statement for statement. */
+    /* R is a build-time knob; the slab size is the runtime wg_M * wg_N. */
+    const int reps = spec->ws_replicas;
+    rocke_value_t* group_v = ctx->group_idx;
+    rocke_value_t* slab_idx = NULL;
+    if(group_v != NULL && reps > 1)
+    {
+        rocke_value_t* c_reps_a = rocke_b_const_i32(b, reps);
+        rocke_value_t* grp_term = rocke_b_mul(b, group_v, c_reps_a);
+        rocke_value_t* z = rocke_b_block_id_z(b);
+        rocke_value_t* c_reps_b = rocke_b_const_i32(b, reps);
+        rocke_value_t* rep_term = rocke_b_mod(b, z, c_reps_b);
+        slab_idx = rocke_b_add(b, grp_term, rep_term);
+    }
+    else if(group_v != NULL)
+    {
+        slab_idx = group_v;
+    }
+    else if(reps > 1)
+    {
+        rocke_value_t* z = rocke_b_block_id_z(b);
+        rocke_value_t* c_reps = rocke_b_const_i32(b, reps);
+        slab_idx = rocke_b_mod(b, z, c_reps);
+    }
+    rocke_value_t* slab_off = NULL;
+    if(slab_idx != NULL)
+        slab_off = rocke_b_mul(b, slab_idx, slab_v);
 
     /* 3. Per-warp M/N offsets -- Python: warp_m_off = b.mul(warp_m_idx, ...) */
     rocke_value_t* warp_m_off
@@ -1277,7 +1316,7 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
                 rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* OOB guard: scf_if instead of sentinel -- global_store to a
+                /* OOB guard: scf_if instead of sentinel -- an atomic to a
                  * sentinel offset would compute a real address and fault. */
                 rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
                 rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
@@ -1286,9 +1325,10 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
                 rocke_if_t if_op = rocke_b_scf_if(b, in_bounds);
                 rocke_b_region_enter(b, if_op.then_region);
                 {
-                    rocke_value_t* ws_off = rocke_b_add(
-                        b, slice_off, rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n));
-                    rocke_b_global_store(b, ws_ptr, ws_off, val_f32, 4);
+                    rocke_value_t* ws_off = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n);
+                    if(slab_off != NULL)
+                        ws_off = rocke_b_add(b, slab_off, ws_off);
+                    rocke_b_global_atomic_add(b, ws_ptr, ws_off, val_f32, NULL);
                 }
                 rocke_b_region_leave(b);
             }
@@ -1314,9 +1354,11 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
                                             const rocke_conv_build_ctx_t* ctx,
                                             const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
                                             rocke_value_t* dw_ptr,
-                                            int wg_M,
-                                            int wg_N)
+                                            int wg_M /*unused: bounds are kernargs*/,
+                                            int wg_N /*unused: bounds are kernargs*/)
 {
+    (void)wg_M; /* bounds come from the ctx kernargs now */
+    (void)wg_N;
     const rocke_mfma_atom_t* atom = ctx->atom;
     int mfmas_m = ctx->mfmas_m;
     int mfmas_n = ctx->mfmas_n;
@@ -1370,8 +1412,9 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
     }
 
     /* Python creates wg_M_v / wg_N_v after the slot decode loop. */
-    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
-    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
+    /* AOT: the GEMM extents are kernargs, not folded constants. */
+    rocke_value_t* wg_M_v = ctx->p_wg_M;
+    rocke_value_t* wg_N_v = ctx->p_wg_N;
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; ++mi)
@@ -1474,6 +1517,8 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
 {
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
     bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
+    (void)wg_M; /* bounds come from the ctx kernargs now */
+    (void)wg_N;
     int C = spec->problem.C;
     int vec_c;
 
@@ -1509,9 +1554,9 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
                                          ctx->final_accs,
                                          ctx->num_final_accs,
                                          dw_ptr,
-                                         rocke_b_const_i32(b, wg_N),
-                                         rocke_b_const_i32(b, wg_M),
-                                         rocke_b_const_i32(b, wg_N));
+                                         ctx->p_wg_N,
+                                         ctx->p_wg_M,
+                                         ctx->p_wg_N);
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,14 +1607,41 @@ static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
     return off;
 }
 
+/* dW descriptor, built at the point of use.
+ *
+ * Python builds it inside the epilogue rather than up front, so its stride
+ * constant lands after the K-loop; building it earlier would shift every SSA
+ * id in between and break byte-identity. */
+static rocke_tensor_descriptor_t* wgrad_build_dw_descriptor(rocke_ir_builder_t* b,
+                                                            const rocke_conv_build_ctx_t* ctx)
+{
+    rocke_conv_dyn_desc_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.name = ctx->p->is_3d ? "dW_kzyxc" : "dW_kyxc";
+    opts.stride_n = ctx->p_dW_stride_k;
+    opts.stride_di = ctx->p_dW_stride_z;
+    opts.stride_hi = ctx->p_dW_stride_y;
+    opts.stride_wi = ctx->p_dW_stride_x;
+    opts.channel_y.mult = ctx->p_magic_n_Y_mult;
+    opts.channel_y.shift = ctx->p_magic_n_Y_shift;
+    opts.channel_x.mult = ctx->p_magic_n_X_mult;
+    opts.channel_x.shift = ctx->p_magic_n_X_shift;
+    opts.channel_c.mult = ctx->p_magic_n_cpg_mult;
+    opts.channel_c.shift = ctx->p_magic_n_cpg_shift;
+    return (rocke_tensor_descriptor_t*)rocke_conv_make_b_descriptor_dynamic_opts(
+        b, ctx, "n_wg", &opts);
+}
+
 static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
                                        const rocke_conv_build_ctx_t* ctx,
                                        const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
-                                       rocke_tensor_descriptor_t* dW_desc,
                                        rocke_value_t* dw_rsrc,
                                        int wg_M,
                                        int wg_N)
 {
+    /* AOT: the store bounds are the p_wg_M / p_wg_N kernargs. */
+    (void)wg_M;
+    (void)wg_N;
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
 
     if(!ctx->is_wmma)
@@ -1585,9 +1657,9 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
             /* Pointwise: Python _emit_wgrad_direct_epilogue emits _c_N FIRST:
              *   _c_N = b.const_i32(wg_N)                      <- first
              *   bounds = (b.const_i32(wg_M), b.const_i32(wg_N)) <- second/third */
-            rocke_value_t* c_N = rocke_b_const_i32(b, wg_N);
-            rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
-            rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
+            rocke_value_t* c_N = ctx->p_wg_N;
+            rocke_value_t* bound_m = ctx->p_wg_M;
+            rocke_value_t* bound_n = ctx->p_wg_N;
             rocke_direct_epilogue_store(b,
                                         &epi,
                                         ctx->final_accs,
@@ -1602,9 +1674,11 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
         else
         {
             WgradDwAddrCtx addr_ctx;
-            addr_ctx.dW_desc = dW_desc;
-            rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
-            rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
+            /* Built here, where Python builds it: its stride constant must
+             * land at this point in the SSA sequence. */
+            addr_ctx.dW_desc = wgrad_build_dw_descriptor(b, ctx);
+            rocke_value_t* bound_m = ctx->p_wg_M;
+            rocke_value_t* bound_n = ctx->p_wg_N;
             rocke_direct_epilogue_store(b,
                                         &epi,
                                         ctx->final_accs,
@@ -1630,9 +1704,14 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
         = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+    /* Python builds the dW descriptor after the warp offsets on the WMMA
+     * path, so its stride constant lands here. */
+    rocke_tensor_descriptor_t* dW_desc
+        = ctx->is_pointwise ? NULL : wgrad_build_dw_descriptor(b, ctx);
 
-    rocke_value_t* c_M = rocke_b_const_i32(b, wg_M);
-    rocke_value_t* c_N = rocke_b_const_i32(b, wg_N);
+    /* AOT: bounds are the p_wg_M / p_wg_N kernargs. */
+    rocke_value_t* c_M = ctx->p_wg_M;
+    rocke_value_t* c_N = ctx->p_wg_N;
 
     bool _fp32_out = (strcmp(dtype_d, "fp32") == 0);
     bool _bf16_out = (strcmp(dtype_d, "bf16") == 0);
@@ -1714,13 +1793,15 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                                  const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
                                  const char* arch,
                                  int wg_K, /* rocke_wgrad_conv_spec_wg_K(spec) */
-                                 int split_k, /* resolved (>= 1, or 0 for runtime) */
-                                 rocke_value_t* ks_param) /* non-NULL iff split_k == 0 */
+                                 rocke_value_t* ks_param, /* slice width  (always) */
+                                 rocke_value_t* ks_count_param) /* slice count (always) */
 {
     if(ctx == NULL || b == NULL || spec == NULL)
         return false;
 
-    memset(ctx, 0, sizeof(*ctx));
+    /* The caller has already emitted the AOT kernarg block into ctx, so this
+     * must not clear it -- the params are ctx state, not scratch. Only the
+     * fields this function owns are (re)initialised below. */
     ctx->b = b;
     ctx->arch = arch;
 
@@ -1917,81 +1998,77 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* Geometry constants -- K-loop bound is wg_K (or split-K slice size).
      *
      * Creation order must mirror Python (build_implicit_gemm_conv_wgrad, after bind):
-     *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1/0: unused 0)
+     *   c0        = b.const_i32(0)         -- always
      *   c_block_k = b.const_i32(block_k)   -- always
-     *   c_wg_K    = b.const_i32(wg_K)      -- always (used as loop bound when split_k=1)
-     *   [split_k>1 only] c_ks, k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
-     *   [split_k==0 only] c_ks=ks_param,   k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
+     *   c_wg_K    = p_wg_K kernarg         -- always
+     *   c_ks = ks_param, slice = z % ks_count, k_lo = to_sgpr(slice * c_ks),
+     *   k_hi = to_sgpr(k_lo + c_ks) -- always; the degree is a kernarg
      */
-    int wg_K_padded_val = rocke_wgrad_conv_spec_wg_K_padded(spec);
-
     /* c0: always const(0). For split_k=1 this is also k_lo. */
     rocke_value_t* c0_node = rocke_b_const_i32(b, 0);
     /* c_block_k: always created here (matches Python ordering). */
     ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
-    /* c_wg_K: always created (occupies SSA slot even for split_k>1). */
-    rocke_value_t* c_wg_K = rocke_b_const_i32(b, wg_K);
+    /* AOT: the reduction extent is the p_wg_K kernarg, not a folded constant. */
+    rocke_value_t* c_wg_K = ctx->p_wg_K;
 
-    rocke_value_t* k_lo;
-    rocke_value_t* k_hi_v; /* NULL => loop runs to c_wg_K */
-    if(split_k > 1)
-    {
-        int ks = wg_K_padded_val / split_k;
-        rocke_value_t* c_ks = rocke_b_const_i32(b, ks);
-        k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), c_ks));
-        k_hi_v = rocke_b_to_sgpr_u32(b, rocke_b_add(b, k_lo, c_ks));
-    }
-    else if(split_k == 0)
-    {
-        /* Runtime atomic: ks is a kernel argument passed at launch time.
-         * Mirrors Python: c_ks = _ks_param; k_lo = to_sgpr(mul(block_id_z, c_ks))
-         * groups==1 is the only supported path for C++ (grouped wgrad is rejected by
-         * the validator), so no ks_count / group decode is needed. */
-        rocke_value_t* c_ks = ks_param; /* i32 kernel arg */
-        k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), c_ks));
-        k_hi_v = rocke_b_to_sgpr_u32(b, rocke_b_add(b, k_lo, c_ks));
-    }
-    else
-    {
-        k_lo = c0_node;
-        k_hi_v = NULL;
-    }
-    ctx->c0 = k_lo;
-    ctx->c_K_gemm = (k_hi_v != NULL) ? k_hi_v : c_wg_K;
+    /* Split-K K-slice bounds. The degree is a launch parameter (ks_count),
+     * never a compile-time constant, so there is exactly one shape of decode:
+     *
+     *     slice = z % ks_count
+     *     k_lo  = slice * ks ;  k_hi = k_lo + ks
+     *
+     * An unsplit launch passes ks_count = 1 and ks = wg_K rounded up to a
+     * whole number of K tiles, which collapses that to k_lo = 0, k_hi = padded
+     * wg_K. The tail past wg_K reads zero through the descriptor bounds, so
+     * the padding contributes nothing -- which is what lets the split and
+     * unsplit cases share one computation instead of two branches that have to
+     * be kept in step. Grouped wgrad is rejected by the validator here, so the
+     * group half of the decode is not emitted.
+     *
+     * C leaves argument evaluation order unspecified, so each subexpression is
+     * bound to a temp in Python's left-to-right order. */
+    rocke_value_t* z_id = rocke_b_block_id_z(b);
+    rocke_value_t* slice_id = rocke_b_mod(b, z_id, ks_count_param);
+    rocke_value_t* mul_lo = rocke_b_mul(b, slice_id, ks_param);
+    rocke_value_t* k_lo = rocke_b_to_sgpr_u32(b, mul_lo);
+    rocke_value_t* add_hi = rocke_b_add(b, k_lo, ks_param);
+    rocke_value_t* k_hi_v = rocke_b_to_sgpr_u32(b, add_hi);
+    /* ctx->c0 is the literal zero the epilogue passes as a buffer soffset.
+     * It used to be aliased to k_lo, which only worked while the unsplit path
+     * made k_lo the constant 0; now that every launch computes k_lo from the
+     * slice index, the two have to stay separate or the stores pick up the
+     * slice base as their soffset. */
+    ctx->c0 = c0_node;
+    ctx->c_K_gemm = k_hi_v;
     /* wgrad's async k-loop offsets are b.add(k_lo, const_i32(...)) -- the slice
      * base is part of the expression, unlike the forward conv which uses a bare
      * const. Handing the driver k_lo keeps the emitted SSA identical. */
     ctx->kloop_k_lo = k_lo;
-    /* Python: slice_k = wg_K if k_hi is None else wg_K_padded() // split_k
-     *         K_iters = ceil(slice_k / block_k)
-     * k_hi is None exactly when split_k == 1. */
-    {
-        const int wgk = rocke_wgrad_conv_spec_wg_K(spec);
-        const int slice_k
-            = (k_hi_v == NULL) ? wgk : (rocke_wgrad_conv_spec_wg_K_padded(spec) / spec->split_k);
-        ctx->kloop_num_iters = (slice_k + ctx->block_k - 1) / ctx->block_k;
-    }
+    /* AOT: the drivers walk a runtime [k_lo, k_hi) range, so there is no
+     * build-time iteration count left to derive. */
+    ctx->kloop_k_hi = ctx->c_K_gemm;
+    /* k_hi is a slice end inside the tensor under split-K; past wg_K the
+     * descriptor zero-fills, so that is where a stray prefetch is sent. */
+    ctx->kloop_k_zero_fill = c_wg_K;
+    ctx->kloop_num_iters = 0;
 
     /* Chiplet swizzle */
     if(spec->chiplet_swizzle)
     {
-        int wg_M_val = spec->problem.K;
-        int wg_N_val = rocke_wgrad_conv_spec_wg_N(spec);
-        int npm = (wg_M_val + ctx->block_m - 1) / ctx->block_m;
-        int npn = (wg_N_val + ctx->block_n - 1) / ctx->block_n;
-        rocke_value_t* c_npn = rocke_b_const_i32(b, npn);
+        /* AOT: the tile counts are kernargs -- the host computes them from
+         * the launch shape and the tile size it dispatched. */
         rocke_value_t* bid_y = rocke_b_block_id_y(b);
-        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, c_npn);
+        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, ctx->p_num_pid_n);
         rocke_value_t* bid_x = rocke_b_block_id_x(b);
         rocke_value_t* wgflat = rocke_b_add(b, mul_y, bid_x);
         rocke_super_tile_swizzle_result_t swz
-            = rocke_chiplet_aware_super_tile(b,
-                                             wgflat,
-                                             npm,
-                                             npn,
-                                             spec->chiplet_wgm,
-                                             spec->chiplet_num_xcds,
-                                             spec->chiplet_chunk_size);
+            = rocke_chiplet_aware_super_tile_dynamic(b,
+                                                     wgflat,
+                                                     ctx->p_num_pid_m,
+                                                     ctx->p_num_pid_n,
+                                                     spec->chiplet_wgm,
+                                                     spec->chiplet_num_xcds,
+                                                     spec->chiplet_chunk_size);
         ctx->block_m_off_v = rocke_b_mul(b, swz.row, rocke_b_const_i32(b, ctx->block_m));
         ctx->block_n_off_v = rocke_b_mul(b, swz.col, rocke_b_const_i32(b, ctx->block_n));
         ctx->grid.block_m_off = ctx->block_m_off_v;
@@ -2241,6 +2318,42 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
 // rocke_build_implicit_gemm_conv_wgrad
 // ---------------------------------------------------------------------------
 
+/* Pointer declarations for the wgrad kernarg list. The attributes are
+ * builder-specific (dW is read-modify-write under split-K atomics), so the
+ * ABI list names the slot and this callback owns the type and the opts. */
+struct WgradPtrDecl
+{
+    const rocke_type_t* a_type;
+    const rocke_type_t* b_type;
+    const rocke_type_t* d_type;
+    const rocke_param_opts_t* ro_opts;
+    const rocke_param_opts_t* d_opts;
+    const rocke_param_opts_t* ws_opts;
+};
+
+static rocke_value_t* wgrad_declare_ptr(rocke_ir_builder_t* b,
+                                        const char* name,
+                                        rocke_conv_arg_kind_t kind,
+                                        void* user)
+{
+    const WgradPtrDecl* d = static_cast<const WgradPtrDecl*>(user);
+    switch(kind)
+    {
+    case ROCKE_CONV_ARG_A:
+        return rocke_b_param(b, name, d->a_type, d->ro_opts);
+    case ROCKE_CONV_ARG_B:
+        return rocke_b_param(b, name, d->b_type, d->ro_opts);
+    case ROCKE_CONV_ARG_D:
+        return rocke_b_param(b, name, d->d_type, d->d_opts);
+    case ROCKE_CONV_ARG_F32_PTR:
+        /* Two-stage: f32 workspace that receives the partial sums. */
+        return rocke_b_param(b, name, rocke_ptr_type(b, rocke_f32(), "global"), d->ws_opts);
+    default:
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "wgrad: unexpected pointer kind for %s", name);
+    }
+}
+
 rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_ir_builder_t* b, const rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char* arch)
 {
@@ -2273,16 +2386,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
     }
 
-    /* force_deterministic: promote to two_stage when split_k > 1.
-     * Use a local mutable copy so we do not mutate the caller's spec. */
     bool effective_two_stage = spec->two_stage;
-    if(spec->force_deterministic && split_k > 1)
-        effective_two_stage = true;
 
-    bool is_split_k = (split_k > 1 || split_k == 0);
-    bool split_k_runtime = (split_k == 0);
+    bool is_split_k = split_k > 1;
 
-    /* split_k atomic (>1 or ==0) supported for fp32, fp16, bf16 output dtypes */
+    /* split_k atomic (>1) supported for fp32, fp16, bf16 output dtypes */
     if(is_split_k)
     {
         const char* dt = spec->dtype_d ? spec->dtype_d : "fp16";
@@ -2299,6 +2407,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     int wg_N = rocke_wgrad_conv_spec_wg_N(spec);
 
     const rocke_conv_problem_t* p = &spec->problem;
+    /* --- wgrad ctx: host state only, filled as the params are declared --- */
+    rocke_conv_build_ctx_t ctx;
+    bool is_two_stage = is_split_k && effective_two_stage;
+    rocke_value_t* ks_param = NULL;
+    rocke_value_t* ks_count_param = NULL;
+    rocke_value_t* ws_ptr = NULL;
+    memset(&ctx, 0, sizeof(ctx));
+
     /* --- kernel params with wgrad names (Python: dY, X, dW, *_bytes) --- */
     rocke_param_opts_t ro_opts;
     memset(&ro_opts, 0, sizeof(ro_opts));
@@ -2313,7 +2429,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    /* split_k>1 or split_k==0: dW is read+write (atomic); split_k=1: writeonly.
+    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly.
      * Caller MUST zero-init dW before launch for atomic paths -- the kernel only
      * issues atomic-adds.  See the header contract note for details. */
     d_opts.writeonly = !is_split_k;
@@ -2336,38 +2452,115 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     const rocke_type_t* x_glob
         = rocke_ptr_type(b, _WGRAD_ELEM_TYPE(spec->dtype_b, "fp16"), "global");
 #undef _WGRAD_ELEM_TYPE
-    rocke_value_t* dY = rocke_b_param(b, "dY", dy_glob, &ro_opts);
-    rocke_value_t* X = rocke_b_param(b, "X", x_glob, &ro_opts);
-    rocke_value_t* dW = rocke_b_param(b, "dW", dw_glob, &d_opts);
-    rocke_value_t* dY_bytes = rocke_b_param(b, "dY_bytes", rocke_i32(), NULL);
-    rocke_value_t* X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
-    rocke_value_t* dW_bytes = rocke_b_param(b, "dW_bytes", rocke_i32(), NULL);
-    /* Runtime split-K: ks = slice width, supplied by the launcher at dispatch.
-     * Only emitted when split_k == 0; fixed-degree kernels bake ks as a const.
-     * Mirrors Python: _ks_param = b.param("ks", I32) if _split_k_runtime else None */
-    rocke_value_t* ks_param = split_k_runtime ? rocke_b_param(b, "ks", rocke_i32(), NULL) : NULL;
+    rocke_value_t* dY = NULL;
+    rocke_value_t* X = NULL;
+    rocke_value_t* dW = NULL;
+    rocke_value_t* dY_bytes = NULL;
+    rocke_value_t* X_bytes = NULL;
+    rocke_value_t* dW_bytes = NULL;
 
-    /* Two-stage only: workspace ptr (f32) and its byte size.
-     * Only present when two_stage=true && split_k>1. */
-    bool is_two_stage = is_split_k && effective_two_stage;
-    rocke_value_t* ws_ptr = NULL;
-    if(is_two_stage)
+    /* ---- the whole kernarg list ----
+     * Pointers, byte sizes, the shared extent block, wgrad's own GEMM dims,
+     * strides and magic pairs, then the variant-specific extras -- emitted
+     * from the ordered ABI list, as the Python builder emits from
+     * conv_arg_names(direction="wgrad"), so the order cannot drift from the
+     * launch signature. */
     {
+        const bool is_3d = spec->problem.is_3d;
         rocke_param_opts_t ws_opts;
         memset(&ws_opts, 0, sizeof(ws_opts));
         ws_opts.noalias = true;
         ws_opts.noalias_set = true;
-        ws_opts.writeonly = true;
-        ws_opts.writeonly_set = true;
+        /* Not writeonly: an atomicrmw reads its target. */
         ws_opts.align = 16;
         ws_opts.align_set = true;
-        ws_ptr = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ws_opts);
-        rocke_b_param(b, "ws_bytes", rocke_i32(), NULL); /* consumed by host */
+        WgradPtrDecl ptrs;
+        ptrs.a_type = dy_glob;
+        ptrs.b_type = x_glob;
+        ptrs.d_type = dw_glob;
+        ptrs.ro_opts = &ro_opts;
+        ptrs.d_opts = &d_opts;
+        ptrs.ws_opts = &ws_opts;
+        const rocke_conv_param_slot_t slots[] = {
+            {"dY", &dY},
+            {"X", &X},
+            {"dW", &dW},
+            {"dY_bytes", &dY_bytes},
+            {"X_bytes", &X_bytes},
+            {"dW_bytes", &dW_bytes},
+            {"p_N", &ctx.p_N},
+            {"p_Hi", &ctx.p_Hi},
+            {"p_Wi", &ctx.p_Wi},
+            {"p_C", &ctx.p_C},
+            {"p_K", &ctx.p_K},
+            {"p_Y", &ctx.p_Y},
+            {"p_X", &ctx.p_X},
+            {"p_Z", &ctx.p_Z},
+            {"p_Di", &ctx.p_Di},
+            {"p_sH", &ctx.p_sH},
+            {"p_sW", &ctx.p_sW},
+            {"p_pH", &ctx.p_pH},
+            {"p_pW", &ctx.p_pW},
+            {"p_dH", &ctx.p_dH},
+            {"p_dW", &ctx.p_dW},
+            {"p_sD", &ctx.p_sD},
+            {"p_pD", &ctx.p_pD},
+            {"p_dD", &ctx.p_dD},
+            {"p_groups", &ctx.p_groups},
+            {"p_Ho", &ctx.p_Ho},
+            {"p_Wo", &ctx.p_Wo},
+            {"p_Do", &ctx.p_Do},
+            {"p_cpg", &ctx.p_cpg},
+            {"p_kpg", &ctx.p_kpg},
+            {"p_wg_M", &ctx.p_wg_M},
+            {"p_wg_N", &ctx.p_wg_N},
+            {"p_wg_K", &ctx.p_wg_K},
+            {"p_dY_stride_n", &ctx.p_dY_stride_n},
+            {"p_dY_stride_do", &ctx.p_dY_stride_do},
+            {"p_dY_stride_ho", &ctx.p_dY_stride_ho},
+            {"p_dY_stride_wo", &ctx.p_dY_stride_wo},
+            {"p_X_stride_n", &ctx.p_X_stride_n},
+            {"p_X_stride_di", &ctx.p_X_stride_di},
+            {"p_X_stride_hi", &ctx.p_X_stride_hi},
+            {"p_X_stride_wi", &ctx.p_X_stride_wi},
+            {"p_dW_stride_k", &ctx.p_dW_stride_k},
+            {"p_dW_stride_z", &ctx.p_dW_stride_z},
+            {"p_dW_stride_y", &ctx.p_dW_stride_y},
+            {"p_dW_stride_x", &ctx.p_dW_stride_x},
+            {"p_magic_k_Do_mult", &ctx.p_magic_k_Do_mult},
+            {"p_magic_k_Do_shift", &ctx.p_magic_k_Do_shift},
+            {"p_magic_k_Ho_mult", &ctx.p_magic_k_Ho_mult},
+            {"p_magic_k_Ho_shift", &ctx.p_magic_k_Ho_shift},
+            {"p_magic_k_Wo_mult", &ctx.p_magic_k_Wo_mult},
+            {"p_magic_k_Wo_shift", &ctx.p_magic_k_Wo_shift},
+            {"p_magic_n_Y_mult", &ctx.p_magic_n_Y_mult},
+            {"p_magic_n_Y_shift", &ctx.p_magic_n_Y_shift},
+            {"p_magic_n_X_mult", &ctx.p_magic_n_X_mult},
+            {"p_magic_n_X_shift", &ctx.p_magic_n_X_shift},
+            {"p_magic_n_cpg_mult", &ctx.p_magic_n_cpg_mult},
+            {"p_magic_n_cpg_shift", &ctx.p_magic_n_cpg_shift},
+            {"p_num_pid_m", &ctx.p_num_pid_m},
+            {"p_num_pid_n", &ctx.p_num_pid_n},
+            /* ws_bytes is consumed by the host only; it has no slot. */
+            {"ws_ptr", &ws_ptr},
+            {"ks", &ks_param},
+            {"ks_count", &ks_count_param},
+        };
+        rocke_conv_arg_list_t abi;
+        ctx.params_is_3d = is_3d;
+        if(!rocke_conv_arg_names("wgrad", is_3d, is_two_stage, &abi))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: no kernarg ABI for this variant");
+            return NULL;
+        }
+        if(!rocke_conv_emit_param_block(
+               b, &abi, wgrad_declare_ptr, &ptrs, slots, (int)(sizeof(slots) / sizeof(slots[0]))))
+        {
+            return NULL;
+        }
     }
 
-    /* --- build wgrad ctx (with correct param names) --- */
-    rocke_conv_build_ctx_t ctx;
-    if(!wgrad_build_ctx_init(&ctx, b, spec, arch, wg_K, split_k, ks_param))
+    if(!wgrad_build_ctx_init(&ctx, b, spec, arch, wg_K, ks_param, ks_count_param))
         return NULL;
 
     /* Wire the params we declared into the ctx slots the phases read */
@@ -2389,17 +2582,96 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      * Emitted before buffer_rsrc so the SSA sequence matches Python. */
     if(ctx.is_pointwise)
     {
-        ctx.ir_c_C_pw = rocke_b_const_i32(b, ctx.c_K_pw); /* kpg = _c_K_ir */
-        ctx.ir_c_K_pw = rocke_b_const_i32(b, ctx.c_C_pw); /* cpg = _c_C_ir */
-        ctx.ir_c_M_pw = rocke_b_const_i32(b, ctx.c_M_pw); /* wg_M = _c_wgM_ir */
-        ctx.ir_always_valid = rocke_b_const_i32(b, ctx.c_wgN_pw); /* wg_N = _c_wgN_ir */
-        ctx.ir_c_wgN_pw = rocke_b_const_i32(b, ctx.c_wgK_pw); /* wg_K = _c_wgK_ir */
+        /* AOT: every pointwise bound is a kernarg, so nothing is emitted here.
+         * The slot names below are historical; the comment gives the Python
+         * name each one carries. */
+        ctx.ir_c_C_pw = ctx.p_kpg; /* _c_K_ir   */
+        ctx.ir_c_K_pw = ctx.p_cpg; /* _c_C_ir   */
+        ctx.ir_c_M_pw = ctx.p_wg_M; /* _c_wgM_ir */
+        ctx.ir_always_valid = ctx.p_wg_N; /* _c_wgN_ir */
+        ctx.ir_c_wgN_pw = ctx.p_wg_K; /* _c_wgK_ir */
     }
     else
     {
         ctx.ir_c_C_pw = ctx.ir_c_K_pw = ctx.ir_c_M_pw = ctx.ir_always_valid = NULL;
         ctx.ir_c_wgN_pw = NULL;
     }
+
+    /* --- wgrad-specific descriptors ---
+     * Pointwise fast path (Y=X=1, stride=1, pad=0): descriptors are NULL; the
+     * wgrad_dy_descriptor / wgrad_x_descriptor closures use flat arithmetic.
+     * Non-pointwise: build the full coordinate-transform descriptor DAGs. */
+    rocke_tensor_descriptor_t* dY_desc = NULL;
+    rocke_tensor_descriptor_t* X_desc = NULL;
+    if(!ctx.is_pointwise)
+    {
+        /* AOT: every extent, stride and magic constant is a kernarg. The dY
+         * and X descriptors are the forward D/A DAGs under wgrad's coord
+         * names, so they reuse the shared builders with wgrad's stride slots
+         * and magic families (k_ for the reduction, n_ for the filter). */
+        rocke_conv_dyn_desc_opts_t dy_opts;
+        rocke_conv_dyn_desc_opts_t x_opts;
+        rocke_conv_dyn_desc_opts_t dw_opts;
+        const bool is_3d = spec->problem.is_3d;
+
+        memset(&dy_opts, 0, sizeof(dy_opts));
+        dy_opts.name = is_3d ? "dY_ndhwk" : "dY_nhwk";
+        dy_opts.stride_n = ctx.p_dY_stride_n;
+        dy_opts.stride_di = ctx.p_dY_stride_do;
+        dy_opts.stride_hi = ctx.p_dY_stride_ho;
+        dy_opts.stride_wi = ctx.p_dY_stride_wo;
+        dy_opts.spatial_di.mult = ctx.p_magic_k_Do_mult;
+        dy_opts.spatial_di.shift = ctx.p_magic_k_Do_shift;
+        dy_opts.spatial_hi.mult = ctx.p_magic_k_Ho_mult;
+        dy_opts.spatial_hi.shift = ctx.p_magic_k_Ho_shift;
+        dy_opts.spatial_wi.mult = ctx.p_magic_k_Wo_mult;
+        dy_opts.spatial_wi.shift = ctx.p_magic_k_Wo_shift;
+        dY_desc
+            = (rocke_tensor_descriptor_t*)rocke_conv_make_dy_descriptor_dynamic(b, &ctx, &dy_opts);
+
+        memset(&x_opts, 0, sizeof(x_opts));
+        x_opts.name = is_3d ? "X_ndhwc" : "X_nhwc";
+        /* The shared load phase queries B_desc with ("k_out", "k_gemm"), so
+         * the wgrad X descriptor exposes those names for the same axes the
+         * forward A descriptor calls ("m", "k"). */
+        x_opts.spatial_upper = "k_gemm";
+        x_opts.channel_upper = "k_out";
+        x_opts.stride_n = ctx.p_X_stride_n;
+        x_opts.stride_di = ctx.p_X_stride_di;
+        x_opts.stride_hi = ctx.p_X_stride_hi;
+        x_opts.stride_wi = ctx.p_X_stride_wi;
+        x_opts.spatial_di.mult = ctx.p_magic_k_Do_mult;
+        x_opts.spatial_di.shift = ctx.p_magic_k_Do_shift;
+        x_opts.spatial_hi.mult = ctx.p_magic_k_Ho_mult;
+        x_opts.spatial_hi.shift = ctx.p_magic_k_Ho_shift;
+        x_opts.spatial_wi.mult = ctx.p_magic_k_Wo_mult;
+        x_opts.spatial_wi.shift = ctx.p_magic_k_Wo_shift;
+        x_opts.channel_y.mult = ctx.p_magic_n_Y_mult;
+        x_opts.channel_y.shift = ctx.p_magic_n_Y_shift;
+        x_opts.channel_x.mult = ctx.p_magic_n_X_mult;
+        x_opts.channel_x.shift = ctx.p_magic_n_X_shift;
+        x_opts.channel_c.mult = ctx.p_magic_n_cpg_mult;
+        x_opts.channel_c.shift = ctx.p_magic_n_cpg_shift;
+        X_desc = (rocke_tensor_descriptor_t*)rocke_conv_make_a_descriptor_dynamic_opts(
+            b, &ctx, /*decompose_m=*/true, &x_opts);
+
+        /* dW is built lazily at the epilogue, where Python builds it -- doing
+         * it here would emit its stride constant before the K-loop and shift
+         * every SSA id in between. */
+        (void)dw_opts;
+
+        if(dY_desc == NULL || X_desc == NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: descriptor build failed");
+            return NULL;
+        }
+    }
+    /* The forward phase functions query A_desc with ("m","k") and B_desc with
+     * ("k_out","k_gemm") -- our descriptors are built with exactly those names. */
+    ctx.A_desc = dY_desc;
+    ctx.B_desc = X_desc;
+    /* dW is built at the epilogue; see wgrad_build_dw_descriptor. */
+    ctx.D_desc = NULL;
 
     /* Buffer resources */
     rocke_conv_buffer_resource_t a_rsrc, b_rsrc, d_rsrc;
@@ -2458,38 +2730,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         ctx.tr_grp16 = rocke_b_div(b, m16, c4c);
     }
 
-    /* --- wgrad-specific descriptors ---
-     * Pointwise fast path (Y=X=1, stride=1, pad=0): descriptors are NULL; the
-     * wgrad_dy_descriptor / wgrad_x_descriptor closures use flat arithmetic.
-     * Non-pointwise: build the full coordinate-transform descriptor DAGs. */
-    rocke_tensor_descriptor_t* dY_desc = NULL;
-    rocke_tensor_descriptor_t* X_desc = NULL;
-    rocke_tensor_descriptor_t* dW_desc = NULL;
-    if(!ctx.is_pointwise)
-    {
-        dY_desc = wgrad_make_dy_descriptor(b, p);
-        X_desc = wgrad_make_x_descriptor(b, p);
-        dW_desc = wgrad_make_dw_descriptor(b, p);
-        if(dY_desc == NULL || X_desc == NULL || dW_desc == NULL)
-        {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: descriptor build failed");
-            return NULL;
-        }
-    }
-    /* The forward phase functions query A_desc with ("m","k") and B_desc with
-     * ("k_out","k_gemm") -- our descriptors are built with exactly those names. */
-    ctx.A_desc = dY_desc;
-    ctx.B_desc = X_desc;
-    ctx.D_desc = dW_desc;
-
     if(!rocke_ir_builder_ok(b))
         return NULL;
 
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
-    else if(spec->pipeline && strcmp(spec->pipeline, "basic") == 0)
-        rocke_conv_emit_kloop_basic(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else
@@ -2537,11 +2783,16 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         for(int i = 0; i < ctx.num_final_accs; ++i)
             ctx.final_accs[i] = post_accs[i];
 
+        /* The dW descriptor is built inside whichever epilogue runs, at the
+         * point Python builds it -- the cshuffle path builds it first thing,
+         * the direct path after the warp offsets. Building it out here would
+         * emit its stride constant for both and in the wrong place. */
         WgradDwAddrCtx dw_addr_ctx;
-        dw_addr_ctx.dW_desc = dW_desc;
+        dw_addr_ctx.dW_desc = NULL;
 
         if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
         {
+            dw_addr_ctx.dW_desc = ctx.is_pointwise ? NULL : wgrad_build_dw_descriptor(b, &ctx);
             /* _emit_wgrad_cshuffle_epilogue: CShuffleEpilogue.from_grid(...).store(...)
              * vec_c = WgradConvSpec.default_vector_sizes(C, K, dtype_d, split_k=1)[2]
              * For split_k=1: vec_c = _vec(C) where _vec picks largest of [8,4,2,1]
@@ -2583,8 +2834,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
                                               wgrad_dw_addr_pointwise,
                                               (void*)c_wgN,
                                               ctx.d_rsrc,
-                                              rocke_b_const_i32(b, wg_M),
-                                              rocke_b_const_i32(b, wg_N));
+                                              ctx.p_wg_M,
+                                              ctx.p_wg_N);
             }
             else
             {
@@ -2595,15 +2846,18 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
                                               wgrad_dw_addr,
                                               &dw_addr_ctx,
                                               ctx.d_rsrc,
-                                              rocke_b_const_i32(b, wg_M),
-                                              rocke_b_const_i32(b, wg_N));
+                                              ctx.p_wg_M,
+                                              ctx.p_wg_N);
             }
         }
         else
         {
-            /* Use wgrad-specific direct epilogue. Mirrors Python _emit_wgrad_direct_epilogue
-             * for MFMA, _emit_wgrad_direct_epilogue_wmma for WMMA. */
-            wgrad_emit_direct_epilogue(b, &ctx, spec, dW_desc, ctx.d_rsrc, wg_M, wg_N);
+            /* Use wgrad-specific direct epilogue. Mirrors Python
+             * _emit_wgrad_direct_epilogue for MFMA,
+             * _emit_wgrad_direct_epilogue_wmma for WMMA. */
+            /* Pointwise uses flat arithmetic and never touches dW_desc, so
+             * building one would emit a stride constant Python does not. */
+            wgrad_emit_direct_epilogue(b, &ctx, spec, ctx.d_rsrc, wg_M, wg_N);
         }
     }
 

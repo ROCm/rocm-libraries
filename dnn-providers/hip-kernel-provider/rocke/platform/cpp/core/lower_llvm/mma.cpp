@@ -19,6 +19,7 @@
  * reached from _op_tile_mma's op_id routing, which mirrors the Python CDNA
  * ISABackend.emit_mma rebuilding ``tile.<op_id>`` and re-dispatching.
  */
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -89,6 +90,9 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
+
+    if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
 
     /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
      * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
@@ -623,6 +627,18 @@ typedef struct _mfma_spec
 } _mfma_spec_t;
 
 static const _mfma_spec_t MFMA_SPECS[] = {
+    {"mfma_f32_32x32x4_xf32",
+     "mfma.f32.32x32x4.xf32",
+     "llvm.amdgcn.mfma.f32.32x32x4.xf32",
+     "<2 x i32>",
+     "<16 x float>",
+     "<2 x float>"},
+    {"mfma_f32_16x16x8_xf32",
+     "mfma.f32.16x16x8.xf32",
+     "llvm.amdgcn.mfma.f32.16x16x8.xf32",
+     "<2 x i32>",
+     "<4 x float>",
+     "<2 x float>"},
     {"mfma_f32_16x16x16_f16",
      "mfma.f32.16x16x16f16",
      "llvm.amdgcn.mfma.f32.16x16x16f16",
@@ -900,17 +916,34 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         b_packed = rocke_ll_operand(L, b);
     }
-    rocke_ll_emitf(L,
-                   "  %s = call <4 x float> "
-                   "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                   "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                   "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
-                   mma_result_name(L, op),
-                   a_packed,
-                   b_packed,
-                   rocke_ll_operand(L, c),
-                   rocke_ll_operand(L, a_scale),
-                   rocke_ll_operand(L, b_scale));
+    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call <4 x float> "
+                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                       "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
+                       mma_result_name(L, op),
+                       a_packed,
+                       b_packed,
+                       rocke_ll_operand(L, c),
+                       rocke_ll_operand(L, a_scale),
+                       rocke_ll_operand(L, b_scale));
+    }
+    else
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call <4 x float> "
+                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                       "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
+                       mma_result_name(L, op),
+                       a_packed,
+                       b_packed,
+                       rocke_ll_operand(L, c),
+                       rocke_ll_operand(L, a_scale),
+                       rocke_ll_operand(L, b_scale));
+    }
 }
 
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op)
@@ -1016,8 +1049,8 @@ static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* 
 {
     /* UNSCALED fp8 16x16x128 hero atom (L6): reuse the f8f6f4 scaled intrinsic
      * with both E8M0 scales pinned to 0 (2^0 == 1.0) so it is numerically a
-     * plain unscaled fp8 MFMA. Uses a dedicated decl key for the 9-arg LLVM22
-     * signature -- it does NOT touch the 11-arg MX-scaled decl. */
+     * plain unscaled fp8 MFMA. Its dedicated 9-arg decl key preserves the
+     * LLVM20/22 MX-scaled declaration, which remains the 11-arg form. */
     const rocke_value_t *a, *b, *c;
     const char *a_packed, *b_packed;
     const char *a_ty, *b_ty;

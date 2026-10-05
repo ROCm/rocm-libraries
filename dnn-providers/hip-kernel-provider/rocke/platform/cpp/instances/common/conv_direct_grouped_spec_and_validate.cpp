@@ -21,7 +21,6 @@
  *     .kernel_name() / .validate()             rocke_direct_conv_4c_kernel_name / _validate
  *   is_valid_spec_16c(spec, arch)              rocke_direct_conv_16c_is_valid_spec()
  *   is_valid_spec_4c(spec, arch)               rocke_direct_conv_4c_is_valid_spec()
- *   (C-port-only 6-entry manifest ABI)         rocke_direct_conv_signature()
  *
  * The reason strings + the kernel name are formatted byte-identically to Python
  * (kernel_name_join, the ValueError messages) so a sweep driver sees the same
@@ -116,6 +115,7 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void)
     p.KW = 3;
     p.PAD = 1;
     p.stride = 1;
+    p.dtype = "fp16";
     return p;
 }
 
@@ -127,6 +127,16 @@ int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p)
 int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
 {
     return p->groups * p->kpg;
+}
+
+int rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)
+{
+    return (p->H + 2 * p->PAD - p->KH) / p->stride + 1;
+}
+
+int rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p)
+{
+    return (p->W + 2 * p->PAD - p->KW) / p->stride + 1;
 }
 
 long long rocke_direct_conv_problem_flops(const rocke_direct_conv_problem_t* p)
@@ -200,9 +210,10 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     char bg_buf[32];
     const char* db_part;
     const char* parts[4];
-    const char* flag_names[1];
-    int flag_on[1];
+    const char* flag_names[2];
+    int flag_on[2];
     rocke_status_t st;
+    const char* dtype;
 
     if(spec == NULL || out == NULL)
     {
@@ -220,16 +231,50 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     db_part = spec->double_buffer ? "db" : "sb";
 
     /* kernel_name_join(name, short, "bq..", "bg..", "db"/"sb",
-     *                  flags={"k32": fold_k32}) */
+     *                  flags={"k32": fold_k32, "bf16": dtype=="bf16"}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = db_part;
 
+    dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
     flag_names[0] = "k32";
     flag_on[0] = spec->fold_k32 ? 1 : 0;
+    flag_names[1] = "bf16";
+    flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 2, out, out_cap, NULL);
+}
+
+/* Why a forward direct-conv kernel cannot compute `p`; false when it can.
+ *
+ * Mirrors conv_direct_grouped.forward_padding_reason. Every forward
+ * direct-conv kernel streams input rows and flushes output row y - (KH-1)
+ * while it is below H -- it indexes output rows by input rows. That is only
+ * right under "same" padding PAD == (KH-1)/2 with an odd filter; any other
+ * padding makes the kernel write wrong rows (including the next image's)
+ * rather than fail, so it is refused before a binary is built. */
+static bool rocke_direct_forward_padding_reason(const rocke_direct_conv_problem_t* p,
+                                                char* why,
+                                                size_t why_cap)
+{
+    if(p->KH % 2 == 0 || p->KW % 2 == 0)
+    {
+        snprintf(
+            why, why_cap, "forward direct conv needs odd filter extents (got %dx%d)", p->KH, p->KW);
+        return true;
+    }
+    if(p->PAD != (p->KH - 1) / 2)
+    {
+        snprintf(why,
+                 why_cap,
+                 "forward direct conv needs 'same' padding PAD == (KH-1)/2 = %d (got PAD=%d); "
+                 "the row stream indexes output rows by input rows",
+                 (p->KH - 1) / 2,
+                 p->PAD);
+        return true;
+    }
+    return false;
 }
 
 rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
@@ -242,6 +287,18 @@ rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv16cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     /* if p.cpg != 16 or p.kpg != 16: raise ValueError(...) */
     if(p->cpg != 16 || p->kpg != 16)
     {
@@ -309,6 +366,33 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     }
 
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            CK_DCONV16C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+        }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
+    /* the fold_k32 16c kernel folds taps s=0/1 into one MFMA atom and handles s=2 as
+     * a separate residual, so the filter has to be exactly three wide. */
+    if(spec->fold_k32 && p->KW != 3)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "the fold_k32 16c kernel is built for a 3-wide filter (got KW=%d)",
+                     p->KW);
+        return false;
+    }
     /* if p.cpg != 16 or p.kpg != 16: return False, ... */
     if(p->cpg != 16 || p->kpg != 16)
     {
@@ -322,18 +406,23 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     }
 
     mma = rocke_archtarget_mma(target);
-    /* if not target.mma.has_shape(f16,f16,fp32, 16,16,16): return False, ... */
-    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
     {
-        CK_DCONV16C_REJECT("missing 16x16x16 f16 MFMA atom on %s", arch);
-    }
-    /* if spec.fold_k32 and not target.mma.has_shape(f16,f16,fp32, 16,16,32): ... */
-    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-    {
-        CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on %s; use "
-                           "fold_k32=False for a %s-capable kernel",
-                           arch,
-                           arch);
+        /* ab_dtype: "f16" or "bf16" based on problem.dtype */
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        /* if not target.mma.has_shape(ab,ab,fp32, 16,16,16): return False, ... */
+        if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+        {
+            CK_DCONV16C_REJECT("missing 16x16x16 %s MFMA atom on %s", ab, arch);
+        }
+        /* if spec.fold_k32 and not target.mma.has_shape(ab,ab,fp32, 16,16,32): ... */
+        if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+        {
+            CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 %s MFMA atom, absent on %s; use "
+                               "fold_k32=False for a %s-capable kernel",
+                               ab,
+                               arch,
+                               arch);
+        }
     }
 
     if(reason != NULL && reason_cap > 0)
@@ -409,6 +498,21 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype != "fp16": raise ValueError(...) — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
+                         "is fp16-only; use fp16 dtype or a different cpg variant");
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     /* if p.cpg != 4 or p.kpg != 4: raise ValueError(...) */
     if(p->cpg != 4 || p->kpg != 4)
     {
@@ -493,6 +597,24 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
+    /* if p.dtype != "fp16": return False, ... — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0)
+        {
+            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 not supported - "
+                              "no mfma_f32_4x4x4_bf16 atom");
+        }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
     if(p->cpg != 4 || p->kpg != 4)
     {
@@ -529,61 +651,9 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
 #undef CK_DCONV4C_REJECT
 }
 
-/* ===================================================================== *
- *  SIGNATURE (manifest) -- the 6-entry ABI shared by both kernels:
- *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
- *    D_bytes:i32.
- * ===================================================================== */
-
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count)
-{
-    rocke_status_t st;
-
-    if(arena == NULL || out == NULL || out_cap < 6)
-    {
-        return ROCKE_ERR_VALUE;
-    }
-
-    st = rocke_sig_param(arena, "A", "f16", NULL, &out[0]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "B", "f16", NULL, &out[1]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_param(arena, "D", "f16", NULL, &out[2]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != ROCKE_OK)
-    {
-        return st;
-    }
-
-    if(out_count != NULL)
-    {
-        *out_count = 6;
-    }
-    return ROCKE_OK;
-}
+/* The launch signature is not built here: every direct kernel takes the AOT
+ * argument list of rocke_conv_direct_arg_names() (conv_abi.cpp), which hosts
+ * pack from directly. */
 
 /* ===================================================================== *
  *  DirectConv8cSpec  (cpg = kpg = 8)
@@ -630,7 +700,15 @@ rocke_status_t rocke_direct_conv_8c_kernel_name(const rocke_direct_conv_8c_spec_
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = spec->double_buffer ? "db" : "sb";
-    return rocke_kernel_name_join(spec->name, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        /* flags={"bf16": dtype=="bf16"} */
+        const char* flag_names8c[1] = {"bf16"};
+        const char* dt8c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        int flag_on8c[1];
+        flag_on8c[0] = (strcmp(dt8c, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 4, flag_names8c, flag_on8c, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* spec,
@@ -643,6 +721,17 @@ rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv8cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 8 || p->kpg != 8)
     {
         if(reason && reason_cap > 0)
@@ -689,6 +778,10 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
                                         size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const char* ab;
+
     if(spec == NULL)
     {
         if(reason && reason_cap > 0)
@@ -701,12 +794,45 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
     {
         arch = "gfx950";
     }
-    if(rocke_archtarget_from_gfx(arch) == NULL)
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
     {
         rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
+    /* the 8c kernel folds taps s=0/1 into one MFMA atom and handles s=2 as
+     * a separate residual, so the filter has to be exactly three wide. */
+    if(p->KW != 3)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "the 8c kernel is built for a 3-wide filter (got KW=%d)",
+                     p->KW);
+        return false;
+    }
     if(p->cpg != 8 || p->kpg != 8)
     {
         if(reason && reason_cap > 0)
@@ -736,6 +862,16 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "DirectConv8cSpec block_q must be a multiple of 16");
+        }
+        return false;
+    }
+    mma = rocke_archtarget_mma(target);
+    ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "missing 16x16x16 %s MFMA atom on %s", ab, arch);
         }
         return false;
     }
@@ -792,7 +928,15 @@ rocke_status_t rocke_direct_conv_32c_kernel_name(const rocke_direct_conv_32c_spe
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = spec->double_buffer ? "db" : "sb";
-    return rocke_kernel_name_join(spec->name, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        /* flags={"bf16": dtype=="bf16"} */
+        const char* flag_names32c[1] = {"bf16"};
+        const char* dt32c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        int flag_on32c[1];
+        flag_on32c[0] = (strcmp(dt32c, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 4, flag_names32c, flag_on32c, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t* spec,
@@ -805,6 +949,17 @@ rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv32cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 32 || p->kpg != 32)
     {
         if(reason && reason_cap > 0)
@@ -851,6 +1006,10 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
                                          size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const char* ab;
+
     if(spec == NULL)
     {
         if(reason && reason_cap > 0)
@@ -863,12 +1022,34 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
     {
         arch = "gfx950";
     }
-    if(rocke_archtarget_from_gfx(arch) == NULL)
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
     {
         rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 32 || p->kpg != 32)
     {
         if(reason && reason_cap > 0)
@@ -898,6 +1079,16 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "DirectConv32cSpec block_q must be a multiple of 32");
+        }
+        return false;
+    }
+    mma = rocke_archtarget_mma(target);
+    ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 32, 32, 8))
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "missing 32x32x8 %s MFMA atom on %s", ab, arch);
         }
         return false;
     }
@@ -952,13 +1143,21 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv") */
+    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bw_buf;
     parts[2] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec_t* spec,
@@ -972,6 +1171,19 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseSpec: unsupported dtype '%s'; expected fp16 or bf16",
+                         dt);
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1019,6 +1231,15 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
         return false;
     }
     p = &spec->problem;
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1092,11 +1313,18 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bwv{block_waves}") */
+    /* kernel_name_join(name, p.short(), f"bwv{block_waves}", flags={"bf16": dtype=="bf16"}) */
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 2, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 2, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_spatial_spec_t* spec,
@@ -1125,6 +1353,15 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         return false;
     }
     p = &spec->problem;
+    {
+        char why_[256];
+        if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", why_);
+            return false;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1164,6 +1401,45 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
     return true;
 }
 
+rocke_status_t rocke_direct_depthwise_spatial_validate(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+        return ROCKE_ERR_VALUE;
+    p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseSpatialSpec: unsupported dtype '%s'; "
+                         "expected fp16 or bf16",
+                         dt);
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseSpatialSpec requires cpg=kpg=1 (got cpg=%d, kpg=%d)",
+                     p->cpg,
+                     p->kpg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return ROCKE_OK;
+}
+
 /* ===================================================================== *
  *  DirectConvDgradSpec  (grouped dgrad — scalar FMA)
  * ===================================================================== */
@@ -1201,13 +1477,21 @@ rocke_status_t rocke_direct_conv_dgrad_kernel_name(const rocke_direct_conv_dgrad
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bq{block_q}", f"bg{block_groups}") */
+    /* kernel_name_join(name, p.short(), f"bq{block_q}", f"bg{block_groups}",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
     parts[0] = prob_short;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_spec_t* spec,
@@ -1220,6 +1504,18 @@ rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_sp
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConvDgradSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg < 1)
     {
         if(reason && reason_cap > 0)
@@ -1275,6 +1571,19 @@ bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t*
         return false;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): return False, ... */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
     if(p->cpg < 1)
     {
         if(reason && reason_cap > 0)
@@ -1352,13 +1661,21 @@ rocke_status_t rocke_direct_depthwise_dgrad_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv") */
+    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
+     *                  flags={"bf16": dtype=="bf16"}) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bw_buf;
     parts[2] = bwv_buf;
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names[1] = {"bf16"};
+        int flag_on[1];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_depthwise_dgrad_validate(
@@ -1370,6 +1687,20 @@ rocke_status_t rocke_direct_depthwise_dgrad_validate(
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseDgradSpec: unsupported dtype '%s'; "
+                         "expected fp16 or bf16",
+                         dt);
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1423,4 +1754,360 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
         reason[reason_cap - 1] = '\0';
     }
     return true;
+}
+
+/* ===================================================================== *
+ *  DirectConvWgradSpec  (backward weights)
+ * ===================================================================== */
+
+/* The row loop walks INPUT rows and pairs row hi with output row hi + PAD - r,
+ * and one LDS strip row serves all KW s-taps by being read at a one-column
+ * shift. Both identities hold only at stride 1. Python: _WGRAD_STRIDE_WHY. */
+#define ROCKE_WGRAD_STRIDE_WHY                                                   \
+    "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row " \
+    "strip); got stride=%d"
+
+/* The lane->fragment mapping is the wave64 MFMA one (c4 = lane / 16 picks the
+ * accumulator row group, lane % 16 the column) and ds_read_tr16_b64 hands back
+ * a 64-lane fragment. There is no wave32 variant of either.
+ * Python: _WGRAD_WAVE64_WHY. */
+#define ROCKE_WGRAD_WAVE64_WHY                                                  \
+    "direct wgrad needs wave_size 64 (wave64 MFMA fragment + ds_read_tr16_b64 " \
+    "lane mapping); got wave_size=%d"
+
+rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void)
+{
+    rocke_direct_conv_wgrad_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_conv_wgrad";
+    spec.wave_tile_k = 16;
+    spec.wave_tile_c = 16;
+    spec.waves_k = 1;
+    spec.waves_c = 1;
+    spec.waves_q = 1;
+    spec.wave_size = 64;
+    spec.ho_per_block = 4;
+    spec.mfma_k = 32;
+    return spec;
+}
+
+int rocke_direct_conv_wgrad_block_k(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->waves_k * spec->wave_tile_k;
+}
+
+int rocke_direct_conv_wgrad_block_c(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->waves_c * spec->wave_tile_c;
+}
+
+int rocke_direct_conv_wgrad_threads_per_block(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->waves_k * spec->waves_c * spec->waves_q * spec->wave_size;
+}
+
+int rocke_direct_conv_wgrad_wo_block(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->mfma_k;
+}
+
+int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    /* INPUT height: the builder decodes `by` as an input-row block
+     * (hi_block_start = by * HPB) and the row loop walks hi. Mirrors
+     * DirectConvWgradSpec.n_ho_blocks. */
+    return (spec->problem.H + spec->ho_per_block - 1) / spec->ho_per_block;
+}
+
+int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    int Wo = rocke_direct_conv_problem_Wo(&spec->problem);
+    int wo_block = rocke_direct_conv_wgrad_wo_block(spec);
+    return (Wo + wo_block - 1) / wo_block;
+}
+
+int rocke_direct_conv_wgrad_n_q_blocks(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    int n_wo_tiles = rocke_direct_conv_wgrad_n_wo_tiles(spec);
+    return (n_wo_tiles + spec->waves_q - 1) / spec->waves_q;
+}
+
+rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                   char* out,
+                                                   size_t out_cap)
+{
+    char prob_short[128];
+    const char* parts[5];
+    char bk_buf[24];
+    char bc_buf[24];
+    char hpb_buf[24];
+    char mk_buf[24];
+    const char* flag_names[2];
+    int flag_on[2];
+    const char* dtype;
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    snprintf(bk_buf, sizeof(bk_buf), "bk%d", rocke_direct_conv_wgrad_block_k(spec));
+    snprintf(bc_buf, sizeof(bc_buf), "bc%d", rocke_direct_conv_wgrad_block_c(spec));
+    snprintf(hpb_buf, sizeof(hpb_buf), "hpb%d", spec->ho_per_block);
+    snprintf(mk_buf, sizeof(mk_buf), "mk%d", spec->mfma_k);
+    parts[0] = prob_short;
+    parts[1] = bk_buf;
+    parts[2] = bc_buf;
+    parts[3] = hpb_buf;
+    parts[4] = mk_buf;
+    /* Python: flags={"wq": waves_q} if waves_q > 1 else {}, then flags["bf16"]
+     * when p.dtype == "bf16". kernel_name_join appends the NAME (not the value)
+     * for a truthy entry, and waves_q > 1 is exactly when the entry exists and
+     * is truthy -- so a false entry and an absent one name the same kernel.
+     * Order matches the Python dict's insertion order: wq, then bf16. */
+    dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
+    flag_names[0] = "wq";
+    flag_on[0] = (spec->waves_q > 1) ? 1 : 0;
+    flag_names[1] = "bf16";
+    flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                char* reason,
+                                                size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+
+#define ROCKE_DCONV_WGRAD_RAISE(...)                   \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+        {                                              \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        }                                              \
+        return ROCKE_ERR_VALUE;                        \
+    } while(0)
+
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            ROCKE_DCONV_WGRAD_RAISE("DirectConvWgradSpec: unsupported dtype '%s'", dt);
+        }
+    }
+    if(p->kpg < spec->wave_tile_k)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
+    }
+    if(p->cpg < spec->wave_tile_c)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("cpg %d must be >= wave_tile_c %d", p->cpg, spec->wave_tile_c);
+    }
+    if(spec->wave_tile_k != 16)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("wave_tile_k must be 16");
+    }
+    if(spec->wave_tile_c != 16)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("wave_tile_c must be 16");
+    }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_WGRAD_MAX_KH)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_WGRAD_MAX_KW)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
+    }
+    /* Checked before the product: waves_k=0 would sail through
+     * `waves_k * waves_c <= 16` and then divide by a zero block_k. */
+    if(spec->waves_k < 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_k must be >= 1");
+    }
+    if(spec->waves_c < 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_c must be >= 1");
+    }
+    if(spec->waves_k * spec->waves_c > 16)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_k * waves_c must be <= 16");
+    }
+    if(spec->waves_q < 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_q must be >= 1");
+    }
+    if(spec->wave_size != 64)
+    {
+        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+    }
+    if(spec->ho_per_block <= 0)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("ho_per_block must be > 0");
+    }
+    if(spec->mfma_k != 16 && spec->mfma_k != 32)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("mfma_k must be 16 or 32 (got %d)", spec->mfma_k);
+    }
+    if(p->stride != 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_STRIDE_WHY, p->stride);
+    }
+    if(reason != NULL && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return ROCKE_OK;
+
+#undef ROCKE_DCONV_WGRAD_RAISE
+}
+
+bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap)
+{
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const rocke_direct_conv_problem_t* p;
+
+#define ROCKE_DCONV_WGRAD_REJECT(...)                  \
+    do                                                 \
+    {                                                  \
+        if(reason != NULL && reason_cap > 0)           \
+        {                                              \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        }                                              \
+        return false;                                  \
+    } while(0)
+
+    if(spec == NULL)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("spec is NULL");
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            ROCKE_DCONV_WGRAD_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+        }
+    }
+    if(p->kpg < spec->wave_tile_k)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
+    }
+    if(p->cpg < spec->wave_tile_c)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("cpg %d must be >= wave_tile_c %d", p->cpg, spec->wave_tile_c);
+    }
+    if(spec->wave_tile_k != 16 || spec->wave_tile_c != 16)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("wave_tile_k and wave_tile_c must be 16");
+    }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_WGRAD_MAX_KH)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_WGRAD_MAX_KW)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
+    }
+    if(spec->waves_k < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_k must be >= 1");
+    }
+    if(spec->waves_c < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_c must be >= 1");
+    }
+    if(spec->waves_k * spec->waves_c > 16)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_k * waves_c must be <= 16");
+    }
+    if(spec->waves_q < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_q must be >= 1");
+    }
+    if(spec->wave_size != target->wave_size)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("wave_size %d does not match the %s wave size %d",
+                                 spec->wave_size,
+                                 arch,
+                                 target->wave_size);
+    }
+    if(spec->wave_size != 64)
+    {
+        ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+    }
+    if(rocke_direct_conv_wgrad_threads_per_block(spec)
+       > rocke_archtarget_max_threads_per_block(target))
+    {
+        ROCKE_DCONV_WGRAD_REJECT("threads_per_block %d > %d (hardware cap) on %s",
+                                 rocke_direct_conv_wgrad_threads_per_block(spec),
+                                 rocke_archtarget_max_threads_per_block(target),
+                                 arch);
+    }
+    if(spec->ho_per_block <= 0)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("ho_per_block must be > 0");
+    }
+    if(spec->mfma_k != 16 && spec->mfma_k != 32)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("mfma_k must be 16 or 32 (got %d)", spec->mfma_k);
+    }
+    if(p->stride != 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_STRIDE_WHY, p->stride);
+    }
+    mma = rocke_archtarget_mma(target);
+    {
+        /* ab_dtype: "f16" or "bf16" based on problem.dtype */
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+        {
+            ROCKE_DCONV_WGRAD_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
+        }
+        if(spec->mfma_k == 32
+           && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+        {
+            ROCKE_DCONV_WGRAD_REJECT(
+                "mfma_k=32 needs mfma_f32_16x16x32_%s, absent on %s", ab, arch);
+        }
+    }
+    if(!target->memory.has_ds_read_tr)
+    {
+        ROCKE_DCONV_WGRAD_REJECT(
+            "wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on %s", arch);
+    }
+    if(reason != NULL && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return true;
+
+#undef ROCKE_DCONV_WGRAD_REJECT
 }

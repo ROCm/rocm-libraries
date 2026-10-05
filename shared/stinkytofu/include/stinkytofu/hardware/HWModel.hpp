@@ -12,7 +12,7 @@
 // PassFeatureConfig (user-overridable, plumbed to both the Python bindings and
 // stinkytofu-opt) or stay local to the pass that owns the policy. Examples
 // deliberately kept out include InsertClusterBarrierPass's configurable Rule 3
-// signal lead and the dsReadPerWmma / globalReadPerWmma scheduling ratios in
+// signal lead and the dsReadPerCap / globalReadPerWmma scheduling ratios in
 // CDNA5Config.
 //
 // Per-opcode LDS drain caps / throughputs live on HwInstDesc (filled from each
@@ -48,6 +48,21 @@ struct HWModel {
         /// Fallback experimental max drain latency when an opcode's
         /// HwInstDesc::dsMaxDrain is 0.
         int dsLoadDefaultMaxDrain;
+        /// Waves that share one ds issue pipeline.
+        ///
+        /// A ds_load's ISA issue cost is quoted for a single wave. The issue
+        /// pipe is shared, so when several resident waves contend for it they
+        /// round-robin and one wave sees its own issues spaced out by the
+        /// number of waves sharing its pipe. The ISA number is therefore only
+        /// correct at one wave; at four waves on a 2-wave-per-pipe part the
+        /// effective cost is doubled.
+        ///
+        /// 0 or 1 = unmodelled, issue cost is taken from the ISA as-is.
+        ///
+        /// NOTE: this is NOT a substitute for dagFeatures.dsReadPerCap. That
+        /// knob is a separate manual ceiling the hardware team tunes; this
+        /// field only makes the modelled issue cost match the machine.
+        int wavesPerDsIssuePipe;
     };
 
     /// s_barrier_signal / s_barrier_wait timing, and branch overhead.
@@ -98,12 +113,37 @@ struct HWModel {
         bool hasSplitStoreCntAsyncCnt;
     };
 
+    /// Intervening-operation counts that satisfy a pending wait, so it need not be
+    /// emitted. A non-zero entry is how many ops are needed; 0 is a sentinel for off,
+    /// so that wait is always sent.
+    struct WaitHide {
+        /// Matrix ops that satisfy a pending va_vdst, for one form. Keyed by the
+        /// instruction's own resolved cost latency and destination width.
+        struct Form {
+            int costLatency;
+            int dstVgprs;
+            /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
+            int xdlVaVdst;
+            /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
+            int csmaccVaVdst;
+        };
+        /// One row per form the arch issues. A form with no row never satisfies a
+        /// va_vdst wait, so its producers are always waited on.
+        std::span<const Form> forms;
+        /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
+        int vmVsrcLds;
+        int vmVsrcTex;
+        /// Reads in the other class that satisfy the wait of an op belonging to both.
+        int vmVsrcBridge;
+    };
+
     Lds lds;
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
     DelayAlu delayAlu;
     Counters counters;
+    WaitHide waitHide;
 };
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.
@@ -165,6 +205,18 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
 /// - issue throughput as the count-weighted average of per-load throughputs
 int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
                                        int numWaves);
+
+/// Effective ds issue cost in cycles for one wave, given how many waves are
+/// resident. \p issueCycles is the ISA cost (single-wave); \p numWaves is
+/// GemmTileConfig::NumWaves.
+///
+/// Waves are assumed to pair onto a pipe as soon as there are enough of them to
+/// fill one, so two waves on a 2-wave-per-pipe part contend rather than landing
+/// on separate pipes. That is the conservative reading and it is UNVERIFIED for
+/// exactly NumWaves == 2 -- the ends (1 wave, 4 waves) are known, the middle is
+/// not. If hardware turns out to spread instead, this becomes
+/// ceilDiv(numWaves, pipeCount) and NumWaves == 2 drops back to the ISA cost.
+int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

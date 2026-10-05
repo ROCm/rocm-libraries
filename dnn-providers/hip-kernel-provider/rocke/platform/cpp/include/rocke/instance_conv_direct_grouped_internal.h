@@ -55,6 +55,78 @@ extern "C" {
 #endif
 
 /* ===================================================================== *
+ *  rocke_dconv_params_t  --  the direct-conv AOT kernarg block.
+ *
+ *  Emitted from rocke_conv_direct_arg_names() (instance_conv_abi.h), the
+ *  twin of the library's kernels.common.conv_abi.conv_direct_arg_names(). Every
+ *  direct-conv variant declares the same block in the same order, so one
+ *  emitter serves them all; kernargs are packed positionally from the launch
+ *  signature, so the order here IS the ABI.
+ *
+ *  What stays build-time: the filter extents (KH/KW), stride, PAD and the
+ *  per-group channel counts. They shape the unrolled MFMA chain, the LDS row
+ *  and the tap offsets -- kernel capabilities, not shape. What becomes a
+ *  kernarg is everything that merely sizes the work.
+ * ===================================================================== */
+typedef struct rocke_dconv_params
+{
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+    rocke_value_t* p_N;
+    rocke_value_t* p_Hi;
+    rocke_value_t* p_Wi;
+    rocke_value_t* p_Ho;
+    rocke_value_t* p_Wo;
+    rocke_value_t* p_groups;
+    rocke_value_t* p_total_c;
+    rocke_value_t* p_total_k;
+    /* Strides of the tensors bound to the A and D operand slots. Forward runs
+     * NHWC -> NHWK; dgrad runs the other way, so the two triples swap
+     * layouts and the parameter names follow the tensor, not the slot. */
+    rocke_value_t* p_A_stride_n;
+    rocke_value_t* p_A_stride_hi;
+    rocke_value_t* p_A_stride_wi;
+    rocke_value_t* p_D_stride_n;
+    rocke_value_t* p_D_stride_ho;
+    rocke_value_t* p_D_stride_wo;
+    /* wgrad only: X (NHWC) rides the B slot. */
+    rocke_value_t* p_B_stride_n;
+    rocke_value_t* p_B_stride_hi;
+    rocke_value_t* p_B_stride_wi;
+} rocke_dconv_params_t;
+
+/* Declare the block. direction is "fwd", "dgrad" or "wgrad"; io_type is the
+ * operand element type (rocke_f16() or rocke_bf16(); NULL means f16). Under
+ * wgrad D is always the fp32 dW atomic target. */
+void rocke_dconv_emit_params(rocke_ir_builder_t* b,
+                             rocke_dconv_params_t* params,
+                             const char* direction,
+                             const rocke_type_t* io_type);
+
+/* A[N,H,W,total_c] with runtime extents + the two conv-spatial embeds.
+ * w_upper_0 / w_upper_1 name the column pair ("q_pos"/"W_lds_pos" for the
+ * LDS-staged variants, "wo"/"s" for the DRAM-direct 4c one). */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_dconv_a_descriptor_dynamic(rocke_ir_builder_t* b,
+                                     const rocke_dconv_params_t* params,
+                                     int pad,
+                                     int stride,
+                                     const char* w_upper_0,
+                                     const char* w_upper_1);
+
+/* D[N,Ho,Wo,total_k] with runtime extents. */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_dconv_d_descriptor_dynamic(rocke_ir_builder_t* b, const rocke_dconv_params_t* params);
+
+/* How many row steps one scf.for body covers: lcm(2, KH) where the variant
+ * ping-pongs LDS, KH alone where it reads straight from DRAM. */
+int rocke_dconv_row_loop_unroll(int kh, bool lds_ping_pong);
+
+/* ===================================================================== *
  *  Bound on the per-thread DRAM-load passes (16c).
  *  PASSES = ceil(NUM_VEC4 / THREADS). With THREADS = block_groups*wave
  *  (>= 64) and NUM_VEC4 = (block_q+KW-1)*block_groups*cpg/4, the largest
@@ -89,6 +161,7 @@ typedef struct rocke_dconv_16c_ctx
     const rocke_direct_conv_16c_spec_t* spec; /* the DirectConv16cSpec        */
     const char* arch; /* NULL-normalised "gfx950"     */
     rocke_direct_conv_problem_t p; /* spec->problem (by value)     */
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() depending on p.dtype */
 
     /* ---- block-geometry scalars (Python all-caps locals) -- */
     int BLOCK_Q; /* spec.block_q                              */
@@ -100,11 +173,12 @@ typedef struct rocke_dconv_16c_ctx
     int LOAD_VEC; /* 4                                         */
     int NUM_VEC4; /* LDS_ROW_FP16 / LOAD_VEC                    */
     int PASSES; /* ceil(NUM_VEC4 / THREADS)                  */
-    int lds_total_fp16; /* PASSES * THREADS * LOAD_VEC                */
+    int lds_total_elems; /* PASSES * THREADS * LOAD_VEC                */
     int q_subtiles; /* BLOCK_Q // 16                             */
     int n_iters; /* H + KH - 1                                */
 
     /* ---- kernel params (Values) -- */
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -119,12 +193,12 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* c_BQ; /* const_i32(BLOCK_Q)                   */
     rocke_value_t* c_cpg; /* const_i32(cpg)                       */
     rocke_value_t* c_kpg; /* const_i32(kpg)                       */
-    rocke_value_t* c_W; /* const_i32(W)                         */
+    rocke_value_t* c_W; /* p_Wo -- the output-width store bound  */
     rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                         */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                      */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                      */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                      */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -146,7 +220,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* q_tile_start; /* bx * BLOCK_Q                         */
 
     /* ---- LDS ping-pong buffers + buffer rsrcs -- */
-    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_fp16] */
+    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_elems] */
     rocke_value_t* B_smem; /* smem_alloc lds_b (or == A_smem)      */
     rocke_value_t* a_rsrc; /* buffer_rsrc(A, A_bytes)              */
     rocke_value_t* b_rsrc; /* buffer_rsrc(Bp, B_bytes)            */
@@ -185,7 +259,7 @@ typedef struct rocke_dconv_16c_ctx
 
     /* ---- A / D descriptors (built once, reused) -- */
     const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,total_c] + 2 embeds  */
-    const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive       */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,Ho,Wo,total_k] naive     */
 
     /* ---- accumulator iter-state across the unrolled H-loop -- *
      * acc_tiles[qt][slot]; q_subtiles x KH. Updated in place by the MFMA
@@ -210,6 +284,7 @@ typedef struct rocke_dconv_4c_ctx
     int n_iters; /* H + KH - 1                                */
 
     /* ---- kernel params (Values) -- */
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -224,7 +299,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -386,6 +461,7 @@ typedef struct rocke_dconv_8c_ctx
     const rocke_direct_conv_8c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
@@ -396,10 +472,11 @@ typedef struct rocke_dconv_8c_ctx
     int LOAD_VEC;
     int NUM_VEC4;
     int PASSES;
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 16 */
     int n_iters;
 
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -418,7 +495,7 @@ typedef struct rocke_dconv_8c_ctx
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <4 x float> */
 
     rocke_value_t* tid;
@@ -485,6 +562,7 @@ typedef struct rocke_dconv_32c_ctx
     const rocke_direct_conv_32c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
@@ -496,10 +574,11 @@ typedef struct rocke_dconv_32c_ctx
     int NUM_VEC4;
     int PASSES;
     int N_CH_BLOCKS; /* cpg / 4 = 8 for cpg=32 */
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 32 */
     int n_iters;
 
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -518,7 +597,7 @@ typedef struct rocke_dconv_32c_ctx
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <16 x float> */
 
     rocke_value_t* tid;
@@ -593,7 +672,9 @@ typedef struct rocke_dconv_dw_ctx
     int Ho; /* output height: (H + 2*PAD - KH) / stride + 1 */
     int Wo; /* output width:  (W + 2*PAD - KW) / stride + 1 */
     int c_stride_dw; /* p.stride (kept as int for flush-loop modulo) */
+    int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise */
 
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -654,6 +735,189 @@ void rocke_dconv32c_build_chunk_meta(rocke_dconv_32c_ctx_t* ctx);
 void rocke_dconv32c_build_descriptors(rocke_dconv_32c_ctx_t* ctx);
 void rocke_dconv32c_prologue_prefetch(rocke_dconv_32c_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  rocke_dconv_wgrad_ctx_t  --  shared state for build_direct_conv_wgrad.
+ *
+ *  The Python body is one long function with six closures (_tr_read, _read_dy,
+ *  _read_strip, _lds_run, _issue_delta / _commit_delta, _issue_s_strip /
+ *  _commit_s_strip, _row_coords) over a wide block of prologue locals. Every
+ *  local those closures share is a field here; field order follows the Python
+ *  prologue top-to-bottom so the populate routine reads against the source.
+ *
+ *  Unlike the forward variants there is NO LDS ping-pong and no chunk-decode
+ *  table: the row loop stages one dY tile + one S-row strip per input row into
+ *  wave-private LDS partitions, and the epilogue atomically adds the KH*KW
+ *  accumulators into an fp32 dW.
+ * ===================================================================== */
+/* ROCKE_DCONV_WGRAD_MAX_KH / _MAX_KW live in the public header: they bound the
+ * ctx arrays below AND are enforced by both validators. */
+/* STRIP_PASSES = ceil((WO_BLOCK + KW - 1) / WO_BLOCK) is 2 for every legal
+ * (WO_BLOCK >= 16, KW <= 8) combination, and STRIP_PASSES_PER_WAVE <=
+ * STRIP_PASSES; 8 is generous headroom. */
+#define ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES 8
+
+typedef struct rocke_dconv_wgrad_ctx
+{
+    /* ---- inputs / resolved environment -- */
+    rocke_ir_builder_t* b;
+    const rocke_direct_conv_wgrad_spec_t* spec;
+    const char* arch; /* NULL-normalised "gfx950" */
+    rocke_direct_conv_problem_t p;
+
+    /* ---- geometry scalars (Python all-caps locals) --
+     * AOT: no image extent is build-time; Ho/Wo/H ride the kernarg block. */
+    int KH;
+    int KW;
+    int WAVE_K; /* spec.wave_tile_k (16)                      */
+    int WAVE_C; /* spec.wave_tile_c (16)                      */
+    int WAVES_K;
+    int WAVES_C;
+    int WAVES_Q;
+    int WAVE; /* spec.wave_size                             */
+    int THREADS; /* spec.threads_per_block                     */
+    int HPB; /* spec.ho_per_block                          */
+    int WO_BLOCK; /* spec.mfma_k                                */
+    int VEC_CH; /* spec.mfma_k / 4                            */
+
+    /* dY/X element type; dW stays fp32 (the split-K reduction is fp32 atomics). */
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() per p.dtype */
+    int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise      */
+
+    int STRIP_COLS; /* WO_BLOCK + KW - 1                          */
+    int TR_N; /* WAVE_K (LDS row width)                     */
+    int TR_K_L; /* WO_BLOCK / 4                               */
+    int N_TR_READS; /* VEC_CH / 4                                 */
+    int LDS_SIZE_DY; /* WO_BLOCK * TR_N                            */
+    int STRIP_PASSES;
+    int STRIP_GROUPS;
+    int STRIP_PASSES_PER_WAVE;
+    int STRIP_COLS_PAD;
+    int STRIP_PER_Q; /* STRIP_COLS_PAD * TR_N                      */
+    int n_k_tiles;
+    int n_c_tiles;
+
+    /* ---- kernel params (Values): the AOT kernarg block, conv_abi order -- */
+    rocke_dconv_params_t params;
+    rocke_value_t* A; /* dY  ptr<f16, global> */
+    rocke_value_t* Bp; /* X   ptr<f16, global> */
+    rocke_value_t* D; /* dW  ptr<f32, global> */
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    /* D_bytes is declared to keep the shared 6-arg launch signature but the
+     * Python discards the Value (dW is reached by plain global_atomic_add, not
+     * a buffer resource), so it is not carried here either. */
+
+    /* ---- common SSA constants -- */
+    rocke_value_t* c0;
+    rocke_value_t* c_wave;
+    rocke_value_t* c_cpg;
+    rocke_value_t* c_kpg;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* c_H; /* INPUT height  (p_Hi)    */
+    rocke_value_t* c_Ho; /* output height (p_Ho)    */
+    rocke_value_t* c_Wo; /* output width  (p_Wo)    */
+    rocke_value_t* zero_acc; /* zero_vec_f32(4)         */
+
+    /* ---- thread / wave / lane decode -- */
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+    rocke_value_t* c4; /* lane / 16 */
+    rocke_value_t* q_in_lane; /* lane % 16 */
+
+    /* ---- grid decode -- */
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* bz;
+    rocke_value_t* c_n_k_tiles;
+    rocke_value_t* c_n_c_tiles;
+    rocke_value_t* c_n_wo_tiles; /* ceil(p_Wo / WO_BLOCK)       */
+    rocke_value_t* c_n_q_blocks; /* ceil(n_wo_tiles / WAVES_Q)  */
+    rocke_value_t* c_tile_idx;
+    rocke_value_t* gk_flat;
+    rocke_value_t* k_tile_in_group;
+    rocke_value_t* group;
+    rocke_value_t* n_i;
+    rocke_value_t* q_block;
+    rocke_value_t* hi_block_start;
+
+    /* ---- wave decomposition (KCQ layout) -- */
+    rocke_value_t* wave_q_id;
+    rocke_value_t* wave_kc_id;
+    rocke_value_t* wave_k_id;
+    rocke_value_t* wave_c_id;
+    rocke_value_t* wave_k_origin;
+    rocke_value_t* wave_c_origin;
+    rocke_value_t* wo_tile;
+    rocke_value_t* wo_tile_start;
+    rocke_value_t* wo_tile_valid;
+    rocke_value_t* k_tile_origin;
+    rocke_value_t* c_tile_origin;
+    rocke_value_t* k_wave_base;
+
+    /* ---- buffer rsrcs (dW has none: plain atomics) -- */
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+
+    /* ---- descriptors -- */
+    const rocke_tensor_descriptor_t* dy_desc; /* A[N,Ho,Wo,total_k], runtime strides */
+    const rocke_tensor_descriptor_t* x_strip_desc; /* B[N,H,W,total_c] + w embed (runtime) */
+    const rocke_tensor_descriptor_t* dw_desc; /* D[total_k,KH,KW,cpg] naive    */
+
+    /* ---- LDS tiles -- */
+    rocke_value_t* dy_lds;
+    rocke_value_t* s_strip_lds;
+
+    /* ---- per-thread loader decomposition -- */
+    rocke_value_t* c_lanes_per_sp;
+    rocke_value_t* c_ld_sp;
+    rocke_value_t* c_ld_ch;
+    rocke_value_t* dy_part_idx;
+    rocke_value_t* dy_wave_off_f16;
+    rocke_value_t* s_strip_part_idx;
+    rocke_value_t* s_strip_off_f16;
+    rocke_value_t* c_TR_N;
+    rocke_value_t* c_WO_BLOCK;
+    rocke_value_t* c_STRIP_COLS;
+    rocke_value_t* tr_row;
+    rocke_value_t* tr_flat;
+
+    /* ---- S-strip pass decomposition -- */
+    rocke_value_t* strip_pass_base;
+    rocke_value_t* strip_cols[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+    rocke_value_t* strip_col_ok[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+
+    /* ---- iter-state carried across the unrolled row loop -- */
+    rocke_value_t* acc[ROCKE_DCONV_WGRAD_MAX_KH][ROCKE_DCONV_WGRAD_MAX_KW];
+    rocke_value_t* delta_ring[ROCKE_DCONV_WGRAD_MAX_KH];
+    rocke_value_t* pending_dy;
+    rocke_value_t* pending_x[ROCKE_DCONV_WGRAD_MAX_STRIP_PASSES];
+} rocke_dconv_wgrad_ctx_t;
+
+/* ===================================================================== *
+ *  wgrad PHASE FUNCTIONS
+ * ===================================================================== */
+
+/* Prologue: validate() + is_valid_wgrad_spec gate, every geometry scalar, the
+ * params, the SSA constants, thread/wave/grid decode, the three descriptors,
+ * the two LDS tiles, the loader decomposition and the S-strip pass columns.
+ * Returns false (builder error set) on a rejected spec. */
+bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* Ring prologue: pre-load the KH-1 past dY rows into ctx->delta_ring, and seed
+ * ctx->acc / the remaining ring slot. */
+void rocke_dconv_wgrad_ring_prologue(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* The Python-unrolled loop over the HPB input rows of this block: commit the
+ * fragments issued last row, issue the next row's, sync, refresh the ring +
+ * read the KW S fragments, then the KH*KW MFMAs. */
+void rocke_dconv_wgrad_row_loop(rocke_dconv_wgrad_ctx_t* ctx);
+
+/* Epilogue: KH*KW*4 guarded global_atomic_add into the fp32 dW. Returns the
+ * kernel (ctx->b->kernel) on success, NULL on error. */
+rocke_kernel_def_t* rocke_dconv_wgrad_epilogue(rocke_dconv_wgrad_ctx_t* ctx);
 
 /* ===================================================================== *
  *  Depthwise PHASE FUNCTIONS

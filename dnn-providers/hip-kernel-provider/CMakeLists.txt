@@ -256,6 +256,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 # Setup testing dependencies
 include(Dependencies)
@@ -380,6 +381,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950AttentionDense_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
     set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
@@ -388,6 +390,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
@@ -396,6 +399,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
             "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
         )
@@ -428,10 +432,10 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # rocKE's installed Python CTest entries invoke a bare `python`, which the
-    # runtime image does not provide, so they cannot run from an installed tree.
-    # The installed C++ entries and the rocke Python frontend are unaffected.
-    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
+    # The pinned TheRock supplies NumPy and ml_dtypes and installs the staged
+    # rocKE wheels before invoking CTest, so the platform GPU tests can run.
+    set(ROCKE_INSTALL_PYTHON_TESTS ON)
+    set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
 
     add_subdirectory(rocke)
 else()
@@ -528,11 +532,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
-if(ENABLE_ASM_SDPA_ENGINE)
-    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
-            FILES_MATCHING PATTERN "*.co")
-endif()
+# .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The two descriptor trees are installed here and nowhere else. Every producer --

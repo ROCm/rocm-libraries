@@ -24,8 +24,8 @@
  *   B[total_k, KH, KW, 1]  naive
  *   D[N, Ho, Wo, total_k]  naive
  *
- * Unroll threshold: n_iters * KH * KW <= 20000 (one W-pos per thread).
- * Above the threshold: scf_for_iter over n_groups = ceil(n_iters / KH) groups.
+ * The H rows stream through scf_for_iter over KH-row periods; the trip count
+ * follows the runtime height (AOT), so there is no build-time-unrolled form.
  *
  * Phase functions: rocke_build_direct_depthwise_spatial (full kernel build),
  *                  rocke_build_direct_depthwise_spatial_new (init b + build).
@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -53,12 +54,6 @@
 /* ===================================================================== *
  *  Internal helpers
  * ===================================================================== */
-
-static int sp_ho(const rocke_direct_conv_problem_t* p)
-{
-    int s = p->stride > 0 ? p->stride : 1;
-    return (p->H + 2 * p->PAD - p->KH) / s + 1;
-}
 
 static int sp_wo(const rocke_direct_conv_problem_t* p)
 {
@@ -75,11 +70,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     rocke_ir_builder_t* bld = b;
     const rocke_direct_conv_problem_t* p;
     int WAVE, BLOCK_WAVES, THREADS, n_w, BLOCK_W;
-    int Ho, Wo, c_stride_dw;
-    int n_iters;
-    int _use_unroll;
+    int Wo, c_stride_dw;
     int total_c, total_k;
+    int is_bf16;
 
+    rocke_dconv_params_t params;
     rocke_value_t* A;
     rocke_value_t* Bp;
     rocke_value_t* D;
@@ -145,46 +140,36 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     n_w = rocke_direct_depthwise_spatial_n_w_per_wave(spec);
     BLOCK_W = rocke_direct_depthwise_spatial_block_w(spec);
     c_stride_dw = p->stride > 0 ? p->stride : 1;
-    Ho = sp_ho(p);
     Wo = sp_wo(p);
     total_c = rocke_direct_conv_problem_total_c(p);
+    /* AOT: the output extents and the channel count live in kernargs now;
+     * these stay only for the spec-validation arithmetic above. */
+    (void)Wo;
+    (void)total_c;
     total_k = rocke_direct_conv_problem_total_k(p);
 
-    n_iters = p->H + p->KH - 1;
-    _use_unroll = ((long)n_iters * p->KH * p->KW) <= 20000;
+    is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? 1 : 0;
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
 
     /* ---- parameters ---- */
     {
-        const rocke_type_t* f16ptr = rocke_ptr_type(bld, rocke_f16(), "global");
-        rocke_param_opts_t ro, wo_opt, none;
-
-        ro = (rocke_param_opts_t){0};
-        ro.noalias = ro.noalias_set = true;
-        ro.readonly = ro.readonly_set = true;
-        ro.align = 16;
-        ro.align_set = true;
-        A = rocke_b_param(bld, "A", f16ptr, &ro);
-        Bp = rocke_b_param(bld, "B", f16ptr, &ro);
-
-        wo_opt = (rocke_param_opts_t){0};
-        wo_opt.noalias = wo_opt.noalias_set = true;
-        wo_opt.writeonly = wo_opt.writeonly_set = true;
-        wo_opt.align = 16;
-        wo_opt.align_set = true;
-        D = rocke_b_param(bld, "D", f16ptr, &wo_opt);
-
-        none = (rocke_param_opts_t){0};
-        A_bytes = rocke_b_param(bld, "A_bytes", rocke_i32(), &none);
-        B_bytes = rocke_b_param(bld, "B_bytes", rocke_i32(), &none);
-        D_bytes = rocke_b_param(bld, "D_bytes", rocke_i32(), &none);
+        /* The AOT kernarg block, in conv_abi order. */
+        rocke_dconv_emit_params(
+            bld, &params, "fwd", rocke_b_io_ir_type(bld, p->dtype ? p->dtype : "fp16"));
+        A = params.A;
+        Bp = params.Bp;
+        D = params.D;
+        A_bytes = params.A_bytes;
+        B_bytes = params.B_bytes;
+        D_bytes = params.D_bytes;
     }
 
     /* ---- SSA constants ---- */
     c0 = rocke_b_const_i32(bld, 0);
     c_wave = rocke_b_const_i32(bld, WAVE);
-    c_Wo = rocke_b_const_i32(bld, Wo);
+    /* AOT: the store guard bounds against the runtime output width. */
+    c_Wo = params.p_Wo;
     c_half_bytes = rocke_b_const_i32(bld, 2);
     oob_sentinel = rocke_b_const_i32(bld, ((int64_t)1 << 31) - 1);
     zero_f32 = rocke_b_const_f32(bld, 0.0f);
@@ -194,8 +179,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     wave_id = rocke_b_div(bld, tid, c_wave);
     t_in_wave = rocke_b_mod(bld, tid, c_wave);
 
-    ch = rocke_b_mod(bld, t_in_wave, rocke_b_const_i32(bld, p->groups));
-    w_in_wave = rocke_b_div(bld, t_in_wave, rocke_b_const_i32(bld, p->groups));
+    ch = rocke_b_mod(bld, t_in_wave, params.p_groups);
+    w_in_wave = rocke_b_div(bld, t_in_wave, params.p_groups);
 
     /* Grid: bx=W-tile, bz=batch */
     bx = rocke_b_block_id_x(bld);
@@ -223,33 +208,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
     /* ---- descriptors ---- */
     {
-        /* a_desc = naive("A", [N, H, W, total_c]) + 2 embeds */
-        static const char* const a_coords[4] = {"n", "h", "w", "c"};
-        int a_lengths[4];
-        rocke_tensor_descriptor_t* a_naive;
-        const rocke_transform_t* xforms[2];
-
-        a_lengths[0] = p->N;
-        a_lengths[1] = p->H;
-        a_lengths[2] = p->W;
-        a_lengths[3] = total_c;
-        a_naive = rocke_tensor_descriptor_naive(bld, "A", a_lengths, 4, NULL, a_coords, 4);
-
-        /* embed h: upper=("y_iter",), strides=(1,), offset=-PAD, lo=0, hi=H */
-        {
-            static const char* const h_upper[1] = {"y_iter"};
-            int h_strides[1] = {1};
-            xforms[0] = rocke_embed_bounded(bld, h_upper, 1, "h", h_strides, -p->PAD, 0, p->H);
-        }
-        /* embed w: upper=("wo","s_off"), strides=(stride,1), offset=-PAD, lo=0, hi=W */
-        {
-            static const char* const w_upper[2] = {"wo", "s_off"};
-            int w_strides[2];
-            w_strides[0] = c_stride_dw;
-            w_strides[1] = 1;
-            xforms[1] = rocke_embed_bounded(bld, w_upper, 2, "w", w_strides, -p->PAD, 0, p->W);
-        }
-        a_desc = rocke_tensor_descriptor_transform(bld, a_naive, xforms, 2);
+        /* a_desc with runtime extents; PAD and stride stay build-time. */
+        rocke_dynamic_tensor_descriptor_t* a_dyn
+            = rocke_dconv_a_descriptor_dynamic(bld, &params, p->PAD, c_stride_dw, "wo", "s_off");
+        if(!a_dyn)
+            return NULL;
+        a_desc = &a_dyn->base;
     }
 
     {
@@ -264,14 +228,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     }
 
     {
-        /* d_desc = naive("D", [N, Ho, Wo, total_k]) */
-        static const char* const d_coords[4] = {"n", "h", "w", "k"};
-        int d_lengths[4];
-        d_lengths[0] = p->N;
-        d_lengths[1] = Ho;
-        d_lengths[2] = Wo;
-        d_lengths[3] = total_k;
-        d_desc = rocke_tensor_descriptor_naive(bld, "D", d_lengths, 4, NULL, d_coords, 4);
+        /* d_desc = D[N, Ho, Wo, total_k] with runtime extents. */
+        rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(bld, &params);
+        if(!d_dyn)
+            return NULL;
+        d_desc = &d_dyn->base;
     }
 
     /* ---- Preload weights: KH * KW f32 per thread, guarded by w_valid ---- */
@@ -296,7 +257,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
                 safe_w = rocke_b_select(
                     bld, w_valid, rocke_b_mul(bld, w_off, c_half_bytes), oob_sentinel);
-                w_h = rocke_b_buffer_load_f16(bld, b_rsrc, safe_w, c0);
+                w_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, b_rsrc, safe_w, c0)
+                              : rocke_b_buffer_load_f16(bld, b_rsrc, safe_w, c0);
                 weights_f32[r_const][s_const]
                     = rocke_b_select(bld, w_valid, rocke_b_cast_to_f32(bld, w_h), zero_f32);
             }
@@ -306,97 +268,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ================================================================== *
      *  H-streaming loop
      * ================================================================== */
-    if(_use_unroll)
-    {
-        /* ---- static unroll path ---- */
-        /* acc[slot]: KH f32 circular accumulators (one W-pos per thread) */
-        rocke_value_t* acc[ROCKE_DCONV_DW_MAX_KH];
-        int y, slot, r_const, s_const;
-
-        for(slot = 0; slot < p->KH; ++slot)
-            acc[slot] = zero_f32;
-
-        for(y = 0; y < n_iters; ++y)
-        {
-            rocke_value_t* y_i = rocke_b_const_i32(bld, y);
-            int p_flush_val = y - (p->KH - 1);
-            int P_FLUSH = ((p_flush_val % p->KH) + p->KH) % p->KH;
-
-            /* FMA: for s_const: load A; for r_const: fma */
-            for(s_const = 0; s_const < p->KW; ++s_const)
-            {
-                rocke_value_t* a_off = NULL;
-                rocke_value_t* valid = NULL;
-                rocke_value_t* ok;
-                rocke_value_t* safe_off;
-                rocke_value_t* a_h;
-                rocke_value_t* a_f32;
-                const char* on[5];
-                rocke_value_t* ov[5];
-
-                on[0] = "n";
-                ov[0] = n;
-                on[1] = "y_iter";
-                ov[1] = y_i;
-                on[2] = "wo";
-                ov[2] = q_out;
-                on[3] = "s_off";
-                ov[3] = rocke_b_const_i32(bld, s_const);
-                on[4] = "c";
-                ov[4] = ch;
-                rocke_transforms_descriptor_offset(bld, a_desc, on, ov, 5, &a_off, &valid);
-
-                ok = rocke_b_land(bld, valid, q_ok);
-                safe_off
-                    = rocke_b_select(bld, ok, rocke_b_mul(bld, a_off, c_half_bytes), oob_sentinel);
-                a_h = rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
-                a_f32 = rocke_b_select(bld, ok, rocke_b_cast_to_f32(bld, a_h), zero_f32);
-
-                for(r_const = 0; r_const < p->KH; ++r_const)
-                {
-                    int p_idx = (((y - r_const) % p->KH) + p->KH) % p->KH;
-                    acc[p_idx] = rocke_b_fma(bld, weights_f32[r_const][s_const], a_f32, acc[p_idx]);
-                }
-            }
-
-            /* Flush: stride-aligned, in [0,H) and ho_row < Ho */
-            if(0 <= p_flush_val && p_flush_val < p->H && p_flush_val % c_stride_dw == 0)
-            {
-                int ho_row = p_flush_val / c_stride_dw;
-                if(ho_row < Ho)
-                {
-                    rocke_value_t* d_off = NULL;
-                    rocke_value_t* d_valid = NULL;
-                    rocke_value_t* safe_d;
-                    const char* dn[4];
-                    rocke_value_t* dv[4];
-
-                    dn[0] = "n";
-                    dv[0] = n;
-                    dn[1] = "h";
-                    dv[1] = rocke_b_const_i32(bld, ho_row);
-                    dn[2] = "w";
-                    dv[2] = q_out;
-                    dn[3] = "k";
-                    dv[3] = ch;
-                    rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
-
-                    safe_d = rocke_b_select(
-                        bld, q_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-                    rocke_b_buffer_store_f16(
-                        bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc[P_FLUSH]));
-                }
-            }
-
-            /* Unconditional reset */
-            acc[P_FLUSH] = zero_f32;
-        }
-    }
-    else
+    /* AOT: the row count follows the runtime height, so the rows stream
+     * through an scf.for over KH-row periods; a build-time unroll would
+     * bake Hi into the trip count. */
     {
         /* ---- scf_for_iter group loop path ---- */
         int KH = p->KH;
-        int n_groups = (n_iters + KH - 1) / KH;
         int num_iargs = KH;
         rocke_iter_arg_t* iargs;
         rocke_for_t group_loop;
@@ -404,6 +281,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         rocke_value_t* c1;
         rocke_value_t* c_KH;
         rocke_value_t* c_stride_rv;
+        rocke_value_t* n_iters_v;
+        rocke_value_t* n_groups_v;
         int j;
 
         {
@@ -424,10 +303,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         c1 = rocke_b_const_i32(bld, 1);
         c_KH = rocke_b_const_i32(bld, KH);
         c_stride_rv = rocke_b_const_i32(bld, c_stride_dw);
+        /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
+        n_iters_v = rocke_b_add(bld, params.p_Hi, rocke_b_const_i32(bld, KH - 1));
+        n_groups_v
+            = rocke_b_div(bld, rocke_b_add(bld, n_iters_v, rocke_b_const_i32(bld, KH - 1)), c_KH);
 
         group_loop = rocke_b_scf_for_iter(bld,
                                           c0,
-                                          rocke_b_const_i32(bld, n_groups),
+                                          n_groups_v,
                                           c1,
                                           iargs,
                                           num_iargs,
@@ -460,9 +343,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
             const char* dn[4];
             rocke_value_t* dv[4];
 
-            y_j = rocke_b_add(
-                bld, rocke_b_mul(bld, group_loop.iv, c_KH), rocke_b_const_i32(bld, j));
-            j_valid = rocke_b_cmp_lt(bld, y_j, rocke_b_const_i32(bld, n_iters));
+            /* y_j = grp_iv*c_KH + j -- emit the mul first, then const(j), to
+             * match Python's left-to-right evaluation (C++ arg order is
+             * unspecified and GCC evaluates right-to-left here). */
+            {
+                rocke_value_t* mul_gk = rocke_b_mul(bld, group_loop.iv, c_KH);
+                rocke_value_t* cj = rocke_b_const_i32(bld, j);
+                y_j = rocke_b_add(bld, mul_gk, cj);
+            }
+            j_valid = rocke_b_cmp_lt(bld, y_j, n_iters_v);
 
             for(s_const = 0; s_const < p->KW; ++s_const)
             {
@@ -490,7 +379,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 ok = rocke_b_land(bld, rocke_b_land(bld, valid, j_valid), q_ok);
                 safe_off
                     = rocke_b_select(bld, ok, rocke_b_mul(bld, a_off, c_half_bytes), oob_sentinel);
-                a_h = rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
+                a_h = is_bf16 ? rocke_b_buffer_load_bf16(bld, a_rsrc, safe_off, c0)
+                              : rocke_b_buffer_load_f16(bld, a_rsrc, safe_off, c0);
                 a_f32 = rocke_b_select(bld, ok, rocke_b_cast_to_f32(bld, a_h), zero_f32);
 
                 for(r_const = 0; r_const < KH; ++r_const)
@@ -542,8 +432,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);
-            rocke_b_buffer_store_f16(
-                bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc_val));
+            if(is_bf16)
+                rocke_b_buffer_store_bf16(
+                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_bf16(bld, acc_val));
+            else
+                rocke_b_buffer_store_f16(
+                    bld, d_rsrc, safe_d, c0, rocke_b_trunc_f32_to_f16(bld, acc_val));
 
             /* Unconditional static reset */
             new_accs[P_FLUSH_j] = zero_f32;

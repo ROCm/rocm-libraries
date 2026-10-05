@@ -150,6 +150,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
     unit/core/BackendTest.cpp
+    unit/core/TimePassesInstrumentation_test.cpp
     unit/core/VersionTest.cpp
 )
 
@@ -461,15 +462,16 @@ file(GLOB FILECHECK_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
 )
-# v0-specific FileCheck tests invoke `--arch gfx1250v0`, so they are only valid
-# when the Gfx1250v0 stepping is built. Register them only then, keeping a
+# These invoke `--arch gfx1250-strict`, which only resolves when that stepping is
+# built. It is registered under its C++ identity Gfx1250v0, since "gfx1250-strict"
+# is not spellable as an identifier. Registering them conditionally keeps a
 # Gfx1250-only test build green.
 if("Gfx1250v0" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
-    file(GLOB FILECHECK_V0_TESTS
-        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.stir"
-        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.s"
+    file(GLOB FILECHECK_STRICT_TESTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/gfx1250-strict/*.stir"
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/gfx1250-strict/*.s"
     )
-    list(APPEND FILECHECK_TESTS ${FILECHECK_V0_TESTS})
+    list(APPEND FILECHECK_TESTS ${FILECHECK_STRICT_TESTS})
 endif()
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)

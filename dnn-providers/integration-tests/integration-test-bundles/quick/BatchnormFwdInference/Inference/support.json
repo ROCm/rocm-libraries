@@ -14,13 +14,29 @@
           "tiny_fp32_nchw"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
             "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
@@ -40,13 +56,29 @@
           "tiny_fp32_nchw"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1030": [
             "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
