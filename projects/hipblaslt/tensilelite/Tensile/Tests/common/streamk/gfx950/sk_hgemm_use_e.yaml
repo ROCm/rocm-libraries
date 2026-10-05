@@ -63,6 +63,8 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]
           - Exact: [129, 97, 1, 1030]
           - Exact: [1031, 1031, 1, 4103]
+          # Few tiles and a long K: parallel reduction with the post kernel
+          - Exact: [512, 512, 1, 8192]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: Relu]
@@ -106,5 +108,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
           - Exact: [1031, 1031, 1, 4103]
+          - Exact: [512, 512, 1, 8192]
         - ActivationArgs:
           - [Enum: Dgelu]
