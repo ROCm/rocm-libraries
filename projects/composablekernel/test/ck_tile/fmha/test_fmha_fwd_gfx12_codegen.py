@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Generate actual gfx12 forward sources; verify BF16 tiles and FP16 isolation."""
+"""Generate actual gfx12 forward sources; verify the BF16 D256 tile and that other tiles are unchanged."""
 
 import subprocess
 import sys
@@ -61,8 +61,8 @@ class TestGfx12ForwardCodegen(unittest.TestCase):
         self.check_tiles(
             "bf16",
             {
-                32: "b64x64x16x32x64x32",
-                64: "b64x64x32x64x64x64",
+                32: "b64x64x16x32x32x32",
+                64: "b64x64x32x64x32x64",
                 256: "b64x64x32x256x16x256",
             },
         )
