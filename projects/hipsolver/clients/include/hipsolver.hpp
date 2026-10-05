@@ -6168,6 +6168,269 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
 }
 /********************************************************/
 
+/******************** GETRI ********************/
+// batched
+inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
+                                                    hipsolverHandle_t handle,
+                                                    int               n,
+                                                    float*            A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    float*            C[],
+                                                    int               ldc,
+                                                    int*              lwork,
+                                                    int               batch_count)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverSgetriBatched_bufferSize(
+            handle, n, A, lda, devIpiv, strideP, C, ldc, lwork, batch_count);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
+                                                    hipsolverHandle_t handle,
+                                                    int               n,
+                                                    double*           A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    double*           C[],
+                                                    int               ldc,
+                                                    int*              lwork,
+                                                    int               batch_count)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverDgetriBatched_bufferSize(
+            handle, n, A, lda, devIpiv, strideP, C, ldc, lwork, batch_count);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t         API,
+                                                    hipsolverHandle_t handle,
+                                                    int               n,
+                                                    hipsolverComplex* A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    hipsolverComplex* C[],
+                                                    int               ldc,
+                                                    int*              lwork,
+                                                    int               batch_count)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverCgetriBatched_bufferSize(handle,
+                                                 n,
+                                                 (hipFloatComplex**)A,
+                                                 lda,
+                                                 devIpiv,
+                                                 strideP,
+                                                 (hipFloatComplex**)C,
+                                                 ldc,
+                                                 lwork,
+                                                 batch_count);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri_bufferSize(testAPI_t               API,
+                                                    hipsolverHandle_t       handle,
+                                                    int                     n,
+                                                    hipsolverDoubleComplex* A[],
+                                                    int                     lda,
+                                                    int*                    devIpiv,
+                                                    int                     strideP,
+                                                    hipsolverDoubleComplex* C[],
+                                                    int                     ldc,
+                                                    int*                    lwork,
+                                                    int                     batch_count)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverZgetriBatched_bufferSize(handle,
+                                                 n,
+                                                 (hipDoubleComplex**)A,
+                                                 lda,
+                                                 devIpiv,
+                                                 strideP,
+                                                 (hipDoubleComplex**)C,
+                                                 ldc,
+                                                 lwork,
+                                                 batch_count);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
+                                         bool              NPVT,
+                                         hipsolverHandle_t handle,
+                                         int               n,
+                                         float*            A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         float*            C[],
+                                         int               ldc,
+                                         float*            work,
+                                         int               lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverSgetriBatched(
+            handle, n, A, lda, devIpiv, strideP, C, ldc, work, lwork, devInfo, batch_count);
+    case C_NORMAL_ALT:
+        return hipsolverSgetriBatched(
+            handle, n, A, lda, nullptr, 0, C, ldc, work, lwork, devInfo, batch_count);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
+                                         bool              NPVT,
+                                         hipsolverHandle_t handle,
+                                         int               n,
+                                         double*           A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         double*           C[],
+                                         int               ldc,
+                                         double*           work,
+                                         int               lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverDgetriBatched(
+            handle, n, A, lda, devIpiv, strideP, C, ldc, work, lwork, devInfo, batch_count);
+    case C_NORMAL_ALT:
+        return hipsolverDgetriBatched(
+            handle, n, A, lda, nullptr, 0, C, ldc, work, lwork, devInfo, batch_count);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri(testAPI_t         API,
+                                         bool              NPVT,
+                                         hipsolverHandle_t handle,
+                                         int               n,
+                                         hipsolverComplex* A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         hipsolverComplex* C[],
+                                         int               ldc,
+                                         hipsolverComplex* work,
+                                         int               lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverCgetriBatched(handle,
+                                      n,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      devIpiv,
+                                      strideP,
+                                      (hipFloatComplex**)C,
+                                      ldc,
+                                      (hipFloatComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      batch_count);
+    case C_NORMAL_ALT:
+        return hipsolverCgetriBatched(handle,
+                                      n,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      nullptr,
+                                      0,
+                                      (hipFloatComplex**)C,
+                                      ldc,
+                                      (hipFloatComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      batch_count);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getri(testAPI_t               API,
+                                         bool                    NPVT,
+                                         hipsolverHandle_t       handle,
+                                         int                     n,
+                                         hipsolverDoubleComplex* A[],
+                                         int                     lda,
+                                         int*                    devIpiv,
+                                         int                     strideP,
+                                         hipsolverDoubleComplex* C[],
+                                         int                     ldc,
+                                         hipsolverDoubleComplex* work,
+                                         int                     lwork,
+                                         int*                    devInfo,
+                                         int                     batch_count)
+{
+    switch(api2marshal(API, NPVT))
+    {
+    case C_NORMAL:
+        return hipsolverZgetriBatched(handle,
+                                      n,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      devIpiv,
+                                      strideP,
+                                      (hipDoubleComplex**)C,
+                                      ldc,
+                                      (hipDoubleComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      batch_count);
+    case C_NORMAL_ALT:
+        return hipsolverZgetriBatched(handle,
+                                      n,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      nullptr,
+                                      0,
+                                      (hipDoubleComplex**)C,
+                                      ldc,
+                                      (hipDoubleComplex*)work,
+                                      lwork,
+                                      devInfo,
+                                      batch_count);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+/********************************************************/
+
 /******************** GETRS ********************/
 // normal and strided_batched
 inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
