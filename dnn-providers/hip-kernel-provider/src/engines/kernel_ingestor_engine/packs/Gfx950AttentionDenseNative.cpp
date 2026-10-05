@@ -38,7 +38,9 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 
 /**
  * @file Gfx950AttentionDenseNative.cpp
@@ -372,30 +374,6 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
     }
     return std::nullopt;
 }
-
-/// The tensor uids and derived scalars a matched dense-attention graph binds.
-struct AttentionDenseBinding
-{
-    int64_t q = 0;
-    int64_t k = 0;
-    int64_t v = 0;
-    int64_t o = 0;
-    int64_t causal = 0;
-    int64_t slidingWindow = 0;
-    float scale = 0.0F;
-};
-
-/// The graph facts the matcher and prepare() both need, derived once from the tensors.
-struct AttentionDenseProblem
-{
-    int64_t batch = 0;
-    int64_t seqLenQ = 0;
-    int64_t seqLenKv = 0;
-    int64_t numQueryHeads = 0;
-    int64_t numKvHeads = 0;
-    int64_t headSize = 0;
-    data_objects::DataType dataType = data_objects::DataType::UNSET;
-};
 
 /// The graph's shape, read from Q and K. Callers must have validated both operands.
 AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
@@ -1006,16 +984,23 @@ std::vector<KernelArgument> attentionDenseKernelSignature()
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
 /// into the MatchContext or BoundTokens it came from.
-class PreparedGfx950AttentionDense : public PreparedDispatch
+class PreparedGfx950AttentionDense : public IngestorPreparedDispatch
 {
 public:
     PreparedGfx950AttentionDense(IngestorKernelCode code,
                                  AttentionDenseBinding binding,
-                                 AttentionDenseProblem problem)
+                                 AttentionDenseProblem problem,
+                                 int64_t blockM)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
+        , _blockM(blockM)
     {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
     }
 
     compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
@@ -1033,10 +1018,16 @@ public:
         return _problem;
     }
 
+    int64_t blockM() const
+    {
+        return _blockM;
+    }
+
 private:
     IngestorKernelCode _code;
     AttentionDenseBinding _binding;
     AttentionDenseProblem _problem;
+    int64_t _blockM;
 };
 
 /**
@@ -1109,7 +1100,18 @@ public:
         code.setBlockSize(geometry.blockX, 1, 1);
         code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
 
-        return std::make_unique<PreparedGfx950AttentionDense>(std::move(code), binding, problem);
+        return std::make_unique<PreparedGfx950AttentionDense>(
+            std::move(code), binding, problem, tile->blockM);
+    }
+
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& preparedDense = dynamic_cast<const PreparedGfx950AttentionDense&>(prepared);
+        return SavedLaunchInputs{std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+                                 gfx950AttentionDenseLaunchValues(preparedDense.binding(),
+                                                                  preparedDense.problem(),
+                                                                  preparedDense.blockM())};
     }
 
     void launch(const Handle& handle,
@@ -1149,6 +1151,30 @@ private:
 
 } // namespace
 
+MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
+                                                const AttentionDenseProblem& problem,
+                                                int64_t blockM)
+{
+    return {{std::string(GFX950_ATTENTION_DENSE_Q_UID_VALUE), binding.q},
+            {std::string(GFX950_ATTENTION_DENSE_K_UID_VALUE), binding.k},
+            {std::string(GFX950_ATTENTION_DENSE_V_UID_VALUE), binding.v},
+            {std::string(GFX950_ATTENTION_DENSE_O_UID_VALUE), binding.o},
+            {std::string(GFX950_ATTENTION_DENSE_CAUSAL_VALUE), binding.causal},
+            {std::string(GFX950_ATTENTION_DENSE_SLIDING_WINDOW_VALUE), binding.slidingWindow},
+            {std::string(GFX950_ATTENTION_DENSE_BATCH_VALUE), problem.batch},
+            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_Q_VALUE), problem.seqLenQ},
+            {std::string(GFX950_ATTENTION_DENSE_SEQLEN_KV_VALUE), problem.seqLenKv},
+            {std::string(GFX950_ATTENTION_DENSE_NUM_QUERY_HEADS_VALUE), problem.numQueryHeads},
+            {std::string(GFX950_ATTENTION_DENSE_NUM_KV_HEADS_VALUE), problem.numKvHeads},
+            {std::string(GFX950_ATTENTION_DENSE_HEAD_SIZE_VALUE), problem.headSize},
+            {std::string(GFX950_ATTENTION_DENSE_BLOCK_M_VALUE), blockM},
+            {std::string(GFX950_ATTENTION_DENSE_SCALE_VALUE), static_cast<double>(binding.scale)},
+            {std::string(GFX950_ATTENTION_DENSE_DATA_TYPE_VALUE),
+             std::string(data_objects::EnumNameDataType(problem.dataType))},
+            {std::string(GFX950_ATTENTION_DENSE_STRIDE_LAYOUT_VALUE),
+             std::string(GFX950_ATTENTION_DENSE_BSHD_LAYOUT)}};
+}
+
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
@@ -1180,6 +1206,8 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
     scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler());
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+              &gfx950AttentionDenseDispatchHandler());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

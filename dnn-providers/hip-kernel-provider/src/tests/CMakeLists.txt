@@ -159,12 +159,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
     # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestKpackArchSelection.cpp
         compilation/TestKpackArchive.cpp
+        compilation/TestKpackCodeObjectRead.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
+        engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
         ingestor/TestPackedDescriptorLoad.cpp
     )
+
+    # The packed Pointwise set the integration binary reads. The save cases need a
+    # packed Pointwise kernel, and the unit root packs none: its Pointwise set is
+    # embedded_source. Binary-relative, like the defines above. The integration
+    # suite corrupts this staged archive in place, so these cases read only a copy.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
+    if(TARGET hkp_packaging_archive_fixture)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_archive_fixture)
+    endif()
 
     # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
     # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own

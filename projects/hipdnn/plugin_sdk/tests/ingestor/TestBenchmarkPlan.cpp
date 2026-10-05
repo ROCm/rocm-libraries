@@ -23,6 +23,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -1213,6 +1214,104 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSort
         EXPECT_EQ(recorded[index].kernelId, testId(static_cast<uint8_t>(index + 1)))
             << "candidate at index " << index << " moved; equal times must keep input order";
     }
+}
+
+/// A dispatch handler that prepares an empty launch and launches nothing. It lets a test
+/// build a real GenericPlan over BenchmarkTestHandle.
+class StubBenchmarkDispatchHandler : public IKernelDispatchHandler<BenchmarkTestHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const BenchmarkTestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// A FakePlan that answers saveablePlan() with a given plan.
+class SaveableFakePlan : public FakePlan
+{
+public:
+    explicit SaveableFakePlan(const GenericPlan<BenchmarkTestHandle>& saveable)
+        : _saveable(&saveable)
+    {
+    }
+
+    const GenericPlan<BenchmarkTestHandle>* saveablePlan() const override
+    {
+        return _saveable;
+    }
+
+private:
+    const GenericPlan<BenchmarkTestHandle>* _saveable;
+};
+
+/// A real GenericPlan over @p handler, for a candidate that has something to save.
+std::unique_ptr<GenericPlan<BenchmarkTestHandle>>
+    makeStubGenericPlan(const StubBenchmarkDispatchHandler& handler, const DescriptorId& kernelId)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const BoundTokens bound;
+    return std::make_unique<GenericPlan<BenchmarkTestHandle>>(
+        KernelDispatcher<BenchmarkTestHandle>{makeDefinition(kernelId, 64), &handler},
+        context,
+        bound);
+}
+
+TEST(TestIngestorBenchmarkPlan, HasNoSaveablePlanBeforeAWinnerIsChosen)
+{
+    const StubBenchmarkDispatchHandler handler;
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), makeStubGenericPlan(handler, testId(0x01))});
+    candidates.push_back({testId(0x02), makeStubGenericPlan(handler, testId(0x02))});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle);
+
+    EXPECT_EQ(plan.chosenPlan(), nullptr);
+    EXPECT_EQ(plan.saveablePlan(), nullptr);
+}
+
+TEST(TestIngestorBenchmarkPlan, SaveablePlanIsTheChosenCandidates)
+{
+    const StubBenchmarkDispatchHandler handler;
+    const auto winnersSaveable = makeStubGenericPlan(handler, testId(0x22));
+
+    auto loser = std::make_unique<FakePlan>(64);
+    auto winner = std::make_unique<SaveableFakePlan>(*winnersSaveable);
+    const auto* loserRaw = loser.get();
+    const auto* winnerRaw = winner.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(loser)});
+    candidates.push_back({testId(0x02), std::move(winner)});
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, fixedTimer({{loserRaw, 5.0}, {winnerRaw, 1.0}}));
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(plan.chosenPlan(), winnerRaw);
+    EXPECT_EQ(plan.saveablePlan(), winnersSaveable.get());
 }
 
 } // namespace

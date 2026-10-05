@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -31,6 +32,7 @@
 #include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -80,14 +82,17 @@ compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 
-/// What a kpack kernel needs to be loaded again for another device: the archive it was
-/// resolved to, the entry inside it, and the declared digest the loader verifies. Held
-/// because `buildIngestorKernelCode` derives them from a descriptor that a prepared
-/// dispatch does not keep.
+/// What a kpack kernel needs to be loaded again for another device, or read again for a
+/// save: the archive it was resolved to, the entry inside it, and the declared digest the
+/// loader verifies. Held because `buildIngestorKernelCode` derives them from a descriptor
+/// that a prepared dispatch does not keep.
 ///
 /// `strippedArch` is the feature-stripped architecture the plan was matched against,
-/// which is what a second device must agree with. `label` and `symbol` are carried so a
-/// later failure names the descriptor as precisely as the first load would have.
+/// which is what a second device must agree with. `deviceArch` is the decorated
+/// architecture of the device the plan was built for. A read for a save selects the
+/// archive entry with it, so the read gets the entry the plan loaded. A device resolved
+/// later does not change it. `label` and `symbol` are carried so a later failure names
+/// the descriptor as precisely as the first load does.
 struct KpackSource
 {
     std::filesystem::path archive;
@@ -96,6 +101,18 @@ struct KpackSource
     std::string sha256;
     std::string label;
     std::string strippedArch;
+    std::string deviceArch;
+};
+
+/// A kernel's code object bytes and the facts that identify them.
+struct IngestorCodeObject
+{
+    std::vector<uint8_t> bytes;
+    /// The GPU target the bytes were built for.
+    std::string target;
+    /// Lowercase hex SHA-256 of `bytes`.
+    std::string sha256;
+    std::string symbol;
 };
 
 /// The program plus the kernel resolved out of it, answered per device.
@@ -197,6 +214,15 @@ public:
     /// @throws HipdnnPluginException when the architecture differs, or when a kpack
     ///         kernel is asked for a device and no coordinates were retained.
     compilation::IRunnableKernel& kernelFor(int deviceOrdinal) const;
+
+    /// Reads this kernel's code object again from its source and verifies its digest.
+    /// Loads no module, touches no HIP state and holds no lock, so it is safe while other
+    /// threads launch the kernel.
+    ///
+    /// @throws HipdnnPluginException with a save refusal when the bytes cannot be read
+    ///         or do not match the descriptor's digest, and with INTERNAL_ERROR when this
+    ///         code does not expose its bytes.
+    IngestorCodeObject readCodeObject() const;
 
     virtual ~IngestorKernelCode() = default;
 
@@ -430,6 +456,86 @@ inline compilation::IRunnableKernel& IngestorKernelCode::kernelFor(int deviceOrd
     return *stored.kernel;
 }
 
+namespace detail
+{
+
+// The save refusal a failed kpack read gives. A digest mismatch means the archive and the
+// descriptor disagree, so it is damage. The plan is valid for every other stage, but its
+// code cannot be read here.
+inline serialization::IngestorPlanRefusal kpackSaveRefusal(compilation::KpackLoadStage stage)
+{
+    return stage == compilation::KpackLoadStage::DIGEST_MISMATCH
+               ? serialization::IngestorPlanRefusal::DAMAGED
+               : serialization::IngestorPlanRefusal::INCOMPATIBLE;
+}
+
+inline const char* kpackLoadStageName(compilation::KpackLoadStage stage)
+{
+    switch(stage)
+    {
+    case compilation::KpackLoadStage::OPEN_ARCHIVE:
+        return "OPEN_ARCHIVE";
+    case compilation::KpackLoadStage::ARCH_LOOKUP:
+        return "ARCH_LOOKUP";
+    case compilation::KpackLoadStage::ENTRY_LOOKUP:
+        return "ENTRY_LOOKUP";
+    case compilation::KpackLoadStage::DECOMPRESS:
+        return "DECOMPRESS";
+    case compilation::KpackLoadStage::DIGEST_MISMATCH:
+        return "DIGEST_MISMATCH";
+    case compilation::KpackLoadStage::MODULE_LOAD:
+        return "MODULE_LOAD";
+    default:
+        break;
+    }
+    return "UNKNOWN";
+}
+
+} // namespace detail
+
+inline IngestorCodeObject IngestorKernelCode::readCodeObject() const
+{
+    if(!_source.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "the code bytes of this source kind are not exposed");
+    }
+    if(_source->archive.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "kernel '" + _source->symbol
+                + "' cannot read its code object: no archive coordinates were retained");
+    }
+
+    std::string selectedArch;
+    try
+    {
+        const compilation::KpackCodeObject codeObject
+            = compilation::readVerifiedKpackCodeObject(_source->archive.string(),
+                                                       _source->tocKey,
+                                                       _source->deviceArch,
+                                                       _source->sha256,
+                                                       selectedArch);
+        const auto* first = static_cast<const uint8_t*>(codeObject.data());
+        IngestorCodeObject result;
+        result.bytes.assign(first, first + codeObject.size());
+        result.target = selectedArch;
+        result.sha256 = _source->sha256;
+        result.symbol = _source->symbol;
+        return result;
+    }
+    catch(const compilation::KpackModuleLoadFailure& failure)
+    {
+        serialization::refuseIngestorPlanSave(
+            detail::kpackSaveRefusal(failure.stage()),
+            "kpack kernel source for " + _source->label + ", symbol '" + _source->symbol
+                + "': cannot read its code object at stage "
+                + detail::kpackLoadStageName(failure.stage()) + ": " + failure.what());
+    }
+}
+
 /// Fails unless the argument list a descriptor records matches the one its pack marshals.
 ///
 /// A prebuilt archive is compiled out of band from the pack that launches it, and
@@ -630,7 +736,8 @@ inline IngestorKernelCode buildForSourceKind(
                                               kernel.source.sha256,
                                               label,
                                               std::string(hipdnn_plugin_sdk::stripArchFeatures(
-                                                  context.deviceProperties.gcnArchName))},
+                                                  context.deviceProperties.gcnArchName)),
+                                              context.deviceProperties.gcnArchName},
                                   context.deviceId,
                                   std::move(program),
                                   std::move(runnableKernel)};

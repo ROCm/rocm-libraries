@@ -5,10 +5,12 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
@@ -127,6 +129,28 @@ TEST(TestIngestorDescriptors, CarriesTheKpackCoordinates)
     EXPECT_EQ(source.signature[1].name, "count");
     EXPECT_TRUE(source.sourceFile.empty());
     EXPECT_TRUE(source.entryPoint.empty());
+}
+
+TEST(TestIngestorDescriptors, KernelSourceKindNameParsesBackToTheSameKind)
+{
+    const std::vector<std::pair<KernelSourceKind, std::string>> cases{
+        {KernelSourceKind::EMBEDDED_SOURCE, "embedded_source"},
+        {KernelSourceKind::KPACK, "kpack"},
+        {KernelSourceKind::HSACO_FILE, "hsaco_file"},
+        {KernelSourceKind::ROCKE_BUILDER, "rocke_builder"},
+    };
+
+    for(const auto& [kind, name] : cases)
+    {
+        EXPECT_EQ(toString(kind), name);
+        EXPECT_EQ(detail::kernelSourceKindFromString(toString(kind), "the test"), kind) << name;
+    }
+}
+
+TEST(TestIngestorDescriptors, KernelSourceKindNameReportsAValueOutsideTheEnumAsUnknown)
+{
+    EXPECT_EQ(toString(static_cast<KernelSourceKind>(4)), "unknown (4)");
+    EXPECT_EQ(toString(static_cast<KernelSourceKind>(-1)), "unknown (-1)");
 }
 
 TEST(TestIngestorDescriptors, DescribesAKernelSignatureArgumentByKindWidthAndPosition)

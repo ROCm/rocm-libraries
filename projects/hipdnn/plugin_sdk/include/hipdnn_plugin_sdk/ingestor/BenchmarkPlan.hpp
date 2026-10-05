@@ -176,6 +176,25 @@ public:
         _candidates[chosen].plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
     }
 
+    /// The candidate the first execute() chose, or nullptr before a candidate is chosen.
+    const IPlan<THandle>* chosenPlan() const
+    {
+        const size_t chosen = _chosen.load(std::memory_order_acquire);
+        if(chosen == NOT_RESOLVED)
+        {
+            return nullptr;
+        }
+        return _candidates[chosen].plan.get();
+    }
+
+    /// The chosen candidate's saveable plan, or nullptr before a candidate is chosen.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    const GenericPlan<THandle>* saveablePlan() const override
+    {
+        const IPlan<THandle>* chosen = chosenPlan();
+        return chosen != nullptr ? chosen->saveablePlan() : nullptr;
+    }
+
 private:
     static constexpr size_t NOT_RESOLVED = std::numeric_limits<size_t>::max();
     /// One timer's answer for one sample: an elapsed time when the launch could be

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -17,6 +18,8 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
@@ -147,6 +150,36 @@ TEST(TestIngestorGenericPlan, KernelReturnsTheDispatchersSelectedKernel)
     const GenericPlan<StubHandle> plan({makeDefinition(kernelId, 64), &handler}, context, bound);
 
     EXPECT_EQ(plan.kernel().kernelId, kernelId);
+}
+
+TEST(TestIngestorGenericPlan, SaveablePlanIsThePlanItself)
+{
+    const MockKernelDispatchHandler handler;
+    EXPECT_CALL(handler, workspaceBytes(_, _, _)).WillOnce(Return(0));
+    auto prepared = std::make_unique<PreparedDispatch>();
+    const PreparedDispatch* const preparedAddress = prepared.get();
+    EXPECT_CALL(handler, prepare(_, _, _)).WillOnce(Return(::testing::ByMove(std::move(prepared))));
+
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const BoundTokens bound;
+
+    const GenericPlan<StubHandle> plan(makeDispatcher(handler), context, bound);
+    const hipdnn_plugin_sdk::IPlan<StubHandle>& asPlan = plan;
+
+    EXPECT_EQ(asPlan.saveablePlan(), &plan);
+    EXPECT_EQ(&plan.handler(), &handler);
+    EXPECT_EQ(&plan.prepared(), preparedAddress);
+}
+
+TEST(TestIngestorGenericPlan, HandlerSaveAndRestoreDefaultToNotSerializable)
+{
+    const MockKernelDispatchHandler handler;
+    const PreparedDispatch prepared;
+
+    EXPECT_FALSE(handler.saveLaunchInputs(prepared).has_value());
+    EXPECT_EQ(handler.restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0), nullptr);
 }
 
 } // namespace

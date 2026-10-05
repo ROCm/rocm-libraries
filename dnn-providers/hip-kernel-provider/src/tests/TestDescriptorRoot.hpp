@@ -90,6 +90,36 @@ inline const std::filesystem::path& unitKpackRoot()
 }
 #endif
 
+#ifdef HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR
+/// The packed `archive_fixture` set, staged for the integration binary and read here too.
+/// It holds one subdirectory per packed arch, each with a real Pointwise archive.
+///
+/// The integration suite corrupts this staged archive in place while it runs. Read it only
+/// through a copy: see copyPackedArchTree().
+inline const std::filesystem::path& archiveFixtureRoot()
+{
+    static const std::filesystem::path s_root
+        = descriptorSetRoot(HIPKERNELPROVIDER_ARCHIVE_FIXTURE_RELDIR);
+    return s_root;
+}
+#endif
+
+/// Copies one packed arch directory, with its descriptors and its archive, into
+/// @p scratch, and returns the copy.
+///
+/// Read packed fixtures only through such a copy. Other suites corrupt or delete the
+/// staged archives, and a test that deletes or corrupts an archive must change only its
+/// own copy.
+///
+/// @throws std::filesystem::filesystem_error when the copy fails.
+inline std::filesystem::path copyPackedArchTree(const std::filesystem::path& archDirectory,
+                                                const std::filesystem::path& scratch)
+{
+    const std::filesystem::path copy = scratch / archDirectory.filename();
+    std::filesystem::copy(archDirectory, copy, std::filesystem::copy_options::recursive);
+    return copy;
+}
+
 #ifdef HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH
 /// rocm-kpack's own test archive, staged in the same test descriptor tree as the packed
 /// sets and reached by a path relative to this test binary.

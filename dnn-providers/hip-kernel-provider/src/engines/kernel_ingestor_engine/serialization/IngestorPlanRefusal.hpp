@@ -51,6 +51,33 @@ inline constexpr std::string_view INGESTOR_PLAN_DAMAGED_PREFIX = "ingestor plan 
                                                    "unknown ingestor plan refusal: " + message);
 }
 
+inline constexpr std::string_view INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX
+    = "cannot save this plan here: ";
+inline constexpr std::string_view INGESTOR_PLAN_SAVE_DAMAGED_PREFIX
+    = "cannot save this plan: its kernel source does not match its descriptor: ";
+
+/// Throws `HipdnnPluginException` for a refusal at save time, with the status mapping of
+/// `refuseIngestorPlan` and save-side message prefixes.
+[[noreturn]] inline void refuseIngestorPlanSave(IngestorPlanRefusal refusal,
+                                                const std::string& message)
+{
+    switch(refusal)
+    {
+    case IngestorPlanRefusal::INCOMPATIBLE:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+            std::string(INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX) + message);
+    case IngestorPlanRefusal::DAMAGED:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            std::string(INGESTOR_PLAN_SAVE_DAMAGED_PREFIX) + message);
+    default:
+        break;
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "unknown ingestor plan save refusal: " + message);
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::serialization
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

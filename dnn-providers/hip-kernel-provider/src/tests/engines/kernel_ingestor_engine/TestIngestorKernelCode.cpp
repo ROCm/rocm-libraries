@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
@@ -27,6 +28,7 @@
 #include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
  * @file TestIngestorKernelCode.cpp
@@ -769,6 +771,100 @@ TEST(TestIngestorKernelCode, CompilesASourceKernelWhenThePackSuppliesACompiler)
 
     ASSERT_EQ(compiler.compiledFiles.size(), 1U);
     EXPECT_EQ(compiler.compiledFiles.front(), "kernels/PointwiseAdd.cpp");
+}
+
+// ---------------------------------------------------------------------------
+// Reading the code object for a save
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorKernelCode, DoesNotExposeTheBytesOfANonKpackProgram)
+{
+    const IngestorKernelCode code(std::make_unique<CountingProgram>(99),
+                                  std::make_unique<CountingKernel>(99));
+
+    try
+    {
+        static_cast<void>(code.readCodeObject());
+        FAIL() << "expected a program that runs anywhere to expose no bytes";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(std::string(error.what()).find("not exposed"), std::string::npos) << error.what();
+    }
+}
+
+TEST(TestIngestorKernelCode, RefusesWithoutArchiveCoordinates)
+{
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}}, 0);
+
+    try
+    {
+        static_cast<void>(code.readCodeObject());
+        FAIL() << "expected code without archive coordinates to be refused";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(std::string(error.what()).find("no archive coordinates"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(TestIngestorKernelCode, MapsReadFailuresToSaveRefusals)
+{
+    using compilation::KpackLoadStage;
+    using serialization::IngestorPlanRefusal;
+
+    EXPECT_EQ(detail::kpackSaveRefusal(KpackLoadStage::DIGEST_MISMATCH),
+              IngestorPlanRefusal::DAMAGED);
+    for(const auto stage : {KpackLoadStage::OPEN_ARCHIVE,
+                            KpackLoadStage::ARCH_LOOKUP,
+                            KpackLoadStage::ENTRY_LOOKUP,
+                            KpackLoadStage::DECOMPRESS,
+                            KpackLoadStage::MODULE_LOAD})
+    {
+        EXPECT_EQ(detail::kpackSaveRefusal(stage), IngestorPlanRefusal::INCOMPATIBLE)
+            << detail::kpackLoadStageName(stage);
+    }
+}
+
+// The kpack constructor stores what it is given and loads nothing, so this needs no device.
+TEST(TestIngestorKernelCode, RefusesToSaveWhenTheArchiveIsAbsent)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path absent = scratch.path() / "absent.kpack";
+
+    compilation::KpackModuleCache cache;
+    const compilation::KpackKernelLoader loader(cache);
+    KpackSource source;
+    source.archive = absent;
+    source.tocKey = "PointwiseAdd/block64";
+    source.symbol = "PointwiseAdd";
+    source.sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    source.label = "kernel 'pointwise_add_f32_kpack'";
+    source.strippedArch = "gfx942";
+    source.deviceArch = "gfx942:sramecc+:xnack-";
+    const IngestorKernelCode code(loader,
+                                  source,
+                                  0,
+                                  std::make_unique<CountingProgram>(0),
+                                  std::make_unique<CountingKernel>(0));
+
+    try
+    {
+        static_cast<void>(code.readCodeObject());
+        FAIL() << "expected an absent archive to refuse the save";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << what;
+        EXPECT_EQ(what.rfind(serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX, 0), 0U) << what;
+        EXPECT_NE(what.find("OPEN_ARCHIVE"), std::string::npos) << what;
+        EXPECT_NE(what.find(absent.string()), std::string::npos) << what;
+        EXPECT_NE(what.find("PointwiseAdd"), std::string::npos) << what;
+    }
 }
 
 } // namespace

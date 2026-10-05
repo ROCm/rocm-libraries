@@ -31,6 +31,8 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 
 /**
  * @file ConvNative.cpp
@@ -74,14 +76,6 @@ constexpr size_t SUPPORTED_SPATIAL_RANK = 2;
 // ---------------------------------------------------------------------------
 // Matching
 // ---------------------------------------------------------------------------
-
-/// The tensor uids a matched conv graph binds, in kernel argument order.
-struct ConvFwdBinding
-{
-    int64_t x = 0;
-    int64_t w = 0;
-    int64_t y = 0;
-};
 
 const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
@@ -335,31 +329,26 @@ ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The compiled kernel plus everything its launch geometry needs: the operand uids and
-/// the seven dims read from the graph at prepare() time, owning nothing that points
-/// back into it.
-class PreparedConvFwd : public PreparedDispatch
+/// The compiled kernel plus everything its launch is computed from: the operand uids, the
+/// seven dims read from the graph at prepare() time and the block size, owning nothing
+/// that points back into it.
+class PreparedConvFwd : public IngestorPreparedDispatch
 {
 public:
     PreparedConvFwd(IngestorKernelCode code,
                     ConvFwdBinding binding,
-                    int n,
-                    int c,
-                    int h,
-                    int width,
-                    int k,
-                    int r,
-                    int s)
+                    ConvFwdExtents extents,
+                    int64_t blockSize)
         : _code(std::move(code))
         , _binding(binding)
-        , _n(n)
-        , _c(c)
-        , _h(h)
-        , _width(width)
-        , _k(k)
-        , _r(r)
-        , _s(s)
+        , _extents(extents)
+        , _blockSize(blockSize)
     {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
     }
 
     /// The kernel for the device this dispatch is running on. Resolved here rather than
@@ -374,33 +363,14 @@ public:
         return _binding;
     }
 
-    int n() const
+    const ConvFwdExtents& extents() const
     {
-        return _n;
+        return _extents;
     }
-    int c() const
+
+    int64_t blockSize() const
     {
-        return _c;
-    }
-    int h() const
-    {
-        return _h;
-    }
-    int width() const
-    {
-        return _width;
-    }
-    int k() const
-    {
-        return _k;
-    }
-    int r() const
-    {
-        return _r;
-    }
-    int s() const
-    {
-        return _s;
+        return _blockSize;
     }
 
 private:
@@ -408,13 +378,8 @@ private:
     // outlives every function resolved from it for the plan's lifetime.
     IngestorKernelCode _code;
     ConvFwdBinding _binding;
-    int _n;
-    int _c;
-    int _h;
-    int _width;
-    int _k;
-    int _r;
-    int _s;
+    ConvFwdExtents _extents;
+    int64_t _blockSize;
 };
 
 /// The C++ type the kernel is compiled for, from the kernel's dtype metadata.
@@ -524,8 +489,8 @@ public:
         const auto r = static_cast<int>(wDims->Get(2));
         const auto s = static_cast<int>(wDims->Get(3));
 
-        const auto blockSize
-            = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
+        const int64_t blockSizeValue = kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD));
+        const auto blockSize = static_cast<unsigned int>(blockSizeValue);
 
         compilation::KernelCompileOptions options(&xTensor, context.deviceProperties.gcnArchName);
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
@@ -546,7 +511,18 @@ public:
         code.setBlockSize(blockSize, 1, 1);
         code.setGridSize(gridSize, 1, 1);
 
-        return std::make_unique<PreparedConvFwd>(std::move(code), binding, n, c, h, width, k, r, s);
+        return std::make_unique<PreparedConvFwd>(
+            std::move(code), binding, ConvFwdExtents{n, c, h, width, k, r, s}, blockSizeValue);
+    }
+
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& preparedConvFwd = dynamic_cast<const PreparedConvFwd&>(prepared);
+        return SavedLaunchInputs{std::string(CONV_FWD_DISPATCH_SYMBOL_V1),
+                                 convFwdLaunchValues(preparedConvFwd.binding(),
+                                                     preparedConvFwd.extents(),
+                                                     preparedConvFwd.blockSize())};
     }
 
     void launch(const Handle& handle,
@@ -565,18 +541,19 @@ public:
         const auto y
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
 
+        const auto& extents = preparedConvFwd.extents();
         preparedConvFwd.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
                     x.ptr,
                     w.ptr,
                     y.ptr,
-                    preparedConvFwd.n(),
-                    preparedConvFwd.c(),
-                    preparedConvFwd.h(),
-                    preparedConvFwd.width(),
-                    preparedConvFwd.k(),
-                    preparedConvFwd.r(),
-                    preparedConvFwd.s());
+                    extents.n,
+                    extents.c,
+                    extents.h,
+                    extents.width,
+                    extents.k,
+                    extents.r,
+                    extents.s);
     }
 
 private:
@@ -585,6 +562,23 @@ private:
 };
 
 } // namespace
+
+MetadataValues convFwdLaunchValues(const ConvFwdBinding& binding,
+                                   const ConvFwdExtents& extents,
+                                   int64_t blockSize)
+{
+    return {{std::string(CONV_FWD_X_UID_VALUE), binding.x},
+            {std::string(CONV_FWD_W_UID_VALUE), binding.w},
+            {std::string(CONV_FWD_Y_UID_VALUE), binding.y},
+            {std::string(CONV_FWD_N_VALUE), int64_t{extents.n}},
+            {std::string(CONV_FWD_C_VALUE), int64_t{extents.c}},
+            {std::string(CONV_FWD_H_VALUE), int64_t{extents.h}},
+            {std::string(CONV_FWD_WIDTH_VALUE), int64_t{extents.width}},
+            {std::string(CONV_FWD_K_VALUE), int64_t{extents.k}},
+            {std::string(CONV_FWD_R_VALUE), int64_t{extents.r}},
+            {std::string(CONV_FWD_S_VALUE), int64_t{extents.s}},
+            {std::string(CONV_FWD_BLOCK_SIZE_VALUE), blockSize}};
+}
 
 compilation::KpackModuleCache& convFwdKpackModuleCache()
 {
@@ -619,6 +613,7 @@ void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& sc
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &convFwdKernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &convFwdScore);
     scope.add(std::string(DISPATCH_SYMBOL), &convFwdDispatchHandler());
+    scope.add(std::string(CONV_FWD_DISPATCH_SYMBOL_V1), &convFwdDispatchHandler());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

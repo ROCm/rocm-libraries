@@ -199,6 +199,26 @@ enum class KernelSourceKind
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
+/// The descriptor spelling of @p kind, which `kernelSourceKindFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(KernelSourceKind kind)
+{
+    switch(kind)
+    {
+    case KernelSourceKind::EMBEDDED_SOURCE:
+        return "embedded_source";
+    case KernelSourceKind::KPACK:
+        return "kpack";
+    case KernelSourceKind::HSACO_FILE:
+        return "hsaco_file";
+    case KernelSourceKind::ROCKE_BUILDER:
+        return "rocke_builder";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(kind)) + ")";
+}
+
 /// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
 /// metadata note declares it -- read out of the object by the packager, never authored.
 ///
