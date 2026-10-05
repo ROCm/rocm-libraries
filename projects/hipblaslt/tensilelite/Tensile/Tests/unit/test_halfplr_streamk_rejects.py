@@ -344,3 +344,78 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
     )
     assert sol.get("Valid") is False
     assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+
+
+# ---------------------------------------------------------------------------
+# Guard 5: HalfPLR + a >2-byte datatype (e.g. F32) without LDSTr -> rejected.
+#
+# Regression test for the IndexError crash reproduced from
+# ``Tensile/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
+# F32, TT, HalfPLR=[0,1,2,3], LDSTrInst=True but enableLDSTr can never be True
+# for a 4-byte MacDataType -- isLDSTrEnabled has no arm for numBytes > 2).
+# getHalfPLRGroups() only exposes a 2-element sliding window of HalfPLR's 3
+# rotating half-vgpr-groups; the "without enableLDSTr" local-read codegen path
+# (Components/LocalRead.py) generates offsets across the full double-buffered
+# span, which for wide (>2-byte) datatypes can reach a full extra block and
+# index past that 2-element window (``vgprGroups[gIdx]`` with gIdx == 2),
+# raising IndexError during KernelWriter. Build-only reproduction confirmed
+# all 188/188 kernels assemble cleanly once this guard rejects the offending
+# candidates instead of letting them reach codegen.
+#
+# narrower (<=2-byte) non-LDSTr HalfPLR configs that pack via UnrollMajorLDS
+# alone (e.g. the pure-F8 TN base solution in this module, asserted ACCEPTED
+# above by ``test_halfplr_streamk_sk3_sia4_is_accepted``) are unaffected and
+# must remain accepted -- this is the over-rejection guard for this fix.
+#
+# TT (TransposeA=TransposeB=True) makes UnrollMajorLDSA=True (A packs fine)
+# but UnrollMajorLDSB=False, so HalfPLRB alone (half_plr in {2,3}) is already
+# rejected by the pre-existing "does not support packing" guard above --
+# unrelated to this fix. Only half_plr=1 (A-only, the actual
+# f32_tt_batched.yaml crash shape: UnrollMajorLDSA=True, enableLDSTrA=False,
+# numBytesA=4) exercises the new guard.
+# ---------------------------------------------------------------------------
+def test_halfplr_rejects_f32_wider_than_2_bytes_without_ldstr(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=1,
+        LDSTrInst=False,
+        ProblemType={
+            "DataType": "S",
+            "DestDataType": "S",
+            "ComputeDataType": "s",
+            "HighPrecisionAccumulate": False,
+            "TransposeA": True,
+            "TransposeB": True,
+        },
+    )
+    assert sol.get("Valid") is False, f"expected reject, accepted instead: {out!r}"
+    assert (
+        "HalfPLR requires enableLDSTr for datatypes wider than 2 bytes" in out
+    )
+
+
+@pytest.mark.parametrize("half_plr", [2, 3])
+def test_halfplr_b_side_f32_tt_rejected_by_packing_guard(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        LDSTrInst=False,
+        ProblemType={
+            "DataType": "S",
+            "DestDataType": "S",
+            "ComputeDataType": "s",
+            "HighPrecisionAccumulate": False,
+            "TransposeA": True,
+            "TransposeB": True,
+        },
+    )
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR does not support packing" in out
