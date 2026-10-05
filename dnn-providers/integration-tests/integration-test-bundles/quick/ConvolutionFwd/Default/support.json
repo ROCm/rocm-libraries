@@ -75,6 +75,36 @@
           "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_80fc28",
           "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_d9f61c",
           "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2",
+          "1d_filter1_bfp16_ncl_pad0_stride1",
+          "1d_filter1_bfp16_nlc_pad0_stride1",
+          "1d_filter1_fp16_ncl_pad0_stride1",
+          "1d_filter1_fp16_nlc_pad0_stride1",
+          "1d_filter1_fp32_ncl_pad0_stride1",
+          "1d_filter1_fp32_nlc_pad0_stride1",
+          "1d_filter3_bfp16_ncl_pad0_stride1",
+          "1d_filter3_bfp16_nlc_pad0_stride1",
+          "1d_filter3_fp16_ncl_pad0_stride1",
+          "1d_filter3_fp16_nlc_pad0_stride1",
+          "1d_filter3_fp32_ncl_pad0_stride1",
+          "1d_filter3_fp32_nlc_pad0_stride1",
+          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
+          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
+          "1d_grouped2_bfp16_ncl_pad1_stride1",
+          "1d_grouped2_bfp16_nlc_pad1_stride1",
+          "1d_grouped2_fp16_ncl_pad1_stride1",
+          "1d_grouped2_fp16_nlc_pad1_stride1",
+          "1d_grouped2_fp32_ncl_pad1_stride1",
+          "1d_grouped2_fp32_nlc_pad1_stride1",
           "2_4_7_7_7_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
           "2_4_7_7_7_bfp16_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
           "2_4_7_7_7_fp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
@@ -113,53 +143,30 @@
           "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1030": [
             "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
             "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "1d_filter1_bfp16_ncl_pad0_stride1",
-          "1d_filter1_bfp16_nlc_pad0_stride1",
-          "1d_filter1_fp16_ncl_pad0_stride1",
-          "1d_filter1_fp16_nlc_pad0_stride1",
-          "1d_filter1_fp32_ncl_pad0_stride1",
-          "1d_filter1_fp32_nlc_pad0_stride1",
-          "1d_filter3_bfp16_ncl_pad0_stride1",
-          "1d_filter3_bfp16_nlc_pad0_stride1",
-          "1d_filter3_fp16_ncl_pad0_stride1",
-          "1d_filter3_fp16_nlc_pad0_stride1",
-          "1d_filter3_fp32_ncl_pad0_stride1",
-          "1d_filter3_fp32_nlc_pad0_stride1",
-          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
-          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
-          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
-          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
-          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
-          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
-          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
-          "1d_grouped2_bfp16_ncl_pad1_stride1",
-          "1d_grouped2_bfp16_nlc_pad1_stride1",
-          "1d_grouped2_fp16_ncl_pad1_stride1",
-          "1d_grouped2_fp16_nlc_pad1_stride1",
-          "1d_grouped2_fp32_ncl_pad1_stride1",
-          "1d_grouped2_fp32_nlc_pad1_stride1"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
