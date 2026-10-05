@@ -1018,6 +1018,17 @@ void traverseModule(const rocisa::Module& module,
 }  // anonymous namespace
 
 namespace stinkytofu {
+
+//: rocisa's per-instruction GIR facts, in StinkyTofu's shape.
+GirActionData girActionOf(const rocisa::GirActionData& src) {
+    std::vector<GirAccessData> accesses;
+    accesses.reserve(src.accesses.size());
+    for (const rocisa::GirAccess& a : src.accesses)
+        accesses.push_back(GirAccessData{a.isWrite, a.operand, a.ring, a.genId, a.gdelta,
+                                         a.absolute, a.crossAgent});
+    return GirActionData{src.actionId, src.anchorAction, static_cast<GirActionKind>(src.kind),
+                         std::move(accesses)};
+}
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
@@ -1189,6 +1200,13 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         if (auto memToken = inst->getMemToken()) {
             stinkyInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
         }
+        auto girAction = inst->getGirActionData();
+        if (girAction) {
+            stinkyAsmModule.setPluginDataI64(
+                "gir.action_tag_count",
+                stinkyAsmModule.getPluginDataI64("gir.action_tag_count", 0) + 1);
+            stinkyInst->addModifier<GirActionData>(girActionOf(*girAction));
+        }
 
         Legalized legalizedInsts =
             legalizeInstruction(stinkyInst, inst, irBuilder, archId, asmCaps, archCaps, hasVgprMsb);
@@ -1196,6 +1214,13 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         if (legalizedInsts.first != nullptr) {
             StinkyInstruction* currentStinkyInst = legalizedInsts.first;
             while (currentStinkyInst != legalizedInsts.last->getNext()) {
+                if (girAction) {
+                    if (auto* existing = currentStinkyInst->getModifier<GirActionData>()) {
+                        *existing = girActionOf(*girAction);
+                    } else {
+                        currentStinkyInst->addModifier<GirActionData>(girActionOf(*girAction));
+                    }
+                }
                 stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
                 currentStinkyInst = static_cast<StinkyInstruction*>(currentStinkyInst->getNext());
             }
@@ -1397,7 +1422,8 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
         .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
-        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses)
+        .value("EndOfPipeline", PipelineExtensionPoint::EndOfPipeline);
 
     m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
           "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
@@ -1527,6 +1553,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const {
             return module_->getPluginDataI64(key, defaultVal);
         }
+        void setGirFrameContract(const GirFrameContract& contract) {
+            module_->setGirFrameContract(std::make_shared<const GirFrameContract>(contract));
+        }
+
         void setPluginDataStr(const std::string& key, const std::string& value) {
             module_->setPluginDataStr(key, value);
         }
@@ -1548,6 +1578,35 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_;
         }
     };
+
+    // The frame contract carries ONLY what belongs to no instruction -- the generation table and
+    // the phi edges.  Actions and the storage they touch ride on the instructions themselves, so
+    // they never appear here.  Built as a struct, never encoded, so there is no text format for a
+    // writer and a reader to disagree about.
+    nb::class_<GirFrameContract>(m, "GirFrameContract")
+        .def(nb::init<>())
+        .def(
+            "addGeneration",
+            [](GirFrameContract& c, int id, int ring, int entry) {
+                c.generations[id] = GirGenerationSpec{id, ring, entry};
+                c.loaded = true;
+            },
+            nb::arg("id"), nb::arg("ring"), nb::arg("entry"))
+        .def(
+            "addIncoming",
+            [](GirFrameContract& c, uint64_t dst, uint64_t src, int gen, int value, bool relative) {
+                c.incomings.push_back(GirFrameIncomingSpec{dst, src, gen, value, relative});
+                c.loaded = true;
+            },
+            nb::arg("dst"), nb::arg("src"), nb::arg("gen"), nb::arg("value"), nb::arg("relative"))
+        .def(
+            "addRequires",
+            [](GirFrameContract& c, uint64_t dst, uint64_t src, int gen,
+               const std::vector<int>& values) {
+                c.requires_.push_back(GirFrameRequiresSpec{dst, src, gen, values});
+                c.loaded = true;
+            },
+            nb::arg("dst"), nb::arg("src"), nb::arg("gen"), nb::arg("values"));
 
     // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
     // Used by Tensile to declare per-kernel region-clone jobs (e.g. InitCIterWmma).
@@ -1581,6 +1640,8 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              nb::arg("defaultVal") = 0, "Get an integer plugin data value")
         .def("setPluginDataStr", &StinkyAsmModuleWithSignature::setPluginDataStr, nb::arg("key"),
              nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("setGirFrameContract", &StinkyAsmModuleWithSignature::setGirFrameContract,
+             nb::arg("contract"), "Hand over the GIR frame contract as a struct")
         .def("getPluginDataStr", &StinkyAsmModuleWithSignature::getPluginDataStr, nb::arg("key"),
              nb::arg("defaultVal") = "", "Get a string plugin data value")
         .def("registerPassAtExtensionPoint",

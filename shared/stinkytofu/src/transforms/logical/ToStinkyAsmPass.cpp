@@ -368,6 +368,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->memtoken.has_value()) {
         asmInst->addModifier<MemTokenData>(MemTokenData{irInst->memtoken.value()});
     }
+    if (irInst->giraction.has_value()) {
+        asmInst->addModifier<GirActionData>(GirActionData{irInst->giraction.value()});
+    }
     if (irInst->swaitcnt.has_value()) {
         // Per-counter wait values {vlcnt, vscnt, dlcnt, dscnt, kmcnt} forwarded
         // from the logical SWaitCnt. The rocisa->asm path attaches the same

@@ -45,10 +45,14 @@ def tdmBothTensors(ks):
 
 
 def _tdmFuseCanShareDescriptors(ks):
-    """Shared-descriptor preconditions, including writer-visible TDMSplit states."""
+    """Shared-descriptor preconditions.
+
+    The split does not refuse here: `TDMSplitA`/`TDMSplitB` are per operand, and a fused
+    group's members agreeing on region count is Solution.py's rule.
+    """
     if not tdmBothTensors(ks):
         return False
-    if ks.get("TDMSplit") or ks.get("UseSubtileImpl"):
+    if ks.get("UseSubtileImpl"):
         return False
     pt = ks.get("ProblemType") or {}
     return bool(pt.get("MXBlockA") and pt.get("MXBlockB"))
@@ -150,6 +154,17 @@ def liveGroups(ks, grouping=None):
     return tuple(live)
 
 
+def tdmFusedGroups(ks):
+    """The groups that actually ride one cooperative tensor_load_to_lds.
+
+    A one-member set moves on its own descriptor with every wave cooperating, which is what an
+    unfused operand already does, so only the sets with a member to select between are here.
+    """
+    if not tdmWaveSeparated(ks):
+        return ()
+    return tuple(group for group in liveGroups(ks) if len(group) > 1)
+
+
 # Descriptor ownership expected by PrefetchAcrossPersistent.
 TDM_DATA_TENSORS = ("A", "B")
 TDM_SCALE_TENSORS = ("MXSA", "MXSB")
@@ -182,6 +197,33 @@ def tdmSetOwner(ks, tc):
         if member in TDM_DATA_TENSORS:
             return member
     return group[0]
+
+
+def tdmSetOwners(ks):
+    """`{member: owner}` over the live members -- the aliasing that IS the fuse.
+
+    Every member of a fused set but its owner is a RegSet onto the owner, so the set is one
+    physical descriptor. An operand in no fused set owns its own. Subtile keeps per-wave
+    descriptors, so it asks the writer's `tdmDescriptorSetOwner` instead.
+    """
+    owners = {member: member for group in liveGroups(ks) for member in group}
+    for group in tdmFusedGroups(ks):
+        for member in group:
+            owners[member] = tdmSetOwner(ks, member)
+    return owners
+
+
+def tdmSetIncsSgpr(ks, tc):
+    """The SGPR holding one advance of `tc`'s descriptor set.
+
+    The two set registers keep their historical names whatever the row seats on them: the first
+    set advances through `tdmABIncs` and the second through `tdmMXSAMXSBIncs`. An operand on no
+    fused set advances by its own `GlobalReadIncs`.
+    """
+    for index, group in enumerate(tdmFusedGroups(ks)):
+        if tc in group:
+            return "tdmABIncs" if index == 0 else "tdmMXSAMXSBIncs"
+    return "GlobalReadIncs%s" % tc
 
 
 def tdmSharedScaleSet(ks):
@@ -290,6 +332,32 @@ def tdmWaveComponents(ks, tc):
         "tensor %s rides waves %s over %d components, and no right-shift of WaveIdx maps "
         "that onto components 0..%d: shifting by one gives %s"
         % (tc, waves, numComp, numComp - 1, tuple(w >> 1 for w in waves)))
+
+
+def tdmGroupWaveRanges(ks, group):
+    """`[(member index, first wave, wave count)]` for one set, or None where parity selects.
+
+    None is the even/odd split of a two-member parity set, the one every shipped fused kernel
+    emits; a contiguous range is what lets a set divide its waves unevenly.
+    """
+    if len(group) == 2 and tdmGrouping(ks).layout == "parity":
+        return None
+    ranges = []
+    for index, tc in enumerate(group):
+        waves = tdmWavePartition(ks, tc)[1]
+        if waves != tuple(range(waves[0], waves[0] + len(waves))):
+            raise TdmArrangementNotEmittable(
+                "the range selector takes contiguous shares; %s rides waves %s" % (tc, waves))
+        ranges.append((index, waves[0], len(waves)))
+    return ranges
+
+
+def tdmParityOrder(ks, group):
+    """`(even member, odd member)` of a two-member parity set, from the wave partition."""
+    if len(group) != 2:
+        raise TdmArrangementNotEmittable(
+            "a parity order needs exactly two members; %s has %d" % (group, len(group)))
+    return tuple(group) if 0 in tdmWavePartition(ks, group[0])[1] else (group[1], group[0])
 
 
 def tdmSoleWave(ks, tc):

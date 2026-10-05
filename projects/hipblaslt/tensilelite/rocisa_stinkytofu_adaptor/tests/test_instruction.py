@@ -2746,6 +2746,11 @@ class TestSSchedulingFence(unittest.TestCase):
         inst = SSchedulingFence()
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
 
+    def test_carries_gir_action_identity(self):
+        inst = SSchedulingFence()
+        inst.setGirActionData(17)
+        self.assertEqual(inst.getGirActionData(), 17)
+
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_to_stinky_logical(self):
         inst = SSchedulingFence(comment="test fence")

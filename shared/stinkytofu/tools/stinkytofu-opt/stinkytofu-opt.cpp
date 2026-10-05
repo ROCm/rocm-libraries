@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -34,6 +35,7 @@
 
 #include "stinkytofu/Version.h"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
@@ -306,6 +308,44 @@ static void printKernelConfigHelp(std::ostream& os) {
     os << "  --NumWaves <n>      (or --NumWaves=<n>)\n";
 }
 }  // namespace
+
+//: `st.metadata "key" { ... }` at column 0 carries raw text -- a frame contract is line-oriented
+//: and hand-written, so escaping it into a quoted string would defeat the point of the format.
+static std::map<std::string, std::string> extractStirMetadata(std::string& source) {
+    std::map<std::string, std::string> out;
+    std::istringstream in(source);
+    std::ostringstream kept;
+    std::string line, key, body;
+    bool inside = false;
+    while (std::getline(in, line)) {
+        if (!inside && line.rfind("st.metadata", 0) == 0) {
+            const size_t first = line.find('"');
+            const size_t last = line.find('"', first + 1);
+            if (first == std::string::npos || last == std::string::npos ||
+                line.find('{', last) == std::string::npos) {
+                std::cerr << "Error: st.metadata needs `st.metadata \"key\" {`\n";
+                continue;
+            }
+            key = line.substr(first + 1, last - first - 1);
+            body.clear();
+            inside = true;
+            continue;
+        }
+        if (inside) {
+            if (line == "}") {
+                out[key] = body;
+                inside = false;
+            } else {
+                body += line;
+                body += "\n";
+            }
+            continue;
+        }
+        kept << line << "\n";
+    }
+    source = kept.str();
+    return out;
+}
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
@@ -649,6 +689,7 @@ int main(int argc, char** argv) {
     std::stringstream fileBuffer;
     fileBuffer << inputFile.rdbuf();
     std::string fileContent = fileBuffer.str();
+    const auto stirMetadata = extractStirMetadata(fileContent);
 
     // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
     // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
@@ -899,6 +940,18 @@ int main(int argc, char** argv) {
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
+            }
+            for (const auto& [key, value] : stirMetadata) func.setStringMetaData(key, value);
+            if (auto contractText = stirMetadata.find(stinkytofu::kGirFrameContractKey);
+                contractText != stirMetadata.end()) {
+                std::string problem;
+                auto contract = stinkytofu::parseGirFrameContract(contractText->second, &problem);
+                if (!contract) {
+                    std::cerr << "Error: " << problem << "\n";
+                    return 1;
+                }
+                func.setStructMetaData<stinkytofu::GirFrameContract>(
+                    stinkytofu::kGirFrameContractKey, std::move(contract));
             }
 
             passManager.run(func);

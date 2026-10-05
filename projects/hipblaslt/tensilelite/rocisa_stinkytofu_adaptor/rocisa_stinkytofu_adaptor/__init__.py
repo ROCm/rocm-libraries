@@ -427,6 +427,21 @@ def _mfma_types():
 # ``hasattr(_rocisa, ...)``.
 
 
+def __getattr__(name: str):
+    """Fall back to the stinkytofu binding for symbols native rocisa re-exports.
+
+    ``PipelineExtensionPoint`` and friends are defined by the stinkytofu module and surfaced
+    through ``rocisa`` on the native backend; forward them rather than restate the enum here.
+    """
+    import stinkytofu as _st
+    try:
+        return getattr(_st, name)
+    except AttributeError:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r} "
+            f"(not provided by the adapter and not found in stinkytofu)") from None
+
+
 def hasStinkyTofuBackend() -> bool:
     """Return True if the standalone stinkytofu binding exposes arch probes."""
     try:

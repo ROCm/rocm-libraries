@@ -196,6 +196,13 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Do not remove the temporary build directory (may required hundreds of GBs of space)",
     )
     argParser.add_argument(
+        "--output-loop-ir",
+        dest="OutputLoopIR",
+        action="store_true",
+        default=False,
+        help="Also dump the LoopModel theta-IR for each kernel to a sibling ir/ directory",
+    )
+    argParser.add_argument(
         "--logic-filter",
         dest="LogicFilter",
         action="store",
@@ -240,6 +247,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["BuildIdKind"] = args.BuildIdKind
     arguments["KeepBuildTmp"] = args.KeepBuildTmp
     arguments["BuildGfx1250v0"] = args.BuildGfx1250v0
+    arguments["OutputLoopIR"] = args.OutputLoopIR
     arguments["AsanBuild"] = args.AsanBuild
     arguments["UseCompression"] = not args.NoCompress
     arguments["CxxCompiler"] = args.CxxCompiler

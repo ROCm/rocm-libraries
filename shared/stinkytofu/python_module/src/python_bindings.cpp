@@ -125,7 +125,8 @@ NB_MODULE(_stinkytofu, m) {
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
         .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
-        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses)
+        .value("EndOfPipeline", PipelineExtensionPoint::EndOfPipeline);
 
     // ------------------------------------------------------------------------
     // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
@@ -652,6 +653,10 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("tokens"),
             "Set memory token IDs for LDS dependency tracking (forwarded to MemTokenData)")
+        .def(
+            "set_gir_action",
+            [](LogicalInstruction& inst, uint64_t actionId) { inst.giraction = actionId; },
+            nb::arg("action_id"), "Set stable GIR semantic action id")
         .def(
             "set_swaitcnt",
             [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt) {

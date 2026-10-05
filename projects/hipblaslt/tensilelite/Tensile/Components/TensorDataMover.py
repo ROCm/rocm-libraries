@@ -4,12 +4,12 @@ from ..Common import INDEX_CHARS
 from .TDMFuse import tdmWaveComponents
 from typing import Mapping, Optional
 from rocisa.code import Module, Label
-from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
+from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
     VReadfirstlaneB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
-from math import log2, ceil, prod
+from math import log2, ceil
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 class TensorDataMoverLoad(TensorDataMover):
@@ -72,7 +72,10 @@ class TensorDataMoverLoad(TensorDataMover):
         assert bpe > 0, "bpe must > 0"
         tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
         unrollSummation = [i for i in tp["ia"] if i in kernel["ProblemType"]["IndicesSummation"]]
-        tdmSeparateStride: str | RegisterContainer = writer.strideRef(tc, unrollSummation[-1]) if tlu else writer.strideRef(tc, tIdx)
+        # Waves keep the descriptor's dim1 axis. Moving the offset to the
+        # free axis fails multi-wave NT, both split and unsplit.
+        tdmSeparateStride: str | RegisterContainer = (
+            writer.strideRef(tc, unrollSummation[-1]) if tlu else tileStride)
         if tp["isM"]:
             ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
             sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[ia[1]]}"
@@ -82,9 +85,10 @@ class TensorDataMoverLoad(TensorDataMover):
         numWaves: int = kernel["NumWaves"]
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tIdx == 0 else kernel["MacroTile1"]
-        # Metadata is never split (only the A/B data tensors are); Sparse implies
-        # this function may be called with the Metadata tp (tdmGlobalOffset).
-        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not tp["isM"]) else 1
+        # The wave offset shrinks only when the split cuts the wave's axis.
+        _geo = writer.tdmSplitGeometry(kernel, tp)
+        tdmSplit: int = _geo.factor
+        waveSplitDiv: int = 1 if _geo.splitDim == 0 else tdmSplit
         du: int = kernel["DepthU"]
         if "MXS" in tc:
             subTc0 = tc[3]
@@ -129,7 +133,7 @@ class TensorDataMoverLoad(TensorDataMover):
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(du * bpe // 2 // metaNumWaves), "woffset = wCompId * du * bpe / 2 (sparse) // metaNumWaves"))
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(sgprStrideName), f"woffset *= stride"))
             else:
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * bpe // tdmSplit), "woffset = wId * mt // numWaves * bpe // tdmSplit"))
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * bpe // waveSplitDiv), f"woffset = wId * mt // numWaves * bpe // {waveSplitDiv}"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= stride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= woffset carry"))
@@ -171,6 +175,14 @@ class TensorDataMoverLoad(TensorDataMover):
         return mod
 
     def calculateStartAddrWaveSeparated(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, sgprAddr: int | str, dstGroup0: str = None, waveIdxSgpr: int | str = "WaveIdx") -> Module:
+        """The start address for one member of a descriptor set, over its own wave share.
+
+        `tdmWaveComponents` answers how many waves cooperate on this member and which right-shift
+        of WaveIdx numbers them: the default row's two-member set takes `waveIdx >> 1` over
+        `NumWaves // 2`, while a block row's uneven share can take WaveIdx itself or no shift at
+        all.  `A_MX` gives A two waves and each scale one, because A is ~32x the bytes of a scale
+        at MXBlock 32 and an equal split would leave half the waves nearly idle.
+        """
         mod = Module()
         tc: str = tp["tensorChar"]
         tIdx: int = tp["idx"]
@@ -179,7 +191,9 @@ class TensorDataMoverLoad(TensorDataMover):
         assert bpe > 0, "bpe must > 0"
         tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
         unrollSummation = [i for i in tp["ia"] if i in kernel["ProblemType"]["IndicesSummation"]]
-        tdmSeparateStride: str | RegisterContainer = writer.strideRef(tc, unrollSummation[-1]) if tlu else writer.strideRef(tc, tIdx)
+        # The WAVE offset keeps the descriptor's dim1 axis — same reasoning as `calculateStartAddr`.
+        tdmSeparateStride: str | RegisterContainer = (
+            writer.strideRef(tc, unrollSummation[-1]) if tlu else tileStride)
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
@@ -189,8 +203,12 @@ class TensorDataMoverLoad(TensorDataMover):
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
         du: int = kernel["DepthU"]
         tile1Size: int = du if tlu else mt
-        tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc)) else 1
-        if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tp["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tp["isB"])):
+        # See `calculateStartAddr`: the wave offset shrinks with the split only when the split
+        # cuts dim1, i.e. when the geometry put the divisor there.
+        _geo = writer.tdmSplitGeometry(kernel, tp)
+        tdmSplit: int = _geo.factor
+        waveSplitDiv: int = 1 if _geo.splitDim == 0 else tdmSplit
+        if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tc.endswith("A")) or (kernel["ProblemType"]["Sparse"] == 2 and tc.endswith("B"))):
             tile1Size = tile1Size // 2
         if ("MXS" in tc):
             subTc = tc[3]
@@ -208,7 +226,9 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
         with writer.allocTmpSgpr(3, tag="TensorDataMoverLoadWaveSeparated_tmpSgprRes") as tmpSgprRes:
+            # numComp = how many waves cooperate on THIS member; the slice index runs 0..numComp-1.
             numComp, compShift = tdmWaveComponents(kernel, tc)
+            assert numComp >= 1, "numComp must be >= 1"
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
@@ -236,7 +256,7 @@ class TensorDataMoverLoad(TensorDataMover):
                     # M/N-splitting: offset within same k_group along tile dimension
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
             else:
-                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // waveSplitDiv), f"woffset = wCompId * tile1({tile1Size}) // numComp({numComp}) * bpe({bpe}) // {waveSplitDiv}"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
             mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= woffset carry"))
