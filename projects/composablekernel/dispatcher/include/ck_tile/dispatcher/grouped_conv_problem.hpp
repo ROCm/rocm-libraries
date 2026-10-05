@@ -12,6 +12,7 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace ck_tile {
 namespace dispatcher {
@@ -37,15 +38,24 @@ struct GroupedConvProblem
     std::int64_t K; // Output channels (filters)
     std::int64_t G; // Number of groups (1 for standard conv)
 
-    // Spatial dimensions (supports 1D, 2D, 3D)
+    // Spatial dimensions (supports 2D and 3D; unused slot is 1 for 2D)
     std::array<std::int64_t, 3> input_spatial;  // {D, H, W} or {1, H, W} for 2D
     std::array<std::int64_t, 3> filter_spatial; // {Z, Y, X} or {1, Y, X} for 2D
     std::array<std::int64_t, 3> output_spatial; // {Do, Ho, Wo} or {1, Ho, Wo} for 2D
 
+    // Runtime signature (canonical values, not aliases)
+    std::string dtype_in;
+    std::string dtype_wei;
+    std::string dtype_out;
+    std::string layout;
+    int ndim_spatial = 2;
+    std::string arch;
+
     // Convolution parameters
-    std::array<std::int64_t, 3> stride;   // Stride in each dimension
-    std::array<std::int64_t, 3> padding;  // Padding in each dimension
-    std::array<std::int64_t, 3> dilation; // Dilation in each dimension
+    std::array<std::int64_t, 3> stride;
+    std::array<std::int64_t, 3> padding_left;
+    std::array<std::int64_t, 3> padding_right;
+    std::array<std::int64_t, 3> dilation;
 
     // Operation type
     GroupedConvOp op = GroupedConvOp::Forward;
@@ -65,7 +75,8 @@ struct GroupedConvProblem
           filter_spatial{1, 3, 3},
           output_spatial{1, 26, 26},
           stride{1, 1, 1},
-          padding{0, 0, 0},
+          padding_left{0, 0, 0},
+          padding_right{0, 0, 0},
           dilation{1, 1, 1},
           op(GroupedConvOp::Forward)
     {
@@ -92,7 +103,8 @@ struct GroupedConvProblem
           input_spatial{1, hi, wi},
           filter_spatial{1, y, x},
           stride{1, stride_h, stride_w},
-          padding{0, pad_h, pad_w},
+          padding_left{0, pad_h, pad_w},
+          padding_right{0, pad_h, pad_w},
           dilation{1, dilation_h, dilation_w},
           op(GroupedConvOp::Forward)
     {
@@ -102,18 +114,54 @@ struct GroupedConvProblem
     /// Check if problem dimensions are valid
     bool is_valid() const
     {
-        return N > 0 && C > 0 && K > 0 && G > 0 && (C % G == 0) && (K % G == 0);
-    }
+        if(N <= 0 || C <= 0 || K <= 0 || G <= 0 || C % G != 0 || K % G != 0 ||
+           dtype_in.empty() || dtype_wei.empty() || dtype_out.empty() || layout.empty() ||
+           arch.empty() || (ndim_spatial != 2 && ndim_spatial != 3))
+            return false;
 
-    /// Compute output spatial dimensions
-    void compute_output_size()
-    {
+        if(ndim_spatial == 2 &&
+           (input_spatial[0] != 1 || filter_spatial[0] != 1 || output_spatial[0] != 1 ||
+            stride[0] != 1 || dilation[0] != 1 || padding_left[0] != 0 ||
+            padding_right[0] != 0))
+            return false;
+
         for(int i = 0; i < 3; ++i)
         {
-            std::int64_t effective_filter = (filter_spatial[i] - 1) * dilation[i] + 1;
-            output_spatial[i] =
-                (input_spatial[i] + 2 * padding[i] - effective_filter) / stride[i] + 1;
+            if(input_spatial[i] <= 0 || filter_spatial[i] <= 0 || output_spatial[i] <= 0 ||
+               stride[i] <= 0 || dilation[i] <= 0 || padding_left[i] < 0 ||
+               padding_right[i] < 0)
+                return false;
+            const std::int64_t effective_filter =
+                (filter_spatial[i] - 1) * dilation[i] + 1;
+            const std::int64_t numerator = input_spatial[i] + padding_left[i] +
+                                           padding_right[i] - effective_filter;
+            if(numerator < 0 || output_spatial[i] != numerator / stride[i] + 1)
+                return false;
         }
+        return true;
+    }
+
+    /// Compute output dimensions when all spatial parameters are valid.
+    /// Returns false without changing output_spatial when the inputs cannot describe
+    /// a positive output.
+    bool compute_output_size()
+    {
+        std::array<std::int64_t, 3> computed_output;
+        for(int i = 0; i < 3; ++i)
+        {
+            if(input_spatial[i] <= 0 || filter_spatial[i] <= 0 || stride[i] <= 0 ||
+               dilation[i] <= 0 || padding_left[i] < 0 || padding_right[i] < 0)
+                return false;
+            const std::int64_t effective_filter =
+                (filter_spatial[i] - 1) * dilation[i] + 1;
+            const std::int64_t numerator = input_spatial[i] + padding_left[i] +
+                                           padding_right[i] - effective_filter;
+            if(numerator < 0)
+                return false;
+            computed_output[i] = numerator / stride[i] + 1;
+        }
+        output_spatial = computed_output;
+        return true;
     }
 
     /// Get 2D height/width accessors
@@ -190,11 +238,23 @@ class GroupedConvProblemBuilder
         return *this;
     }
 
+    GroupedConvProblemBuilder& ndim(int value)
+    {
+        problem_.ndim_spatial = value;
+        return *this;
+    }
+
     GroupedConvProblemBuilder& input_size(std::int64_t h, std::int64_t w)
     {
         problem_.input_spatial[0] = 1;
         problem_.input_spatial[1] = h;
         problem_.input_spatial[2] = w;
+        return *this;
+    }
+
+    GroupedConvProblemBuilder& input_size(std::int64_t d, std::int64_t h, std::int64_t w)
+    {
+        problem_.input_spatial = {d, h, w};
         return *this;
     }
 
@@ -206,6 +266,12 @@ class GroupedConvProblemBuilder
         return *this;
     }
 
+    GroupedConvProblemBuilder& filter_size(std::int64_t z, std::int64_t y, std::int64_t x)
+    {
+        problem_.filter_spatial = {z, y, x};
+        return *this;
+    }
+
     GroupedConvProblemBuilder& stride(std::int64_t sh, std::int64_t sw)
     {
         problem_.stride[0] = 1;
@@ -214,11 +280,49 @@ class GroupedConvProblemBuilder
         return *this;
     }
 
+    GroupedConvProblemBuilder& stride(std::int64_t sd, std::int64_t sh, std::int64_t sw)
+    {
+        problem_.stride = {sd, sh, sw};
+        return *this;
+    }
+
+    /// Set symmetric 2D {H, W} padding; depth padding remains zero.
     GroupedConvProblemBuilder& padding(std::int64_t ph, std::int64_t pw)
     {
-        problem_.padding[0] = 0;
-        problem_.padding[1] = ph;
-        problem_.padding[2] = pw;
+        problem_.padding_left  = {0, ph, pw};
+        problem_.padding_right = {0, ph, pw};
+        return *this;
+    }
+
+    /// Set symmetric 3D {D, H, W} padding.
+    GroupedConvProblemBuilder& padding(std::int64_t pd, std::int64_t ph, std::int64_t pw)
+    {
+        problem_.padding_left  = {pd, ph, pw};
+        problem_.padding_right = {pd, ph, pw};
+        return *this;
+    }
+
+    /// Set asymmetric 2D {left H, left W, right H, right W} padding.
+    GroupedConvProblemBuilder& padding(std::int64_t pad_h_left,
+                                       std::int64_t pad_w_left,
+                                       std::int64_t pad_h_right,
+                                       std::int64_t pad_w_right)
+    {
+        problem_.padding_left  = {0, pad_h_left, pad_w_left};
+        problem_.padding_right = {0, pad_h_right, pad_w_right};
+        return *this;
+    }
+
+    /// Set asymmetric 3D {left D, H, W, right D, H, W} padding.
+    GroupedConvProblemBuilder& padding(std::int64_t pad_d_left,
+                                       std::int64_t pad_h_left,
+                                       std::int64_t pad_w_left,
+                                       std::int64_t pad_d_right,
+                                       std::int64_t pad_h_right,
+                                       std::int64_t pad_w_right)
+    {
+        problem_.padding_left  = {pad_d_left, pad_h_left, pad_w_left};
+        problem_.padding_right = {pad_d_right, pad_h_right, pad_w_right};
         return *this;
     }
 
@@ -227,6 +331,34 @@ class GroupedConvProblemBuilder
         problem_.dilation[0] = 1;
         problem_.dilation[1] = dh;
         problem_.dilation[2] = dw;
+        return *this;
+    }
+
+    GroupedConvProblemBuilder& data_types(std::string in, std::string wei, std::string out)
+    {
+        problem_.dtype_in  = std::move(in);
+        problem_.dtype_wei = std::move(wei);
+        problem_.dtype_out = std::move(out);
+        return *this;
+    }
+
+    GroupedConvProblemBuilder& layout(std::string value)
+    {
+        problem_.layout = std::move(value);
+        return *this;
+    }
+
+    GroupedConvProblemBuilder& arch(std::string value)
+    {
+        problem_.arch = std::move(value);
+        return *this;
+    }
+
+    GroupedConvProblemBuilder& dilation(std::int64_t dd,
+                                        std::int64_t dh,
+                                        std::int64_t dw)
+    {
+        problem_.dilation = {dd, dh, dw};
         return *this;
     }
 
@@ -239,8 +371,7 @@ class GroupedConvProblemBuilder
     [[nodiscard]] GroupedConvProblem build() const
     {
         GroupedConvProblem p = problem_;
-        p.compute_output_size();
-        if(!p.is_valid())
+        if(!p.compute_output_size() || !p.is_valid())
         {
             throw std::invalid_argument("Invalid grouped convolution problem dimensions");
         }
