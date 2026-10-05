@@ -1,0 +1,50 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# global_prefetch_b8 / flat_prefetch_b8 take two addressing modes: a null saddr
+# with a 64-bit vaddr, or a register saddr with a 32-bit vaddr offset. Both are
+# legal and must pass the verifier. A null saddr is "off" in GLOBAL syntax and
+# omitted in FLAT syntax.
+
+#--- global_prefetch_b8 with off saddr and 64-bit vaddr
+# CHECK-LABEL: @global_prefetch_off_saddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_prefetch_b8
+# CHECK-SAME: v[2:3], off
+
+st.func @global_prefetch_off_saddr() {
+^entry:
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- global_prefetch_b8 with register saddr and 32-bit vaddr
+# CHECK-LABEL: @global_prefetch_register_saddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_prefetch_b8
+# CHECK-SAME: v2, s[62:63]
+
+st.func @global_prefetch_register_saddr() {
+^entry:
+  "st.global_prefetch_b8"(v2, s[62:63]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- flat_prefetch_b8 with omitted saddr and 64-bit vaddr
+# CHECK-LABEL: @flat_prefetch_null_saddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: flat_prefetch_b8
+# CHECK-SAME: v[2:3]
+
+st.func @flat_prefetch_null_saddr() {
+^entry:
+  "st.flat_prefetch_b8"(v[2:3]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- flat_prefetch_b8 with register saddr and 32-bit vaddr
+# CHECK-LABEL: @flat_prefetch_register_saddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: flat_prefetch_b8
+# CHECK-SAME: v2, s[62:63]
+
+st.func @flat_prefetch_register_saddr() {
+^entry:
+  "st.flat_prefetch_b8"(v2, s[62:63]) { issueCycles = 1, latencyCycles = 1 }
+}
