@@ -59,6 +59,14 @@ on:
         type: string
         default: ""
         description: "Repository to query for baseline_run_id. Defaults to github.repository for workflow_dispatch."
+      stage_reuse_mode:
+        type: choice
+        description: "Stage reuse mode for non-release manual runs (release branches always use off)"
+        default: "reuse-stage"
+        options:
+          - "off"
+          - "dry-run"
+          - "reuse-stage"
       build_python_packages:
         type: boolean
         default: false
@@ -95,18 +103,31 @@ jobs:
       # Use the manually supplied or bot-maintained baseline. An empty value
       # causes artifact reuse to be disabled and triggers a full stage build.
       baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
+      stage-reuse-mode: ${{ steps.stage-reuse-mode.outputs.mode }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
-      - name: Checkout ci-env action
+      - name: Checkout CI helpers
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/actions/ci-env
+          sparse-checkout: |
+            .github/actions/ci-env
+            .github/scripts
           sparse-checkout-cone-mode: true
 
       - name: Load CI environment
         id: ci-env
         uses: ./.github/actions/ci-env
+
+      - name: Resolve stage reuse mode
+        id: stage-reuse-mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          REF_NAME: ${{ github.ref_name }}
+          REQUESTED_MODE: ${{ inputs.stage_reuse_mode || 'reuse-stage' }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
+        run: python3 .github/scripts/resolve_stage_reuse_mode.py
 
   configure:
     name: Configure Changed Projects
@@ -171,9 +192,9 @@ jobs:
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
-      # Copy prebuilt stages only when the resolved reuse policy provides a
-      # baseline run ID. Otherwise, leave this empty for a full stage build.
-      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      # Copy prebuilt stages only when reuse is enabled and a baseline exists.
+      # The off and dry-run modes build all stages from source.
+      prebuilt_stages: ${{ needs.ci-env.outputs.stage-reuse-mode == 'reuse-stage' && needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
       # Use the baseline selected by the artifact reuse policy above.
       baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
@@ -183,14 +204,8 @@ jobs:
       # Preserve manual workflow_dispatch control and enable native package
       # builds for pull requests carrying the opt-in label.
       build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
-      # A missing baseline disables artifact reuse and causes TheRock to
-      # perform a full stage build.
-      stage_reuse_mode: >-
-        ${{
-          needs.ci-env.outputs.baseline-run-id != '' &&
-          'reuse-stage' ||
-          'off'
-        }}
+      # Use the caller's effective mode for PRs, pushes, and manual runs.
+      stage_reuse_mode: ${{ needs.ci-env.outputs.stage-reuse-mode }}
       repository: ROCm/TheRock
       ref: 498444ae814a961ace81aed8717054208e41a7d8 # 2026-10-02
       # Pass external repo info for stage-impact analysis.
