@@ -216,7 +216,7 @@ namespace TensileLite
                     success
                         = mappingDistance<Key, Matching::RandomDistance<Key>>(io, lib, properties);
                 }
-                else if(distanceType == "GridBased")
+                else if(distanceType == "GridBased" || distanceType == "MeshBased")
                 {
                     success = mappingDistance<Key, Matching::GridBasedDistance<Key>>(
                         io, lib, properties);

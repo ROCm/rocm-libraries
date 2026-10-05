@@ -816,6 +816,7 @@ namespace TensileLite
         static const std::map<ContractionSolution::MatchingTag, const char*> MatchingTag2String
             = {{TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Equal)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::GridBased)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::MeshBased)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Range)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FreeSize)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Prediction)},
