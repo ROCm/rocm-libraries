@@ -200,6 +200,7 @@ def main() -> int:
         sliding_window=0,
         use_sinks=use_sinks,
         use_fp8=kv_is_fp8,
+        num_kv_blocks=num_blocks,
     )
     ok, why = au.supports_native_unified_attention_3d_tiled(problem)
     if not ok:

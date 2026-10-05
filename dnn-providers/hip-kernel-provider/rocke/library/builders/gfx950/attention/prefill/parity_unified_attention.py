@@ -1425,6 +1425,12 @@ def _run_rocke(
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
         num_cus=120,
+        # The "2d" lane builds its spec with _tiled_spec_from_problem and skips
+        # run_unified_attention_torch, which is what normally fills num_kv_blocks
+        # from the K cache. Without it, _enable_i64_kv_addr keeps i32 addressing,
+        # which overflows once the cache exceeds 2 GiB (num_kv_heads=8 with 32768
+        # blocks is 4 GiB) and reads zeros for high physical blocks.
+        num_kv_blocks=int(data["key_cache"].shape[0]),
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
         waves_per_eu=force_wpe,
     )

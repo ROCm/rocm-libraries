@@ -2573,17 +2573,64 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     """
     if problem.num_kv_blocks <= 0:
         return False
+    return _kv_cache_exceeds_i32(problem, problem.num_kv_blocks)
+
+
+def _kv_cache_bytes(problem: UnifiedAttentionProblem, num_kv_blocks: int) -> int:
+    """Byte size of a paged KV cache of ``num_kv_blocks`` blocks for ``problem``."""
     elem_bytes = 1 if problem.use_fp8 else 2
     block_stride = (
         problem.block_size * problem.num_kv_heads * problem.head_size * elem_bytes
     )
-    cache_bytes = problem.num_kv_blocks * block_stride
+    return num_kv_blocks * block_stride
+
+
+def _kv_cache_exceeds_i32(problem: UnifiedAttentionProblem, num_kv_blocks: int) -> bool:
+    """True when a paged KV cache of ``num_kv_blocks`` blocks needs i64 addressing."""
     # The within-block voffset is always < block_stride, so the i32 offset
     # overflows exactly when cache_bytes > 2^31 (the last block's base alone
     # reaches 2^31). Keep the fast i32 path at/below that; switch to i64
     # strictly above. (Verified: cap=65536 bf16 = 2^31 bytes, max offset
     # 2147483646 < 2^31 -> still correct on i32.)
-    return cache_bytes > 0x8000_0000
+    return _kv_cache_bytes(problem, num_kv_blocks) > 0x8000_0000
+
+
+def _check_kv_addr_width(
+    problem: UnifiedAttentionProblem,
+    k,
+    use_i64_kv_addr: bool | None = None,
+) -> None:
+    """Reject a launch whose K cache needs i64 addressing the kernel does not use.
+
+    ``_enable_i64_kv_addr`` only sees ``problem.num_kv_blocks``. A caller that
+    builds the problem without it (0 means unknown, so assume small) or with a
+    stale count gets the i32 voffset path, and on a cache over 2 GiB the
+    overflowed offsets read zeros with no fault. ``k`` is the real cache, so
+    check against it at launch. Overcounting only costs the i64 path on a small
+    cache, which is still correct, so it is allowed.
+
+    ``use_i64_kv_addr`` is the compiled spec's flag. Pass it when the spec was
+    not built from ``problem`` (a hand-built harness spec); otherwise the
+    problem's own decision is what the spec builder used.
+    """
+    if not hasattr(k, "shape") or len(k.shape) < 1:
+        return
+    num_kv_blocks = int(k.shape[0])
+    if not _kv_cache_exceeds_i32(problem, num_kv_blocks):
+        return
+    if use_i64_kv_addr is None:
+        use_i64_kv_addr = _enable_i64_kv_addr(problem)
+    if use_i64_kv_addr:
+        return
+    raise ValueError(
+        f"paged KV cache has {num_kv_blocks} blocks "
+        f"({_kv_cache_bytes(problem, num_kv_blocks)} bytes), over the 2 GiB i32 "
+        f"voffset cap, but the kernel uses i32 KV addressing "
+        f"(problem.num_kv_blocks={problem.num_kv_blocks}), which would silently "
+        "read zeros past the cap. Build the problem with num_kv_blocks=k.shape[0] "
+        "and the spec from that problem (run_unified_attention_torch does this "
+        "automatically)."
+    )
 
 
 # --- LDS-budget resolver ----------------------------------------------------
@@ -3314,7 +3361,13 @@ def _attn_values(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    use_i64_kv_addr: bool | None = None,
 ):
+    # Every Python 2D and scalar kernarg pack goes through here (production and
+    # the direct-launch harnesses), so check the kernel's KV addressing width
+    # against the real K cache. The 3D path packs its own kernargs and is not
+    # covered. Hand-built specs pass their own ``use_i64_kv_addr``.
+    _check_kv_addr_width(problem, k, use_i64_kv_addr)
     vals = {
         "output_ptr": out,
         "query_ptr": q,
@@ -4429,11 +4482,7 @@ def run_unified_attention_torch(
     # keep ``num_kv_blocks=0`` -> the correct fast i32 path -> no per-call
     # replace, which otherwise dominates tiny-shape host latency.
     if problem.num_kv_blocks <= 0 and hasattr(k, "shape") and len(k.shape) >= 1:
-        _eb = 1 if problem.use_fp8 else 2
-        _blk_stride = (
-            problem.block_size * problem.num_kv_heads * problem.head_size * _eb
-        )
-        if int(k.shape[0]) * _blk_stride > 0x8000_0000:
+        if _kv_cache_exceeds_i32(problem, int(k.shape[0])):
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
     if tuning_spec is not None:
         # Explicit specs are initially selected before framework tensors exist.

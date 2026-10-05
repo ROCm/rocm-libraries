@@ -853,6 +853,9 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         use_qq_bias=False,
         use_fp8=False,
         num_cus=120,
+        # This lane bypasses run_unified_attention_torch, which is what normally
+        # fills num_kv_blocks from the K cache.
+        num_kv_blocks=int(data["key_cache"].shape[0]),
     )
     hip_stream = int(torch.cuda.current_stream().cuda_stream)
     vals = _attn_values(
@@ -873,6 +876,9 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         qq_bias=None,
         qq_bias_stride_0=0,
         include_qq_bias_stride=True,
+        # The spec is hand-built from the Shape, not from this problem, so check
+        # the cache against the flag the kernel was actually compiled with.
+        use_i64_kv_addr=spec.use_i64_kv_addr,
     )
     block_q = spec.block_q
     total_num_q_blocks = q.shape[0] // block_q + s.batch

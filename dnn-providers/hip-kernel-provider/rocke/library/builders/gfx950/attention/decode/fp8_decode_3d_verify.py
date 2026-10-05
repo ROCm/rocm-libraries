@@ -117,6 +117,8 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
             num_cus=0,
         )
     )
+    max_blocks = (kv_len + _BS - 1) // _BS
+    num_blocks = max_blocks * num_seqs + 4
     problem = au.UnifiedAttentionProblem(
         total_q=total_q,
         num_seqs=num_seqs,
@@ -132,6 +134,7 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
         use_sinks=use_sinks,
         use_fp8=True,
         num_cus=num_cus,
+        num_kv_blocks=num_blocks,
     )
     label = f"{'sink' if use_sinks else 'flash'}_b{num_seqs}_kv{kv_len}"
     # On a partitioned part the resolved CU count is floored (e.g. to 120), so the
@@ -165,8 +168,6 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     red_art = compile_kernel(build_red(red_spec, arch=arch), arch=arch)
 
     rng = np.random.default_rng(seed)
-    max_blocks = (kv_len + _BS - 1) // _BS
-    num_blocks = max_blocks * num_seqs + 4
     q_f32 = (rng.standard_normal((total_q, _NQH, _HD)) * 0.3).astype(np.float32)
     kc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)
     vc = (rng.standard_normal((num_blocks, _BS, _NKVH, _HD)) * 0.3).astype(_FP8)
