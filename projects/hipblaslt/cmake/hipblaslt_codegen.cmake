@@ -322,10 +322,7 @@ function(create_device_library)
          "${_codegen_dir}/Tensile/*.py"
          "${_codegen_dir}/Tensile/*.h"
          "${_codegen_dir}/Tensile/*.s")
-    # Tests is pytest, not codegen input, and is 3/4 of the .py under Tensile/.
     list(FILTER _codegen_sources EXCLUDE REGEX "/Tensile/Tests/")
-    # Coarser than each step's import closure on purpose: that closure is not
-    # statically obvious, and guessing it short reintroduces the same staleness.
     list(APPEND _codegen_dependencies
          ${_logic_files}
          ${_codegen_sources}
@@ -336,12 +333,10 @@ function(create_device_library)
     # older mtime. CONFIGURE_DEPENDS keeps the list accurate but ninja never acts
     # on membership alone. Depend on a sorted manifest of the list as well: it is
     # rewritten only when the set changes, and that rewrite dirties the stamp.
-    # No list(SORT) needed: file(GLOB_RECURSE) orders results lexicographically,
-    # so the manifest is byte-stable for an unchanged set.
+    # file(GLOB_RECURSE) orders results lexicographically.
     set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-inputs.manifest")
     string(JOIN "\n" _manifest_content ${_logic_files} ${_codegen_sources})
-    # file(CONFIGURE) rewrites only when the content differs. file(WRITE) would
-    # bump the mtime on every reconfigure and force a needless full rebuild.
+    # file(CONFIGURE) rewrites only when the content differs.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_content}\n" @ONLY)
     list(APPEND _codegen_dependencies "${_manifest}")
 
