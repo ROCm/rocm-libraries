@@ -147,7 +147,7 @@ __forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
     }
     else
     {
-        static_assert("Invalid input types for _accumulate.");
+        static_assert(false, "Invalid input types for _accumulate.");
     }
 }
 
