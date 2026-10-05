@@ -185,6 +185,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                     moduleOptions.TensorLoadDsLoadGapCycles;
                 passFeatureConfig.dagFeatures.wmmaBatchSize = moduleOptions.WmmaBatchSize;
+                passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
+                    moduleOptions.DsIssueCapSpanCycles;
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    static_cast<PassFeatureConfig::DsIssueCapMode>(moduleOptions.DsIssueCapMode);
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =

@@ -183,6 +183,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-cap=") ||
                 arg.starts_with("--ds-issue-cap-span-cycles=") ||
+                arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
                 arg.starts_with("--wmma-batch-size=") ||
@@ -543,6 +544,18 @@ int main(int argc, char** argv) {
             // anything alone, so both are reachable from the CLI.
             passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                 std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
+        } else if (a.starts_with("--ds-issue-cap-mode=")) {
+            const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
+            if (val == "sliding")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
+            else if (val == "periodic")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
+            else {
+                std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
+                return 1;
+            }
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
