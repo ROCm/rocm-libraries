@@ -11,10 +11,10 @@ source change.
 
 Start with evidence that another developer can review:
 
-1. Search recursively below `Tensile/Tests/unit/` for
+1. Search recursively below `tensilelite/Tests/unit/` for
    `test_<Module>.py`. Do not assume the file is directly below `unit/`; for
    example, the direct tests for `Tensile/Common/Utilities.py` are in
-   `Tensile/Tests/unit/Common/test_Utilities.py`.
+   `tensilelite/Tests/unit/Common/test_Utilities.py`.
 2. Search unit tests and tests that record current behavior for imports or
    references to the target module.
 3. Include existing test directories whose fixtures or public API calls reach
@@ -23,7 +23,7 @@ Start with evidence that another developer can review:
    every addition or removal.
 
 Keep the set inside the `-m unit` suite. The YAML-driven directories under
-`Tensile/Tests/common` execute the same production code, but each config
+`tensilelite/Tests/common` execute the same production code, but each config
 compiles kernels and benchmarks them on real hardware, and a mutation run
 repeats the whole set once per mutant. Including them makes a run
 hardware-gated and turns minutes into hours. Accept the consequence: a kill
@@ -51,8 +51,8 @@ set +e
 docker exec -e PYTHONPATH="$PROJ" -w "$PROJ" tl-mut \
   pytest -p no:cacheprovider -m unit --cov=Tensile/Common \
   --cov-report=term-missing --cov-fail-under=0 \
-  Tensile/Tests/unit/Common/test_Utilities.py \
-  Tensile/Tests/unit/characterization/CommonUtilities \
+  tensilelite/Tests/unit/Common/test_Utilities.py \
+  tensilelite/Tests/unit/characterization/CommonUtilities \
   >"$OUT/coverage.log" 2>&1
 rc=$?
 set -e
@@ -93,8 +93,8 @@ directory:
   "module": "Tensile/Common/Utilities.py",
   "source_sha": "<commit>",
   "selected": [
-    "Tensile/Tests/unit/Common/test_Utilities.py",
-    "Tensile/Tests/unit/characterization/CommonUtilities"
+    "tensilelite/Tests/unit/Common/test_Utilities.py",
+    "tensilelite/Tests/unit/characterization/CommonUtilities"
   ],
   "command": "<exact command>",
   "exit_code": 0,
