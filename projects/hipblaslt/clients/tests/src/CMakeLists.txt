@@ -21,6 +21,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_update_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
