@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_gemmi
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,47 +57,6 @@ program example_hipsparse_gemmi
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseSgemmi(handle, m, n, k, nnz, alpha, A, lda, cscValB, cscColPtrB, &
-                                 cscRowIndB, beta, C, ldc) &
-                bind(c, name = 'hipsparseSgemmi')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSgemmi
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            integer(c_int), value :: k
-            integer(c_int), value :: nnz
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), intent(in), value :: A
-            integer(c_int), value :: lda
-            type(c_ptr), intent(in), value :: cscValB
-            type(c_ptr), intent(in), value :: cscColPtrB
-            type(c_ptr), intent(in), value :: cscRowIndB
-            type(c_ptr), intent(in), value :: beta
-            type(c_ptr), value :: C
-            integer(c_int), value :: ldc
-        end function hipsparseSgemmi
-    end interface
 
     ! Variables
     type(c_ptr) :: handle

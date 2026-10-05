@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_csrsm2
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,169 +57,6 @@ program example_hipsparse_csrsm2
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseSetMatFillMode(descr, fillMode) &
-                bind(c, name = 'hipsparseSetMatFillMode')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSetMatFillMode
-            type(c_ptr), value :: descr
-            integer(c_int), value :: fillMode
-        end function hipsparseSetMatFillMode
-
-        function hipsparseSetMatDiagType(descr, diagType) &
-                bind(c, name = 'hipsparseSetMatDiagType')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSetMatDiagType
-            type(c_ptr), value :: descr
-            integer(c_int), value :: diagType
-        end function hipsparseSetMatDiagType
-
-        function hipsparseCreateCsrsm2Info(info) &
-                bind(c, name = 'hipsparseCreateCsrsm2Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateCsrsm2Info
-            type(c_ptr) :: info
-        end function hipsparseCreateCsrsm2Info
-
-        function hipsparseDestroyCsrsm2Info(info) &
-                bind(c, name = 'hipsparseDestroyCsrsm2Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyCsrsm2Info
-            type(c_ptr), value :: info
-        end function hipsparseDestroyCsrsm2Info
-
-        function hipsparseDcsrsm2_bufferSizeExt(handle, algo, transA, transB, m, nrhs, nnz, &
-                                                alpha, descr, csrSortedValA, csrSortedRowPtrA, &
-                                                csrSortedColIndA, B, ldb, info, policy, pBufferSize) &
-                bind(c, name = 'hipsparseDcsrsm2_bufferSizeExt')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDcsrsm2_bufferSizeExt
-            type(c_ptr), value :: handle
-            integer(c_int), value :: algo
-            integer(c_int), value :: transA
-            integer(c_int), value :: transB
-            integer(c_int), value :: m
-            integer(c_int), value :: nrhs
-            integer(c_int), value :: nnz
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descr
-            type(c_ptr), intent(in), value :: csrSortedValA
-            type(c_ptr), intent(in), value :: csrSortedRowPtrA
-            type(c_ptr), intent(in), value :: csrSortedColIndA
-            type(c_ptr), value :: B
-            integer(c_int), value :: ldb
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBufferSize
-        end function hipsparseDcsrsm2_bufferSizeExt
-
-        function hipsparseDcsrsm2_analysis(handle, algo, transA, transB, m, nrhs, nnz, alpha, &
-                                           descr, csrSortedValA, csrSortedRowPtrA, csrSortedColIndA, &
-                                           B, ldb, info, policy, pBuffer) &
-                bind(c, name = 'hipsparseDcsrsm2_analysis')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDcsrsm2_analysis
-            type(c_ptr), value :: handle
-            integer(c_int), value :: algo
-            integer(c_int), value :: transA
-            integer(c_int), value :: transB
-            integer(c_int), value :: m
-            integer(c_int), value :: nrhs
-            integer(c_int), value :: nnz
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descr
-            type(c_ptr), intent(in), value :: csrSortedValA
-            type(c_ptr), intent(in), value :: csrSortedRowPtrA
-            type(c_ptr), intent(in), value :: csrSortedColIndA
-            type(c_ptr), value :: B
-            integer(c_int), value :: ldb
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseDcsrsm2_analysis
-
-        function hipsparseDcsrsm2_solve(handle, algo, transA, transB, m, nrhs, nnz, alpha, descr, &
-                                        csrSortedValA, csrSortedRowPtrA, csrSortedColIndA, B, ldb, &
-                                        info, policy, pBuffer) &
-                bind(c, name = 'hipsparseDcsrsm2_solve')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDcsrsm2_solve
-            type(c_ptr), value :: handle
-            integer(c_int), value :: algo
-            integer(c_int), value :: transA
-            integer(c_int), value :: transB
-            integer(c_int), value :: m
-            integer(c_int), value :: nrhs
-            integer(c_int), value :: nnz
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descr
-            type(c_ptr), intent(in), value :: csrSortedValA
-            type(c_ptr), intent(in), value :: csrSortedRowPtrA
-            type(c_ptr), intent(in), value :: csrSortedColIndA
-            type(c_ptr), value :: B
-            integer(c_int), value :: ldb
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseDcsrsm2_solve
-
-        function hipsparseXcsrsm2_zeroPivot(handle, info, position) &
-                bind(c, name = 'hipsparseXcsrsm2_zeroPivot')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseXcsrsm2_zeroPivot
-            type(c_ptr), value :: handle
-            type(c_ptr), value :: info
-            type(c_ptr), value :: position
-        end function hipsparseXcsrsm2_zeroPivot
-    end interface
-
-    integer, parameter :: HIPSPARSE_OPERATION_NON_TRANSPOSE = 0
-    integer, parameter :: HIPSPARSE_FILL_MODE_LOWER = 0
-    integer, parameter :: HIPSPARSE_DIAG_TYPE_NON_UNIT = 0
-    integer, parameter :: HIPSPARSE_SOLVE_POLICY_NO_LEVEL = 0
-    integer, parameter :: HIPSPARSE_STATUS_ZERO_PIVOT = 6
 
     ! Variables
     type(c_ptr) :: handle
@@ -362,7 +200,7 @@ program example_hipsparse_csrsm2
                                           ldb, &
                                           info, &
                                           HIPSPARSE_SOLVE_POLICY_NO_LEVEL, &
-                                          c_loc(buffer_size))
+                                          buffer_size)
     if (stat /= 0) then
         write(*,*) 'Error: hipsparseDcsrsm2_bufferSizeExt failed'
         stop

@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_csrgemm2
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,155 +57,6 @@ program example_hipsparse_csrgemm2
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseCreateCsrgemm2Info(info) &
-                bind(c, name = 'hipsparseCreateCsrgemm2Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateCsrgemm2Info
-            type(c_ptr) :: info
-        end function hipsparseCreateCsrgemm2Info
-
-        function hipsparseDestroyCsrgemm2Info(info) &
-                bind(c, name = 'hipsparseDestroyCsrgemm2Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyCsrgemm2Info
-            type(c_ptr), value :: info
-        end function hipsparseDestroyCsrgemm2Info
-
-        function hipsparseScsrgemm2_bufferSizeExt(handle, m, n, k, alpha, descrA, nnzA, csrRowPtrA, &
-                                                   csrColIndA, descrB, nnzB, csrRowPtrB, csrColIndB, &
-                                                   beta, descrD, nnzD, csrRowPtrD, csrColIndD, &
-                                                   info, pBufferSizeInBytes) &
-                bind(c, name = 'hipsparseScsrgemm2_bufferSizeExt')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseScsrgemm2_bufferSizeExt
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            integer(c_int), value :: k
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descrA
-            integer(c_int), value :: nnzA
-            type(c_ptr), intent(in), value :: csrRowPtrA
-            type(c_ptr), intent(in), value :: csrColIndA
-            type(c_ptr), value :: descrB
-            integer(c_int), value :: nnzB
-            type(c_ptr), intent(in), value :: csrRowPtrB
-            type(c_ptr), intent(in), value :: csrColIndB
-            type(c_ptr), intent(in), value :: beta
-            type(c_ptr), value :: descrD
-            integer(c_int), value :: nnzD
-            type(c_ptr), intent(in), value :: csrRowPtrD
-            type(c_ptr), intent(in), value :: csrColIndD
-            type(c_ptr), value :: info
-            type(c_ptr), value :: pBufferSizeInBytes
-        end function hipsparseScsrgemm2_bufferSizeExt
-
-        function hipsparseXcsrgemm2Nnz(handle, m, n, k, descrA, nnzA, csrRowPtrA, csrColIndA, &
-                                       descrB, nnzB, csrRowPtrB, csrColIndB, descrD, nnzD, &
-                                       csrRowPtrD, csrColIndD, descrC, csrRowPtrC, nnzTotalDevHostPtr, &
-                                       info, pBuffer) &
-                bind(c, name = 'hipsparseXcsrgemm2Nnz')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseXcsrgemm2Nnz
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            integer(c_int), value :: k
-            type(c_ptr), value :: descrA
-            integer(c_int), value :: nnzA
-            type(c_ptr), intent(in), value :: csrRowPtrA
-            type(c_ptr), intent(in), value :: csrColIndA
-            type(c_ptr), value :: descrB
-            integer(c_int), value :: nnzB
-            type(c_ptr), intent(in), value :: csrRowPtrB
-            type(c_ptr), intent(in), value :: csrColIndB
-            type(c_ptr), value :: descrD
-            integer(c_int), value :: nnzD
-            type(c_ptr), intent(in), value :: csrRowPtrD
-            type(c_ptr), intent(in), value :: csrColIndD
-            type(c_ptr), value :: descrC
-            type(c_ptr), value :: csrRowPtrC
-            type(c_ptr), value :: nnzTotalDevHostPtr
-            type(c_ptr), value :: info
-            type(c_ptr), value :: pBuffer
-        end function hipsparseXcsrgemm2Nnz
-
-        function hipsparseScsrgemm2(handle, m, n, k, alpha, descrA, nnzA, csrValA, csrRowPtrA, &
-                                    csrColIndA, descrB, nnzB, csrValB, csrRowPtrB, csrColIndB, &
-                                    beta, descrD, nnzD, csrValD, csrRowPtrD, csrColIndD, &
-                                    descrC, csrValC, csrRowPtrC, csrColIndC, info, pBuffer) &
-                bind(c, name = 'hipsparseScsrgemm2')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseScsrgemm2
-            type(c_ptr), value :: handle
-            integer(c_int), value :: m
-            integer(c_int), value :: n
-            integer(c_int), value :: k
-            type(c_ptr), intent(in), value :: alpha
-            type(c_ptr), value :: descrA
-            integer(c_int), value :: nnzA
-            type(c_ptr), intent(in), value :: csrValA
-            type(c_ptr), intent(in), value :: csrRowPtrA
-            type(c_ptr), intent(in), value :: csrColIndA
-            type(c_ptr), value :: descrB
-            integer(c_int), value :: nnzB
-            type(c_ptr), intent(in), value :: csrValB
-            type(c_ptr), intent(in), value :: csrRowPtrB
-            type(c_ptr), intent(in), value :: csrColIndB
-            type(c_ptr), intent(in), value :: beta
-            type(c_ptr), value :: descrD
-            integer(c_int), value :: nnzD
-            type(c_ptr), intent(in), value :: csrValD
-            type(c_ptr), intent(in), value :: csrRowPtrD
-            type(c_ptr), intent(in), value :: csrColIndD
-            type(c_ptr), value :: descrC
-            type(c_ptr), value :: csrValC
-            type(c_ptr), value :: csrRowPtrC
-            type(c_ptr), value :: csrColIndC
-            type(c_ptr), value :: info
-            type(c_ptr), value :: pBuffer
-        end function hipsparseScsrgemm2
-    end interface
 
     ! Variables
     type(c_ptr) :: handle
@@ -339,7 +191,7 @@ program example_hipsparse_csrgemm2
                                             dcsrRowPtrD, &
                                             dcsrColIndD, &
                                             info, &
-                                            c_loc(bufferSize))
+                                            bufferSize)
     if (stat /= 0) then
         write(*,*) 'Error: hipsparseScsrgemm2_bufferSizeExt failed'
         stop

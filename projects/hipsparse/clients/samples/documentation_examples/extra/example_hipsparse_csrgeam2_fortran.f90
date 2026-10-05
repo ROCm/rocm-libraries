@@ -174,7 +174,7 @@ program example_fortran_csrgeam2
                                                           c_null_ptr, &
                                                           d_csr_row_ptr_c, &
                                                           c_null_ptr, &
-                                                          c_loc(buffer_size)))
+                                                          buffer_size))
 
 !   Allocate buffer
     call HIP_CHECK(hipMalloc(d_buffer, buffer_size))

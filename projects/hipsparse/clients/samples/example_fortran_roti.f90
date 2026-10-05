@@ -124,7 +124,7 @@ program example_fortran_roti
 
     type(c_ptr) :: handle
 
-    integer :: version
+    integer(c_int) :: version
 
 !   Input data
 
@@ -144,12 +144,12 @@ program example_fortran_roti
     s = 1.3
 
 !   Allocate device memory
-    call HIP_CHECK(hipMalloc(d_xind, (int(nnz, c_size_t) + 1) * 4))
+    call HIP_CHECK(hipMalloc(d_xind, int(nnz, c_size_t) * 4))
     call HIP_CHECK(hipMalloc(d_xval, int(nnz, c_size_t) * 8))
     call HIP_CHECK(hipMalloc(d_y, int(M, c_size_t) * 8))
 
 !   Copy host data to device
-    call HIP_CHECK(hipMemcpy(d_xind, c_loc(h_xind), (int(nnz, c_size_t) + 1) * 4, 1))
+    call HIP_CHECK(hipMemcpy(d_xind, c_loc(h_xind), int(nnz, c_size_t) * 4, 1))
     call HIP_CHECK(hipMemcpy(d_xval, c_loc(h_xval), int(nnz, c_size_t) * 8, 1))
     call HIP_CHECK(hipMemcpy(d_y, c_loc(h_y), int(M, c_size_t) * 8, 1))
 
