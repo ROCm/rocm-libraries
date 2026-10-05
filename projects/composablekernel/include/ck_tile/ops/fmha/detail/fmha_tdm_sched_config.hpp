@@ -269,8 +269,8 @@ struct FmhaTdmSchedLayout
     // TDM fields encode interval_bytes = 4 * 2^(interval + 1) and
     // pad_bytes = 4 * (amount + 1). Native 16-bit V64/V128 rows have 128/256
     // bytes, so intervals 4/5 insert 32 bytes at each row boundary (16 elements).
-    static constexpr index_t kVPadAmount      = 7;
-    static constexpr index_t kVPadInterval    = integer_log2_floor(Geometry::kDv / 2) - 1;
+    static constexpr index_t kVPadAmount   = 7;
+    static constexpr index_t kVPadInterval = integer_log2_floor(Geometry::kDv / 2) - 1;
 };
 
 template <index_t KWait,
