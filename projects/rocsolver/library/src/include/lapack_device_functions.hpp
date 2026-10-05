@@ -263,20 +263,39 @@ __device__ __host__ void lartg(T& f, T& g, T& c, T& s, T& r)
     }
     else
     {
-        T t;
-        if(std::abs(g) > std::abs(f))
+        // (c and s are computed from d = sqrt(f^2 + g^2), as in LAPACK 3.10, with a scaling
+        // if f or g is out of range: with t = -g/f or -f/g, computing 1/sqrt(1 + t^2) rounds
+        // 1 + t^2 to 1 for small t, so that c^2 + s^2 > 1 in many rotations, and long sequences
+        // of rotations, as in BDSQR or STEQR, drift away from orthogonality and lose accuracy;
+        // hypot is also biased on some devices)
+        const T safmin = std::numeric_limits<T>::min();
+        const T safmax = 1 / safmin;
+        const T rtmin = std::sqrt(safmin);
+        const T rtmax = std::sqrt(safmax / 2);
+        const T f1 = std::abs(f);
+        const T g1 = std::abs(g);
+        T u = 1, fs = f, gs = g;
+        if(!(f1 > rtmin && f1 < rtmax && g1 > rtmin && g1 < rtmax))
         {
-            t = -f / g;
-            s = 1 / std::sqrt(1 + t * t);
-            c = s * t;
+            u = std::min(safmax, std::max(safmin, std::max(f1, g1)));
+            fs = f / u;
+            gs = g / u;
+        }
+        const T d = std::sqrt(fs * fs + gs * gs);
+        if(g1 > f1)
+        {
+            const T dg = std::copysign(d, gs);
+            s = std::abs(gs) / d;
+            c = -fs / dg;
+            r = -dg * u;
         }
         else
         {
-            t = -g / f;
-            c = 1 / std::sqrt(1 + t * t);
-            s = c * t;
+            const T df = std::copysign(d, fs);
+            c = std::abs(fs) / d;
+            s = -gs / df;
+            r = df * u;
         }
-        r = c * f - s * g;
     }
 }
 
