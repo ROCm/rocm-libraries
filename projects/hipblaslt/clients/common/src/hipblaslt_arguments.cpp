@@ -117,6 +117,7 @@ void Arguments::init()
     allclose_check = 0;
     unit_check     = 1;
     ulp_check      = 0;
+    fast_check     = 0;
     timing         = 0;
 
     transA = '*';
