@@ -66,11 +66,11 @@ class segmented_radix_sort_helper
     using count_helper_type
         = radix_digit_count_helper<WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>;
     using scan_type               = typename ::rocprim::block_scan<unsigned int,
-                                                     radix_size,
-                                                     block_scan_algorithm::default_algorithm,
-                                                     1,
-                                                     1,
-                                                     TargetWaveSize>;
+                                                                   BlockSize,
+                                                                   block_scan_algorithm::default_algorithm,
+                                                                   1,
+                                                                   1,
+                                                                   TargetWaveSize>;
     using sort_and_scatter_helper = radix_sort_and_scatter_helper<BlockSize,
                                                                   ItemsPerThread,
                                                                   RadixBits,
@@ -300,13 +300,13 @@ class segmented_radix_sort_single_block_helper
         = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
     using bit_key_type = typename key_codec::bit_key_type;
     using sort_type    = ::rocprim::block_radix_sort<Key,
-                                                  BlockSize,
-                                                  ItemsPerThread,
-                                                  Value,
-                                                  1,
-                                                  1,
-                                                  8,
-                                                  block_radix_rank_algorithm::match>;
+                                                     BlockSize,
+                                                     ItemsPerThread,
+                                                     Value,
+                                                     1,
+                                                     1,
+                                                     8,
+                                                     block_radix_rank_algorithm::match>;
 
     static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
@@ -1027,12 +1027,14 @@ void segmented_sort_medium_or_small(KeysInputIterator keys_input,
                                            params.warp_sort_config.items_per_thread_medium,
                                            params.warp_sort_config.block_size_medium>;
 
-    using warp_helper = typename std::conditional<IsSmall == true, warp_helper_small, warp_helper_medium>::type;
+    using warp_helper =
+        typename std::conditional<IsSmall == true, warp_helper_small, warp_helper_medium>::type;
 
     using warp_sort_helper_type
         = segmented_warp_sort_helper<warp_helper, key_type, value_type, block_size, Descending>;
 
-    ROCPRIM_SHARED_MEMORY typename warp_sort_helper_type::storage_type storage;
+    ROCPRIM_SHARED_MEMORY
+    typename warp_sort_helper_type::storage_type storage;
 
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int logical_warp_id = ::rocprim::detail::logical_warp_id<logical_warp_size>();
