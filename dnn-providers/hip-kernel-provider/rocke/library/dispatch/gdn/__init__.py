@@ -66,24 +66,18 @@ def _kernel_id(
     return make_kernel_id(req, candidate, spec, op="gdn_decode")
 
 
-def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
-    """Every distinct spec any candidate would build for ``req``.
-
-    Under ``auto`` the tuning table admits exactly one candidate, so a tuner
-    that wants the whole tile space must ask per ``spec_id``; this returns what
-    is reachable for the request as given.
-    """
+def dispatch_gdn_decode_all(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
+    """Return every legal registered decode candidate with full identity."""
     if request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in GDN_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        digest = stable_json_hash(asdict(spec), n=16)
-        if digest not in seen:
-            seen.add(digest)
-            specs.append(spec)
-    return tuple(specs)
+    return GDN_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
+
+
+def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
+    """Every distinct spec admitted by the registry for ``req``."""
+    if not isinstance(req, GdnDecodeRequest):
+        return ()
+    return tuple(result.spec for result in dispatch_gdn_decode_all(req))
 
 
 def dispatch_gdn_decode(
@@ -166,6 +160,7 @@ __all__ = [
     "GDN_REGISTRY",
     "GdnDecodeRequest",
     "dispatch_gdn_decode",
+    "dispatch_gdn_decode_all",
     "gdn_candidates",
     "gdn_sweep_space",
     "normalize_dtype",
