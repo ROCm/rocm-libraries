@@ -251,6 +251,54 @@ class GlobalWriteBatchWriter:
            (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
 
   @property
+  def fuseAlphaIntoPack(self) -> bool:
+    """
+    Fuse the per-element alpha multiply into the F8/BF8 saturation+pack loop (_epilog)
+    instead of running it as a bulk pass over all batch elements in _prolog. This lets
+    the first global store issue earlier: element 0's store no longer waits on the alpha
+    multiply of every element, only on its own.
+
+    Valid only on the "pure" path, where nothing between alpha and pack reads the
+    accumulator -- no beta*C, ScaleAlphaVec, bias-read, activation, ScaleCD, ScaleAB
+    vector, or E store -- so moving alpha down to the pack stage does not change numerics.
+
+    Scoped to the narrow-float outputs (half / bf16 / f8 / bf8) that run their
+    accum->dest conversion per element through self.packdata in _epilog. Int8/Int32 are
+    excluded (their bulk alpha pass also carries an F32->I32 convert), and the 16bit
+    UseSubtileImpl paired-store path is excluded (it packs across elements separately).
+    """
+    if not (self.applyAlpha and self.codeMulAlpha is not None):
+      return False
+    if self.beta or self.parentWriter.alphaBeforeLoadC or self.kernel["InterleaveAlpha"]:
+      return False
+    # Atomic stores (e.g. GSU AtomicDest -> buffer_atomic_pk_add_bf16) pack and store
+    # through their own path (_emitAtomicPkAddBF16 / _emitAtomicAdd / _emitCasAdd), which
+    # never reaches the per-element pack block below -- so the fused alpha would not run
+    # there while the bulk _prolog pass is skipped, dropping alpha entirely.
+    if self.atomic:
+      return False
+    if not self.needsAccumToDestConversion:
+      return False
+    if self.kernel.get("UseSubtileImpl", False):
+      return False
+    destType = self.kernel["ProblemType"]["DestDataType"]
+    if not (destType.isHalf() or destType.isBFloat16() or
+            destType.isAnyFloat8() or destType.isAnyBFloat8()):
+      return False
+    if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel["ProblemType"]["UseScaleAlphaVec"] or \
+       self.kernel["ActivationFuncCall"] or \
+       self.kernel["ProblemType"]["UseScaleCD"] or \
+       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
+       self.kernel["ProblemType"]["UseE"] or \
+       self.kernel["ProblemType"]["Gradient"] or \
+       self.storeBiasD == 1:
+      return False
+    if self.kernel["LocalSplitU"] > 1 or self.kernel.get("CompactLoopStore", False):
+      return False
+    return True
+
+  @property
   def skipRearrangement(self) -> bool:
     """
     Check if we can skip v_mov_b32 rearrangement and use WMMA output registers directly.
@@ -1408,7 +1456,10 @@ class GlobalWriteBatchWriter:
                                                    self.beta, self.edge, sumIdxGSUSYNC, addrCalc))
 
     # rC *= alpha
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
+    # When fuseAlphaIntoPack is set, the alpha multiply is emitted per element inside
+    # _epilog (right before each element's saturation/pack) instead of here as a bulk
+    # pass, so the first global store can issue earlier.
+    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC and not self.fuseAlphaIntoPack:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -2224,6 +2275,18 @@ class GlobalWriteBatchWriter:
           else:
             assert 0, "Unsupported scaleD type"
 
+
+      # Fused alpha: emit this element's alpha multiply immediately before its
+      # saturation/pack (see fuseAlphaIntoPack). Reuses the same codeMulAlpha holders and
+      # dst-index math as the bulk _prolog pass, popped in the same (elementIdx, vi) order.
+      if self.fuseAlphaIntoPack and self.needsAccumToDestConversion:
+        alphaModule = Module("fused alpha mul element %d" % elementIdx)
+        regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
+        for vi in range(self.gwvw):
+          rh = replaceHolder(self.codeMulAlpha.popFirstItem(),
+                             self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
+          alphaModule.add(rh)
+        module.add(alphaModule)
 
       # pack stores, beta and non-beta reach here:
       packModule = Module("Empty pack module")
