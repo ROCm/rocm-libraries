@@ -46,6 +46,26 @@ TEST(TestJsonDataSource, GetResolvesPathsAndSubscripts)
     EXPECT_EQ(src.getData("q.dims["), V()); // malformed subscript
 }
 
+TEST(TestJsonDataSource, ArrayResultsOutliveDocumentsAndSources)
+{
+    V result;
+    {
+        json document{{"values", json::array({7, json::array({"kept", nullptr})})}};
+        jexpr::JsonDataSource source{document};
+        result = source.getData("values");
+
+        document.clear();
+        source.document()["values"] = json::array({99});
+        EXPECT_EQ(source.getData("values"), V(V::Array{V(99)}));
+    }
+
+    EXPECT_EQ(result, V(V::Array{V(7), V(V::Array{V("kept"), V()})}));
+    EXPECT_TRUE(result.containsUnresolved());
+    const V nested = result.asArray().at(1);
+    result = V();
+    EXPECT_EQ(nested, V(V::Array{V("kept"), V()}));
+}
+
 TEST(TestJsonDataSource, UsesFixedVariableSigil)
 {
     const jexpr::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};

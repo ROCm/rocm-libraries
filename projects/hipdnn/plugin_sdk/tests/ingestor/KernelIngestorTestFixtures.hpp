@@ -160,6 +160,8 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    properties.multiProcessorCount = 48;
+    properties.ldsSize = 65536;
     return properties;
 }
 
