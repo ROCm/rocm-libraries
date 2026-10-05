@@ -89,23 +89,29 @@ rocblas_status rocblas_internal_rot_launcher_64(rocblas_handle handle,
             for(int64_t n_base = 0; n_base < n_64; n_base += c_i64_grid_X_chunk)
             {
                 int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
+
+                int64_t shiftx
+                    = offset_x + (incx_64 < 0 ? -incx_64 * (n_64 - n - n_base) : n_base * incx_64);
+                int64_t shifty
+                    = offset_y + (incy_64 < 0 ? -incy_64 * (n_64 - n - n_base) : n_base * incy_64);
+
                 // 32bit API call as incx/y int64_t
-                rocblas_status status = rocblas_internal_rot_launcher<rocblas_int, NB, Tex, Tx>(
-                    handle,
-                    rocblas_int(n),
-                    x_ptr,
-                    offset_x + n_base * incx_64,
-                    incx_64,
-                    stride_x,
-                    y_ptr,
-                    offset_y + n_base * incy_64,
-                    incy_64,
-                    stride_y,
-                    c_ptr,
-                    c_stride,
-                    s_ptr,
-                    s_stride,
-                    batch_count);
+                rocblas_status status
+                    = rocblas_internal_rot_launcher<rocblas_int, NB, Tex, Tx>(handle,
+                                                                              rocblas_int(n),
+                                                                              x_ptr,
+                                                                              shiftx,
+                                                                              incx_64,
+                                                                              stride_x,
+                                                                              y_ptr,
+                                                                              shifty,
+                                                                              incy_64,
+                                                                              stride_y,
+                                                                              c_ptr,
+                                                                              c_stride,
+                                                                              s_ptr,
+                                                                              s_stride,
+                                                                              batch_count);
                 if(status != rocblas_status_success)
                     return status;
             }
@@ -126,11 +132,10 @@ rocblas_status rocblas_internal_rot_launcher_64(rocblas_handle handle,
             {
                 int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
 
-                int64_t shiftx = incx_64 < 0 ? -incx_64 * n_base : incx_64 * n_base;
-                int64_t shifty = incy_64 < 0 ? -incy_64 * n_base : incy_64 * n_base;
-
-                shiftx += offset_x;
-                shifty += offset_y;
+                int64_t shiftx
+                    = offset_x + (incx_64 < 0 ? -incx_64 * (n_64 - n - n_base) : n_base * incx_64);
+                int64_t shifty
+                    = offset_y + (incy_64 < 0 ? -incy_64 * (n_64 - n - n_base) : n_base * incy_64);
 
                 // new instantiation for 64bit incx/y
                 rocblas_status status
