@@ -3,8 +3,12 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -59,17 +63,17 @@ enum PointwiseMode : byte {
     TANH_FWD = 47
 }
 
-table PointwiseAttributes {
+table PointwiseAttributes (umd_opcode: "pointwise") {
     operation: PointwiseMode;
     relu_lower_clip: float = null;
     relu_upper_clip: float = null;
     relu_lower_clip_slope: float = null;
     // Plain axis index (not a tensor UID). Used by GEN_INDEX mode.
     axis_tensor_uid: long = null;
-    in_0_tensor_uid: long (cache_uid);
-    in_1_tensor_uid: long = null (cache_uid);
-    in_2_tensor_uid: long = null (cache_uid);
-    out_0_tensor_uid: long (cache_uid);
+    in_0_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "in_0");
+    in_1_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "in_1");
+    in_2_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "in_2");
+    out_0_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "out_0");
     swish_beta: float = null;
     elu_alpha: float = null;
     softplus_beta: float = null;

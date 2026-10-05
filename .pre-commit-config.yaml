@@ -151,6 +151,15 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
+      # Same shape as cache-key-hipdnn, for the op-schema registry header and JSON.
+      # Also fires on gen_cache_key.py, whose schema loader the generator imports.
+      - id: op-schema-registry-hipdnn
+        name: op-schema registry codegen (hipDNN)
+        entry: python projects/hipdnn/scripts/gen_op_schema_registry.py
+        language: python
+        files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_op_schema_registry\.py$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
+        pass_filenames: false
+
       - id: verify-support-claims
         name: Verify hipDNN support-claim sidecars (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py

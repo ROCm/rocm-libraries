@@ -1,17 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 // The long attributes are keys to the tensor_attributes->uid
-table BatchnormInferenceAttributes {
-    x_tensor_uid: long (cache_uid);
-    mean_tensor_uid: long (cache_uid);
-    inv_variance_tensor_uid: long (cache_uid);
-    scale_tensor_uid: long (cache_uid);
-    bias_tensor_uid: long (cache_uid);
-    y_tensor_uid: long (cache_uid);
+table BatchnormInferenceAttributes (umd_opcode: "batchnorm_inference") {
+    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");
+    mean_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "mean");
+    inv_variance_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "inv_variance");
+    scale_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "scale");
+    bias_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "bias");
+    y_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "y");
 }

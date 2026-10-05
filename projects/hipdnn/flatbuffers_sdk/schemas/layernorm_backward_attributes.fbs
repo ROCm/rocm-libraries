@@ -3,20 +3,24 @@
 
 include "norm_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table LayernormBackwardAttributes {
-    dy_tensor_uid:           long (cache_uid);
-    x_tensor_uid:            long (cache_uid);
-    scale_tensor_uid:        long (cache_uid);
-    mean_tensor_uid:         long = null (cache_uid);
-    inv_variance_tensor_uid: long = null (cache_uid);
-    epsilon_tensor_uid:      long = null (cache_uid);
-    dx_tensor_uid:           long (cache_uid);
-    dscale_tensor_uid:       long (cache_uid);
-    dbias_tensor_uid:        long (cache_uid);
+table LayernormBackwardAttributes (umd_opcode: "layernorm_bwd") {
+    dy_tensor_uid:           long (cache_uid, umd_input_tensor, umd_name: "dy");
+    x_tensor_uid:            long (cache_uid, umd_input_tensor, umd_name: "x");
+    scale_tensor_uid:        long (cache_uid, umd_input_tensor, umd_name: "scale");
+    mean_tensor_uid:         long = null (cache_uid, umd_input_tensor, umd_name: "mean");
+    inv_variance_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "inv_variance");
+    epsilon_tensor_uid:      long = null (cache_uid, umd_input_tensor, umd_name: "epsilon");
+    dx_tensor_uid:           long (cache_uid, umd_output_tensor, umd_name: "dx");
+    dscale_tensor_uid:       long (cache_uid, umd_output_tensor, umd_name: "dscale");
+    dbias_tensor_uid:        long (cache_uid, umd_output_tensor, umd_name: "dbias");
     normalized_dim_count:    long;
 }

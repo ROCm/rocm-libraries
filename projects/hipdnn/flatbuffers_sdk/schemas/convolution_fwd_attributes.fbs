@@ -3,16 +3,20 @@
 
 include "convolution_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table ConvolutionFwdAttributes {
+table ConvolutionFwdAttributes (umd_opcode: "convolution_fwd") {
     // Input/Output tensor UIDs
-    x_tensor_uid: long (cache_uid);          // Input tensor
-    w_tensor_uid: long (cache_uid);          // Weights/filter tensor
-    y_tensor_uid: long (cache_uid);          // Output tensor
+    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");   // Input tensor
+    w_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "w");   // Weights/filter tensor
+    y_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "y");  // Output tensor
 
     // Convolution parameters (N-dimensional support)
     pre_padding: [long];         // Padding before each dimension

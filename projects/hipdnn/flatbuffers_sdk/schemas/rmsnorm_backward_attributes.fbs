@@ -1,17 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table RMSNormBackwardAttributes {
-    dy_tensor_uid: long (cache_uid);
-    x_tensor_uid: long (cache_uid);
-    scale_tensor_uid: long (cache_uid);
-    inv_rms_tensor_uid: long (cache_uid);
-    dx_tensor_uid: long (cache_uid);
-    dscale_tensor_uid: long (cache_uid);
-    dbias_tensor_uid: long = null (cache_uid);
+table RMSNormBackwardAttributes (umd_opcode: "rms_norm_bwd") {
+    dy_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "dy");
+    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");
+    scale_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "scale");
+    inv_rms_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "inv_rms");
+    dx_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dx");
+    dscale_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dscale");
+    dbias_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "dbias");
 }

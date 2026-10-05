@@ -140,6 +140,16 @@ CI runs pre-commit on every pull request, so a stale header fails there.
 See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
 field-policy reference.
 
+#### Op-schema registry annotations
+
+Each `NodeAttributes` table also carries op-schema registry annotations, which name the op
+and its tensor edges for Universal Engine Descriptor (UED) patterns: `(umd_opcode: "...")`
+on the table, and `umd_input_tensor` or `umd_output_tensor` plus `umd_name` on every
+tensor-uid field. `scripts/gen_op_schema_registry.py` generates
+`op_schema_registry_generated.h` and `op_schema_registry.json` from them, and the
+`op-schema-registry-hipdnn` pre-commit hook keeps both current. See
+[Op-Schema Registry Annotations](./AddingNewOperations.md#op-schema-registry-annotations).
+
 ### Configuring Engine Knobs
 
 hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.

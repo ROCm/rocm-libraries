@@ -1,8 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -12,18 +16,18 @@ enum MoeGroupedMatmulMode : byte {
     SCATTER = 2,
 }
 
-table MoeGroupedMatmulAttributes {
+table MoeGroupedMatmulAttributes (umd_opcode: "moe_grouped_matmul") {
     // Required input tensor UIDs
-    token_tensor_uid:              long (cache_uid);
-    weight_tensor_uid:             long (cache_uid);
-    first_token_offset_tensor_uid: long (cache_uid);
+    token_tensor_uid:              long (cache_uid, umd_input_tensor, umd_name: "token");
+    weight_tensor_uid:             long (cache_uid, umd_input_tensor, umd_name: "weight");
+    first_token_offset_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "first_token_offset");
 
     // Optional input tensor UIDs
-    token_index_tensor_uid:        long = null (cache_uid);
-    token_ks_tensor_uid:           long = null (cache_uid);
+    token_index_tensor_uid:        long = null (cache_uid, umd_input_tensor, umd_name: "token_index");
+    token_ks_tensor_uid:           long = null (cache_uid, umd_input_tensor, umd_name: "token_ks");
 
     // Required output tensor UID
-    output_tensor_uid:             long (cache_uid);
+    output_tensor_uid:             long (cache_uid, umd_output_tensor, umd_name: "output");
 
     // Routing attributes
     mode: MoeGroupedMatmulMode = NONE;

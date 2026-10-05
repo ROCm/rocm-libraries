@@ -16,6 +16,7 @@ find_package(hip REQUIRED)
 add_executable(
     hipdnn_flatbuffers_sdk_tests
     main.cpp
+    TestOpSchemaRegistry.cpp
     TestVersion.cpp
     flatbuffer_utilities/TestEngineConfigWrapper.cpp
     flatbuffer_utilities/TestEngineDetailsWrapper.cpp

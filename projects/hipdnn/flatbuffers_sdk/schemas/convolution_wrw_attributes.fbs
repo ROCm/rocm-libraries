@@ -3,16 +3,20 @@
 
 include "convolution_common.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table ConvolutionWrwAttributes {
+table ConvolutionWrwAttributes (umd_opcode: "convolution_bwd_filter") {
     // Input/Output tensor UIDs
-    x_tensor_uid: long (cache_uid);          // Input tensor
-    dy_tensor_uid: long (cache_uid);         // Gradient of output tensor (DY)
-    dw_tensor_uid: long (cache_uid);         // Gradient of weights tensor (DW)
+    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");     // Input tensor
+    dy_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "dy");   // Gradient of output tensor (DY)
+    dw_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dw");  // Gradient of weights tensor (DW)
 
     // Convolution parameters (N-dimensional support)
     pre_padding: [long];         // Padding before each dimension

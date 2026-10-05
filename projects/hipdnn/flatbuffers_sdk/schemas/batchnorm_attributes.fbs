@@ -1,23 +1,27 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "umd_opcode";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
+attribute "umd_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table BatchnormAttributes {
-    x_tensor_uid: long (cache_uid);
-    scale_tensor_uid: long (cache_uid);
-    bias_tensor_uid: long (cache_uid);
-    epsilon_tensor_uid: long (cache_uid);
-    peer_stats_tensor_uid: [long] (cache_uid);
-    prev_running_mean_tensor_uid: long = null (cache_uid);
-    prev_running_variance_tensor_uid: long = null (cache_uid);
-    momentum_tensor_uid: long = null (cache_uid);
-    y_tensor_uid: long (cache_uid);
-    mean_tensor_uid: long = null (cache_uid);
-    inv_variance_tensor_uid: long = null (cache_uid);
-    next_running_mean_tensor_uid: long = null (cache_uid);
-    next_running_variance_tensor_uid: long = null (cache_uid);
+table BatchnormAttributes (umd_opcode: "batchnorm") {
+    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");
+    scale_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "scale");
+    bias_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "bias");
+    epsilon_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "epsilon");
+    peer_stats_tensor_uid: [long] (cache_uid, umd_input_tensor);
+    prev_running_mean_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "prev_running_mean");
+    prev_running_variance_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "prev_running_variance");
+    momentum_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "momentum");
+    y_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "y");
+    mean_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "mean");
+    inv_variance_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "inv_variance");
+    next_running_mean_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "next_running_mean");
+    next_running_variance_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "next_running_variance");
 }

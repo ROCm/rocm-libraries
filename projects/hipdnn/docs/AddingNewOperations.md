@@ -13,6 +13,7 @@ A contributor walkthrough for landing a new op across the hipDNN stack. The code
 **Supplementary Reference** *(read when you need it, not by default)*
 - [cuDNN Parity Rules](#cudnn-parity-rules)
 - [Cache-Key Annotations](#cache-key-annotations)
+- [Op-Schema Registry Annotations](#op-schema-registry-annotations)
 - [File Map (PR Diff Template)](#file-map-pr-diff-template)
 - [Layer-by-Layer Reference](#layer-by-layer-reference)
 - [Testing Requirements](#testing-requirements)
@@ -99,6 +100,7 @@ Copy-paste this into your PR description.
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
 - [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not); `cachekey_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations)
+- [ ] Attribute table annotated `(umd_opcode: "...")`; every scalar tensor-uid field carries `umd_input_tensor` or `umd_output_tensor` plus `umd_name`, and every tensor-uid vector carries one direction flag only; `op_schema_registry_generated.h` and `op_schema_registry.json` regenerated and committed — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
@@ -213,6 +215,113 @@ inherited through `include`.
 
 ---
 
+## Op-Schema Registry Annotations
+
+A Universal Engine Descriptor (UED) pattern names ops by opcode and binds their tensors by
+edge name (RFC 0020 § 4.3). The op-schema registry supplies those names. It is generated
+from annotations on each `NodeAttributes` table by `scripts/gen_op_schema_registry.py`,
+which writes two files from one schema walk:
+
+- `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h`,
+  which the kernel ingestor compiles.
+- `flatbuffers_sdk/op_schema_registry.json`, which `hkp_pack` validates descriptors against.
+
+### Annotating a table
+
+| Annotation | Where | Meaning |
+|---|---|---|
+| `(umd_opcode: "matmul")` | Table | The opcode a pattern matches. Required on every `NodeAttributes` table; one opcode per table. |
+| `umd_input_tensor` | Field | The field is an operand (input) tensor uid, or a vector of them. |
+| `umd_output_tensor` | Field | The field is a result (output) tensor uid, or a vector of them. |
+| `umd_name: "a"` | Field | The edge name a pattern binds a flagged scalar field by. Not allowed on a vector. |
+
+```fbs
+table MatmulAttributes (umd_opcode: "matmul") {
+    a_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "a");
+    b_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "b");
+    c_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "c");
+}
+```
+
+Follow these conventions:
+
+- **Opcode:** lower snake case of the op, e.g. `convolution_fwd`, `sdpa_bwd`. A table that
+  serves several modes, such as `PointwiseAttributes`, still gets one opcode. Its mode stays
+  an enum attribute (`operation`), so a pattern matches `pointwise` and its criteria test
+  the mode.
+- **Edge name:** the field name without the `_tensor_uid` suffix (`x_tensor_uid` becomes
+  `x`).
+- **Direction:** match the frontend attribute class. A tensor set with `setInput` is an
+  input; one set with `setOutput` is an output.
+- **Optionality:** derived, not annotated. A field declared `= null` is an optional edge or
+  attribute; anything else is required.
+
+A `[long] (cache_uid)` field, such as `CustomOpAttributes.input_tensor_uids`, is an **edge
+list**: a variable-length set of tensor references. Give it exactly one direction flag and no
+`umd_name`:
+
+```fbs
+    input_tensor_uids: [long] (cache_uid, umd_input_tensor);
+    output_tensor_uids: [long] (cache_uid, umd_output_tensor);
+```
+
+The registry lists it under `operandLists`/`resultLists` (`operand_lists`/`result_lists` in
+the JSON), named by the field. The ingestor counts a result list's uids as tensors the node
+produces, exactly like a scalar result, so a pattern can never treat a tensor an edge list
+produces as a graph input. A pattern cannot bind an edge list by name: an edge naming one
+fails to resolve like any undeclared edge.
+
+Every unflagged scalar field becomes a scalar attribute named by the field: integers as
+`int`, `float`/`double` as `float`, `bool` as `bool`, and enum-typed fields as `enum_name`,
+the name of the enum value. The `Node` table's `compute_data_type` is added to every op.
+Other vectors, strings, and sub-tables are skipped. A `long` field that is not a tensor
+reference, such as `PointwiseAttributes.axis_tensor_uid`, stays unflagged and is an `int`
+attribute.
+
+A new `.fbs` file must redeclare the `umd_*` annotations it uses, as it does `cache_uid`.
+
+### Build errors
+
+The generator refuses to write either file, naming the table and field, when:
+
+- A `NodeAttributes` table has no `umd_opcode`.
+- A field carries both `umd_input_tensor` and `umd_output_tensor`.
+- A field carries `umd_name` without a direction flag, or a flagged scalar lacks a non-empty
+  `umd_name`.
+- A direction flag is on anything other than a scalar `long` or a `[long]` vector.
+- A scalar integer field carries `(cache_uid)` but no direction flag. Every tensor
+  reference must be an edge.
+- A vector field carries `(cache_uid)` but no direction flag, or a direction-flagged vector
+  carries `umd_name`. Every tensor-uid vector must be an edge list, and an edge list has no
+  name.
+- Two edges of one op share a `umd_name`, or two attributes share a name (including the
+  `Node` table's attributes).
+- An edge is named `graph`, `kernel`, or `device`, the reserved symbol roots.
+- A `umd_opcode` or `umd_name` is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`).
+- Two tables declare the same opcode, or `umd_opcode` is on a table outside the
+  `NodeAttributes` union.
+- A `Node` table field carries any `umd_` annotation. `Node` fields bind as attributes only.
+- An annotation starts with `umd_` but is not one of the four above.
+- An attribute is an unsigned 64-bit integer, which cannot be published as a signed `int`.
+
+### Regenerating
+
+Like `cachekey_generated.h`, the registry does not come from the ordinary `flatc` step.
+Regenerate both files with:
+
+```shell
+python3 projects/hipdnn/scripts/gen_op_schema_registry.py
+```
+
+The `op-schema-registry-hipdnn` pre-commit hook runs it on any change under
+`flatbuffers_sdk/schemas/` or to the generator, and the build reruns it through the
+`generate_hipdnn_op_schema_registry` target. The generator's own tests are
+`scripts/test_gen_op_schema_registry.py`; `flatbuffers_sdk/tests/TestOpSchemaRegistry.cpp`
+checks that the committed header covers every `NodeAttributes` member and reads real
+nodes.
+
+---
+
 ## File Map (PR Diff Template)
 
 The complete surface area for a single op, using **Matmul** as the canonical example. Use as the diff template when reviewing your own PR.
@@ -223,6 +332,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
 | FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`SCHEMAS` variable) |
 | Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
+| Op-schema registry annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`umd_opcode` on the table, direction flag and `umd_name` on tensor-uid fields — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |
 | Backend attribute type enum | `backend/include/HipdnnBackendAttributeType.h` |
