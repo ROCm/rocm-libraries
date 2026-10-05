@@ -9,6 +9,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
 
+### Resolved Issues
+* [GEMM] Report the failing hipBLASLt API, symbolic and numeric backend status, and GEMM
+  configuration instead of a generic error; retain backend status in handle-creation errors.
+
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
 * [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
