@@ -46,6 +46,9 @@ struct AsmPrinterOptions {
     /// special registers) and instructions with no attached SSA keep their
     /// physical spelling, so a partially lifted function is still readable.
     bool ssaForm = false;
+
+    // Whether to print comment-only directives.
+    bool emitComments = false;
 };
 
 class STINKYTOFU_EXPORT AsmPrinter {
