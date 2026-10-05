@@ -805,6 +805,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    "raw.ptr.buffer.load.f16": (
+        "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -5066,6 +5070,19 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
 
+    def _op_tile_buffer_load_f16_d16(self, op: Op) -> None:
+        """D16-form scalar half buffer load: the raw ``raw.ptr.buffer.load.f16``
+        intrinsic returns ``half`` directly (no i16 + bitcast round-trip).
+        Port of the pinned PR9710 ``tile.buffer_load_f16_d16`` lowering.
+        """
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.f16")
+        self._current().emit(
+            f"  {op.result.name} = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, i32 {self._operand(soffset)}, i32 0)"
+        )
+
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
@@ -5558,6 +5575,14 @@ class _Lowerer:
             f"  {op.result.name} = extractelement {_llvm_type(v.type)} "
             f"{self._operand(v)}, i32 {i}"
         )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        """Freeze-poison base for a vector fully overwritten by subsequent
+        inserts (never a zero substitute). Port of the pinned PR9710
+        ``vector.undef`` lowering.
+        """
+        dtype = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {dtype} poison")
 
     def _op_vector_splat(self, op: Op) -> None:
         (scalar,) = op.operands
@@ -6239,9 +6264,11 @@ class _Lowerer:
         out.append("}")
         out.append("")
         max_wg = self.kernel.max_workgroup_size
+        # LLVM discards inverted ranges, losing the declared resource limit.
+        min_wg = min(self._backend.arch.wave_size, max_wg)
         attr_parts = [
             '"uniform-work-group-size"="true"',
-            f'"amdgpu-flat-work-group-size"="64,{max_wg}"',
+            f'"amdgpu-flat-work-group-size"="{min_wg},{max_wg}"',
         ]
         scheduler_strategy = codegen_policy_for_kernel(self.kernel).scheduler_strategy
         if scheduler_strategy is not None:

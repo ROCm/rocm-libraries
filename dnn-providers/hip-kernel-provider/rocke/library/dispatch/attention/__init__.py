@@ -32,8 +32,7 @@ from rocke.dispatch.core import (
     spec_identity,
     stable_json_hash,
 )
-
-from . import generic, gfx942, gfx942_tuning, gfx950, gfx950_tuning, gfx1250
+from . import generic, gfx942, gfx942_tuning, gfx950, gfx950_tuning, gfx1151, gfx1250
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -67,11 +66,13 @@ generic.register(ATTENTION_ROUTE_REGISTRY)
 gfx942.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx950.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx1250.register(ATTENTION_ROUTE_REGISTRY)
+gfx1151.register(ATTENTION_ROUTE_REGISTRY)
 gfx942_tuning.register(ATTENTION_ROUTE_REGISTRY)
 gfx950_tuning.register(ATTENTION_ROUTE_REGISTRY)
 gfx942.register_execution(ATTENTION_EXECUTION_REGISTRY)
 gfx950.register_execution(ATTENTION_EXECUTION_REGISTRY)
 gfx1250.register(ATTENTION_EXECUTION_REGISTRY)
+gfx1151.register(ATTENTION_EXECUTION_REGISTRY)
 gfx942_tuning.register(ATTENTION_EXECUTION_REGISTRY)
 gfx950_tuning.register(ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
@@ -206,7 +207,7 @@ def iter_dispatch_attention_all(
     sweep_level: str = "production",
 ) -> Iterator[DispatchResult]:
     """Yield each :func:`attention_dispatch_result` for ``req``."""
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return
     for candidate, spec in iter_registered_attention_combos(
         req,
@@ -270,7 +271,7 @@ def attention_sweep_space(
     ``limit`` stops after that many specs; the stream is only materialized
     up to what is returned.
     """
-    if _request_errors(req):
+    if _request_errors(req, allow_unequal_head_dims=True):
         return ()
     assert isinstance(req, AttentionRequest)
     specs = []

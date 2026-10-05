@@ -156,8 +156,8 @@ rocke_value_t* rocke_softmax_row_reduce(rocke_ir_builder_t* b,
  *
  *   k_row_base_fn / v_row_base_fn : Callable[[IRBuilder, Value], Value]
  *       (b, row_idx) -> i32 element offset for one K/V row.
- *   extra_score_transform         : Callable[[IRBuilder, Value, Value, int], Value]
- *       (b, score_log2, kt, row_in_atom) -> score_log2.
+ *   extra_score_transform:
+ *       (b, score_log2, kt, row_in_atom, query_pos, key_pos, user) -> score_log2.
  *   extra_mask_predicate          : Callable[[IRBuilder, Value], Value]
  *       (b, kt) -> i1 per-K-tile keep flag.
  *   extra_skip_predicate          : Callable[[IRBuilder, Value], Value]
@@ -171,6 +171,8 @@ typedef rocke_value_t* (*rocke_attn_score_transform_fn)(rocke_ir_builder_t* b,
                                                         rocke_value_t* score_log2,
                                                         rocke_value_t* kt,
                                                         int row_in_atom,
+                                                        rocke_value_t* query_pos,
+                                                        rocke_value_t* key_pos,
                                                         void* user);
 typedef rocke_value_t* (*rocke_attn_predicate_fn)(rocke_ir_builder_t* b,
                                                   rocke_value_t* kt,
@@ -242,6 +244,19 @@ typedef struct rocke_mfma_attn_params
     rocke_value_t* codebook_ptr;
     bool wmma_v_lds_stage;
     const char* arch; /* NULL => "gfx950"                                  */
+    rocke_value_t* mask_neg_inf; /* NULL => legacy sentinel; true -inf permits fully masked rows */
+    rocke_value_t* wmma_seqlen_q; /* NULL => complete query tiles */
+    bool wmma_kv_tail; /* include and mask the final partial KV tile */
+    rocke_value_t* sink_log2; /* optional always-visible softmax logit; no value contribution */
+    rocke_value_t*
+        k_scale; /* WMMA FP8: explicit K dequant scale; v_scale applies before the V cast */
+    int wmma_value_tile_size; /* 0 => full PV/output head; QK always uses head_size */
+    rocke_value_t* wmma_value_offset; /* optional first V/O column, in elements */
+    int wmma_v_head_size; /* 0 => V/O width equals head_size; wave32 only */
+    bool wmma_use_window_right; /* false (zero-init) => off; wave32 only */
+    int wmma_window_right; /* when enabled, keep k <= q + ctx + window_right */
+    rocke_value_t* lse; /* optional FP32 global ptr: natural-log softmax stat per row; wave32 only */
+    rocke_value_t* lse_offset; /* element index of this tile's first query row (required with lse) */
 } rocke_mfma_attn_params_t;
 
 /* ---------------------------------------------- mfma_attention_fwd_inner_body *

@@ -48,6 +48,7 @@ params). Correctness rests entirely on the key.
 | 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950.py` | persist + wide-DMA, 128×64 tile (opt-in) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950.py` | bf16 D256 2D prefill |
+| 5 | `attention_gfx1151_wmma` | gfx1151 | `gfx1151.py` | FP16/BF16 dense/ragged/paged inference, score features and OCP FP8 KV (auto and explicit selection) |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
