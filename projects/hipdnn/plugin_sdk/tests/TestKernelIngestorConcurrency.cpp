@@ -14,12 +14,11 @@
 
 #include <gtest/gtest.h>
 
+#include "ingestor/KernelIngestorTestFixtures.hpp"
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
-#include "ingestor/KernelIngestorTestFixtures.hpp"
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 /**
  * @file TestKernelIngestorConcurrency.cpp

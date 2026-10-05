@@ -195,10 +195,35 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendCreateDescriptor(HEURISTIC)
          -> Backend: hipdnnBackendSetAttribute(heuristic, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
+         -> Backend: hipdnnBackendSetAttribute(heuristic, POLICY_ORDER_EXT, policyIds)
+            [only when HeuristicMode::A or ::B is requested]
+         -> Backend: hipdnnBackendSetAttribute(heuristic, RANKING_METRIC_EXT, metric)
+            [only when graph.set_ranking_metric() was called]
          -> Backend: hipdnnBackendFinalize(heuristic)
             -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()
-            -> Plugin: hipdnnEnginePluginGetEngineDetails() [per engine]
+            -> Prediction policy: query engine/configuration predictions in the metric
       -> detail::getEngineConfigs(configs, ids, heuristicDesc)
+
+``HeuristicMode::A`` and ``HeuristicMode::B`` are policy requests, not backend modes.
+The frontend hashes them into the descriptor's ordered policy list
+(``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT``) as ``SelectionHeuristic::ModeA`` and
+``SelectionHeuristic::ModeB``, bracketed by ``SelectionHeuristic::Config`` first and
+``SelectionHeuristic::StaticOrdering`` last; ``HIPDNN_ATTR_ENGINEHEUR_MODE`` still
+carries a single ``HIPDNN_HEUR_MODE_FALLBACK``. Mode A requests graph-level predictions
+without materializing candidate catalogs. Mode B first requests an exact, calibrated
+configuration prediction for each engine and uses its graph-level prediction if that is
+unavailable or invalid. Both rank usable predictions best first in the ranking
+metric's direction -- descending for ``tflops``, ascending for ``time`` -- and retain
+unscored applicable engines afterward. The metric comes from ``HIPDNN_HEUR_RANKING_METRIC``,
+else ``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``, else ``tflops``; an engine with no
+model for it is unscored rather than ranked by another metric. If all predictions are
+unusable, the policy declines and the next policy in the order runs.
+
+Heuristic results carry the engine ID, the ranking metric and, for scored
+configurations, the owned knob tuple. Plan construction preserves those settings to
+execute the scored configuration. Graph-level selections use the chosen engine's
+normal selector, ranking its kernels by the same metric, with
+``global.benchmarking=0``. Existing engine cache behavior is unchanged.
 
 
 ``create_execution_plan_ext()``
@@ -217,6 +242,9 @@ Handle destruction (implicit via RAII)
               -> Plugin: hipdnnEnginePluginGetEngineDetails()
      3. applyKnobSettingsToEngineConfig(settings)
         -> Backend: hipdnnBackendSetAttribute(engineConfig, KNOB_CHOICE, ...)
+        -> Backend: hipdnnBackendSetAttribute(engineConfig, RANKING_METRIC_EXT, metric)
+           [only when graph.set_ranking_metric() was called; the engine picks
+            its kernel by this metric]
      4. Backend: hipdnnBackendFinalize(engineConfig)
      5. Create executionPlanDesc
         -> Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)

@@ -3,9 +3,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,8 +19,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
@@ -658,6 +659,198 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     ASSERT_EQ(values.size(), 2U);
     EXPECT_EQ(std::get<int64_t>(values[0]), 256);
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
+}
+
+/// Throws on one candidate, so rankScored degrades the whole ranking to static order
+/// (RFC 0019 §5 step 8). That makes the candidate set a ranking was decided over observable.
+class DegradesOnAnUnscorableCandidate : public IKernelHeuristic
+{
+public:
+    /// Stands in for a dangling `$kernel.*` reference or an untrained feature.
+    static constexpr int64_t UNSCORABLE_BLOCK_SIZE = 999;
+
+    double score(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == UNSCORABLE_BLOCK_SIZE)
+        {
+            throw std::runtime_error("no feature for block size 999");
+        }
+        return static_cast<double>(blockSize);
+    }
+
+    std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
+                                                const MatchContext& context,
+                                                std::string& modelId) const override
+    {
+        modelId = "test-calibrated-model";
+        return rankScored(catalog, context);
+    }
+};
+
+/// Highest score, lowest priority: the model's pick, and never static order's.
+inline const DescriptorId FASTEST_ID = testId(0x7A);
+/// Lowest score, highest priority: static order's pick, and never the model's.
+inline const DescriptorId PREFERRED_ID = testId(0x7B);
+inline const DescriptorId UNSCORABLE_ID = testId(0x7C);
+
+std::unique_ptr<StateManager> makeCalibratedStateManager()
+{
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "calibrated pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    // No matchers: every kernel reaches the catalog, and only the test narrows it.
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/10),
+                    makeKernel(UNSCORABLE_ID,
+                               "unscorable",
+                               DegradesOnAnUnscorableCandidate::UNSCORABLE_BLOCK_SIZE,
+                               "FLOAT",
+                               /*priority=*/0)};
+
+    return std::make_unique<StateManager>(makeSchema(),
+                                          std::vector<MatchDescriptor>{},
+                                          makeTestDispatches(),
+                                          std::vector<KernelDescriptorPack>{std::move(pack)},
+                                          std::make_shared<DegradesOnAnUnscorableCandidate>(),
+                                          "test.graph");
+}
+
+/// Everything in @p ranking that names a kernel other than @p excluded, in order.
+std::vector<KernelDefinition> withoutKernel(const std::vector<KernelDefinition>& entries,
+                                            const DescriptorId& excluded)
+{
+    std::vector<KernelDefinition> kept;
+    std::copy_if(
+        entries.begin(),
+        entries.end(),
+        std::back_inserter(kept),
+        [&excluded](const KernelDefinition& kernel) { return kernel.kernelId != excluded; });
+    return kept;
+}
+
+/// RFC 0019 §9.2: a filtered request restricts the cached order rather than ranking its own
+/// subset. Static order puts `preferred` first; the model puts `fastest` first.
+TEST(TestKernelIngestorStateManager, ANarrowedCalibratedRankingRestrictsTheCachedFullOrder)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeCalibratedStateManager();
+    const TestGraph graph(makeGraphId(0x7A));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto catalog = manager->unsortedCatalog(context);
+    ASSERT_EQ(catalog.entries.size(), 3U);
+
+    std::string modelId;
+    const auto wide = manager->calibratedRanking(catalog, catalog.entries, context, modelId);
+    const auto narrowed = manager->calibratedRanking(
+        catalog, withoutKernel(catalog.entries, UNSCORABLE_ID), context, modelId);
+
+    ASSERT_EQ(wide.size(), 3U);
+    ASSERT_EQ(narrowed.size(), 2U);
+    EXPECT_EQ(wide.front().kernelId, PREFERRED_ID)
+        << "one unscorable candidate degrades the whole ranking to static order";
+    EXPECT_EQ(narrowed.front().kernelId, PREFERRED_ID)
+        << "the narrowed request must read the cached full order, not rank its own subset";
+    EXPECT_EQ(narrowed.back().kernelId, FASTEST_ID);
+    EXPECT_DOUBLE_EQ(narrowed.front().score, 0.0)
+        << "the scores are the full catalog's too; a fresh subset ranking would score 128";
+}
+
+/// RFC 0019 §5 step 8: a cold pinned request also ranks the canonical candidate set, not its
+/// subset. Separate managers keep both requests on the cold path.
+TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnpinnedOne)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto pinnedOnly = makeCalibratedStateManager();
+    const auto unpinnedOnly = makeCalibratedStateManager();
+    const TestGraph graph(makeGraphId(0x7B));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const auto catalog = pinnedOnly->unsortedCatalog(context);
+    ASSERT_EQ(catalog.entries.size(), 3U);
+
+    std::string modelId;
+    const auto pinned = pinnedOnly->calibratedRanking(
+        catalog, withoutKernel(catalog.entries, UNSCORABLE_ID), context, modelId);
+    const auto unpinned
+        = unpinnedOnly->calibratedRanking(catalog, catalog.entries, context, modelId);
+
+    ASSERT_EQ(pinned.size(), 2U);
+    ASSERT_EQ(unpinned.size(), 3U);
+
+    std::vector<std::string> pinnedOrder;
+    pinnedOrder.reserve(pinned.size());
+    for(const auto& scored : pinned)
+    {
+        pinnedOrder.push_back(toString(scored.kernelId));
+    }
+    std::vector<std::string> survivingOrder;
+    for(const auto& scored : unpinned)
+    {
+        if(scored.kernelId != UNSCORABLE_ID)
+        {
+            survivingOrder.push_back(toString(scored.kernelId));
+        }
+    }
+
+    EXPECT_EQ(pinnedOrder, survivingOrder)
+        << "a pin may remove candidates; it may not reorder the ones that survive";
+    EXPECT_EQ(pinned.front().kernelId, PREFERRED_ID)
+        << "the candidate the scorer throws on is part of the basis either way, so both "
+           "rankings are static order";
+    EXPECT_DOUBLE_EQ(pinned.front().score, 0.0)
+        << "a subset ranking of its own would have scored `fastest` at 512";
+}
+
+/// Ranks by block size for a throughput request and by the inverse for a time request, so
+/// the two metrics pick different winners over the same catalog.
+class RanksByTheRequestedMetric : public IKernelHeuristic
+{
+public:
+    double score(const MatchContext& context,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+        return context.rankingMetric == "time" ? -blockSize : blockSize;
+    }
+};
+
+/// RFC 0019 §11.4: the sorted-catalog cache is keyed by metric, so the second request matches
+/// every key component but the metric.
+TEST(TestKernelIngestorStateManager, ASortedCatalogIsCachedPerRankingMetric)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "metric pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/0)};
+    const auto manager
+        = std::make_unique<StateManager>(makeSchema(),
+                                         std::vector<MatchDescriptor>{},
+                                         makeTestDispatches(),
+                                         std::vector<KernelDescriptorPack>{std::move(pack)},
+                                         std::make_shared<RanksByTheRequestedMetric>(),
+                                         "test.graph");
+    const TestGraph graph(makeGraphId(0x7D));
+    const auto properties = testDeviceProperties();
+
+    const auto tflops = manager->sortedDefinitions(MatchContext{graph, 0, properties, "tflops"});
+    const auto time = manager->sortedDefinitions(MatchContext{graph, 0, properties, "time"});
+
+    ASSERT_EQ(tflops.size(), 2U);
+    ASSERT_EQ(time.size(), 2U);
+    EXPECT_EQ(tflops.front().kernelId, FASTEST_ID);
+    EXPECT_EQ(time.front().kernelId, PREFERRED_ID)
+        << "the time request was served the order cached for tflops";
 }
 
 // A pack whose kernel matchers reject everything contributes nothing, so it must read

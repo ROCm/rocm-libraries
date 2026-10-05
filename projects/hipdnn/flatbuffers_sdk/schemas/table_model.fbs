@@ -1,0 +1,64 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+file_identifier "TABL";
+
+/// Bucket definition for quantizing continuous features into discrete ranges.
+table FeatureBucket {
+    /// Feature index in the feature vector
+    feature_index:uint32;
+
+    /// Bucket boundaries (sorted ascending). A value v falls in bucket i when
+    /// boundaries[i] <= v < boundaries[i+1]. Values below boundaries[0] map to
+    /// bucket 0; values >= boundaries[last] map to the last bucket.
+    boundaries:[double];
+}
+
+/// Single table entry mapping a feature-bucket key to a kernel recommendation.
+table TableEntry {
+    /// Bucket indices for each bucketed feature (parallel to TableModel.buckets).
+    /// Length must match TableModel.buckets.size(). Each value is the bucket
+    /// index within that feature's boundaries array.
+    bucket_key:[uint32];
+
+    /// Recommended kernel ID for this bucket combination
+    kernel_id:int64;
+
+    /// Optional score/priority for this recommendation (higher is better).
+    /// If not provided, entries are assumed equally good within their bucket.
+    score:double = 0.0;
+}
+
+/// Table-based heuristic model (RFC 0019 §7 "table" adapter).
+///
+/// Maps coarse problem buckets to kernel recommendations. Features are quantized
+/// into discrete buckets, then looked up in the table. Falls back to priority
+/// ordering when no exact bucket match exists.
+table TableModel {
+    /// Number of features expected in the input vector
+    num_features:uint32;
+
+    /// Hash of the features_signature this model was built against (sha256:...)
+    /// Must match the UHD's features_hash for the model to load.
+    features_hash:string;
+
+    /// Bucket definitions for quantizing continuous features.
+    /// Only features that participate in bucketing are listed here.
+    /// Non-bucketed features are ignored during lookup.
+    buckets:[FeatureBucket];
+
+    /// Lookup table entries mapping bucket combinations to kernel IDs.
+    /// Each entry's bucket_key length must match buckets.size().
+    entries:[TableEntry];
+
+    /// GPU architectures this model was trained/benchmarked on (e.g. ["gfx942", "gfx950"]).
+    /// Used for out-of-distribution detection (RFC 0019 §9.3).
+    training_arches:[string];
+
+    /// Model version string for provenance tracking (RFC 0019 §13).
+    model_version:string;
+}
+
+root_type TableModel;

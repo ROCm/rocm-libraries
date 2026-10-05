@@ -3,7 +3,13 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <string_view>
+#include <vector>
 
 namespace hipdnn_frontend::detail
 {
@@ -33,11 +39,15 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
     return {ErrorCode::OK, ""};
 }
 
+/// @p rankingMetric names the registered metric the prediction policies rank by and the
+/// result configurations carry into plan build (RFC 0019 §11.4). Empty leaves the attribute
+/// unset, so HIPDNN_HEUR_RANKING_METRIC and the backend default keep deciding.
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
                                             const std::vector<HeuristicMode>& modes,
-                                            bool findFirst = false)
+                                            bool findFirst = false,
+                                            std::string_view rankingMetric = {})
 {
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
@@ -50,9 +60,9 @@ inline Error
         "Failed to set operation graph on the engine heuristic descriptor.");
 
     // Only the first mode in the vector is forwarded to the backend today.
-    // When multiple heuristic modes are supported (e.g. HIPDNN_HEUR_MODE_A
-    // combined with a fallback mode), this loop should set all modes on the
-    // descriptor rather than just backendModes.data()[0].
+    // HIPDNN_HEUR_MODE_FALLBACK is the only backend mode, so this collapses to
+    // one element; if the backend ever gains a second mode, this loop should set
+    // all of them rather than just backendModes.data()[0].
     std::vector<hipdnnBackendHeurMode_t> backendModes;
     backendModes.reserve(modes.size());
     for(const auto& mode : modes)
@@ -68,6 +78,49 @@ inline Error
                                              backendModes.data()),
         "Failed to set mode on the engine heuristic descriptor.");
 
+    // A/B name prediction policies, not backend modes (RFC 0007 §5.3.2): send them as the
+    // policy order, between Config and StaticOrdering. Without them leave the attribute unset
+    // so HIPDNN_HEUR_POLICY_ORDER and the backend default apply (RFC 0007 §5.3.3).
+    std::vector<int64_t> policyOrder;
+    for(const auto& mode : modes)
+    {
+        const char* policyName = nullptr;
+        if(mode == HeuristicMode::A)
+        {
+            policyName = hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME;
+        }
+        else if(mode == HeuristicMode::B)
+        {
+            policyName = hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME;
+        }
+        if(policyName == nullptr)
+        {
+            continue;
+        }
+        const int64_t policyId = hipdnn_data_sdk::utilities::policyNameToId(policyName);
+        if(std::find(policyOrder.begin(), policyOrder.end(), policyId) == policyOrder.end())
+        {
+            policyOrder.push_back(policyId);
+        }
+    }
+
+    if(!policyOrder.empty())
+    {
+        policyOrder.insert(
+            policyOrder.begin(),
+            hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
+        policyOrder.push_back(
+            hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
+                                                 HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                                 HIPDNN_TYPE_INT64,
+                                                 static_cast<int64_t>(policyOrder.size()),
+                                                 policyOrder.data()),
+            "Failed to set policy order on the engine heuristic descriptor.");
+    }
+
     if(findFirst)
     {
         bool findFirstValue = true;
@@ -78,6 +131,17 @@ inline Error
                                                  1,
                                                  &findFirstValue),
             "Failed to set find first on the engine heuristic descriptor.");
+    }
+
+    if(!rankingMetric.empty())
+    {
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
+                                                 HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT,
+                                                 HIPDNN_TYPE_CHAR,
+                                                 static_cast<int64_t>(rankingMetric.size()),
+                                                 rankingMetric.data()),
+            "Failed to set ranking metric on the engine heuristic descriptor.");
     }
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineHeuristicDesc.get()),

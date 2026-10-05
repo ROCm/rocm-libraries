@@ -991,6 +991,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.read_bytes(),
         )
 
+    # Sidecars are copied unpruned like their generics; pruning happens in pack_arch.
+    for sidecar in flat.sidecars_for(flat.generics()):
+        _write_bytes_at(
+            inter_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
+
     origins.stable()
     return IntermediateArch(
         arch=arch,
@@ -1342,14 +1351,28 @@ def pack_arch(
         )
 
     prune_result = prune(flat, arch)
-    for generic in flat.generics():
-        if generic.id in prune_result.reachable_generic_ids:
-            _write_bytes_at(
-                out_arch_dir,
-                generic.rel_dir,
-                generic.path.name,
-                generic.path.read_bytes(),
-            )
+    surviving_generics = [
+        generic
+        for generic in flat.generics()
+        if generic.id in prune_result.reachable_generic_ids
+    ]
+    for generic in surviving_generics:
+        _write_bytes_at(
+            out_arch_dir,
+            generic.rel_dir,
+            generic.path.name,
+            generic.path.read_bytes(),
+        )
+
+    # Derived from the surviving descriptors: reachable_generic_ids holds ids only, so a
+    # sidecar's fate is exactly its descriptor's.
+    for sidecar in flat.sidecars_for(surviving_generics):
+        _write_bytes_at(
+            out_arch_dir,
+            sidecar.rel_dir,
+            sidecar.name,
+            sidecar.source.read_bytes(),
+        )
 
     return ArchResult(arch=arch, out_dir=out_arch_dir, kpack_path=kpack_path)
 

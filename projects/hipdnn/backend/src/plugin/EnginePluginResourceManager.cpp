@@ -2,12 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -27,6 +30,7 @@
 #include "descriptors/ExecutionPlanDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
+#include "heuristics/RankingMetric.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -86,6 +90,20 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
         return false;
     }
     return flag;
+}
+
+/// True when every tagged knob value in @p config has its payload. FlatBuffers unions are
+/// optional, so VerifyBuffer accepts a missing payload that UnPack() would dereference.
+bool everyKnobValueIsPresent(const hipdnn_flatbuffers_sdk::data_objects::EngineConfig* config)
+{
+    if(config == nullptr || config->knobs() == nullptr)
+    {
+        return true;
+    }
+    return std::all_of(config->knobs()->begin(), config->knobs()->end(), [](const auto* setting) {
+        return setting->value_type() == hipdnn_flatbuffers_sdk::data_objects::KnobValue::NONE
+               || setting->value() != nullptr;
+    });
 }
 
 } // namespace
@@ -538,6 +556,231 @@ void EnginePluginResourceManager::getEngineDetails(int64_t engineId,
                               "Engine details for engine ID " + std::to_string(engineId)
                                   + " are empty or null");
     }
+}
+
+std::vector<uint8_t>
+    EnginePluginResourceManager::enumerateCandidates(int64_t engineId,
+                                                     const hipdnnPluginConstData_t& engineConfig,
+                                                     const GraphDescriptor* graph,
+                                                     uint64_t offset,
+                                                     uint64_t limit) const
+{
+    THROW_IF_NULL(graph, HIPDNN_STATUS_BAD_PARAM, "Candidate enumeration requires a graph");
+    THROW_IF_TRUE(limit == 0 || limit > 10000,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Candidate page limit must be in [1, 10000]");
+    const auto it = _engineIdToHandle.find(engineId);
+    THROW_IF_TRUE(it == _engineIdToHandle.end(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Candidate enumeration engine is not loaded");
+    const auto handle = it->second;
+    const auto plugin = _handleToPlugin.at(handle);
+    const auto serializedGraph = graph->getSerializedGraph();
+    hipdnnPluginConstData_t data{nullptr, 0};
+    // Own the allocation before calling the plugin: enumerateCandidates may throw after
+    // writing one into `data`.
+    const auto release = [&plugin, handle](hipdnnPluginConstData_t* owned) {
+        if(owned->ptr != nullptr)
+        {
+            try
+            {
+                plugin->destroyEngineDetails(handle, owned);
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release candidate page: {}", error.what());
+            }
+        }
+    };
+    const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
+    plugin->enumerateCandidates(handle, &engineConfig, &serializedGraph, offset, limit, &data);
+    THROW_IF_NULL(data.ptr, HIPDNN_STATUS_PLUGIN_ERROR, "Plugin returned a null candidate page");
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    THROW_IF_FALSE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>(),
+                   HIPDNN_STATUS_PLUGIN_ERROR,
+                   "Plugin returned an invalid candidate page");
+    const auto* details = hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(data.ptr);
+    const auto* page = details->candidate_page();
+    THROW_IF_TRUE(details->engine_id() != engineId || page == nullptr,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Plugin returned the wrong enumeration engine");
+    const auto count = page->candidates() == nullptr ? 0 : page->candidates()->size();
+    THROW_IF_TRUE(page->offset() != offset || page->total_count() < offset
+                      || count != std::min<uint64_t>(limit, page->total_count() - offset),
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Plugin returned an inconsistent candidate page");
+    const auto* begin = static_cast<const uint8_t*>(data.ptr);
+    return {begin, begin + data.size};
+}
+
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+    EnginePluginResourceManager::getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
+                                                     const hipdnnPluginConstData_t& opGraph,
+                                                     hipdnnEnginePredictionKind_t kind,
+                                                     bool evaluate) const
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        engineConfig.ptr, engineConfig.size);
+    THROW_IF_FALSE(config.isValid(), HIPDNN_STATUS_BAD_PARAM, "Invalid prediction engine config");
+    THROW_IF_TRUE(kind != HIPDNN_ENGINE_PREDICTION_ENGINE
+                      && kind != HIPDNN_ENGINE_PREDICTION_CONFIGURATION,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "Unknown engine prediction kind");
+    THROW_IF_NULL(opGraph.ptr, HIPDNN_STATUS_BAD_PARAM, "Prediction requires a graph");
+    const int64_t engineId = config.engineId();
+    const auto it = _engineIdToHandle.find(engineId);
+    THROW_IF_TRUE(
+        it == _engineIdToHandle.end(), HIPDNN_STATUS_BAD_PARAM, "Prediction engine is not loaded");
+    // RFC 0019 §11.4: refuse an unregistered metric before calling the plugin.
+    const auto* requestedName = config.getEngineConfig().ranking_metric();
+    const auto& metric = heuristics::resolveRankingMetric(
+        requestedName == nullptr ? std::string_view{} : requestedName->string_view());
+    fb::EnginePredictionT result;
+    result.engine_id = engineId;
+    result.kind = static_cast<fb::PredictionKind>(kind);
+    result.metric = std::string(metric.name);
+    const auto invalid = [&](const std::string& reason) {
+        fb::EnginePredictionT failure;
+        failure.engine_id = engineId;
+        failure.kind = result.kind;
+        failure.metric = result.metric;
+        failure.status = fb::PredictionStatus::INVALID;
+        failure.reason = reason;
+        HIPDNN_BACKEND_LOG_WARN("Engine {} prediction rejected: {}", engineId, reason);
+        return failure;
+    };
+    const auto handle = it->second;
+    const auto plugin = _handleToPlugin.at(handle);
+    hipdnnPluginConstData_t data{nullptr, 0};
+    const auto release = [plugin, handle](hipdnnPluginConstData_t* owned) {
+        if(owned->ptr != nullptr)
+        {
+            try
+            {
+                plugin->destroyEngineDetails(handle, owned);
+            }
+            catch(const std::exception& error)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release engine prediction: {}", error.what());
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Failed to release engine prediction");
+            }
+        }
+    };
+    // Establish ownership before entering the plugin, including its failure paths.
+    const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
+    try
+    {
+        if(!plugin->getPrediction(handle, &engineConfig, &opGraph, kind, evaluate, &data))
+        {
+            result.reason = "Engine does not expose this prediction capability";
+            return result;
+        }
+    }
+    catch(const HipdnnException& error)
+    {
+        return invalid(error.what());
+    }
+    constexpr size_t MAX_PREDICTION_BYTES = size_t{16} * 1024 * 1024;
+    if(data.ptr == nullptr || data.size == 0 || data.size > MAX_PREDICTION_BYTES)
+    {
+        return invalid("Empty or oversized prediction response");
+    }
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    if(!verifier.VerifyBuffer<fb::EnginePrediction>())
+    {
+        return invalid("Malformed prediction response");
+    }
+    const auto* response = fb::GetEnginePrediction(data.ptr);
+    // Checked before UnPackTo() below, which runs for every status.
+    if(!everyKnobValueIsPresent(response->engine_config()))
+    {
+        return invalid("Prediction configuration names a knob value it does not carry");
+    }
+    if(response->engine_id() != engineId || response->kind() != result.kind)
+    {
+        return invalid("Prediction engine or layer does not match the request");
+    }
+    // An answer in another metric is invalid whatever its status; it is never converted
+    // (RFC 0019 §4.4).
+    const auto answered
+        = response->metric() == nullptr ? std::string_view{} : response->metric()->string_view();
+    if(answered != metric.name)
+    {
+        return invalid("Prediction answered in metric '" + std::string(answered)
+                       + "' instead of the requested '" + result.metric + "'");
+    }
+    if(response->status() != fb::PredictionStatus::UNAVAILABLE
+       && response->status() != fb::PredictionStatus::AVAILABLE
+       && response->status() != fb::PredictionStatus::INVALID)
+    {
+        return invalid("Unknown prediction status");
+    }
+    if(response->status() == fb::PredictionStatus::AVAILABLE)
+    {
+        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value()))
+        {
+            return invalid("Available prediction needs an evaluation and a valid '" + result.metric
+                           + "' value");
+        }
+        // An engine estimate only ever comes from a UHD, so it names one. A configuration
+        // answer may instead be a measured value (RFC 0019 §5 step 9), which names no UHD.
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+           && (response->uhd_id() == nullptr || response->uhd_id()->empty()))
+        {
+            return invalid("Available engine prediction needs the UHD that evaluated it");
+        }
+        const auto* selected = response->engine_config();
+        if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
+           && (selected == nullptr || selected->engine_id() != engineId))
+        {
+            return invalid("Configuration prediction must preserve the requested engine");
+        }
+        if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE && selected != nullptr)
+        {
+            return invalid("Engine-level prediction must not select a configuration");
+        }
+        if(selected != nullptr && selected->ranking_metric() != nullptr
+           && !selected->ranking_metric()->empty()
+           && selected->ranking_metric()->string_view() != metric.name)
+        {
+            return invalid("Configuration prediction selected a configuration by another metric");
+        }
+    }
+    response->UnPackTo(&result);
+    if(result.status != fb::PredictionStatus::AVAILABLE)
+    {
+        result.value = 0.0;
+        result.engine_config.reset();
+        return result;
+    }
+    if(result.engine_config != nullptr)
+    {
+        // The configuration was chosen by this metric, so it builds by it too (§11.4).
+        result.engine_config->ranking_metric = result.metric;
+        const auto& requested = config.getEngineConfig();
+        if(requested.knobs() != nullptr)
+        {
+            for(const auto* knob : *requested.knobs())
+            {
+                const std::unique_ptr<fb::KnobSettingT> constraint(knob->UnPack());
+                const auto matching
+                    = std::find_if(result.engine_config->knobs.begin(),
+                                   result.engine_config->knobs.end(),
+                                   [&](const auto& setting) {
+                                       return setting != nullptr && *setting == *constraint;
+                                   });
+                if(matching == result.engine_config->knobs.end())
+                {
+                    return invalid("Prediction changed an explicit configuration constraint");
+                }
+            }
+        }
+    }
+    return result;
 }
 
 void EnginePluginResourceManager::destroyEngineDetails(int64_t engineId,

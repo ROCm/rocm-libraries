@@ -83,6 +83,30 @@ typedef struct hipdnnHeuristicHandle_opaque* hipdnnHeuristicHandle_t;
  */
 typedef struct hipdnnHeuristicPolicyDescriptor_opaque* hipdnnHeuristicPolicyDescriptor_t;
 
+/**
+ * @brief Scoped host services for prediction-aware policies (ABI version 2).
+ *
+ * The table, its strings, and returned EnginePrediction buffers are borrowed only for
+ * the duration of hipdnnHeuristicPolicyFinalizeWithHost: do not retain them, call back
+ * asynchronously, or free them. Only input candidate engine IDs may be queried. Every
+ * returned prediction is in ranking_metric's registered units (RFC 0019 §11.2).
+ * Check version and struct_size before reading fields; version 1 has no ranking_metric
+ * and means "tflops".
+ */
+typedef struct
+{
+    uint32_t version; ///< Host services version; currently 2.
+    size_t struct_size; ///< Size in bytes of this table.
+    void* context; ///< Opaque borrowed callback context.
+    hipdnnPluginStatus_t (*get_prediction)(
+        void* context,
+        int64_t engine_id,
+        hipdnnEnginePredictionKind_t kind,
+        hipdnnPluginConstData_t* prediction); ///< Borrow a verified EnginePrediction.
+    /// Version 2: registered metric ("tflops", "time", ...) to rank by. Never NULL.
+    const char* ranking_metric;
+} hipdnnHeuristicHostCallbacks_t;
+
 /** @} */ // End of HeuristicPluginDataTypes group
 
 /**
@@ -325,6 +349,30 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int32_t* out_applied);
+
+/**
+ * @brief Optional synchronous finalize with scoped host prediction services (ABI 0.1.0).
+ *
+ * Used instead of Finalize when exported. A null host means predictions are unavailable.
+ * A prediction-ranking policy orders by host->ranking_metric in that metric's direction,
+ * and declines (out_applied=0) when no candidate has a usable prediction.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
+                                          const hipdnnHeuristicHostCallbacks_t* host,
+                                          int32_t* out_applied);
+
+/**
+ * @brief Optional exact EngineConfig retrieval for a returned engine ID (ABI 0.1.0).
+ *
+ * Valid after successful finalize. The buffer is owned by the descriptor until its next
+ * mutation or destruction. NOT_APPLICABLE means no config for this engine. Config
+ * engine_id MUST match a returned engine, and every scored knob setting must be kept.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyGetEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc,
+                                         int64_t engine_id,
+                                         hipdnnPluginConstData_t* engine_config);
 
 /**
  * @brief Retrieves the sorted engine IDs after successful finalize.
