@@ -27,7 +27,6 @@
           "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_9b57f8",
           "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_e3cf27",
           "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_f8b8f8",
-          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_748394",
           "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_831275",
           "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_bfe002",
           "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_c5df8a",
@@ -148,10 +147,6 @@
           "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_1f8a54",
           "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_2d24d5",
           "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2_8e382a",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_831598",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_064c42",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_3a6799",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_bdedac",
           "2_4_7_7_7_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1_6e8c96",
           "2_4_7_7_7_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1_933a18",
           "2_4_7_7_7_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1_c1ae27",
@@ -223,14 +218,26 @@
           "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0_f90ac9",
           "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_2f73b2",
           "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_69e25f",
-          "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_78777b",
-          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa"
+          "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_78777b"
         ],
         "support": {
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
+            "linux",
             "windows"
           ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
@@ -278,14 +285,6 @@
           "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_818c1b",
           "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_8d446e",
           "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2_a008a7",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_28c38e",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_3c1fc9",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_1d9c37",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_323bbc",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_4939a8",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_87dcf0",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_cd06eb",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_d68f2a",
           "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2_0b9cf2",
           "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2_d1bf59",
           "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2_f83c61",
@@ -342,6 +341,66 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_748394",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_831598",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_064c42",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_3a6799",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_bdedac",
+          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_28c38e",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0_3c1fc9",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_1d9c37",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_323bbc",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_4939a8",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_87dcf0",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_cd06eb",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_d68f2a"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
