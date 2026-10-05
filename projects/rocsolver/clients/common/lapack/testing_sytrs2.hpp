@@ -193,7 +193,8 @@ void sytrs2_initData(const rocblas_handle handle,
         for(I b = 0; b < bc; ++b)
         {
             int info = 0;
-            int lwork = rocblas_stride(lda) * n;
+            // (the workspace of SYTRF does not depend on lda)
+            int lwork = 64 * n;
             std::vector<T> work(lwork);
 
             cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], work.data(), lwork, &info);

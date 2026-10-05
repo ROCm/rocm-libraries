@@ -207,9 +207,9 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
     T minone = T(-1);
 
     // block strides
-    rocblas_int bsa = lda * nb;
-    rocblas_int bsb = ldb * nb;
-    rocblas_int bsc = ldc * nb;
+    rocblas_stride bsa = rocblas_stride(lda) * nb;
+    rocblas_stride bsb = rocblas_stride(ldb) * nb;
+    rocblas_stride bsc = rocblas_stride(ldc) * nb;
 
     rocsolver_getrf_template<BATCHED, STRIDED, T>(handle, nb, nb, B, shiftB, incb, ldb, strideB,
                                                   (rocblas_int*)nullptr, 0, 0, info, batch_count,

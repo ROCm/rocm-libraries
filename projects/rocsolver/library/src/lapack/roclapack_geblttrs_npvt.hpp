@@ -161,10 +161,10 @@ rocblas_status rocsolver_geblttrs_npvt_template(rocblas_handle handle,
     T minone = T(-1);
 
     // block strides
-    rocblas_int bsa = lda * nb;
-    rocblas_int bsb = ldb * nb;
-    rocblas_int bsc = ldc * nb;
-    rocblas_int bsx = ldx * nrhs;
+    rocblas_stride bsa = rocblas_stride(lda) * nb;
+    rocblas_stride bsb = rocblas_stride(ldb) * nb;
+    rocblas_stride bsc = rocblas_stride(ldc) * nb;
+    rocblas_stride bsx = rocblas_stride(ldx) * nrhs;
 
     // forward solve
     for(rocblas_int k = 0; k < nblocks; k++)

@@ -64,18 +64,22 @@ double norm_error(char norm_type,
     {
         for(rocblas_int i = 0; i < M; i++)
         {
-            gold_double[i + rocblas_stride(j) * lda] = DoublePrecisionType(gold[i + j * lda_gold]);
-            comp_double[i + rocblas_stride(j) * lda] = DoublePrecisionType(comp[i + j * lda_comp]);
+            gold_double[i + rocblas_stride(j) * lda]
+                = DoublePrecisionType(gold[i + rocblas_stride(j) * lda_gold]);
+            comp_double[i + rocblas_stride(j) * lda]
+                = DoublePrecisionType(comp[i + rocblas_stride(j) * lda_comp]);
         }
     }
 
     std::vector<double> work(M);
     rocblas_int incx = 1;
     DoublePrecisionType alpha = -1.0;
-    rocblas_int size = rocblas_stride(lda) * N;
 
     double gold_norm = cpu_lange(norm_type, M, N, gold_double.data(), lda, work.data());
-    cpu_axpy(size, alpha, gold_double.data(), incx, comp_double.data(), incx);
+    // (comp - gold, a column at a time, as M * N can exceed the 32-bit size of AXPY)
+    for(rocblas_int j = 0; j < N; j++)
+        cpu_axpy(M, alpha, gold_double.data() + rocblas_stride(j) * lda, incx,
+                 comp_double.data() + rocblas_stride(j) * lda, incx);
     double error = cpu_lange(norm_type, M, N, comp_double.data(), lda, work.data());
     if(gold_norm > 0)
         error /= gold_norm;
