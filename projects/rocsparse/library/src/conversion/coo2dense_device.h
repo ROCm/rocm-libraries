@@ -41,24 +41,24 @@ namespace rocsparse
                           T*                   A,
                           rocsparse_order      order)
     {
-        int64_t gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t NUM_THREADS = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        if(gid >= nnz)
-        {
-            return;
-        }
+        const int64_t gid = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
-        I row = coo_row_ind[gid] - base;
-        I col = coo_col_ind[gid] - base;
-        T val = coo_val[gid];
+        for(int64_t idx = gid; idx < nnz; idx += NUM_THREADS)
+        {
+            I row = coo_row_ind[idx] - base;
+            I col = coo_col_ind[idx] - base;
+            T val = coo_val[idx];
 
-        if(order == rocsparse_order_column)
-        {
-            A[lda * col + row] = val;
-        }
-        else
-        {
-            A[lda * row + col] = val;
+            if(order == rocsparse_order_column)
+            {
+                A[lda * col + row] = val;
+            }
+            else
+            {
+                A[lda * row + col] = val;
+            }
         }
     }
 
@@ -74,11 +74,11 @@ namespace rocsparse
                               T*                   A,
                               rocsparse_order      order)
     {
-        const auto NUM_THREADS = hipGridDim_x * BLOCKSIZE;
+        const int64_t NUM_THREADS = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        const auto gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
-        for(auto idx = gid; idx < nnz; idx += NUM_THREADS)
+        for(int64_t idx = gid; idx < nnz; idx += NUM_THREADS)
         {
             I row = coo_ind[2 * idx] - base;
             I col = coo_ind[2 * idx + 1] - base;

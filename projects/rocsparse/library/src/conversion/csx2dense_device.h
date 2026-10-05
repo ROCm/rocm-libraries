@@ -46,9 +46,12 @@ namespace rocsparse
     {
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE,
                             lane_index      = hipThreadIdx_x % WF_SIZE;
-        const J row_index                   = NUMROWS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+        const int64_t stride = static_cast<int64_t>(NUMROWS_PER_BLOCK) * hipGridDim_x;
 
-        if(row_index < m)
+        for(int64_t row_index
+            = static_cast<int64_t>(NUMROWS_PER_BLOCK) * hipBlockIdx_x + wavefront_index;
+            row_index < m;
+            row_index += stride)
         {
             const I shift    = csr_row_ptr[row_index] - base;
             const I size_row = csr_row_ptr[row_index + 1] - base - shift;
@@ -90,9 +93,12 @@ namespace rocsparse
     {
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE,
                             lane_index      = hipThreadIdx_x % WF_SIZE;
-        const J column_index = NUMCOLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+        const int64_t stride = static_cast<int64_t>(NUMCOLUMNS_PER_BLOCK) * hipGridDim_x;
 
-        if(column_index < n)
+        for(int64_t column_index
+            = static_cast<int64_t>(NUMCOLUMNS_PER_BLOCK) * hipBlockIdx_x + wavefront_index;
+            column_index < n;
+            column_index += stride)
         {
             const I shift       = csc_col_ptr[column_index] - base;
             const I size_column = csc_col_ptr[column_index + 1] - base - shift;
