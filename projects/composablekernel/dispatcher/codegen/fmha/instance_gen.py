@@ -56,7 +56,11 @@ from validation import (  # noqa: E402
     MASKS,
     SPLITKV_COMBINE_HDIMS_FP16,
     SPLITKV_COMBINE_HDIMS_FP8,
+    MAX_HDIM_NON_FWD_QR,
     SUPPORTED_HDIMS,
+    WIDE_HDIM_GEMM1_WARP_K,
+    arch_supports_wide_hdim,
+    is_wide_hdim,
     VALID_BK0,
     VALID_BM0,
     VALID_BN0,
@@ -197,6 +201,11 @@ def generate_fwd_tiles(
                         if is_fp8
                         else derive_bk1(bm0, bn0, bk0, hdim_q, hdim_v)
                     )
+                    # Wide hdims (> 256) need a K=16 gemm1 warp tile: the 16x16x32 warp
+                    # gemm miscomputes P*V at kN1=512 (block_fmha_pipeline_qr_ks_vs.hpp).
+                    wk1 = (
+                        WIDE_HDIM_GEMM1_WARP_K if is_wide_hdim(hdim_q, hdim_v) else wk0
+                    )
 
                     tiles.append(
                         FmhaTileConfig(
@@ -213,7 +222,7 @@ def generate_fwd_tiles(
                             wk0=wk0,
                             wm1=wm0,
                             wn1=wn0,
-                            wk1=wk0,
+                            wk1=wk1,
                         )
                     )
 
@@ -484,8 +493,9 @@ def _fwd_specs_fp16bf16(
     """Pipeline specs for fp16/bf16 on gfx9/gfx950.
 
     Source: fmha_fwd.py KernelComponentFactoryGfx9.get_pipelines() —
-    hdim=256 always uses 'qr' (non-async, since bk0 can equal 256).
-    Non-256 hdims use 'qr_async' for non-bias configs (async DMA),
+    symmetric hdim >= 256 always uses 'qr' (qr_async cannot host K/V for
+    those hdims in LDS; 512 is qr-only by static_assert).
+    Smaller hdims use 'qr_async' for non-bias configs (async DMA),
     'qr' for bias configs (bias requires Q in LDS).
     Receipt=1 (ck_extended) adds extra 'qr' variants for non-bias.
     """
@@ -500,7 +510,7 @@ def _fwd_specs_fp16bf16(
         BOOLS,
         BOOLS,
     ):
-        if hdim == 256 and hdim_v == 256:
+        if hdim >= 256 and hdim == hdim_v:
             specs.append(
                 PipelineSpec(
                     "qr",
@@ -1360,6 +1370,9 @@ def tile_compatible(
 
     bm0, bn0, bk0 = tile[0], tile[1], tile[2]
 
+    # hdim > 256 kernels exist for gfx9 (CDNA) targets only
+    if is_wide_hdim(hdim, hdim_v) and not arch_supports_wide_hdim(arch):
+        return False
     if not check_gfx9_tile_constraints(
         dtype, hdim, hdim_v, pipeline_tag, bm0, bn0, bk0
     ):
@@ -1731,6 +1744,23 @@ def _build_fwd_kernel_config(
     )
 
 
+def _supported_hdims(dtype, restrict_hdims=None, family="fwd", arch=None):
+    """SUPPORTED_HDIMS for a dtype, narrowed to what `family` on `arch` can compile.
+
+    Head dims above MAX_HDIM_NON_FWD_QR exist only in the fwd family's qr
+    pipeline (block_fmha_pipeline_qr_ks_vs.hpp); every other pipeline
+    static-asserts hdim <= 256, so splitkv/pagedkv/appendkv/batch_prefill/bwd
+    never enumerate them. They are also shipped for gfx9 (CDNA) targets only,
+    so when `arch` is given and lacks supports_wide_hdim they are dropped too.
+    """
+    hdims = SUPPORTED_HDIMS.get(dtype, [])
+    if family != "fwd" or (arch is not None and not arch_supports_wide_hdim(arch)):
+        hdims = [hv for hv in hdims if max(hv) <= MAX_HDIM_NON_FWD_QR]
+    if restrict_hdims is not None:
+        hdims = [hv for hv in hdims if hv in restrict_hdims]
+    return hdims
+
+
 def _expand_fwd(
     arch,
     dtypes,
@@ -1750,9 +1780,7 @@ def _expand_fwd(
         block_per_cu_values = [-1]
     configs = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd", arch=arch)
         for hq, hv in hdims:
             pipeline_specs = get_pipelines_for_config(arch, dtype, hq, hv, receipt)
             _tile_cache: Dict[str, List[FmhaTileConfig]] = {}
@@ -1860,9 +1888,7 @@ def _expand_fwd_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd", arch=arch)
         for hq, hv in hdims:
             for pipeline in pipelines:
                 tiles = generate_fwd_tiles(
@@ -1922,9 +1948,7 @@ def _expand_splitkv_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -1989,9 +2013,7 @@ def _expand_pagedkv_exhaustive(
 
     configs: List[FmhaKernelConfig] = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_pagedkv_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -2083,9 +2105,9 @@ def _expand_bwd_exhaustive(
                     )
 
         # dq_dk_dv — exhaustive tiles
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="bwd_dq_dk_dv", arch=arch
+        )
         for hq, hv in hdims:
             tiles = generate_bwd_tiles(arch, dtype, hq, hv, apply_constraints=False)
             for tc in tiles:
@@ -2156,9 +2178,7 @@ def _expand_splitkv(
 ):
     configs = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_splitkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             sk_specs = get_splitkv_pipelines(dtype, hq, receipt)
@@ -2276,9 +2296,7 @@ def _expand_pagedkv(
 ):
     configs = []
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(dtype, restrict_hdims, family="fwd_pagedkv", arch=arch)
         for hq, hv in hdims:
             tiles = generate_pagedkv_tiles(arch, dtype, hq, hv)
             pk_specs = get_pagedkv_pipelines(dtype, hq, receipt)
@@ -2343,9 +2361,9 @@ def _expand_appendkv(arch, dtypes, receipt, restrict_hdims=None):
     configs = []
     for dtype in dtypes:
         ak_specs = get_appendkv_pipelines(dtype, 0, receipt)
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="fwd_appendkv", arch=arch
+        )
         for hq, hv in hdims:
             for spec in ak_specs:
                 configs.append(
@@ -2388,9 +2406,9 @@ def _expand_batch_prefill(
         return 32
 
     for dtype in dtypes:
-        hdims = SUPPORTED_HDIMS.get(dtype, [])
-        if restrict_hdims is not None:
-            hdims = [hv for hv in hdims if hv in restrict_hdims]
+        hdims = _supported_hdims(
+            dtype, restrict_hdims, family="batch_prefill", arch=arch
+        )
         for hq, hv in hdims:
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             bp_specs = get_batch_prefill_pipelines(dtype, hq, receipt)

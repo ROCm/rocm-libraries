@@ -5,10 +5,17 @@
 # TODO: run this script from CK root or build directory
 EXE="$(find . -name tile_example_fmha_fwd -type f | head -n 1)"
 VALID=0
+GPU_arch=${GPU_arch:-$(rocminfo | grep -E 'Name:\s+gfx' | head -n1 | awk '{print $2}')}
+
+# hdim 512 (qr pipeline) kernels are only generated for gfx9 (CDNA) targets
+case "$GPU_arch" in
+    gfx9*) HDIMS="64 128 256 512" ;;
+    *)     HDIMS="64 128 256" ;;
+esac
 
 for prec in "fp16" "bf16" ; do
 for perm in 0 1 ; do
-for hdim in 64 128 256 ; do
+for hdim in $HDIMS ; do
 
 nhead=$((2048 / $hdim))     # follow fav2 setup
 $EXE -prec=$prec -b=32 -h=$nhead -d=$hdim -s=512   -iperm=$perm -operm=$perm -kname=1 -v=$VALID ; sleep 3
