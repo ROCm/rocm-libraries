@@ -66,11 +66,11 @@ struct BwdDispatchTuple
     bool verified;
 };
 
-// Output of resolveStage: the .co file path, kernel symbol name, and tile
-// sizes for the resolved registry row.
+// Output of resolveStage: the TOC key (for kpack archive lookup), kernel
+// symbol name, and tile sizes for the resolved registry row.
 struct ResolvedKernel
 {
-    std::string coPath;
+    std::string tocKey;
     std::string knlName;
     SdpaBwdParams::KernelTiles tiles;
 };
@@ -193,12 +193,13 @@ std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
 // Backward kernels live in a flat layout under
 //   asm_kernels/<arch>/fmha_v3_bwd/<co_name>
 // The codegen-emitted co_name already includes the "<arch>/fmha_v3_bwd/"
-// prefix, so this helper simply resolves to the absolute install path.
+// prefix, so this helper strips the arch prefix to produce the TOC key
+// matching the .kpack archive index.
 // (Forward splits gfx942 into MI300/MI308 sub-folders and threads the arch
 // through; backward does not because AITER ships a single backward set.)
-std::string getKernelCoPath(const std::string& coName)
+std::string getKernelTocKey(const std::string& coName)
 {
-    return asm_kernels::getAsmKernelPath(coName);
+    return asm_kernels::getAsmKernelTocKey(coName);
 }
 
 constexpr int64_t K_BF16_BYTES = 2;
@@ -1007,7 +1008,7 @@ void SdpaBwdPlanBuilder::buildPlan(
                     + " kernel for arch=" + deviceString + " dtype=" + dataTypeId + " hdim="
                     + std::to_string(headDimQk) + " (isApplicable should have rejected)");
         }
-        return ResolvedKernel{getKernelCoPath(cfgOpt->co_name),
+        return ResolvedKernel{getKernelTocKey(cfgOpt->co_name),
                               cfgOpt->knl_name,
                               SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfgOpt->ts)}};
     };
@@ -1065,50 +1066,51 @@ void SdpaBwdPlanBuilder::buildPlan(
                                                     dqctuple.bf16Cvt));
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("Using bwd odo kernel: " << odoResolved.coPath
+    HIPDNN_PLUGIN_LOG_INFO("Using bwd odo kernel: " << odoResolved.tocKey
                                                     << " :: " << odoResolved.knlName);
-    HIPDNN_PLUGIN_LOG_INFO("Using bwd dqdkdv kernel: " << dqdkdvResolved.coPath
+    HIPDNN_PLUGIN_LOG_INFO("Using bwd dqdkdv kernel: " << dqdkdvResolved.tocKey
                                                        << " :: " << dqdkdvResolved.knlName);
     if(dqConvertResolved)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Using bwd dq_convert kernel: " << dqConvertResolved->coPath
+        HIPDNN_PLUGIN_LOG_INFO("Using bwd dq_convert kernel: " << dqConvertResolved->tocKey
                                                                << " :: "
                                                                << dqConvertResolved->knlName);
     }
 
     // -------------------------------------------------------------------------
-    // 5. Load kernel modules for resolved stages
+    // 5. Load kernel modules for resolved stages (from kpack archive)
     // -------------------------------------------------------------------------
-    auto odoKernel = moduleCache().getOrLoad(odoResolved.coPath, odoResolved.knlName.c_str());
+    auto odoKernel
+        = moduleCache().getOrLoad(odoResolved.tocKey, deviceString, odoResolved.knlName.c_str());
     if(!odoKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaBwdPlanBuilder::buildPlan: failed to load odo kernel module from "
-                + odoResolved.coPath);
+            "SdpaBwdPlanBuilder::buildPlan: failed to load odo kernel tocKey='" + odoResolved.tocKey
+                + "' arch='" + deviceString + "'");
     }
 
-    auto dqdkdvKernel
-        = moduleCache().getOrLoad(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
+    auto dqdkdvKernel = moduleCache().getOrLoad(
+        dqdkdvResolved.tocKey, deviceString, dqdkdvResolved.knlName.c_str());
     if(!dqdkdvKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaBwdPlanBuilder::buildPlan: failed to load dqdkdv kernel module from "
-                + dqdkdvResolved.coPath);
+            "SdpaBwdPlanBuilder::buildPlan: failed to load dqdkdv kernel tocKey='"
+                + dqdkdvResolved.tocKey + "' arch='" + deviceString + "'");
     }
 
     std::optional<CachedModule> postKernel;
     if(dqConvertResolved)
     {
-        auto loaded = moduleCache().getOrLoad(dqConvertResolved->coPath,
-                                              dqConvertResolved->knlName.c_str());
+        auto loaded = moduleCache().getOrLoad(
+            dqConvertResolved->tocKey, deviceString, dqConvertResolved->knlName.c_str());
         if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel module from "
-                    + dqConvertResolved->coPath);
+                "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel tocKey='"
+                    + dqConvertResolved->tocKey + "' arch='" + deviceString + "'");
         }
         postKernel = std::move(loaded);
     }

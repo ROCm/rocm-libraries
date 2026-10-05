@@ -462,8 +462,8 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *  global_atomic_add, so the caller must zero it before launch.
  *
  *  ABI note: D is a `ptr<f32, global>` here (the other five variants take
- *  `ptr<f16, global>`), so rocke_direct_conv_signature() does NOT describe this
- *  kernel.
+ *  `ptr<f16, global>`); the argument names and order are still those of
+ *  rocke_conv_direct_arg_names().
  * ===================================================================== */
 typedef struct rocke_direct_conv_wgrad_spec
 {
@@ -620,27 +620,9 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
                                                       const rocke_direct_conv_wgrad_spec_t* spec,
                                                       const char* arch);
 
-/* ===================================================================== *
- *  SIGNATURE (manifest)  --  all kernels share the 6-entry ABI:
- *    ptr A:{dtype}, ptr B:{dtype}, ptr D:{dtype}, scalar A_bytes:i32,
- *    B_bytes:i32, D_bytes:i32.
- * ===================================================================== */
-
-/* Writes the 6 manifest entries into out[] (capacity out_cap) and sets
- * *out_count = 6. Strings live in `arena`. Returns ROCKE_OK or ROCKE_ERR_VALUE
- * (NULL args / out_cap < 6). One signature serves both 16c and 4c (fp16 only). */
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count);
-
-/* Dtype-aware variant. `dtype` is "f16" (alias "fp16") or "bf16".
- * NULL `dtype` defaults to "f16". */
-rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
-                                                     const char* dtype,
-                                                     struct rocke_sig_entry* out,
-                                                     size_t out_cap,
-                                                     size_t* out_count);
+/* Launch signature: every direct kernel takes the AOT argument list of
+ * rocke_conv_direct_arg_names() (instance_conv_abi.h); there is no
+ * per-family signature builder. */
 
 /* ===================================================================== *
  *  CONVENIENCE: build -> lower to LLVM .ll text.

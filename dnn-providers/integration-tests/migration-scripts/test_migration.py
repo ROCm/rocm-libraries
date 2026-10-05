@@ -11,6 +11,7 @@ and 1 distinct. Verifies:
   3. verify_migration round-trip passes for all 3
   4. import_graph detects an exact duplicate (skip) and a new case (append)
   5. import_graph round-trip refusals name the mismatch and write nothing
+  6. place_bundles keeps manual cases of an existing sweep on regeneration
 
 No C++ binary needed — everything is pure Python on synthetic data.
 
@@ -19,6 +20,7 @@ Usage::
     python3 test_migration.py [-v]
 """
 
+import copy
 import json
 import shutil
 import subprocess
@@ -169,6 +171,63 @@ def test_place_and_verify():
         assert r.returncode == 0, f"verify_migration failed: {r.stderr}"
 
         print("  PASS: place_and_verify")
+
+
+def test_place_keeps_manual_cases():
+    """Regenerating a sweep keeps its manual cases, or refuses and writes nothing.
+
+    A manual case (metadata.generator == "manual") has no C++ test behind it, so
+    no capture reproduces it. A rerun of place_bundles over the same tree must
+    keep it. One that no longer fits the template fails the run and leaves the
+    sweep as it was.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        bundle_dir = tmp / "bundles"
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp32", "small_fp32", g1)
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp16", "small_fp16", g2)
+        place = [
+            sys.executable,
+            str(SCRIPT_DIR / "place_bundles.py"),
+            "--capture-dir",
+            str(capture_dir),
+            "--output-dir",
+            str(bundle_dir),
+        ]
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        (sweep_path,) = bundle_dir.rglob("sweep.json")
+
+        sweep = json.loads(sweep_path.read_text())
+        manual = copy.deepcopy(sweep["cases"][0])
+        manual["id"] = "runtime_scalar"
+        manual["tensor_patches"] = [
+            {"uid": 0, "set": {"is_runtime_pass_by_value": True}, "remove": []}
+        ]
+        manual["metadata"] = {"format_version": 1, "generator": "manual"}
+        sweep["cases"].append(manual)
+        sweep_path.write_text(json.dumps(sweep, indent=2) + "\n")
+
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        cases = json.loads(sweep_path.read_text())["cases"]
+        assert len(cases) == 3, [c["id"] for c in cases]
+        assert cases[-1] == manual, f"manual case changed or dropped: {cases}"
+
+        # A manual case missing a template tensor cannot be expanded any more.
+        sweep = json.loads(sweep_path.read_text())
+        sweep["cases"][-1]["values"]["tensors"].pop()
+        stale = json.dumps(sweep, indent=2) + "\n"
+        sweep_path.write_text(stale)
+
+        r = run(place, check=False)
+        assert r.returncode == 1, f"expected failure:\n{r.stderr}"
+        assert "'runtime_scalar' does not fit" in r.stderr, r.stderr
+        assert sweep_path.read_text() == stale, "sweep must be left unchanged"
+        print("  PASS: place_keeps_manual_cases")
 
 
 def test_import_dedup():
@@ -1015,6 +1074,7 @@ def main() -> int:
         test_round_trip_expansion,
         test_case_ids,
         test_place_and_verify,
+        test_place_keeps_manual_cases,
         test_import_dedup,
         test_inputs_uid_canonicalized_by_name,
         test_import_inputs_uid_canonicalized_by_name,
