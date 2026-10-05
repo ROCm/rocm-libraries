@@ -12,6 +12,12 @@ endif()
 
 file(MAKE_DIRECTORY "${CUSTOM_KERNEL_DST_DIR}")
 
+# Tell the top-level install that the Tensile library output directory has
+# content. This directory is only added for gfx950 (see the parent
+# CMakeLists.txt), so the top-level cannot infer it from
+# HIPBLASLT_ENABLE_ROCROLLER alone without duplicating that arch check.
+set_property(GLOBAL PROPERTY HIPBLASLT_HAS_ROCROLLER_CUSTOM_KERNELS TRUE)
+
 find_program(ROCM_LLD
     NAMES ld.lld
     PATH_SUFFIXES lib/llvm/bin llvm/bin bin
