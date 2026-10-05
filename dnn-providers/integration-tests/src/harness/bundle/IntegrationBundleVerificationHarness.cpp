@@ -506,11 +506,18 @@ VerificationOutcome
             const bool fallsThrough = chain.next < chain.candidates.size();
             // "the next reference", not a name: the next candidate has not been probed
             // yet and may turn out not to be applicable.
-            const std::string context = !chain.autoMode ? "verification-mode explicit"
-                                        : fallsThrough
-                                            ? "auto mode, falling through to the next reference"
-                                            : "auto mode, last resort";
-            recordRefError(label + " errored (" + context + "): " + result.message);
+            const char* context = "auto mode, last resort";
+            if(!chain.autoMode)
+            {
+                context = "verification-mode explicit";
+            }
+            else if(fallsThrough)
+            {
+                context = "auto mode, falling through to the next reference";
+            }
+            std::string reason = label;
+            reason.append(" errored (").append(context).append("): ").append(result.message);
+            recordRefError(reason);
             chain.refErrored = true;
             chain.tried.push_back(label + " (errored: " + result.message + ")");
             break;
