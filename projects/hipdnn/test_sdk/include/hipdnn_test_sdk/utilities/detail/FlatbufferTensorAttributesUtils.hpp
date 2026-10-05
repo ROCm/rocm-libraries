@@ -26,7 +26,7 @@ inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT unpackTensorAttri
 
 /// Folds the two mutually-exclusive SDPA scale sources into a single optional
 /// scalar operand: a real scale tensor if present, else a synthesized baked
-/// FLOAT scalar carrying attn_scale_value, else nullopt (default 1/sqrt(D)).
+/// FLOAT scalar carrying attn_scale_value, else nullopt (1.0, no scaling).
 /// The frontend (SdpaFwdNode/SdpaBwdNode) enforces that at most one source is
 /// set, so this never has to reconcile a conflict.
 inline std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
