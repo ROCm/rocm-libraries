@@ -19,6 +19,11 @@ from rocke.helpers.spec import kernel_name_join
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
+# KV-cache storage formats a dense body can dequantize on load. ``None`` keeps the
+# KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
+# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
+_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
+
 # Shared query/KV geometry only. LDS layout choices are architecture-specific.
 DENSE_TILE_GEOMETRIES = MappingProxyType(
     {
@@ -75,6 +80,9 @@ class AttentionDenseSpec:
     use_sinks: bool = False
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
+    # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
+    # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
+    kv_storage_dtype: str | None = field(default=None, kw_only=True)
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
@@ -84,6 +92,14 @@ class AttentionDenseSpec:
         if self.dtype not in _DTYPE_IR:
             raise ValueError(
                 f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
+            )
+        if (
+            self.kv_storage_dtype is not None
+            and self.kv_storage_dtype not in _KV_STORAGE_DTYPES
+        ):
+            raise ValueError(
+                f"kv_storage_dtype must be None or one of "
+                f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
         if self.block_m <= 0:
             raise ValueError(f"block_m must be positive, got {self.block_m}")
@@ -191,7 +207,7 @@ class AttentionDenseSpec:
                 * self.block_size
                 * self.num_kv_heads
                 * self.head_size
-                * 2
+                * self.kv_elem_bytes
             )
             if cache_bytes > 2**31 - 1:
                 raise ValueError(
@@ -227,6 +243,11 @@ class AttentionDenseSpec:
     @property
     def dtype_ir(self):
         return _DTYPE_IR[self.dtype]
+
+    @property
+    def kv_elem_bytes(self) -> int:
+        """Bytes per stored K/V element: 1 for fp8 KV, 2 for the compute dtype."""
+        return 1 if self.kv_storage_dtype == "fp8e4m3" else 2
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -298,6 +319,8 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
+        if self.kv_storage_dtype:
+            parts.append(f"kv{self.kv_storage_dtype}")
         if self.block_m != DEFAULT_DENSE_TILE_GEOMETRY["block_m"]:
             parts.append(f"bm{self.block_m}")
         if 128 // self.head_size > 1:
@@ -426,7 +449,13 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"n_per = {spec.block_m} // block_n floors and drops keys"
         )
 
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+    kv_bytes = (
+        spec.batch
+        * spec.seqlen_kv
+        * spec.num_kv_heads
+        * spec.head_size
+        * spec.kv_elem_bytes
+    )
     if kv_bytes >= INT32_LIMIT:
         return False, (
             f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "

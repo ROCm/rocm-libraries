@@ -76,8 +76,12 @@ from dataclasses import dataclass, fields as _dataclass_fields
 from types import MappingProxyType
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
-from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64, FP8E4M3
+from rocke.helpers.attention import (
+    mfma_32x32x16_for_dtype,
+    pv32_v_load_paired,
+    dequant_fp8x8_to_dtype,
+)
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
@@ -117,6 +121,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
     wide_lds_dma: bool = False
+    # fp8 KV loader select. Default (False) = sync-dequant (global load -> dequant
+    # -> bf16 LDS store), the measured-faster path. True = two-phase async DMA (fp8
+    # HBM -> staging LDS slab, barrier, LDS->LDS dequant); measured ~8-10% slower on
+    # the aligned prefill cohort, kept opt-in. No effect unless fp8 KV.
+    fp8_two_phase: bool = False
 
     def supported_persist_decodes(self) -> frozenset[str]:
         return super().supported_persist_decodes() | {
@@ -131,6 +140,19 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
                 f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
+        if self.kv_storage_dtype == "fp8e4m3":
+            # First-cut fp8 KV lands on the default-grid, aligned contiguous builder.
+            # The sync-dequant loader uses a plain in-bounds global load, so ragged /
+            # varlen / paged (partial-tile or indirected KV) are follow-ups, as are
+            # the persistent-grid and paged paths.
+            if self.persistent:
+                raise ValueError("fp8 KV is not yet supported with persistent=True")
+            if self.paged:
+                raise ValueError("fp8 KV is not yet supported with paged KV")
+            if self.ragged:
+                raise ValueError("fp8 KV is not yet supported with ragged=True")
+            if self.varlen:
+                raise ValueError("fp8 KV is not yet supported with varlen=True")
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
@@ -280,6 +302,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         parts = list(super()._algorithm_name_parts())
         if self.wide_lds_dma:
             parts.append("wdma")
+        # fp8 sync is the default (no token, matches the blessed golden); tag the
+        # opt-in two-phase loader.
+        if self.kv_storage_dtype == "fp8e4m3" and self.fp8_two_phase:
+            parts.append("fp8_2ph")
         # Preserve shipped symbols at the default while keeping explicitly
         # swept WPE binaries distinct for AOT packaging and name-based tools.
         if self.waves_per_eu != 2:
@@ -375,6 +401,11 @@ def build_attention_dense(
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
     use_sinks = spec.use_sinks
+    KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    kv_dtype = FP8E4M3 if KV_FP8 else dtype
+    # Two-phase = async fp8 DMA into a staging slab + LDS->LDS dequant (opt-in);
+    # default = direct sync global-load dequant (measured faster).
+    TWO_PHASE = KV_FP8 and spec.fp8_two_phase
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -398,15 +429,21 @@ def build_attention_dense(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
     k = b.param(
-        "k_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "k_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     v = b.param(
-        "v_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "v_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     o = b.param(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if KV_FP8:
+        # Per-tensor fp8 KV dequant scales, declared right after scale to fix their
+        # ABI position (mirrored in attention_dense_signature). Consumed by the
+        # two-phase fp8 loader; absent from the bf16 ABI.
+        k_scale = b.param("k_scale", F32)
+        v_scale = b.param("v_scale", F32)
     # Problem shape as kernel params. Unconditional here: every spec reaching this
     # body takes them, so the base offsets below read params with no baked
     # alternative. Declared right after scale to fix their ABI position (mirrored in
@@ -512,6 +549,11 @@ def build_attention_dense(
     VROW = D + spec.lds_v_row_pad if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
+    if TWO_PHASE:
+        # fp8 staging slabs: plain [NBUF, BN, D] (1 byte/elem, row=key col=d), the
+        # async DMA target. Phase 2 dequants these into the bf16 K_lds/V_lds above.
+        K_fp8_stg = b.smem_alloc(FP8E4M3, [NBUF, BN, D], name_hint="Kfp8stg")
+        V_fp8_stg = b.smem_alloc(FP8E4M3, [NBUF, BN, D], name_hint="Vfp8stg")
     # Packed-K read decode, hoisted out of the KV loop: krow = nsub*32 + lane_m
     # with nsub*32 even, so the group/sub-row split is a shift+and on lane_m
     # plus a compile-time nsub scale.
@@ -577,7 +619,21 @@ def build_attention_dense(
     # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
     # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
     # batch/seqlen param declaration was.
-    if spec.paged:
+    if KV_FP8 and not TWO_PHASE:
+        # The fp8 sync-dequant loader reads K/V with plain in-bounds global loads
+        # (aligned KV only), so no bounds-checked buffer resource is built here.
+        k_rsrc = v_rsrc = None
+    elif KV_FP8:
+        # Two-phase: async DMA fp8 K/V from HBM into the staging slab needs a
+        # bounds-checked resource. Aligned contiguous KV, 1 byte/elem.
+        _kv_fp8_bytes = Hkv * D * 1
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_fp8_bytes))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_fp8_bytes))
+        )
+    elif spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
         # be in range -- batch*seqlen_kv is only the logical KV length of one
@@ -705,10 +761,109 @@ def build_attention_dense(
             v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
+    THREADS = WAVES * 64
+
+    def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
+        """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
+        store, into the same K_lds/V_lds layout the bf16 path fills. The global
+        load is unbounded, so OOB keys are clamped below (the pipeline
+        over-prefetches one tile past the last consumed KV tile)."""
+        total = BN * D
+        assert total % (THREADS * 8) == 0, (
+            f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
+            f"{THREADS * 8}"
+        )
+        for it in range(total // (THREADS * 8)):
+            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
+            key = b.div(e0, b.const_i32(D))
+            d0 = b.mod(e0, b.const_i32(D))
+            # The software pipeline prefetches tile j+1 at the end of iter j; on the
+            # last iteration that tile can fall past seqlen_kv (its data is never
+            # consumed). Clamp OOB keys to row 0 so the unbounded global load stays
+            # in-bounds instead of faulting -- the bf16 path gets this for free from
+            # its bounds-checked buffer resource.
+            kv_row = b.add(tile_key0, key)
+            kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
+            addr = b.add(
+                b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))),
+                d0,
+            )
+            deq = dequant_fp8x8_to_dtype(
+                b, b.global_load_vN(ptr, addr, kv_dtype, 8), scale_p, dtype
+            )
+            if packed_k:
+                row = b.div(key, b.const_i32(K_GROUP))
+                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
+            else:
+                row = key
+                col = d0
+            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
+
+    def _stage_fp8(rsrc, stg, buf_val, tile_key0):
+        """Phase 1 (two-phase): async DMA fp8 K/V from HBM into the [NBUF, BN, D]
+        staging slab. async_buffer_load_lds moves a dword (4 fp8) per lane; a
+        d-aligned 4-chunk stays within one key since 4 | D."""
+        total = BN * D
+        insts = total // 256  # 64 lanes x 4 fp8 = 256 fp8 per wave-instruction
+        assert total % 256 == 0 and insts % WAVES == 0, (
+            f"fp8 stage DMA: BN*D={total} must be a WAVES*256 multiple "
+            f"(insts={insts} WAVES={WAVES})"
+        )
+        stg_base = b.smem_addr_of(stg)
+        buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(total))
+        for i in range(insts // WAVES):
+            block = b.add(b.mul(wave, b.const_i32(insts // WAVES)), b.const_i32(i))
+            base_elem = b.mul(block, b.const_i32(256))
+            dest = b.smem_ptr_add(stg_base, b.add(buf_off, b.zext(base_elem, I64)))
+            elem = b.add(base_elem, b.mul(lane, b.const_i32(4)))
+            key = b.div(elem, b.const_i32(D))
+            d0 = b.mod(elem, b.const_i32(D))
+            voff = b.add(
+                b.add(k_base, b.mul(b.add(tile_key0, key), b.const_i32(stride_k_tok))),
+                d0,
+            )
+            b.async_buffer_load_lds_addr(rsrc, dest, voff, zero_soff, 1)
+
+    def _dequant_stg(stg, lds, buf_val, scale_p, packed_k):
+        """Phase 2 (two-phase): LDS->LDS dequant of the fp8 staging slab into the
+        bf16 K_lds/V_lds, in the same packed layout the compute reads."""
+        total = BN * D
+        for it in range(total // (THREADS * 8)):
+            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
+            key = b.div(e0, b.const_i32(D))
+            d0 = b.mod(e0, b.const_i32(D))
+            raw = b.smem_load_vN(stg, buf_val, key, d0, dtype=FP8E4M3, n=8)
+            deq = dequant_fp8x8_to_dtype(b, raw, scale_p, dtype)
+            if packed_k:
+                row = b.div(key, b.const_i32(K_GROUP))
+                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
+            else:
+                row = key
+                col = d0
+            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
+
+    def _dequant_fp8_tile(buf_val):
+        """Both K and V for one buffer (phase 2)."""
+        _dequant_stg(K_fp8_stg, K_lds, buf_val, k_scale, K_GROUP > 1)
+        _dequant_stg(V_fp8_stg, V_lds, buf_val, v_scale, False)
+        b.s_waitcnt(lgkmcnt=0)
+
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
-        async_load_k(K_lds_addr, buf_val, tk0)
-        async_load_v(V_lds_addr, buf_val, tk0)
+        if TWO_PHASE:
+            # Phase 1 only: issue the async fp8 DMA into staging. Phase 2 (dequant)
+            # runs after the tile's DMA drains, at the consumer barrier.
+            _stage_fp8(k_rsrc, K_fp8_stg, buf_val, tk0)
+            _stage_fp8(v_rsrc, V_fp8_stg, buf_val, tk0)
+        elif KV_FP8:
+            # Sync-dequant fp8: fill K_lds/V_lds with bf16, then drain the LDS stores
+            # so the following barrier publishes them before the compute reads.
+            _sync_fp8_load(k, K_lds, buf_val, tk0, k_scale, K_GROUP > 1)
+            _sync_fp8_load(v, V_lds, buf_val, tk0, v_scale, False)
+            b.s_waitcnt(lgkmcnt=0)
+        else:
+            async_load_k(K_lds_addr, buf_val, tk0)
+            async_load_v(V_lds_addr, buf_val, tk0)
 
     # ---- per-tile compute closures ----
 
@@ -921,6 +1076,10 @@ def build_attention_dense(
     load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
     b.s_waitcnt(vmcnt=0)
     b.s_barrier_bare()
+    if TWO_PHASE:
+        # Phase 2 for the first compute tile; start_buf1 is dequantted in the loop.
+        _dequant_fp8_tile(start_buf)
+        b.s_barrier_bare()
     # ragged non-causal needs the key-pad mask (ktok<seqlen_kv) on any tile that
     # can hold padded keys; causal drops them for free (see do_kbound_mask).
     RAG_KBOUND = RAGGED and (not causal) and (Skv % BN != 0)
@@ -977,8 +1136,13 @@ def build_attention_dense(
 
         # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight so it
         # overlaps compute instead of a full vmcnt(0) serialize (bit-identical).
-        b.s_waitcnt(vmcnt=V_DMA_PASSES)
+        # Two-phase fp8 needs the WHOLE tile arrived before phase-2 dequant, so it
+        # fully drains instead.
+        b.s_waitcnt(vmcnt=0 if TWO_PHASE else V_DMA_PASSES)
         b.s_barrier_bare()
+        if TWO_PHASE:
+            _dequant_fp8_tile(kbuf)
+            b.s_barrier_bare()
         s = do_qk(kbuf)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
@@ -2119,14 +2283,19 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
+    kv_ptr_dtype = spec.kv_storage_dtype or spec.dtype
     sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", kv_ptr_dtype)
+        .ptr("v_ptr", kv_ptr_dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Mirrors the k_scale/v_scale params declared right after scale in
+        # build_attention_dense (fp8 KV only).
+        sig = sig.scalar("k_scale", "f32").scalar("v_scale", "f32")
     if _has_shape_params(spec):
         # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
         # build_attention_dense.
@@ -2164,6 +2333,8 @@ def run_attention_dense_torch(
     v,
     out,
     scale: float,
+    k_scale: float = 1.0,
+    v_scale: float = 1.0,
     stream: int = 0,
     arch: str = "gfx950",
     cu_seqlens_q=None,
@@ -2326,6 +2497,9 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.kv_storage_dtype == "fp8e4m3":
+        vals["k_scale"] = float(k_scale)
+        vals["v_scale"] = float(v_scale)
     if _has_shape_params(spec):
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
