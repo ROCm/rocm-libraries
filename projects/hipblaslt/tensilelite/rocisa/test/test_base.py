@@ -25,8 +25,31 @@ from copy import deepcopy
 import pickle
 import os
 import shutil
+import subprocess
+import sys
+import tempfile
 
 isa = (9,0,10)
+
+
+def test_import_subprocess_shutdown():
+    # A fresh interpreter exercises binding teardown. In sanitizer builds the
+    # child inherits the runtime preload and leak checks from the test runner.
+    env = os.environ.copy()
+    package_root = os.path.dirname(os.path.dirname(rocisa.__file__))
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [package_root, env.get("PYTHONPATH")])
+    )
+    with tempfile.TemporaryDirectory() as working_directory:
+        result = subprocess.run(
+            [sys.executable, "-c", "import rocisa"],
+            cwd=working_directory,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 def fastdeepcopy(x):
     # Note: Some object can't be pickled

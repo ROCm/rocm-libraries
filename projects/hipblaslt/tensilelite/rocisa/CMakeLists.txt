@@ -70,13 +70,13 @@ block()
         else()
             find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
         endif()
-        find_package(nanobind REQUIRED CONFIG)
+        find_package(nanobind 2.14 REQUIRED CONFIG)
     else()
         include(FetchContent)
         FetchContent_Declare(
           nanobind
           GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-          GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
+          GIT_TAG        86e5626728fc282637a6c338597120913dded1bb # v2.14.0: release internal type references at shutdown
         )
         FetchContent_MakeAvailable(nanobind)
         if(ROCISA_USE_STABLE_ABI)
