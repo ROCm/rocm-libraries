@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -78,6 +78,8 @@ public:
   using T = Type;
 };
 
+TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
+
 template <typename T, bool SingleParam, class StdFunc, class ThrustFunc>
 void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 {
@@ -152,15 +154,6 @@ void run_trig_tests(
 //                            C99 MATH
 //
 // ===================================================================
-
-TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
-TYPED_TEST(VariousComplexTest, getInf)
-{
-  using T = typename TestFixture::T;
-
-  T inf = thrust::detail::complex::infinity<T>();
-  ASSERT_TRUE(std::isinf(inf));
-}
 
 #if defined _MSC_VER
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -68,8 +68,8 @@ struct TestPairScan
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with maximum (thrust issue #69)
-    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), thrust::maximum<P>());
-    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), thrust::maximum<P>());
+    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), _THRUST_LIBCXX::maximum<P>());
+    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), _THRUST_LIBCXX::maximum<P>());
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with plus
@@ -78,8 +78,8 @@ struct TestPairScan
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with maximum (thrust issue #69)
-    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, thrust::maximum<P>());
-    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, thrust::maximum<P>());
+    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, _THRUST_LIBCXX::maximum<P>());
+    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, _THRUST_LIBCXX::maximum<P>());
     ASSERT_EQUAL_QUIET(h_output, d_output);
   }
 };

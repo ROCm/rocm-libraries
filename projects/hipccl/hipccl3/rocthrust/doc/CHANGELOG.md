@@ -1605,8 +1605,8 @@ Finally, a new TBB reduce_by_key implementation provides 80% faster
   - `thrust::stable_partition_copy with stencil`
   - `thrust::tabulate`
 - Memory Allocation:
-	- `thrust::malloc`
-	- `thrust::free`
+  - `thrust::malloc`
+  - `thrust::free`
   - `thrust::get_temporary_buffer`
   - `thrust::return_temporary_buffer`
 
