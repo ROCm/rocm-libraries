@@ -411,7 +411,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                                ? rocsparse_status_internal_error
                                                : rocsparse_status_success,
                                            "That's not the supposed configuration");
-    
+
     const int64_t M = A->rows;
     if(M == 0 || nrhs == 0)
     {
@@ -482,7 +482,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
     }
     blockdim <<= 1;
 
-    const int narrays = (nrhs - 1) / blockdim + 1;
+    const int64_t narrays = (nrhs - 1) / blockdim + 1;
     //
     // Buffer
     // header: 256
@@ -553,7 +553,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                  A->data_type,
                                  buf,
                                  buf,
-                                 A->nnz,
+                                 (A->batch_stride > 0) ? A->nnz : 0,
                                  trm_info->get_offset_indextype(),
                                  trm_info->get_transposed_row_ptr(),
                                  trm_info->get_transposed_row_ptr(),
