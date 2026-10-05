@@ -37,6 +37,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblasLtCreate` ending the process with `exit(1)` when a HIP call inside it failed, for example while another thread was capturing a HIP graph. `hipblasLtCreate` now clears its synchronizer buffers with `hipMemsetAsync` on a private non-blocking stream instead of a legacy-stream `hipMemset`, so another thread's capture no longer makes it fail, and `hipblasLtCreate` and `hipblasLtDestroy` return an error status instead of exiting when a HIP call fails.
 * Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
 * Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
