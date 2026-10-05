@@ -186,7 +186,7 @@ def test_addcustomconfig_main_autodetects_threads_and_wavefront(tmp_path, monkey
     acc.main()
 
     out = capsys.readouterr().out
-    assert "Auto-detected" in out
+    assert "auto-detected" in out
     assert "wavefront_size=64" in out
     assert "threads=[128, 1, 1]" in out
     assert "custom.config:" in p.read_text()
