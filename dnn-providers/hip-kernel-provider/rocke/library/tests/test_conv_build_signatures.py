@@ -20,6 +20,8 @@ _CONV_BUILDERS = [
     "build_implicit_gemm_conv_dgrad",
     "build_direct_conv_16c",
     "build_direct_conv_4c",
+    "build_direct_4c_dgrad",
+    "build_direct_dgrad",
     "build_deep_fused_conv_pool",
     "build_img2col",
 ]

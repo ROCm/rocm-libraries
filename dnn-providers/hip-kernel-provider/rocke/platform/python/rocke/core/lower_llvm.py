@@ -492,6 +492,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "fabs.f32": "declare float @llvm.fabs.f32(float)",
     "fabs.f16": "declare half @llvm.fabs.f16(half)",
     "fabs.bf16": "declare bfloat @llvm.fabs.bf16(bfloat)",
+    "amdgcn.fdot2.f16": (
+        "declare float @llvm.amdgcn.fdot2(<2 x half>, <2 x half>, float, i1 immarg)"
+    ),
+    "amdgcn.fdot2.bf16": (
+        "declare float @llvm.amdgcn.fdot2.f32.bf16(<2 x bfloat>, <2 x bfloat>, float, i1 immarg)"
+    ),
     "fmuladd.f32": "declare float @llvm.fmuladd.f32(float, float, float)",
     "fmuladd.f16": "declare half @llvm.fmuladd.f16(half, half, half)",
     "fmuladd.bf16": "declare bfloat @llvm.fmuladd.bf16(bfloat, bfloat, bfloat)",
@@ -677,6 +683,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "mfma.f32.4x4x4f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
         "<4 x half>, <4 x half>, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.4x4x4bf16.1k": (
+        # bf16 4x4x4 goes through the `_1k` variant like 16x16x16 / 32x32x8
+        # bf16: operands are `<4 x i16>` (bitcast of `<4 x bfloat>`).
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+        "<4 x i16>, <4 x i16>, <4 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     # FP8 / BF8 MFMA (gfx940+). Operands are packed as <2 x i32>
@@ -2228,6 +2241,22 @@ class _Lowerer:
             f"  {op.result.name} = call {llvm_ty} @llvm.fmuladd.{ty_name}("
             f"{llvm_ty} {self._operand(a)}, {llvm_ty} {self._operand(b)}, "
             f"{llvm_ty} {self._operand(c)})"
+        )
+
+    def _op_arith_fdot2(self, op: Op) -> None:
+        """Lower ``arith.fdot2`` to ``llvm.amdgcn.fdot2[.f32.bf16]`` (clamp off)."""
+        a, b, c = op.operands
+        elem = a.type.elem.name
+        if elem == "bf16":
+            vty, fn = "<2 x bfloat>", "llvm.amdgcn.fdot2.f32.bf16"
+        elif elem == "f16":
+            vty, fn = "<2 x half>", "llvm.amdgcn.fdot2"
+        else:
+            raise NotImplementedError(f"fdot2: unsupported element type {elem!r}")
+        self._need(f"amdgcn.fdot2.{elem}")
+        self._current().emit(
+            f"  {op.result.name} = call float @{fn}({vty} {self._operand(a)}, "
+            f"{vty} {self._operand(b)}, float {self._operand(c)}, i1 false)"
         )
 
     def _op_arith_fmax3(self, op: Op) -> None:
@@ -3836,6 +3865,26 @@ class _Lowerer:
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
             f"<4 x half> {self._operand(a)}, "
             f"<4 x half> {self._operand(b)}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.4x4x4bf16.1k")
+        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )

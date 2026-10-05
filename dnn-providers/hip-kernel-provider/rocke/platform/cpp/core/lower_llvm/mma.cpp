@@ -708,6 +708,13 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<4 x half>",
      "<4 x float>",
      NULL},
+    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
+    {"mfma_f32_4x4x4_bf16",
+     "mfma.f32.4x4x4bf16.1k",
+     "llvm.amdgcn.mfma.f32.4x4x4bf16.1k",
+     "<4 x bfloat>",
+     "<4 x float>",
+     "<4 x i16>"},
 };
 static const int MFMA_SPECS_N = (int)(sizeof(MFMA_SPECS) / sizeof(MFMA_SPECS[0]));
 

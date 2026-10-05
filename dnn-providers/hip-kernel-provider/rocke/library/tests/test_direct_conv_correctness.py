@@ -905,8 +905,9 @@ class TestDirectConvDgradWgradCorrectness(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 # bf16 correctness tests
-# bf16 is supported by cpg=8, cpg=16, cpg=32 (not cpg=4 — no 4x4x4 bf16 atom)
-# and by the scalar dgrad path. gfx950 is required for the 16x16x32 fold_k32
+# bf16 is supported by cpg=8, cpg=16, cpg=32 and by the scalar dgrad path here;
+# the 4c (cpg=4, mfma_f32_4x4x4_bf16) bf16 kernel is covered by
+# test_conv_dgrad_4c.py. gfx950 is required for the 16x16x32 fold_k32
 # atom; 16x16x16 bf16 (non-fold path) works on both gfx942 and gfx950.
 # ---------------------------------------------------------------------------
 
@@ -922,8 +923,8 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
     """Correctness tests for direct conv with bf16 I/O tensors.
 
     Uses the same harness as ``TestDirectConvCorrectness`` but with
-    ``dtype="bf16"`` and a looser tolerance (``_TOL_BF16``).  cpg=4 is
-    excluded because there is no ``mfma_f32_4x4x4_bf16`` atom on CDNA.
+    ``dtype="bf16"`` and a looser tolerance (``_TOL_BF16``).  The 4c bf16
+    kernel is exercised by ``test_conv_dgrad_4c.py``.
     """
 
     def _run_fwd(self, shape: _Shape) -> None:
@@ -971,17 +972,23 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
 class TestDirectConvValidation(unittest.TestCase):
     """Validation-only tests that do not require a GPU."""
 
-    def test_cpg4_bf16_rejected(self):
-        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+    def test_cpg4_bf16_accepted(self):
+        """cpg=4 + bf16 validates (mfma_f32_4x4x4_bf16 `_1k` atom); fp32 does not."""
         from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
+            is_valid_spec_4c,
         )
 
         p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
         spec = DirectConv4cSpec(problem=p)
+        spec.validate()
+        self.assertTrue(is_valid_spec_4c(spec, arch="gfx950")[0])
+        self.assertTrue(is_valid_spec_4c(spec, arch="gfx942")[0])
+        p32 = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="fp32")
         with self.assertRaises(ValueError):
-            spec.validate()
+            DirectConv4cSpec(problem=p32).validate()
+        self.assertFalse(is_valid_spec_4c(DirectConv4cSpec(problem=p32))[0])
 
 
 # ---------------------------------------------------------------------------

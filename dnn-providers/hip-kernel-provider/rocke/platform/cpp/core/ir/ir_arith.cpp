@@ -263,6 +263,35 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_ARITH_FMA, operands, 3, a->type, NULL, "fma");
 }
 
+/* Python IRBuilder.fdot2: a, c are the same vec<f16|bf16 x2>, d is f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d)
+{
+    rocke_value_t* operands[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !c || !d)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fdot2 NULL operand");
+    const rocke_type_t* at = a->type;
+    const int ok_vec = at && at->kind == ROCKE_TYPE_VECTOR && at->count == 2 && at->elem
+                       && at->elem->kind == ROCKE_TYPE_SCALAR
+                       && (at->elem->scalar == ROCKE_SCALAR_F16
+                           || at->elem->scalar == ROCKE_SCALAR_BF16)
+                       && rocke_type_eq(at, c->type);
+    if(!ok_vec || !rocke_type_eq(d->type, rocke_f32()))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "fdot2 expects (vec<f16|bf16 x2>, same, f32); got %s, %s, %s",
+            a->type->name,
+            c->type->name,
+            d->type->name);
+    operands[0] = a;
+    operands[1] = c;
+    operands[2] = d;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_FDOT2, operands, 3, rocke_f32(), NULL, "fdot2");
+}
+
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return rocke_i_binop(b, ROCKE_OP_ARITH_FMAX, a, c, "fmax");

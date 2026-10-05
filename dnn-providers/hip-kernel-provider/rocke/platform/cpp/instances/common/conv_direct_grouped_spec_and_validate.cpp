@@ -38,6 +38,7 @@
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
+#include "rocke/instance_conv_direct_grouped_internal.h" /* ROCKE_DCONV4C_MAX_WL_PASSES */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
@@ -430,12 +431,20 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
 
-    /* kernel_name_join(name, short, "bq..", "bg..")  -- no flags */
+    /* kernel_name_join(name, short, "bq..", "bg..", flags={"bf16": dtype=="bf16"}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
-
-    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        const char* flag_names4c[3] = {"bf16", "fw", "fwl"};
+        const char* dt4c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        int flag_on4c[3];
+        flag_on4c[0] = (strcmp(dt4c, "bf16") == 0) ? 1 : 0;
+        flag_on4c[1] = (spec->dgrad_fused_weights && !spec->dgrad_weights_lds) ? 1 : 0;
+        flag_on4c[2] = (spec->dgrad_fused_weights && spec->dgrad_weights_lds) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 3, flag_names4c, flag_on4c, 3, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
@@ -448,17 +457,14 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
-    /* if p.dtype != "fp16": raise ValueError(...) — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
             if(reason != NULL && reason_cap > 0)
             {
-                snprintf(reason,
-                         reason_cap,
-                         "DirectConv4cSpec: bf16 is not supported - the mfma_f32_4x4x4 atom "
-                         "is fp16-only; use fp16 dtype or a different cpg variant");
+                snprintf(reason, reason_cap, "DirectConv4cSpec: unsupported dtype '%s'", dt);
             }
             return ROCKE_ERR_VALUE;
         }
@@ -507,6 +513,17 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         }
         return ROCKE_ERR_VALUE;
     }
+    /* if self.dgrad_weights_lds and not self.dgrad_fused_weights: raise */
+    if(spec->dgrad_weights_lds && !spec->dgrad_fused_weights)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "DirectConv4cSpec dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        return ROCKE_ERR_VALUE;
+    }
     return ROCKE_OK;
 }
 
@@ -547,14 +564,18 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
-    /* if p.dtype != "fp16": return False, ... — no mfma_f32_4x4x4_bf16 atom on CDNA */
+    /* if p.dtype not in ("fp16", "bf16"): return False, ... */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0)
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
         {
-            CK_DCONV4C_REJECT("DirectConv4cSpec: bf16 not supported - "
-                              "no mfma_f32_4x4x4_bf16 atom");
+            CK_DCONV4C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
         }
+    }
+    /* if p.stride != 1: return False, ... */
+    if(p->stride != 1)
+    {
+        CK_DCONV4C_REJECT("stride > 1 is not supported (got %d)", p->stride);
     }
     /* if p.cpg != 4 or p.kpg != 4: return False, ... */
     if(p->cpg != 4 || p->kpg != 4)
@@ -576,6 +597,38 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     {
         CK_DCONV4C_REJECT(
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
+    }
+    /* if p.KH * p.KW > DCONV4C_MAX_TAPS: return False, ... (the builder's
+     * per-tap arrays are sized ROCKE_DCONV4C_MAX_TAPS). */
+    if(p->KH * p->KW > ROCKE_DCONV4C_MAX_TAPS)
+    {
+        CK_DCONV4C_REJECT("DirectConv4cSpec supports KH*KW <= %d (got %d)",
+                          ROCKE_DCONV4C_MAX_TAPS,
+                          p->KH * p->KW);
+    }
+    /* if spec.dgrad_weights_lds: needs fused weights + transpose LDS reads. */
+    if(spec->dgrad_weights_lds)
+    {
+        if(!spec->dgrad_fused_weights)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds requires dgrad_fused_weights");
+        }
+        if(!target->memory.has_ds_read_tr)
+        {
+            CK_DCONV4C_REJECT("dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
+        }
+        /* wl_passes = ceil(block_groups*cpg*KH*KW*kpg/8 / threads) <= bound */
+        {
+            const int wl_vecs = spec->block_groups * p->cpg * p->KH * p->KW * p->kpg / 8;
+            const int wl_threads = rocke_direct_conv_4c_threads_per_block(spec);
+            const int wl_passes = (wl_vecs + wl_threads - 1) / wl_threads;
+            if(wl_passes > ROCKE_DCONV4C_MAX_WL_PASSES)
+            {
+                CK_DCONV4C_REJECT("dgrad_weights_lds needs %d staging passes (max %d)",
+                                  wl_passes,
+                                  ROCKE_DCONV4C_MAX_WL_PASSES);
+            }
+        }
     }
 
     /* The 4x4x4 atom is deliberately NOT gated through has_shape (catalog lists
@@ -2121,4 +2174,286 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     return true;
 
 #undef ROCKE_DCONV_WGRAD_REJECT
+}
+
+/* ===================================================================== *
+ *  DirectDepthwiseDgradWindowedSpec  (cpg=kpg=1 dgrad, stride 1, windowed)
+ * ===================================================================== */
+
+rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void)
+{
+    rocke_direct_depthwise_dgrad_win_spec_t spec;
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_depthwise_dgrad_win";
+    spec.block_w = 8;
+    spec.block_waves = 1;
+    spec.ch_per_lane = 1;
+    spec.block_h = 0;
+    spec.dot2 = false;
+    spec.wave_size = 64;
+    return spec;
+}
+
+int rocke_direct_depthwise_dgrad_win_threads_per_block(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+int rocke_direct_depthwise_dgrad_win_block_ch(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+{
+    return rocke_direct_depthwise_dgrad_win_threads_per_block(spec) * spec->ch_per_lane;
+}
+
+int rocke_direct_depthwise_dgrad_win_rows_per_block(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+{
+    const int H = spec->problem.H;
+    return (spec->block_h <= 0 || spec->block_h >= H) ? H : spec->block_h;
+}
+
+int rocke_direct_depthwise_dgrad_win_h_tiles(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+{
+    const int rows = rocke_direct_depthwise_dgrad_win_rows_per_block(spec);
+    return (spec->problem.H + rows - 1) / rows;
+}
+
+void rocke_direct_depthwise_dgrad_win_grid(const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+                                           int out_grid[3])
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const int block_ch = rocke_direct_depthwise_dgrad_win_block_ch(spec);
+    out_grid[0] = (p->W + spec->block_w - 1) / spec->block_w;
+    out_grid[1] = (p->groups + block_ch - 1) / block_ch;
+    out_grid[2] = p->N * rocke_direct_depthwise_dgrad_win_h_tiles(spec);
+}
+
+long long
+    rocke_direct_depthwise_dgrad_win_unrolled_fmas(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    return (long long)rocke_direct_depthwise_dgrad_win_rows_per_block(spec) * p->KH * p->KW
+           * spec->block_w * spec->ch_per_lane;
+}
+
+rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec, char* out, size_t out_cap)
+{
+    char prob_short[128];
+    char rsp_buf[48];
+    char bw_buf[32];
+    char wv_buf[32];
+    char cpl_buf[32];
+    char bh_buf[32];
+    const char* parts[6];
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"r{KH}s{KW}p{PAD}", f"bw{block_w}",
+     *                  f"wv{block_waves}", f"cpl{ch_per_lane}",
+     *                  f"bh{rows_per_block}" if h_tiles > 1 else "",
+     *                  flags={"dot2": dot2, "bf16": dtype == "bf16"}) */
+    snprintf(rsp_buf,
+             sizeof(rsp_buf),
+             "r%ds%dp%d",
+             spec->problem.KH,
+             spec->problem.KW,
+             spec->problem.PAD);
+    snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
+    snprintf(wv_buf, sizeof(wv_buf), "wv%d", spec->block_waves);
+    snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->ch_per_lane);
+    bh_buf[0] = '\0';
+    if(rocke_direct_depthwise_dgrad_win_h_tiles(spec) > 1)
+    {
+        snprintf(
+            bh_buf, sizeof(bh_buf), "bh%d", rocke_direct_depthwise_dgrad_win_rows_per_block(spec));
+    }
+    parts[0] = prob_short;
+    parts[1] = rsp_buf;
+    parts[2] = bw_buf;
+    parts[3] = wv_buf;
+    parts[4] = cpl_buf;
+    parts[5] = bh_buf;
+    {
+        const char* flag_names[2] = {"dot2", "bf16"};
+        int flag_on[2];
+        const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        flag_on[0] = spec->dot2 ? 1 : 0;
+        flag_on[1] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 6, flag_names, flag_on, 2, out, out_cap, NULL);
+    }
+}
+
+/* Python _depthwise_dgrad_win_check: (ok, reason) without the class prefix. */
+static bool rocke_dw_dgrad_win__check(const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const char* dt = p->dtype ? p->dtype : "fp16";
+    char buf[256];
+    bool ok = true;
+
+    buf[0] = '\0';
+    if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+    {
+        snprintf(buf, sizeof(buf), "unsupported dtype '%s'; expected fp16 or bf16", dt);
+        ok = false;
+    }
+    else if(p->cpg != 1 || p->kpg != 1)
+    {
+        snprintf(buf, sizeof(buf), "requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
+        ok = false;
+    }
+    else if(p->stride != 1)
+    {
+        snprintf(buf, sizeof(buf), "requires stride=1 (got %d)", p->stride);
+        ok = false;
+    }
+    else
+    {
+        /* stride == 1 here, so C truncation equals Python floor division. */
+        const int Ho = p->H + 2 * p->PAD - p->KH + 1;
+        const int Wo = p->W + 2 * p->PAD - p->KW + 1;
+        const int threads = rocke_direct_depthwise_dgrad_win_threads_per_block(spec);
+        const int cpl = spec->ch_per_lane;
+        if(p->PAD < 0 || Ho <= 0 || Wo <= 0)
+        {
+            snprintf(buf,
+                     sizeof(buf),
+                     "degenerate geometry (PAD=%d, Ho=%d, Wo=%d)",
+                     p->PAD,
+                     Ho,
+                     Wo);
+            ok = false;
+        }
+        else if(spec->block_w < 1)
+        {
+            snprintf(buf, sizeof(buf), "block_w must be >= 1 (got %d)", spec->block_w);
+            ok = false;
+        }
+        else if(spec->block_waves < 1 || threads > 1024)
+        {
+            snprintf(buf,
+                     sizeof(buf),
+                     "block_waves must give 1..1024 threads (got %d)",
+                     spec->block_waves);
+            ok = false;
+        }
+        else if(cpl != 1 && cpl != 2 && cpl != 4 && cpl != 8)
+        {
+            snprintf(buf, sizeof(buf), "ch_per_lane must be 1, 2, 4 or 8 (got %d)", cpl);
+            ok = false;
+        }
+        else if(p->groups % cpl != 0)
+        {
+            snprintf(buf,
+                     sizeof(buf),
+                     "groups=%d is not a multiple of ch_per_lane=%d",
+                     p->groups,
+                     cpl);
+            ok = false;
+        }
+        else if(spec->dot2 && cpl != 1)
+        {
+            snprintf(buf, sizeof(buf), "dot2 requires ch_per_lane=1 (got %d)", cpl);
+            ok = false;
+        }
+        else if(spec->block_h < 0)
+        {
+            snprintf(buf, sizeof(buf), "block_h must be >= 0 (got %d)", spec->block_h);
+            ok = false;
+        }
+        else
+        {
+            const long long dy_bytes = (long long)p->N * Ho * Wo * p->groups * 2;
+            const long long dx_bytes = (long long)p->N * p->H * p->W * p->groups * 2;
+            const long long big = dy_bytes > dx_bytes ? dy_bytes : dx_bytes;
+            const long long fmas = rocke_direct_depthwise_dgrad_win_unrolled_fmas(spec);
+            if(big > ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES)
+            {
+                snprintf(buf,
+                         sizeof(buf),
+                         "dY/dX of %lld bytes exceed the %lld-byte sentinel addressing range",
+                         big,
+                         (long long)ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES);
+                ok = false;
+            }
+            else if(fmas > ROCKE_DW_DGRAD_WIN_MAX_UNROLL)
+            {
+                snprintf(buf,
+                         sizeof(buf),
+                         "unrolled body too large (%lld FMAs > %d); lower block_w or set block_h",
+                         fmas,
+                         ROCKE_DW_DGRAD_WIN_MAX_UNROLL);
+                ok = false;
+            }
+        }
+    }
+    if(reason && reason_cap > 0)
+    {
+        snprintf(reason, reason_cap, "%s", ok ? "ok" : buf);
+    }
+    return ok;
+}
+
+rocke_status_t rocke_direct_depthwise_dgrad_win_validate(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec, char* reason, size_t reason_cap)
+{
+    char why[256];
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(!rocke_dw_dgrad_win__check(spec, why, sizeof(why)))
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "DirectDepthwiseDgradWindowedSpec: %s", why);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+    const char* arch,
+    char* reason,
+    size_t reason_cap)
+{
+    if(spec == NULL)
+    {
+        if(reason && reason_cap > 0)
+        {
+            strncpy(reason, "null spec", reason_cap);
+        }
+        return false;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    if(rocke_archtarget_from_gfx(arch) == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    /* DW_DGRAD_WIN_DOT2_ARCHES = ("gfx950",) */
+    if(spec->dot2 && strcmp(arch, "gfx950") != 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "dot2 needs one of ('gfx950',) (got %s)", arch);
+        }
+        return false;
+    }
+    return rocke_dw_dgrad_win__check(spec, reason, reason_cap);
 }

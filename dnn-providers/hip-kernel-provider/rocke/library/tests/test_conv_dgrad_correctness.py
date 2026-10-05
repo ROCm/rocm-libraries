@@ -779,8 +779,13 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 # M-outer default for the identical problem and tiling.
 
 
-def _dgrad_run_inprocess(spec, dtype, seed=0):
-    """Launch one dgrad kernel and return dX as a torch tensor (NHWC)."""
+def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False):
+    """Launch one dgrad kernel and return dX as a torch tensor (NHWC).
+
+    ``poison=True`` pre-fills dX with 0xFF bytes (NaN in fp16/bf16) when the
+    kernel stores rather than accumulates, so an output the kernel never
+    writes shows up as NaN instead of passing as zero.
+    """
     import ctypes
 
     import torch
@@ -811,7 +816,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     dY_d, W_d, dX_d = rt.alloc(dY.nbytes), rt.alloc(W.nbytes), rt.alloc(dX.nbytes)
     rt.memcpy_h2d(dY_d, _u8(dY), dY.nbytes)
     rt.memcpy_h2d(W_d, _u8(W), W.nbytes)
-    rt.memset(dX_d, 0, dX.nbytes)  # split-K atomic-add needs a zeroed dX
+    # split-K / multi-sub-GEMM atomic-add needs a zeroed dX.
+    rt.memset(dX_d, 0xFF if (poison and not spec.needs_atomic) else 0, dX.nbytes)
 
     sub_gemms = spec.compute_sub_gemms()
     buf = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
@@ -1001,6 +1007,168 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
         delta = (ref.float() - got.float()).abs().max().item()
         scale = ref.float().abs().max().item()
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
+
+
+# Stride-1 specializations (DgradConvSpec.static_sub_gemm / tap_outer_k). Each
+# case runs the default build (folded record, tap-outer K loop where it
+# applies) next to the flat-loop and the runtime-record builds of the same
+# tiling. All three reduce in the same order -- tap-major, output-channel
+# chunk, then the tile's MFMA sequence -- so the outputs must agree bit for
+# bit, and the default build must match the torch reference under the
+# manifest-runner conv tolerance. The shapes are adversarial on purpose: odd
+# and non-square H/W, N=1, a 5x5 filter with pad 2, M not a multiple of the
+# tile, C not a multiple of tile_n, K not a multiple of tile_k (flat-loop
+# fallback), grouped, and a pad that does not preserve the spatial size.
+_STRIDE1_CASES = (
+    # (label, dtype, N, Hi, Wi, C, K, Y, X, pad, groups, tile_k, warp_tile_mn)
+    ("odd_7x13_n1", "bf16", 1, 7, 13, 64, 128, 3, 3, 1, 1, 64, 32),
+    ("odd_15x17", "fp16", 3, 15, 17, 96, 64, 3, 3, 1, 1, 64, 16),
+    ("5x5_pad2_c48", "bf16", 2, 13, 9, 48, 64, 5, 5, 2, 1, 32, 16),
+    ("pad0_shrinks", "fp16", 2, 11, 11, 64, 64, 3, 3, 0, 1, 64, 32),
+    ("k_not_tile_aligned", "bf16", 2, 14, 14, 64, 96, 3, 3, 1, 1, 64, 32),
+    ("grouped_g4", "bf16", 2, 12, 12, 128, 256, 3, 3, 1, 4, 64, 16),
+    # Grouped, XCD-contiguous tile order with a launch-order remainder
+    # (tiles x groups not a multiple of the XCD count), on the flat loop
+    # (kpg % tile_k != 0, partial N tile) and on the tap-outer loop.
+    ("grouped_g3_xcd_flat", "fp16", 1, 13, 11, 288, 480, 3, 3, 1, 3, 64, 32),
+    ("grouped_g5_xcd_tap", "bf16", 2, 9, 7, 400, 640, 3, 3, 1, 5, 64, 32),
+)
+
+
+@unittest.skipUnless(
+    ARCH in _KOUTER_WAVE and ARCH != "gfx1250" and _HAS_TORCH,
+    "stride-1 dgrad specializations are wave64 MFMA (gfx950) + torch",
+)
+class TestConvDgradStride1Specializations(unittest.TestCase):
+    """Folded record + tap-outer K loop vs the flat / runtime-record builds."""
+
+    def _problem(self, N, Hi, Wi, C, K, Y, X, pad, groups):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(
+            N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, pH=pad, pW=pad, groups=groups
+        )
+
+    def _spec(self, problem, dtype, tile_k, wt, **kw):
+        from rocke.core.arch import ArchTarget
+
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+        atom = ArchTarget.from_gfx(ARCH).mma.select_largest_k(
+            family="mma",
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=wt,
+            n=wt,
+            k_max=tile_k,
+        )
+        return DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_s1",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=atom.k,
+            pipeline="mem",
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            **kw,
+        )
+
+    def _reference(self, problem, dtype, seed=0):
+        import torch
+
+        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+        p = problem
+        torch.manual_seed(seed)
+        # Same draw order as _dgrad_run_inprocess, so the inputs match.
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+        return torch.nn.grad.conv2d_input(
+            (p.N, p.C, p.Hi, p.Wi),
+            W.float().permute(0, 3, 1, 2).contiguous(),
+            dY.float().permute(0, 3, 1, 2).contiguous(),
+            padding=(p.pH, p.pW),
+            groups=p.groups,
+        ).permute(0, 2, 3, 1)
+
+    def test_variants_bit_identical_and_match_reference(self):
+        import torch
+
+        from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
+
+        for label, dtype, N, Hi, Wi, C, K, Y, X, pad, g, tk, wt in _STRIDE1_CASES:
+            with self.subTest(case=label):
+                problem = self._problem(N, Hi, Wi, C, K, Y, X, pad, g)
+                default = self._spec(problem, dtype, tk, wt)
+                flat = self._spec(problem, dtype, tk, wt, tap_outer_k=False)
+                dynrec = self._spec(
+                    problem, dtype, tk, wt, static_sub_gemm=False, tap_outer_k=False
+                )
+                self.assertTrue(default.folds_sub_gemm_record)
+                self.assertEqual(default.uses_tap_outer_k, problem.kpg % tk == 0, label)
+                self.assertFalse(flat.uses_tap_outer_k)
+                self.assertFalse(dynrec.folds_sub_gemm_record)
+                for spec in (default, flat, dynrec):
+                    ok, why = is_valid_dgrad_spec(spec, ARCH)
+                    self.assertTrue(ok, f"{label}: {why}")
+                outs = [
+                    _dgrad_run_inprocess(s, dtype, poison=True)
+                    for s in (default, flat, dynrec)
+                ]
+                self.assertTrue(torch.equal(outs[0], outs[1]), f"{label}: tap vs flat")
+                self.assertTrue(
+                    torch.equal(outs[1], outs[2]), f"{label}: fold vs dynrec"
+                )
+                ref = self._reference(problem, dtype)
+                got = outs[0].float()
+                bad = (got - ref).abs() > 1e-2 + 1e-2 * ref.abs()
+                self.assertFalse(torch.isnan(got).any(), f"{label}: NaN in dX")
+                self.assertEqual(int(bad.sum()), 0, f"{label}: tolerance violations")
+
+    def test_pointwise_record_policy(self):
+        """Ungrouped 1x1 keeps the runtime record; grouped 1x1 folds it.
+
+        Each default build is compared bit for bit with its explicit
+        runtime-record build and against the reference, with dX poisoned.
+        """
+        import torch
+
+        from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
+
+        cases = (
+            # label, dtype, N, Hi, Wi, C, K, groups
+            ("pw_n1_odd", "fp16", 1, 13, 7, 72, 40, 1),
+            ("pw_partial_tiles", "bf16", 3, 15, 17, 136, 200, 1),
+            ("pw_grouped_g2", "bf16", 2, 9, 9, 128, 256, 2),
+        )
+        for label, dtype, N, Hi, Wi, C, K, g in cases:
+            with self.subTest(case=label):
+                problem = self._problem(N, Hi, Wi, C, K, 1, 1, 0, g)
+                default = self._spec(problem, dtype, 64, 32)
+                dynrec = self._spec(problem, dtype, 64, 32, static_sub_gemm=False)
+                self.assertEqual(default.folds_sub_gemm_record, g > 1, label)
+                self.assertEqual(default.uses_tap_outer_k, g > 1, label)
+                for spec in (default, dynrec):
+                    ok, why = is_valid_dgrad_spec(spec, ARCH)
+                    self.assertTrue(ok, f"{label}: {why}")
+                outs = [
+                    _dgrad_run_inprocess(s, dtype, poison=True)
+                    for s in (default, dynrec)
+                ]
+                self.assertTrue(torch.equal(outs[0], outs[1]), f"{label}: vs dynrec")
+                ref = self._reference(problem, dtype)
+                got = outs[0].float()
+                bad = (got - ref).abs() > 1e-2 + 1e-2 * ref.abs()
+                self.assertFalse(torch.isnan(got).any(), f"{label}: NaN in dX")
+                self.assertEqual(int(bad.sum()), 0, f"{label}: tolerance violations")
 
 
 if __name__ == "__main__":

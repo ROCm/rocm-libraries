@@ -6,7 +6,7 @@
  * argv[1] (the config index), builds the rocke_direct_conv_16c_spec_t /
  * rocke_direct_conv_4c_spec_t / rocke_direct_conv_8c_spec_t /
  * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t /
- * rocke_direct_conv_wgrad_spec_t identically to
+ * rocke_direct_depthwise_dgrad_win_spec_t / rocke_direct_conv_wgrad_spec_t identically to
  * the Python emitter conv_direct_grouped_emit.py, builds the kernel via the
  * matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -32,7 +32,8 @@ enum
     KIND_SPATIAL = 5,
     KIND_DGRAD = 6,
     KIND_DW_DGRAD = 7,
-    KIND_WGRAD = 8
+    KIND_WGRAD = 8,
+    KIND_DW_DGRAD_WIN = 9
 };
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -48,6 +49,7 @@ static int make_cfg(int idx,
                     rocke_direct_conv_dgrad_spec_t* sdgrad,
                     rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
                     rocke_direct_conv_wgrad_spec_t* swg,
+                    rocke_direct_depthwise_dgrad_win_spec_t* swin,
                     const char** arch)
 {
     rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
@@ -543,6 +545,316 @@ static int make_cfg(int idx,
         *kind = KIND_WGRAD;
         *arch = "gfx950";
         return 0;
+    case 32:
+        /* windowed depthwise dgrad: 7x7, scalar f32 FMA path */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 7;
+        p.KW = 7;
+        p.PAD = 3;
+        p.dtype = "bf16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 7;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 0;
+        swin->dot2 = false;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 33:
+        /* windowed depthwise dgrad: 7x7 with fdot2 tap pairing (odd KW pads a zero weight) */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 7;
+        p.KW = 7;
+        p.PAD = 3;
+        p.dtype = "bf16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 7;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 0;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 34:
+        /* windowed depthwise dgrad: ch_per_lane=2 (dword loads/stores, packed f32 FMA) */
+        p.N = 2;
+        p.H = 12;
+        p.W = 12;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 1;
+        p.dtype = "fp16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 6;
+        swin->block_waves = 2;
+        swin->ch_per_lane = 2;
+        swin->block_h = 0;
+        swin->dot2 = false;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 35:
+        /* windowed depthwise dgrad: ragged H split (block_h=4, H=13) re-reads the halo */
+        p.N = 2;
+        p.H = 13;
+        p.W = 13;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 5;
+        p.KW = 5;
+        p.PAD = 2;
+        p.dtype = "fp16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 5;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 4;
+        swin->dot2 = false;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 36:
+        /* windowed depthwise dgrad: even H split + dot2, W=13 not a multiple of block_w */
+        p.N = 1;
+        p.H = 8;
+        p.W = 13;
+        p.groups = 40;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 1;
+        p.dtype = "bf16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 4;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 4;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 37:
+        /* windowed depthwise dgrad: even KW=4 with dot2 (no zero pad) */
+        p.N = 2;
+        p.H = 9;
+        p.W = 9;
+        p.groups = 72;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 4;
+        p.KW = 4;
+        p.PAD = 1;
+        p.dtype = "fp16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 8;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 0;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 38:
+        /* windowed depthwise dgrad: dot2 on gfx942 -> both engines reject */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 1;
+        p.dtype = "bf16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 4;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 0;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx942";
+        return 0;
+    case 39:
+        /* windowed depthwise dgrad: ch_per_lane=4 (dwordx2) bf16 */
+        p.N = 2;
+        p.H = 7;
+        p.W = 7;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 1;
+        p.dtype = "bf16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 4;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 4;
+        swin->block_h = 0;
+        swin->dot2 = false;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 40:
+        /* windowed depthwise dgrad: KW=1 with dot2 (tail pair only, no full pairs) */
+        p.N = 2;
+        p.H = 9;
+        p.W = 11;
+        p.groups = 96;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 1;
+        p.PAD = 1;
+        p.dtype = "fp16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 5;
+        swin->block_waves = 1;
+        swin->ch_per_lane = 1;
+        swin->block_h = 0;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 41:
+        /* windowed depthwise dgrad: non-square 3x5 fp16 dot2 with a ragged H split */
+        p.N = 1;
+        p.H = 13;
+        p.W = 10;
+        p.groups = 72;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 5;
+        p.PAD = 2;
+        p.dtype = "fp16";
+        *swin = rocke_direct_depthwise_dgrad_win_spec_default();
+        swin->problem = p;
+        swin->block_w = 10;
+        swin->block_waves = 2;
+        swin->ch_per_lane = 1;
+        swin->block_h = 5;
+        swin->dot2 = true;
+        *kind = KIND_DW_DGRAD_WIN;
+        *arch = "gfx950";
+        return 0;
+    case 42:
+        /* 4c bf16: bf16 I/O and the mfma_f32_4x4x4_bf16 (`_1k`) atom; odd H/W
+         * so the right-edge column mask and the H-edge rows are exercised. */
+        p.N = 2;
+        p.H = 13;
+        p.W = 13;
+        p.groups = 32;
+        p.cpg = 4;
+        p.kpg = 4;
+        p.dtype = "bf16";
+        *s4 = rocke_direct_conv_4c_spec_default();
+        s4->problem = p;
+        s4->block_q = 4;
+        s4->block_groups = 16;
+        *kind = KIND_4C;
+        *arch = "gfx950";
+        return 0;
+    case 43:
+        /* 4c bf16 on gfx942: the 4x4x4 bf16 `_1k` atom is CDNA2+, so the
+         * kernel stays arch-neutral. */
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 16;
+        p.cpg = 4;
+        p.kpg = 4;
+        p.dtype = "bf16";
+        *s4 = rocke_direct_conv_4c_spec_default();
+        s4->problem = p;
+        s4->block_q = 8;
+        s4->block_groups = 16;
+        *kind = KIND_4C;
+        *arch = "gfx942";
+        return 0;
+    case 44:
+        /* 4c bf16 with two waves per block (block_groups=32) and four q-tiles
+         * per wave: the shape the 4c dgrad entry builds for cpg=kpg=4. */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 32;
+        p.cpg = 4;
+        p.kpg = 4;
+        p.dtype = "bf16";
+        *s4 = rocke_direct_conv_4c_spec_default();
+        s4->problem = p;
+        s4->name = "direct_conv_4c_dgrad";
+        s4->block_q = 16;
+        s4->block_groups = 32;
+        *kind = KIND_4C;
+        *arch = "gfx950";
+        return 0;
+    case 45:
+    case 46:
+    case 47:
+    case 48:
+    {
+        /* 4c fused dgrad weights (the 4c dgrad entry with dgrad_fused_weights):
+         * B is the original weight, read flipped / k<->c transposed in the
+         * prologue -- 45/46 per-element gathers (46 = the gfx942 path),
+         * 47/48 LDS staging + ds_read_b64_tr_b16 (48 = 1x1, partial pass). */
+        static const int cfg[4][8] = {
+            /* N, H, W, groups, KH, PAD, block_q, block_groups */
+            {2, 13, 13, 32, 3, 1, 4, 16},
+            {1, 8, 8, 16, 3, 1, 8, 16},
+            {2, 14, 14, 32, 3, 1, 16, 32},
+            {1, 7, 9, 64, 1, 0, 4, 64},
+        };
+        const int* c = cfg[idx - 45];
+        p.N = c[0];
+        p.H = c[1];
+        p.W = c[2];
+        p.groups = c[3];
+        p.cpg = 4;
+        p.kpg = 4;
+        p.KH = c[4];
+        p.KW = c[4];
+        p.PAD = c[5];
+        p.dtype = (idx == 46 || idx == 48) ? "fp16" : "bf16";
+        *s4 = rocke_direct_conv_4c_spec_default();
+        s4->problem = p;
+        s4->name = "direct_conv_4c_dgrad";
+        s4->block_q = c[6];
+        s4->block_groups = c[7];
+        s4->dgrad_fused_weights = true;
+        s4->dgrad_weights_lds = (idx >= 47);
+        *kind = KIND_4C;
+        *arch = (idx == 46) ? "gfx942" : "gfx950";
+        return 0;
+    }
     default:
         return -1;
     }
@@ -568,8 +880,9 @@ int main(int argc, char** argv)
     rocke_direct_conv_dgrad_spec_t sdgrad;
     rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
     rocke_direct_conv_wgrad_spec_t swg;
+    rocke_direct_depthwise_dgrad_win_spec_t swin;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &swg, &arch)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &swg, &swin, &arch)
        != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -594,6 +907,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
     else if(kind == KIND_WGRAD)
         kernel = rocke_build_direct_conv_wgrad_new(&b, &swg, arch);
+    else if(kind == KIND_DW_DGRAD_WIN)
+        kernel = rocke_build_direct_depthwise_dgrad_win_new(&b, &swin, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)

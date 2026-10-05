@@ -729,6 +729,29 @@ class IRBuilder:
             )
         return self._op("arith.fma", [a, b, c], [a.type], result_name_hint="fma").result
 
+    def fdot2(self, a: Value, b: Value, c: Value) -> Value:
+        """Two-wide dot product with f32 accumulate: ``a.x*b.x + a.y*b.y + c``.
+
+        ``a`` and ``b`` are ``vec<f16x2>`` or ``vec<bf16x2>`` (same type),
+        ``c`` and the result are f32. Lowers to ``llvm.amdgcn.fdot2`` (f16)
+        or ``llvm.amdgcn.fdot2.f32.bf16`` (bf16) with clamp off, which the
+        gfx9 backend selects as ``v_dot2c_f32_f16`` / ``v_dot2c_f32_bf16``.
+        """
+        ok_vec = (
+            isinstance(a.type, VectorType)
+            and a.type == b.type
+            and a.type.count == 2
+            and a.type.elem in (F16, BF16)
+        )
+        if not ok_vec or c.type != F32:
+            raise ValueError(
+                f"fdot2 expects (vec<f16|bf16 x2>, same, f32); got {a.type.name}, "
+                f"{b.type.name}, {c.type.name}"
+            )
+        return self._op(
+            "arith.fdot2", [a, b, c], [F32], result_name_hint="fdot2"
+        ).result
+
     def fmax3(self, a: Value, b: Value, c: Value) -> Value:
         """Three-way floating-point max — ``max(a, max(b, c))``.
 
@@ -2404,6 +2427,18 @@ class IRBuilder:
         Lowers to `@llvm.amdgcn.mfma.f32.4x4x4f16` (3 immarg).
         """
         return self.mma("mfma_f32_4x4x4_f16", a, b, c)
+
+    def mfma_f32_4x4x4_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """The 4x4x4 bf16 MFMA atom — 16 independent 4x4 matmuls per wave.
+
+        Same lane layout as :meth:`mfma_f32_4x4x4_f16` (per lane on wave64:
+        A `<4 x bfloat>`, B `<4 x bfloat>`, acc `<4 x float>`; `batch =
+        lane / 4`), with bf16 operands. Lowers through the CDNA2+ `_1k`
+        variant `@llvm.amdgcn.mfma.f32.4x4x4bf16.1k`: the operands are
+        bitcast `<4 x bfloat>` -> `<4 x i16>` first, exactly like
+        :meth:`mfma_f32_16x16x16_bf16`. Selectable on gfx942 and gfx950.
+        """
+        return self.mma("mfma_f32_4x4x4_bf16", a, b, c)
 
     # ----- vector type casts (for packed buffer-load + LDS reads) -----
 

@@ -49,7 +49,7 @@ dispatcher) from `cpg = C / groups`:
 | cpg | Spec class           | MFMA atom                    | Requirement       |
 |-----|----------------------|------------------------------|-------------------|
 | 1   | `DirectDepthwiseSpec`| scalar FMA (no MFMA)         | stride = 1        |
-| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_f16`        | cpg = kpg = 4     |
+| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_{f16,bf16}` | cpg = kpg = 4     |
 | 8   | `DirectConv8cSpec`   | `mfma_f32_16x16x16_f16`     | cpg = kpg = 8     |
 | 16  | `DirectConv16cSpec`  | `mfma_f32_16x16x16_f16`/`32`| cpg = kpg = 16    |
 | 32  | `DirectConv32cSpec`  | `mfma_f32_32x32x8_f16`      | cpg = kpg = 32    |
@@ -75,13 +75,40 @@ Launch grid: `(ceil(W / block_w), ceil(groups / block_ch), N)`.
 
 Uses sixteen independent `mfma_f32_4x4x4_f16` calls per `(y, x)` step to
 cover all 4 input channels in one atom.  Each wave computes 4 output channels
-for 4 output positions simultaneously.
+for 4 output positions simultaneously.  bf16 I/O selects the
+`mfma_f32_4x4x4_bf16` twin (the `_1k` intrinsic, same lane layout); fp16
+output is unchanged.
 
 Tunable parameters:
 - `block_q` — output W positions per block (must be a multiple of 4; default 4).
 - `block_groups` — groups per workgroup (must be a multiple of 16; default 16).
 
 Launch grid: `(ceil(W / block_q), groups // block_groups, N)`.
+
+**Backward data (4c dgrad).** For stride 1, same padding and a 1x1 or 3x3
+filter, dgrad of a cpg = kpg = 4 problem runs on the same kernel:
+`dX = conv(dY, W_T)` with `W_T[c, r', s', k] = W[k, KH-1-r', KW-1-s', c]`.
+
+- `make_dgrad_4c_spec(problem, block_q, block_groups)` — the transposed spec
+  (kernel name prefix `direct_conv_4c_dgrad`).
+- `dgrad_4c_spec_for_problem(problem, arch)` — dispatch hook; returns `None`
+  when the 4c path does not apply (`is_valid_dgrad_4c_problem` gives the reason).
+- `build_direct_4c_dgrad(spec, arch)` — `(transpose_kernel, main_kernel)`.
+- `direct_4c_dgrad_launch(spec)` — both launch geometries and the `W_T`
+  workspace size.  The main kernel takes `(A=dY, B=W_T, D=dX)`.
+
+With `dgrad_fused_weights=True` (the default of `dgrad_4c_spec_for_problem`)
+the transpose kernel and the workspace go away: the 4c kernel takes the
+original weight (`A=dY, B=W, D=dX`) and builds each lane's flipped, k<->c
+transposed fragment in its prologue — four scalar gathers per tap, or, with
+`dgrad_weights_lds=True` (gfx950), one 16-byte-load copy of the workgroup's
+contiguous weight slice into LDS and one `ds_read_b64_tr_b16` per tap.
+`build_direct_4c_dgrad` then returns `(None, main_kernel)` and
+`direct_4c_dgrad_launch` reports no transpose geometry and a zero workspace.
+Both forms are mirrored in the C++ engine (parity configs 45-48).
+
+`benchmark_direct_conv.py --direction dgrad` sweeps this pipeline next to the
+generic direct-MFMA dgrad (`--dgrad-family {all,generic,4c,fused}`).
 
 ### cpg = 8 — `DirectConv8cSpec`
 
@@ -178,6 +205,29 @@ Tunable parameters common to all grouped specs:
 | `block_q`       | 16      | Output W-positions per block; must be ≥ 16 and a multiple of 16 |
 | `block_groups`  | 8       | Groups per workgroup; `groups % block_groups == 0` required |
 | `double_buffer` | True    | Double-buffer the B (weight) tile in LDS |
+
+`DirectConvSpec` only (dgrad and weight-preload knobs):
+
+| Parameter             | Default | Notes |
+|-----------------------|---------|-------|
+| `preload_weights`     | False   | `waves_k == 1`: load every weight fragment once in the prologue (B keeps the plain `[total_k, KH, KW, cpg]` layout) |
+| `dgrad_fused_weights` | False   | Dgrad spec from `make_dgrad_fprop_spec`: B is the original `W` and the prologue reads it flipped / k<->c transposed — no transpose pre-pass, no workspace. Implies the preload; `waves_k == 1`, no `runtime_k_loop` / `persistent_grid` |
+| `dgrad_weights_lds`   | False   | With `dgrad_fused_weights`: stage the raw W slice in LDS and read fragments with `ds_read_b64_tr_b16` (needs transpose LDS reads, `kpg % 4 == 0`, slice <= `DGRAD_WEIGHTS_LDS_BUDGET`); the row buffers are allocated after it so the smem pool overlays them |
+| `waves_per_eu`        | 0       | > 0 emits `"amdgpu-waves-per-eu"="N,N"` |
+
+The preloaded fragments must fit `PRELOAD_WEIGHT_VGPR_BUDGET` VGPRs per lane.
+
+**Single-kernel direct dgrad (dispatch hooks).**
+`direct_dgrad_spec_for_problem(problem, arch=...)` returns a single-kernel
+grouped stride-1 dgrad spec — the 4c kernel for cpg = kpg = 4, otherwise a
+`DirectConvSpec` with `dgrad_fused_weights` (LDS-staged where supported) — or
+`None` when no fused variant fits or the shape is outside the kernel's
+domain (non-"same" padding `2*PAD != KH-1` or `!= KW-1`, `cpg` or `kpg` not a
+multiple of 4, stride > 1; `DirectConvSpec.validate` / `is_valid_spec` reject
+the same shapes for fprop and the pre-pass dgrad); `direct_dgrad_launch(spec)` gives grid /
+block (workspace 0) and `build_direct_dgrad(spec, arch=...)` the kernel. Launch
+with `A = dY`, `B = W`, `D = dX`. The generic `DirectConvSpec` kernel has no
+C++ builder mirror (its IR is lowered by either engine); the 4c kernel does.
 
 For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`:
 
@@ -432,6 +482,10 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 
 - `DirectConv4cSpec` and `build_direct_conv_4c`: sixteen independent
   `mfma_f32_4x4x4_f16` calls per `(y, x)` step.
+- bf16 I/O via `mfma_f32_4x4x4_bf16`, and the 4c dgrad entry
+  (`make_dgrad_4c_spec`, `dgrad_4c_spec_for_problem`, `build_direct_4c_dgrad`).
+- Fused dgrad weight transform (`dgrad_fused_weights`, `dgrad_weights_lds`):
+  single-kernel 4c dgrad, the default of `dgrad_4c_spec_for_problem`.
 
 ### cpg=8 variant
 
@@ -465,6 +519,17 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 - `benchmark_direct_conv.py` now accepts `--miopen-cmd` and `--miopen-file` to
   load conv shapes from MIOpenDriver command strings.
 
+### Single-kernel direct-MFMA dgrad
+
+- `DirectConvSpec.preload_weights`, `dgrad_fused_weights`, `dgrad_weights_lds`
+  and `waves_per_eu`; `make_dgrad_fprop_spec` forwards them (plus `fold_k32`).
+- `direct_dgrad_spec_for_problem` / `direct_dgrad_launch` /
+  `build_direct_dgrad`: the dispatch-facing single-kernel dgrad hooks.
+- `plan_direct_mfma_dgrad` accepts fused `DirectConvSpec` and
+  `DirectConv4cSpec` main specs (one `main` stage bound to `W`, no workspace)
+  as well as the pre-pass forms; the grouped-convolution dispatcher launches
+  every form through it.
+
 ### `kpg != cpg` for the generic dispatcher
 
 - `DirectConvSpec` / `is_valid_spec` no longer require `kpg == cpg`; any
@@ -485,10 +550,20 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 
 ## Dual-Engine Parity
 
-Every kernel in this file exists in both the Python engine (this module) and the
-C++ engine (`cpp/instances/common/conv_direct_grouped_*.cpp`), and the two
-**must emit the same LLVM-IR bytes**.  A change to any builder here has to be
-mirrored into its C++ peer in the same change, and proven with:
+The kernels in this file with a C++ builder (`build_direct_conv_{4c,8c,16c,32c}`,
+`build_direct_depthwise`, `build_direct_depthwise_spatial`,
+`build_direct_depthwise_dgrad`, the scalar `build_direct_conv_dgrad` and
+`build_direct_conv_wgrad`; see `rocke_build_direct_*` in
+`cpp/include/rocke/instance_conv_direct_grouped.h`) exist in both the
+Python engine (this module) and the C++ engine
+(`cpp/instances/common/conv_direct_grouped_*.cpp`), and the two **must emit the
+same LLVM-IR bytes**.  The exception is the generic `build_direct_conv`
+(`DirectConvSpec`, including its dgrad knobs `preload_weights`,
+`dgrad_fused_weights`, `dgrad_weights_lds` and `waves_per_eu`): it has no C++
+builder mirror yet (nor do the other builders not listed above); only its
+emitted IR goes through either engine's lowerer (pinned by representative-IR
+golden cases). Porting it to C++ is a tracked follow-up. A change to a mirrored builder has to be mirrored into its C++ peer
+in the same change, and proven with:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
@@ -500,7 +575,9 @@ The gate drives the sampled spec configs in
 `tests/instances/parity/conv_direct_grouped_emit.{py,c}` — configs 0-24 are the
 existing direct-conv variants, 25-31 the wgrad variant (25 `mfma_k=32`, 26
 `mfma_k=16`, 27 multi-wave K/C/Q, 28-29 the two gfx942 rejection paths, 30-31
-bf16 at `mfma_k=32` / `16`).  Add a config to **both** emitters when you add a
+bf16 at `mfma_k=32` / `16`), 32-41 the windowed depthwise dgrad, 42-44 4c
+bf16, 45-48 4c with the fused dgrad weight transform (45-46 gathers incl.
+gfx942, 47-48 LDS + transpose reads).  Add a config to **both** emitters when you add a
 variant.
 
 | Python | C++ |

@@ -68,6 +68,12 @@ For i in 0..3:
 
 The batch index is composed by the caller. `lane_to_output` returns only the in-atom `(row, col)`.
 
+The bf16 twin is the bare `IRBuilder.mfma_f32_4x4x4_bf16` op (not an `MfmaAtom`
+catalog entry). It uses the same lane layout and lowers through the `_1k`
+intrinsic `llvm.amdgcn.mfma.f32.4x4x4bf16.1k` with `<4 x i16>` operands
+(`v_mfma_f32_4x4x4_16b_bf16` on gfx950). The direct-conv 4c kernel selects it
+for bf16 I/O.
+
 ## Per-Lane K-Slice Layouts (Input A)
 
 For each f16 atom on wave64, the per-lane A operand covers the following K slice:

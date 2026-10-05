@@ -85,7 +85,9 @@ def _spec(idx: int):
             "gfx950",
         )
 
-    # Config 3: async_dma pipeline, gfx950
+    # Config 3: runtime sub-GEMM record on a stride-1 problem (static_sub_gemm
+    # off): binary search + record loads, flat K loop. (Previously async_dma,
+    # which dgrad now rejects instead of silently ignoring.)
     if idx == 3:
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
         return (
@@ -101,7 +103,7 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
-                async_dma=True,
+                static_sub_gemm=False,
             ),
             "gfx950",
         )
@@ -229,7 +231,9 @@ def _spec(idx: int):
             "gfx1201",
         )
 
-    # Config 10: chiplet_swizzle, gfx950
+    # Config 10: folded record with the flat K loop (tap_outer_k off); not a
+    # dispatch warp tile, so no waves_per_eu accumulator hint.
+    # (Previously chiplet_swizzle, which dgrad now rejects instead of ignoring.)
     if idx == 10:
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
         return (
@@ -245,10 +249,7 @@ def _spec(idx: int):
                 warp_tile_k=16,
                 pipeline="mem",
                 epilogue="default",
-                chiplet_swizzle=True,
-                chiplet_wgm=8,
-                chiplet_num_xcds=8,
-                chiplet_chunk_size=64,
+                tap_outer_k=False,
             ),
             "gfx950",
         )
@@ -324,6 +325,264 @@ def _spec(idx: int):
                 lds_k_outer=True,
             ),
             "gfx1250",
+        )
+
+    if idx == 14:
+        # K not a multiple of tile_k: a K tile straddles two taps, so the
+        # folded record keeps the flat K loop.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=48, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 15:
+        # Tap-outer K loop on an odd, non-square, partial-tile problem: N=1,
+        # 13x17, pad 2 with a 5x5 filter, C not a multiple of tile_n.
+        p = _cp(N=1, Hi=13, Wi=17, C=48, K=64, Y=5, X=5, pH=2, pW=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 16:
+        # Tap-outer K loop with the M-outer B tile, compv3 schedule hints.
+        p = _cp(N=4, Hi=28, Wi=28, C=128, K=128, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=64,
+                tile_k=64,
+                warp_m=4,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv3",
+                epilogue="cshuffle",
+            ),
+            "gfx950",
+        )
+
+    if idx == 17:
+        # Ungrouped pointwise (1x1, stride 1, pad 0): static_sub_gemm stays on
+        # but the record is not folded (runtime record, opaque trip count);
+        # C not a multiple of tile_n.
+        p = _cp(N=2, Hi=14, Wi=14, C=96, K=128, Y=1, X=1, pH=0, pW=0)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 18:
+        # Folded record, flat K loop, 4-element dY and W loads (K and C not
+        # multiples of 8): the waves_per_eu accumulator hint is withheld.
+        p = _cp(N=2, Hi=13, Wi=11, C=100, K=68, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 19:
+        # Folded record, flat K loop, 8-element loads, explicit waves_per_eu:
+        # the explicit value wins over the accumulator hint.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=48, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                waves_per_eu=1,
+            ),
+            "gfx950",
+        )
+
+    if idx == 20:
+        # The large-problem dispatch tile: 128x128x64, 2x2 waves, 16x16x32
+        # atom, K-outer B, tap-outer K loop. fp16: the C++ CoalescedTileLoader
+        # mirror has no elem_dtype yet, so a bf16 config cannot be compared.
+        p = _cp(N=2, Hi=16, Wi=16, C=256, K=256, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 21:
+        # Flat K loop (kpg not a multiple of tile_k), 8-element loads, 256 fp32
+        # accumulators per lane (256x128 tile, 1x2 waves, 32x32 atom): above
+        # 128 the record is not folded and the waves_per_eu accumulator hint
+        # is withheld (both would add spills).
+        p = _cp(N=2, Hi=14, Wi=14, C=128, K=48, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=256,
+                tile_n=128,
+                tile_k=64,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 22:
+        # Flat K loop, 8-element loads, 128 fp32 accumulators per lane with the
+        # 16x16x32 atom on a single warp (64x128 tile, 1x1 waves): the record
+        # is folded, but the waves_per_eu accumulator hint is withheld (not a
+        # dispatch warp tile; under its 256-register cap this tile spills).
+        p = _cp(N=2, Hi=14, Wi=14, C=128, K=48, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=128,
+                tile_k=64,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 23:
+        # Flat K loop, 8-element loads, 64 fp32 accumulators per lane on a
+        # warp tile that is not a dispatch tile (256x64x64, 2x2 waves, 32x32
+        # atom): the record is folded but the waves_per_eu accumulator hint
+        # is withheld (it is applied only to the two dispatch tiles).
+        p = _cp(N=2, Hi=14, Wi=14, C=128, K=48, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=256,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 24:
+        # Tap-aligned K, 256 fp32 accumulators per lane (256x128 tile, 1x2
+        # waves, 32x32 atom) and an N tile wider than the input channels
+        # (C=64 < tile_n): the folded record with the tap-outer K loop (the
+        # 128-accumulator fold limit applies to the flat loop only).
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=128, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=256,
+                tile_n=128,
+                tile_k=64,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 25:
+        # The large-problem dispatch tile (128x128x64, 2x2 waves, 16x16x32
+        # atom) on a flat K loop (kpg 96 not a multiple of tile_k): folded
+        # record with the waves_per_eu accumulator hint. fp16, see config 20.
+        p = _cp(N=2, Hi=16, Wi=16, C=256, K=96, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
         )
 
     raise SystemExit(f"unknown config index {idx}")

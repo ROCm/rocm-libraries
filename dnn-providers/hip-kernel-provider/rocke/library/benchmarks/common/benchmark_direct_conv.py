@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -38,9 +39,74 @@ _BLOCK_Q = (16, 32)
 _BLOCK_GROUPS = (1, 2, 4, 8, 16)
 _DOUBLE_BUFFER = (True, False)
 
+# Grouped MFMA dgrad (transposed-fprop pipeline) sweep dimensions.
+# block_h=0 (no H tiling: each workgroup streams the whole image height) is
+# a first-class point -- it is the best setting on large-batch shapes, where
+# N * q_tiles * g_tiles already fills the device without H tiles. block_h=4
+# is the setting dispatch picks for small grids and for 5x5/7x7 filters.
+_DGRAD_BLOCK_H = (0, 4, 8, 16)
+# (waves_q, waves_k, runtime_k_loop, persistent_grid, fold_k32).
+# (1, 1, *, *, True) is the single-wave 16x16x32 path; it reads plain W_T like
+# the default path, so it needs no reorganize pre-pass. Combos whose waves_k
+# does not divide the K-atom count of the chosen atom width are pruned by
+# is_valid_spec for the problem at hand.
+_DGRAD_WAVES_COMBOS = (
+    (1, 1, False, False, False),
+    (1, 1, False, False, True),
+    (1, 1, True, False, False),
+    (1, 2, False, False, False),
+    (1, 4, False, False, False),
+    (1, 4, True, False, False),
+    (1, 2, False, False, True),
+    (1, 6, False, False, True),
+)
+
 # Depthwise (cpg == 1) sweep dimensions.
 _DW_BLOCK_W = (4, 8, 16, 32)
 _DW_BLOCK_WAVES = (1, 2, 4)
+# The ho-streaming depthwise dgrad builder unrolls every (ho, r, s, j) tap, so
+# block_w at or above this with a filter of 7x7 or larger does not finish
+# compiling in a usable time; the sweep skips those combinations.
+_DW_DGRAD_STREAM_MAX_BW_LARGE_FILTER = 16
+_DW_DGRAD_LARGE_FILTER_TAPS = 49
+
+
+def _dw_dgrad_windowed_combos(p, arch: str) -> list:
+    """Windowed depthwise dgrad knob combinations (stride 1) for the sweep.
+
+    block_w: the whole row when W <= 16, plus tiles of about 8 and 16 columns
+    (divisors of W where one is near); waves 1/2/4; f32 FMA, packed channel
+    pairs, or dot2 (gfx950); whole H, or an H split when H spans at least four
+    filter heights. Each tuple is (block_w, waves, ch_per_lane, block_h, dot2).
+    """
+    W, H, KH = p.W, p.H, p.KH
+    bws = {math.ceil(W / math.ceil(W / t)) for t in (8, 16)}
+    if W <= 16:
+        bws.add(W)
+    modes = [(1, False), (2, False)]
+    if arch == "gfx950":
+        modes.append((1, True))
+    bhs = [0]
+    if H >= 4 * KH:
+        bhs += sorted({max(2 * KH, 8), H // 2})
+    return [
+        (bw, wv, cpl, bh, dot2)
+        for bw in sorted(bws)
+        for wv in _DW_BLOCK_WAVES
+        for cpl, dot2 in modes
+        for bh in bhs
+    ]
+
+
+# 4c dgrad (cpg == kpg == 4, batched 4x4x4 MFMA) sweep dimensions.
+# block_q <= 32 keeps q_tiles_per_wave inside the C++ engine's tile bound.
+_DGRAD_4C_BLOCK_Q = (4, 8, 16, 32)
+_DGRAD_4C_BLOCK_GROUPS = (16, 32, 64)
+
+# Single-kernel dgrad (fused weight transform, ``dgrad_fused_weights``) sweep
+# dimensions for the generic direct-MFMA kernel (block_h as the pre-pass sweep).
+_DGRAD_FUSED_BLOCK_H = _DGRAD_BLOCK_H
+_DGRAD_FUSED_WAVES_PER_EU = (0, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +124,50 @@ class Result:
     tflops: float
     gbps: float
     passed: "bool | None" = None
+
+
+@dataclass(frozen=True)
+class _MfmaDgradPipeline:
+    """A planned MFMA dgrad pipeline and the IR of each of its stages."""
+
+    plan: object  # kernels.common.conv_direct_grouped.DirectMfmaDgradPlan
+    kernels: tuple
+
+
+def _mfma_dgrad_label(combo) -> str:
+    """Every knob that distinguishes two MFMA dgrad sweep points."""
+    if combo[0] == "4c":
+        _, bq, bg, tag = combo
+        if tag:
+            return f"bq={bq} bg={bg} 4c+{tag} MFMA 1-kernel"
+        return f"bq={bq} bg={bg} 4c MFMA"
+    if combo[0] == "fused":
+        _, bq, bg, bh, k32, tag, wpe = combo
+        return (
+            f"bq={bq} bg={bg} bh={bh}{'+k32' if k32 else ''}+{tag}"
+            f"{f'+we{wpe}' if wpe else ''} MFMA 1-kernel"
+        )
+    bq, bg, bh, wq, wk, rk, pg, k32 = combo
+    flags = "".join(tag for tag, on in (("+rk", rk), ("+pg", pg), ("+k32", k32)) if on)
+    return f"bq={bq} bg={bg} bh={bh} wq={wq} wk={wk}{flags} MFMA"
+
+
+def _conv_rule_bad_count(out_t, ref_out, dtype: str) -> int:
+    """Elements failing the manifest-runner conv rule (NaN counts as bad).
+
+    ``bad = |D - ref| > tol + tol * |ref|`` with ``tol = 1e-2``; for bf16 the
+    reference is first rounded to bf16 (RNE), as the manifest runner does.
+    """
+    import torch
+
+    tol = 1e-2
+    out_f32 = out_t.float().cpu()
+    ref_f32 = ref_out.float().cpu()
+    if dtype == "bf16":
+        ref_f32 = ref_f32.to(torch.bfloat16).float()
+    err = (out_f32 - ref_f32).abs()
+    ok = err <= tol + tol * ref_f32.abs()
+    return int((~ok).sum())
 
 
 @dataclass
@@ -1210,11 +1320,25 @@ def _run_dgrad_sweep(
         # Depthwise dgrad: use ho-streaming kernel (better DRAM efficiency).
         from kernels.common.conv_direct_grouped import (
             DirectDepthwiseDgradStreamSpec,
+            DirectDepthwiseDgradWindowedSpec,
             build_direct_depthwise_dgrad_streaming,
+            build_direct_depthwise_dgrad_windowed,
             is_valid_depthwise_dgrad_stream_spec,
+            is_valid_depthwise_dgrad_win_spec,
         )
 
-        combos_dw = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+        large_filter = p.KH * p.KW >= _DW_DGRAD_LARGE_FILTER_TAPS
+        stream_bws = [
+            bw
+            for bw in _DW_BLOCK_W
+            if not (large_filter and bw > _DW_DGRAD_STREAM_MAX_BW_LARGE_FILTER)
+        ]
+        combos_dw = [
+            ("stream", bw, wv)
+            for bw, wv in itertools.product(stream_bws, _DW_BLOCK_WAVES)
+        ]
+        if p.stride == 1:
+            combos_dw += [("win",) + c for c in _dw_dgrad_windowed_combos(p, arch)]
         print(
             f"Sweeping {len(combos_dw)} depthwise dgrad combinations for {arch} {dtype} "
             f"{p.short()} (stride={p.stride}) ...",
@@ -1222,80 +1346,83 @@ def _run_dgrad_sweep(
         )
         n_skipped = 0
         pending = []
-        for block_w, block_waves in combos_dw:
-            spec = DirectDepthwiseDgradStreamSpec(
-                problem=p,
-                name="rocke_bench_dw_dgrad",
-                block_w=block_w,
-                block_waves=block_waves,
-            )
-            ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+        for combo in combos_dw:
+            if combo[0] == "win":
+                _, block_w, block_waves, cpl, block_h, dot2 = combo
+                spec = DirectDepthwiseDgradWindowedSpec(
+                    problem=p,
+                    name="rocke_bench_dw_dgrad_win",
+                    block_w=block_w,
+                    block_waves=block_waves,
+                    ch_per_lane=cpl,
+                    block_h=block_h,
+                    dot2=dot2,
+                )
+                ok, _ = is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
+                build = build_direct_depthwise_dgrad_windowed
+            else:
+                _, block_w, block_waves = combo
+                spec = DirectDepthwiseDgradStreamSpec(
+                    problem=p,
+                    name="rocke_bench_dw_dgrad",
+                    block_w=block_w,
+                    block_waves=block_waves,
+                )
+                ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+                build = build_direct_depthwise_dgrad_streaming
             if not ok:
                 n_skipped += 1
                 continue
             try:
-                kernel = build_direct_depthwise_dgrad_streaming(spec, arch=arch)
+                kernel = build(spec, arch=arch)
             except ValueError:
                 n_skipped += 1
                 continue
-            pending.append(((block_w, block_waves), spec, kernel))
+            pending.append((combo, spec, kernel))
     else:
-        # Grouped dgrad: use the 2-kernel MFMA pipeline (transpose + fprop) for
+        # Grouped dgrad: use the MFMA pipeline (weight pre-pass + fprop) for
         # stride=1, fall back to scalar FMA for stride > 1.
         # H-tiling (block_h) ensures enough blocks/CU even for groups=1.
         from kernels.common.conv_direct_grouped import (
-            make_dgrad_fprop_spec,
-            build_direct_transpose_weights_dgrad,
-            DirectTransposeWeightsDgradSpec,
-            build_direct_reorganize_weights,
-            DirectReorganizeWeightsSpec,
-            build_direct_mfma_dgrad,
-            direct_dgrad_workspace_bytes,
-            direct_dgrad_coalesced_workspace_bytes,
+            direct_mfma_dgrad_stage_kernel,
             is_valid_spec as is_valid_fprop_spec,
-            build_direct_conv,
+            make_dgrad_fprop_spec,
+            plan_direct_mfma_dgrad,
         )
 
         use_mfma = p.stride == 1
+        dgrad_family = getattr(args, "dgrad_family", "all")
 
         if use_mfma:
+            from dataclasses import replace as dc_replace
+
             valid_bgs = [bg for bg in _BLOCK_GROUPS if p.groups % bg == 0]
             combos = list(itertools.product(_BLOCK_Q, valid_bgs))
             print(
-                f"Sweeping {len(combos)} MFMA dgrad combinations for {arch} {dtype} {p.short()} "
-                f"(cpg={p.cpg}, kpg={p.kpg}) ...",
+                f"Sweeping MFMA dgrad over {len(combos)} (block_q, block_groups) pairs x "
+                f"{len(_DGRAD_BLOCK_H)} block_h x {len(_DGRAD_WAVES_COMBOS)} wave combos "
+                f"for {arch} {dtype} {p.short()} (cpg={p.cpg}, kpg={p.kpg}) ...",
                 flush=True,
             )
-            # Sweep (block_q, block_h, waves_q, waves_k, runtime_k_loop) combos.
-            # runtime_k_loop=True: loads 1 K-atom at a time → ~55 VGPRs → 4 blks/CU.
-            # waves_k>1 + preload: loads all K-atoms at once → ~200 VGPRs → 1 blk/CU.
-            _BLOCK_H_VALS = (8, 16)
-            # (waves_q, waves_k, runtime_k_loop, persistent_grid, fold_k32)
-            _WAVES_COMBOS = [
-                (1, 1, False, False, False),
-                (1, 4, False, False, False),
-                (1, 4, True, False, False),
-                (1, 2, False, False, True),  # fold_k32: N_K_ATOMS=6, wk=2→N_K_LOCAL=3
-                (1, 6, False, False, True),
-            ]  # fold_k32: N_K_ATOMS=6, wk=6→N_K_LOCAL=1
             n_skipped = 0
             pending = []
+            if dgrad_family in ("4c", "fused"):
+                combos = []
             for block_q, block_groups in combos:
-                for block_h in _BLOCK_H_VALS:
-                    for waves_q, waves_k, use_rk, use_pg, use_k32 in _WAVES_COMBOS:
-                        if block_q // waves_q < 16:
-                            n_skipped += 1
-                            continue
-                        # fold_k32 requires kpg divisible by 32 AND N_K_ATOMS_32 divisible by waves_k.
-                        # Without fold_k32 use ceil(kpg/16) atoms; still require divisibility by waves_k.
-                        if use_k32:
-                            if p.kpg % 32 != 0:
-                                n_skipped += 1
-                                continue
-                            N_KA = p.kpg // 32
-                        else:
-                            N_KA = (p.kpg + 15) // 16
-                        if N_KA == 0 or N_KA % waves_k != 0:
+                for block_h in _DGRAD_BLOCK_H:
+                    # One H tile covering the whole image is block_h=0 with
+                    # extra runtime guards; skip it rather than time it twice.
+                    if block_h >= p.Ho:
+                        n_skipped += 1
+                        continue
+                    for (
+                        waves_q,
+                        waves_k,
+                        use_rk,
+                        use_pg,
+                        use_k32,
+                    ) in _DGRAD_WAVES_COMBOS:
+                        if use_k32 and p.kpg % 32 != 0:
                             n_skipped += 1
                             continue
                         fprop_spec = make_dgrad_fprop_spec(
@@ -1308,26 +1435,20 @@ def _run_dgrad_sweep(
                             runtime_k_loop=use_rk,
                             persistent_grid=use_pg,
                         )
-                        from dataclasses import replace as dc_replace
-
                         if use_k32:
                             fprop_spec = dc_replace(fprop_spec, fold_k32=True)
+                        # is_valid_spec runs validate() too (waves_k against the
+                        # atom width actually used, LDS footprint).
                         ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
                         if not ok:
                             n_skipped += 1
                             continue
                         try:
-                            kt1 = build_direct_transpose_weights_dgrad(
-                                DirectTransposeWeightsDgradSpec(problem=p), arch=arch
+                            plan = plan_direct_mfma_dgrad(p, fprop_spec)
+                            stage_kernels = tuple(
+                                direct_mfma_dgrad_stage_kernel(st, arch=arch)
+                                for st in plan.stages
                             )
-                            kt2 = build_direct_reorganize_weights(
-                                DirectReorganizeWeightsSpec(
-                                    problem=p, fold_k32=use_k32
-                                ),
-                                arch=arch,
-                            )
-                            kf = build_direct_conv(fprop_spec, arch=arch)
-                            kt = (kt1, kt2)  # two-step transpose pipeline
                         except ValueError:
                             n_skipped += 1
                             continue
@@ -1344,7 +1465,121 @@ def _run_dgrad_sweep(
                                     use_k32,
                                 ),
                                 fprop_spec,
-                                (kt, kf),
+                                _MfmaDgradPipeline(plan=plan, kernels=stage_kernels),
+                            )
+                        )
+            # 4c dgrad: cpg == kpg == 4 runs the batched 4x4x4 MFMA kernel on
+            # (dY, W_T) after one transpose pre-pass, or on (dY, W) alone with
+            # the fused weight transform.
+            from kernels.common.conv_direct_grouped import (
+                is_valid_dgrad_4c_problem,
+                is_valid_spec_4c,
+                make_dgrad_4c_spec,
+            )
+            from rocke.core.arch import ArchTarget
+
+            _has_tr = ArchTarget.from_gfx(arch).memory.has_ds_read_tr
+            ok4c, why4c = is_valid_dgrad_4c_problem(p)
+            if dgrad_family in ("all", "4c", "fused") and ok4c:
+                # 4c forms: pre-pass pipeline (not in the "fused" family) and
+                # the single kernel with the fused weight transform (LDS-staged
+                # transpose reads where the target has them, gathers otherwise).
+                forms4c = [] if dgrad_family == "fused" else [(False, False)]
+                forms4c.append((True, bool(_has_tr)))
+                for (block_q, block_groups), (fw4c, wl4c) in itertools.product(
+                    itertools.product(_DGRAD_4C_BLOCK_Q, _DGRAD_4C_BLOCK_GROUPS),
+                    forms4c,
+                ):
+                    if p.groups % block_groups != 0:
+                        n_skipped += 1
+                        continue
+                    spec4c = make_dgrad_4c_spec(
+                        p,
+                        block_q=block_q,
+                        block_groups=block_groups,
+                        dgrad_fused_weights=fw4c,
+                        dgrad_weights_lds=wl4c,
+                    )
+                    ok, _ = is_valid_spec_4c(spec4c, arch=arch)
+                    if not ok:
+                        n_skipped += 1
+                        continue
+                    try:
+                        plan = plan_direct_mfma_dgrad(p, spec4c)
+                        stage_kernels = tuple(
+                            direct_mfma_dgrad_stage_kernel(st, arch=arch)
+                            for st in plan.stages
+                        )
+                    except ValueError:
+                        n_skipped += 1
+                        continue
+                    tag4c = ("fwl" if wl4c else "fw") if fw4c else ""
+                    pending.append(
+                        (
+                            ("4c", block_q, block_groups, tag4c),
+                            spec4c,
+                            _MfmaDgradPipeline(plan=plan, kernels=stage_kernels),
+                        )
+                    )
+            elif dgrad_family == "4c":
+                print(f"[skip] 4c dgrad not applicable: {why4c}", flush=True)
+
+            # Single-kernel generic direct-MFMA dgrad: the main kernel reads W
+            # with flipped / k<->c transposed addressing (dgrad_fused_weights),
+            # LDS-staged + transpose reads where available, else gathers.
+            if dgrad_family in ("all", "fused") and p.kpg % 4 == 0:
+                k32_opts = (False, True) if p.kpg % 32 == 0 else (False,)
+                for block_q, block_groups in itertools.product(_BLOCK_Q, valid_bgs):
+                    for block_h, use_k32, wpe in itertools.product(
+                        _DGRAD_FUSED_BLOCK_H, k32_opts, _DGRAD_FUSED_WAVES_PER_EU
+                    ):
+                        if block_h >= p.Ho:
+                            n_skipped += 1
+                            continue
+                        spec_fw = None
+                        for use_lds in (True, False) if _has_tr else (False,):
+                            cand = make_dgrad_fprop_spec(
+                                p,
+                                block_q=block_q,
+                                block_groups=block_groups,
+                                block_h=block_h,
+                                fold_k32=use_k32,
+                                dgrad_fused_weights=True,
+                                dgrad_weights_lds=use_lds,
+                                waves_per_eu=wpe,
+                            )
+                            try:
+                                cand.validate()
+                            except ValueError:
+                                continue
+                            if is_valid_fprop_spec(cand, arch=arch)[0]:
+                                spec_fw = cand
+                                break
+                        if spec_fw is None:
+                            n_skipped += 1
+                            continue
+                        try:
+                            plan = plan_direct_mfma_dgrad(p, spec_fw)
+                            stage_kernels = tuple(
+                                direct_mfma_dgrad_stage_kernel(st, arch=arch)
+                                for st in plan.stages
+                            )
+                        except ValueError:
+                            n_skipped += 1
+                            continue
+                        pending.append(
+                            (
+                                (
+                                    "fused",
+                                    block_q,
+                                    block_groups,
+                                    block_h,
+                                    use_k32,
+                                    "fwl" if spec_fw.dgrad_weights_lds else "fw",
+                                    wpe,
+                                ),
+                                spec_fw,
+                                _MfmaDgradPipeline(plan=plan, kernels=stage_kernels),
                             )
                         )
         else:
@@ -1376,18 +1611,13 @@ def _run_dgrad_sweep(
                     continue
                 pending.append(((block_q, block_groups), spec, kernel))
 
-    # Compile all kernels (flatten tuples for MFMA pipeline).
+    # Compile all kernels (every stage of an MFMA pipeline is its own kernel).
     all_kernels = []
-    for _, _, kernel_or_pair in pending:
-        if isinstance(kernel_or_pair, tuple) and isinstance(kernel_or_pair[0], tuple):
-            # (kt1, kt2), kf structure
-            kt1, kt2 = kernel_or_pair[0]
-            kf_k = kernel_or_pair[1]
-            all_kernels.extend([kt1, kt2, kf_k])
-        elif isinstance(kernel_or_pair, tuple):
-            all_kernels.extend(kernel_or_pair)
+    for _, _, kernel_or_pipe in pending:
+        if isinstance(kernel_or_pipe, _MfmaDgradPipeline):
+            all_kernels.extend(kernel_or_pipe.kernels)
         else:
-            all_kernels.append(kernel_or_pair)
+            all_kernels.append(kernel_or_pipe)
     artifact_map = _compile_kernels_parallel(all_kernels, compile_kernel, arch, jobs)
     n_built = len(artifact_map)
 
@@ -1415,25 +1645,20 @@ def _run_dgrad_sweep(
         )
         return 0, []
 
-    # Workspaces for 3-kernel MFMA pipeline:
-    # wt_dev:  W_T (step 1, simple transposed weights)
-    # wt_coa:  W_coa (step 2, reorganized coalesced weights)
-    # The fprop kernel reads from wt_coa.
-    wt_dev = None
-    wt_coa = None
-    if not is_depthwise and use_mfma:
-        from kernels.common.conv_direct_grouped import (
-            direct_dgrad_workspace_bytes,
-            direct_dgrad_coalesced_workspace_bytes,
-        )
-
-        # Use the LARGEST possible workspace (max over all fold_k32 combinations).
-        wt_dev = rt.alloc(direct_dgrad_workspace_bytes(p))
-        _wt_coa_max = max(
-            direct_dgrad_coalesced_workspace_bytes(p, fold_k32=False),
-            direct_dgrad_coalesced_workspace_bytes(p, fold_k32=True),
-        )
-        wt_coa = rt.alloc(_wt_coa_max)
+    # Workspaces of the MFMA pipeline, sized once for the largest plan.
+    # Buffer roles come from the plan (kernels.common.conv_direct_grouped):
+    # ws_wt (plain transposed weights) and ws_coa (coalesced preload layout).
+    ws_dev = {}
+    _pipes = [k for _, _, k in pending if isinstance(k, _MfmaDgradPipeline)]
+    for role in ("ws_wt", "ws_coa"):
+        sizes = [
+            dict(pp.plan.buffer_bytes)[role]
+            for pp in _pipes
+            if role in dict(pp.plan.buffer_bytes)
+        ]
+        if sizes:
+            ws_dev[role] = rt.alloc(max(sizes))
+    buf_dev = {"dY": dY_dev, "W": W_dev, "dX": dX_dev, **ws_dev}
 
     ref_out = None
     if args.verify or args.dump_fail:
@@ -1443,56 +1668,36 @@ def _run_dgrad_sweep(
             flush=True,
         )
 
+    _wt_sig = [
+        {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
+    ]
+
     n_run = 0
-    for combo, spec, kernel_or_pair in pending:
-        is_mfma_pair = isinstance(kernel_or_pair, tuple)
+    for combo, spec, kernel_or_pipe in pending:
+        is_mfma_pipe = isinstance(kernel_or_pipe, _MfmaDgradPipeline)
 
         if is_depthwise:
-            block_w, block_waves = combo
-            q_tiles = math.ceil(p.W / block_w)
-            g_tiles = math.ceil(p.groups / spec.block_ch)
-            grid = (q_tiles, g_tiles, p.N)
-            label = f"bw={block_w:3d} waves={block_waves}"
-            block_dim = (spec.threads_per_block, 1, 1)
-            kernel = kernel_or_pair
-        elif is_mfma_pair:
-            # 3-kernel MFMA pipeline: transpose → reorganize → fprop.
-            (kt1, kt2), kf = kernel_or_pair
-            (
-                block_q,
-                block_groups,
-                block_h,
-                waves_q,
-                waves_k,
-                use_rk,
-                use_pg,
-                use_k32,
-            ) = combo
-            # Step 1: simple transpose W_orig → W_T (scalar per thread)
-            t1_grid = (p.groups * p.KH * p.KW, math.ceil(p.kpg / 64), p.cpg)
-            # Step 2: reorganize W_T → W_coa (vec4 per thread, coalesced stores)
-            N_K_ATOMS_r = (p.kpg + 15) // 16
-            N_M_TILES_r = (p.cpg + 15) // 16
-            t2_grid = (p.groups * p.KH * p.KW * N_K_ATOMS_r * N_M_TILES_r, 1, 1)
-            # Step 3: fprop with coalesced preloads
-            Ho_fprop = spec.problem.H
-            q_tiles = (spec.problem.Wo + block_q - 1) // block_q
-            g_tiles = p.groups // block_groups
-            if block_h > 0:
-                n_h_tiles = math.ceil(Ho_fprop / block_h)
-                f_grid = (q_tiles, g_tiles, p.N * n_h_tiles)
+            if combo[0] == "win":
+                _, block_w, block_waves, cpl, block_h, dot2 = combo
+                grid = spec.grid()
+                label = (
+                    f"win bw={block_w:3d} waves={block_waves} cpl={cpl} "
+                    f"bh={spec.rows_per_block if spec.h_tiles > 1 else 0}"
+                    f"{' dot2' if dot2 else ''}"
+                )
             else:
-                f_grid = (q_tiles, g_tiles, p.N)
-            rk_tag = "+rk" if use_rk else ""
-            pg_tag = "+pg" if use_pg else ""
-            k32_tag = "+k32" if use_k32 else ""
-            label = f"bq={block_q} bh={block_h} wq={waves_q} wk={waves_k}{rk_tag}{pg_tag}{k32_tag} MFMA"
-            if use_pg:
-                # Persistent grid: always 256 blocks.
-                f_grid = (256, 1, 1)
+                _, block_w, block_waves = combo
+                q_tiles = math.ceil(p.W / block_w)
+                g_tiles = math.ceil(p.groups / spec.block_ch)
+                grid = (q_tiles, g_tiles, p.N)
+                label = f"bw={block_w:3d} waves={block_waves}"
             block_dim = (spec.threads_per_block, 1, 1)
-            kernel = kf
-            kt = (kt1, kt2)  # for artifact lookup below
+            kernel = kernel_or_pipe
+        elif is_mfma_pipe:
+            label = _mfma_dgrad_label(combo)
         else:
             block_q, block_groups = combo
             block_ch = spec.block_groups * spec.wave_size
@@ -1501,112 +1706,75 @@ def _run_dgrad_sweep(
             grid = (q_tiles, c_tiles, p.N)
             label = f"bq={block_q:3d} bg={block_groups:3d} scFMA"
             block_dim = (spec.threads_per_block, 1, 1)
-            kernel = kernel_or_pair
+            kernel = kernel_or_pipe
 
-        artifact = artifact_map.get(kernel.name)
-        if artifact is None:
-            n_skipped += 1
-            continue
+        if is_mfma_pipe:
+            plan = kernel_or_pipe.plan
+            nbytes = dict(plan.buffer_bytes)
+            stage_calls = []
+            try:
+                for st, k in zip(plan.stages, kernel_or_pipe.kernels):
+                    art = artifact_map.get(k.name)
+                    if art is None:
+                        raise KeyError(k.name)
+                    if st.b is None:
+                        stage_launcher = KernelLauncher(
+                            hsaco=art.hsaco,
+                            kernel_name=art.kernel_name,
+                            signature=_wt_sig,
+                        )
+                        stage_values = {
+                            "A": buf_dev[st.a],
+                            "D": buf_dev[st.d],
+                            "A_bytes": nbytes[st.a],
+                            "D_bytes": nbytes[st.d],
+                        }
+                    else:
+                        stage_launcher = KernelLauncher(
+                            hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
+                        )
+                        stage_values = {
+                            "A": buf_dev[st.a],
+                            "B": buf_dev[st.b],
+                            "D": buf_dev[st.d],
+                            "A_bytes": nbytes[st.a],
+                            "B_bytes": nbytes[st.b],
+                            "D_bytes": nbytes[st.d],
+                        }
+                    stage_calls.append(
+                        (
+                            stage_launcher,
+                            stage_values,
+                            LaunchConfig(grid=st.grid, block=st.block),
+                        )
+                    )
+            except (KeyError, HipError) as e:
+                n_skipped += 1
+                print(f"[skip] {label}: {e}", file=sys.stderr, flush=True)
+                continue
+            main_name = artifact_map[kernel_or_pipe.kernels[-1].name].kernel_name
 
-        try:
-            launcher = KernelLauncher(
-                hsaco=artifact.hsaco,
-                kernel_name=artifact.kernel_name,
-                signature=sig,
-            )
-        except HipError as e:
-            n_skipped += 1
-            print(f"[skip] {artifact.kernel_name}: {e}", file=sys.stderr, flush=True)
-            continue
+            def run_mfma_dgrad(_calls=stage_calls):
+                for _launcher, _values, _cfg in _calls:
+                    _launcher(_values, config=_cfg)
 
-        # For 3-kernel MFMA pipeline: load transpose1 and reorganize launchers.
-        t1_launcher = t2_launcher = None
-        if is_mfma_pair:
-            _wt_sig = [
-                {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
-                {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-                {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-            ]
-            kt1_art = artifact_map.get(kt[0].name)
-            kt2_art = artifact_map.get(kt[1].name)
-            if kt1_art is None or kt2_art is None:
+        else:
+            artifact = artifact_map.get(kernel.name)
+            if artifact is None:
                 n_skipped += 1
                 continue
             try:
-                t1_launcher = KernelLauncher(
-                    hsaco=kt1_art.hsaco,
-                    kernel_name=kt1_art.kernel_name,
-                    signature=_wt_sig,
-                )
-                t2_launcher = KernelLauncher(
-                    hsaco=kt2_art.hsaco,
-                    kernel_name=kt2_art.kernel_name,
-                    signature=_wt_sig,
+                launcher = KernelLauncher(
+                    hsaco=artifact.hsaco,
+                    kernel_name=artifact.kernel_name,
+                    signature=sig,
                 )
             except HipError as e:
                 n_skipped += 1
-                print(f"[skip] transpose {e}", file=sys.stderr, flush=True)
+                print(
+                    f"[skip] {artifact.kernel_name}: {e}", file=sys.stderr, flush=True
+                )
                 continue
-
-        if is_mfma_pair:
-            wt1_nbytes = direct_dgrad_workspace_bytes(p)
-            wt2_nbytes = direct_dgrad_coalesced_workspace_bytes(p, fold_k32=use_k32)
-            t1_values = {
-                "A": W_dev,
-                "D": wt_dev,
-                "A_bytes": W_t.nbytes,
-                "D_bytes": wt1_nbytes,
-            }
-            t2_values = {
-                "A": wt_dev,
-                "D": wt_coa,
-                "A_bytes": wt1_nbytes,
-                "D_bytes": wt2_nbytes,
-            }
-            # wk>1 OR runtime_k_loop=True: coalesced preload reads W_coa.
-            # wk=1 and not runtime_k_loop: runtime loops expect W_T (wt_dev).
-            if waves_k > 1 or use_rk:
-                f_values = {
-                    "A": dY_dev,
-                    "B": wt_coa,
-                    "D": dX_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": wt2_nbytes,
-                    "D_bytes": dX_t.nbytes,
-                }
-
-                def run_mfma_dgrad():
-                    t1_launcher(
-                        t1_values, config=LaunchConfig(grid=t1_grid, block=(64, 1, 1))
-                    )
-                    t2_launcher(
-                        t2_values, config=LaunchConfig(grid=t2_grid, block=(64, 1, 1))
-                    )
-                    launcher(
-                        f_values, config=LaunchConfig(grid=f_grid, block=block_dim)
-                    )
-
-            else:
-                f_values = {
-                    "A": dY_dev,
-                    "B": wt_dev,
-                    "D": dX_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": wt1_nbytes,
-                    "D_bytes": dX_t.nbytes,
-                }
-
-                def run_mfma_dgrad():
-                    t1_launcher(
-                        t1_values, config=LaunchConfig(grid=t1_grid, block=(64, 1, 1))
-                    )
-                    launcher(
-                        f_values, config=LaunchConfig(grid=f_grid, block=block_dim)
-                    )
-
-            values = None
-        else:
             values = {
                 "A": dY_dev,
                 "B": W_dev,
@@ -1618,11 +1786,14 @@ def _run_dgrad_sweep(
 
         kernel_passed = None
         if args.verify or args.dump_fail:
-            if is_mfma_pair:
-                # Verify: run both kernels then compare dX to reference.
-                import torch
-
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+            if is_mfma_pipe:
+                # Poison dX and the workspaces with 0xFF (NaN in fp16 and bf16)
+                # so an unwritten output or an unwritten workspace lane that the
+                # main kernel reads shows up as a failure instead of a lucky zero.
+                rt.memset(dX_dev, 0xFF, dX_t.nbytes)
+                for role, ptr in ws_dev.items():
+                    if role in nbytes:
+                        rt.memset(ptr, 0xFF, nbytes[role])
                 run_mfma_dgrad()
                 synchronize_and_release(0)
                 dX_cpu = torch.empty_like(dX_t)
@@ -1632,10 +1803,14 @@ def _run_dgrad_sweep(
                     ref_f32 = ref_out.float().cpu()
                     abs_diff = (out_f32 - ref_f32).abs()
                     rel_err = float(abs_diff.max() / ref_f32.abs().max().clamp(min=1.0))
-                    tol = 5e-2
-                    kernel_passed = rel_err < tol
-                    status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
-                    print(f"  verify {artifact.kernel_name}: {status}", flush=True)
+                    n_bad = _conv_rule_bad_count(dX_cpu, ref_out, dtype)
+                    kernel_passed = n_bad == 0
+                    status = (
+                        f"PASS(rel_err={rel_err:.2e})"
+                        if kernel_passed
+                        else f"FAIL(bad={n_bad}/{dX_cpu.numel()}, rel_err={rel_err:.2e})"
+                    )
+                    print(f"  verify {main_name} [{label}]: {status}", flush=True)
                 rt.memset(dX_dev, 0, dX_t.nbytes)
             else:
                 stopped, kernel_passed = _verify_kernel(
@@ -1655,12 +1830,12 @@ def _run_dgrad_sweep(
                     rt.free(dY_dev)
                     rt.free(W_dev)
                     rt.free(dX_dev)
-                    if wt_dev:
-                        rt.free(wt_dev)
+                    for ptr in ws_dev.values():
+                        rt.free(ptr)
                     return 1, []
                 rt.memset(dX_dev, 0, dX_t.nbytes)
 
-        if is_mfma_pair:
+        if is_mfma_pipe:
             ms = time_launches(
                 run_mfma_dgrad,
                 warmup=args.warmup,
@@ -1694,17 +1869,15 @@ def _run_dgrad_sweep(
         )
         n_run += 1
         print(
-            f"[{n_run:4d}] {label}  {tflops:6.1f} TFLOPS  {ms:.3f} ms{passed_str}",
+            f"[{n_run:4d}] {label}  {tflops:6.1f} TFLOPS  {ms:.4f} ms{passed_str}",
             flush=True,
         )
 
     rt.free(dY_dev)
     rt.free(W_dev)
     rt.free(dX_dev)
-    if wt_dev:
-        rt.free(wt_dev)
-    if wt_coa:
-        rt.free(wt_coa)
+    for ptr in ws_dev.values():
+        rt.free(ptr)
     print(f"\nDgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
 
     if not results:
@@ -1794,6 +1967,18 @@ def main() -> int:
         "--verify",
         action="store_true",
         help="verify each kernel against torch reference before timing",
+    )
+    parser.add_argument(
+        "--dgrad-family",
+        default="all",
+        choices=["all", "generic", "4c", "fused"],
+        dest="dgrad_family",
+        help=(
+            "grouped stride-1 dgrad: sweep the generic direct-MFMA pre-pass "
+            "pipeline, the 4c (cpg=kpg=4, batched 4x4x4 MFMA) forms, the "
+            "single-kernel forms with the fused weight transform (generic and "
+            "4c), or everything (default: all)"
+        ),
     )
     parser.add_argument(
         "--dump-fail",

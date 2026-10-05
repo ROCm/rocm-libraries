@@ -532,7 +532,20 @@ Contract:
 cpg = 4, kpg = 4
 ```
 
-Uses `mfma_f32_4x4x4_f16`: one wave computes 16 independent 4x4x4 matmuls indexed by `batch = lane / 4`.
+Uses `mfma_f32_4x4x4_f16` (fp16) or `mfma_f32_4x4x4_bf16` (bf16): one wave computes 16 independent 4x4x4 matmuls indexed by `batch = lane / 4`.
+
+Backward data (stride 1, same padding, 1x1 or 3x3): `make_dgrad_4c_spec` /
+`dgrad_4c_spec_for_problem` build the 4c spec for `dX = conv(dY, W_T)` where
+`W_T` is the flipped, k<->c transposed weight produced by
+`build_direct_transpose_weights_dgrad`; `build_direct_4c_dgrad` returns both
+kernels and `direct_4c_dgrad_launch` the launch geometry and workspace size.
+With `dgrad_fused_weights` (the hook's default) the 4c kernel reads the
+original `W` and forms the flipped, transposed fragments in its prologue
+(scalar gathers, or with `dgrad_weights_lds` an LDS copy of the workgroup's
+weight slice plus one `ds_read_b64_tr_b16` per tap on gfx950): one kernel, no
+workspace. The generic `DirectConvSpec` dgrad has the same knobs, and
+`direct_dgrad_spec_for_problem` picks the single-kernel form for a grouped
+stride-1 problem.
 
 Algorithm:
 
@@ -643,6 +656,170 @@ Uses the same `_UNROLL_THRESH` / `scf_for_iter` branch logic as
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
 `tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
 
+### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
+
+`DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
+(C++ `rocke_build_direct_depthwise_dgrad_win`). Backward-data for depthwise
+convolution (`cpg == kpg == 1`), stride 1. Selected by the gfx950 dgrad
+dispatcher (`direct_depthwise_dgrad_win` candidate in
+`library/dispatch/grouped_convolution.py`).
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseDgradWindowedSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_dgrad_win"
+    block_w: int = 8        # dX columns per block
+    block_waves: int = 1
+    ch_per_lane: int = 1    # 1/2/4/8 adjacent channels per lane (vector I/O)
+    block_h: int = 0        # dX rows per block; 0 = whole H
+    dot2: bool = False      # tap pairs on arith.fdot2 (gfx950 only)
+    wave_size: int = 64
+```
+
+Algorithm (all loops unrolled at build time):
+
+```text
+for each local dY row y (ho = h0 + y + PAD - (KH-1)):
+    load window[t] = dY[n, ho, wi0 + PAD - (KW-1) + t, ch..]   t < block_w + KW - 1
+    (the next live row's window is issued before this row's FMAs; sched_barrier)
+    for r in taps owned by this block, s < KW, j < block_w:
+        acc[(y + r - (KH-1)) % KH][j] += W[ch, r, s] * window[j + KW - 1 - s]
+    flush dX local row y - (KH-1) from its slot
+```
+
+Addressing: each offset is a row-invariant lane part (channel + column, or
+`DW_DGRAD_WIN_OOB_LANE = 2**30` when invalid) plus a block-uniform row part
+(or `DW_DGRAD_WIN_OOB_UNIFORM = 2**30 - 1`); an invalid access lands past the
+buffer (loads read zero, stores drop) with no per-tap select, and the sum never
+overflows the signed i32 add.
+
+Constraints (`is_valid_depthwise_dgrad_win_spec` /
+`rocke_direct_depthwise_dgrad_win_is_valid_spec`): fp16/bf16, `cpg == kpg == 1`,
+`stride == 1`, `ch_per_lane in {1,2,4,8}` dividing `groups`, `dot2` only with
+`ch_per_lane == 1` and only on gfx950, dY and dX each below `2**30` bytes, and
+`rows_per_block * KH * KW * block_w * ch_per_lane <= 2**15` unrolled FMAs.
+
+Grid: `(ceil(W / block_w), ceil(groups / block_ch), N * h_tiles)` with
+`block_ch = block_waves * 64 * ch_per_lane`.
+
+Parity gate: configs 32-39 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`
+(scalar FMA, dot2 with odd and even KW, channel vectors, ragged and even H split,
+and a gfx942 dot2 config both engines reject).
+
+### MFMA Grouped Dgrad Pipeline (`plan_direct_mfma_dgrad`)
+
+Grouped stride-1 dgrad runs the generic `DirectConvSpec` streaming kernel as a
+*transposed fprop*: `dX = fprop(dY, W_T)` with `W_T[c, r', s', k] =
+W[k, KH-1-r', KW-1-s', c]` per group. `make_dgrad_fprop_spec(problem, ...)`
+builds the main spec (channels swapped: `cpg' = kpg`, `kpg' = cpg`;
+`PAD' = KH-1-PAD`).
+
+`plan_direct_mfma_dgrad(problem, fprop_spec)` is the single description of the
+launches -- harnesses and the dispatcher read it instead of re-deriving grids:
+
+| stage | builder | grid | reads -> writes |
+| --- | --- | --- | --- |
+| `transpose` | `build_direct_transpose_weights_dgrad` | `direct_transpose_weights_dgrad_grid(problem)`: `(groups*KH*k_chunks, 1, 1)`, block 256: one workgroup per (group, filter row, chunk of source `k` rows) staging its slice through LDS with vector loads and writing `W_T` runs with vector stores (`_transpose_staging` picks the chunk: largest within the LDS budget that keeps one workgroup per CU; `_transpose_block_pad` shifts each block of staged `k` rows so the write-back gather spreads over the LDS banks); weight tensors below `_TRANSPOSE_STAGED_MIN_ELEMENTS` (latency-bound copy) and slices too large to stage use the flat `(ceil(total_C*KH*KW*kpg / 256), 1, 1)` one-lane-per-element grid | `W -> ws_wt` |
+| `reorganize` (only if `waves_k > 1` or `runtime_k_loop`) | `build_direct_reorganize_weights` | `(groups*KH*KW*n_k_atoms*ceil(cpg/16), 1, 1)`, `n_k_atoms` counted at the main kernel's atom width (32 under `fold_k32`) | `ws_wt -> ws_coa` |
+| `main` | `build_direct_conv` (or `build_direct_conv_4c` for a `DirectConv4cSpec`) | `direct_mfma_dgrad_main_grid(fprop_spec)` | `dY` + (`ws_wt` or `ws_coa`, or `W` itself when fused) `-> dX` |
+
+With `dgrad_fused_weights` on the main spec (`DirectConvSpec` or
+`DirectConv4cSpec`) the plan is the `main` stage alone, bound to the original
+`W`: the kernel's prologue reads each lane's weight fragment with flipped taps
+and per-group k<->c transposed addressing (or stages the workgroup's raw slice
+through LDS and builds the fragments with `ds_read_b64_tr_b16` under
+`dgrad_weights_lds`), so there is no pre-pass and no workspace. The fused
+generic form preloads every fragment into registers and is limited by
+`PRELOAD_WEIGHT_VGPR_BUDGET`; past it the pre-pass pipeline above is the
+fallback.
+
+`plan.buffer_bytes` sizes every buffer role (`dY`, `W`, `dX`, `ws_wt`,
+`ws_coa`); `plan.workspace_bytes` is the scratch a caller must provide.
+`direct_mfma_dgrad_stage_kernel(stage, arch)` routes a stage to its builder.
+
+Validity (`DirectConvSpec.validate`, also run by `is_valid_spec`):
+
+- `kpg % 4 == 0` -- the flush stores 4 channels per lane; a non-multiple writes
+  into the next group's channels.
+- stride 1 requires `Ho == H` and `Wo == W` ('same' padding): the row stream
+  flushes output rows `0..H-1` of its input height only.
+- `waves_k` must divide the K-atom count *at the atom width in use*
+  (`cpg // 32` under `fold_k32`); otherwise a wave owns zero atoms.
+- `is_valid_spec` also checks the LDS footprint (`direct_conv_lds_bytes`).
+
+The reorganize pass indexes `W_T` with the per-group `k` (W_T's last dim is
+`kpg`) and stores every lane, zero where the source is out of range: the main
+kernel masks only the dY operand of a partial K-atom.
+
+Dispatch: `library/dispatch/grouped_convolution.py` registers
+`direct_mfma_conv_dgrad` (gfx950, priority 5, ahead of the igemm dgrad
+candidate). Its structural region (`_direct_dgrad_shape_errors`) is grouped,
+stride-1, dilation-1, square-filter, 'same'-padded problems with `cpg, kpg`
+multiples of 4 up to 32 and filters 1x1 up to 7x7.
+
+The main kernel (`_select_direct_dgrad_spec`):
+
+- `cpg == kpg == 4`, 1x1/3x3, `groups % 16 == 0` and a 4c grid of at least
+  `_DIRECT_DGRAD_4C_MIN_GRID` workgroups: the batched 4x4x4 kernel
+  (`variant = "4c"`, `make_dgrad_4c_spec` defaults), fused weights, LDS-staged
+  transpose reads where the target has them. One wave is one workgroup and
+  there is no H tiling, so small grids take the generic kernel instead.
+- otherwise the generic `DirectConvSpec` kernel with the table-driven knobs
+  below, fused weights (LDS-staged where the target has transpose reads and the
+  slice fits, register gathers otherwise) and `waves_per_eu = 4` for a small
+  preloaded footprint (`_direct_dgrad_fused_waves_per_eu`); the pre-pass
+  pipeline when the fused form exceeds its register budget (large filters with
+  32-wide output and reduction channel groups).
+
+The candidate then declines the corners where that kernel measured slower than
+the igemm candidate (`_direct_dgrad_policy_errors`; every reason starts with
+`_DIRECT_DGRAD_POLICY_PREFIX`). The policy was fitted on a same-session sweep of
+randomly drawn shapes over the structural region and checked on a disjoint
+hold-out draw:
+
+- pre-pass pipeline: with more than 20 output channels per group it needs
+  `kpg % 16 == 0` (full K atoms), column strips at least
+  `_DIRECT_DGRAD_PREPASS_MIN_STRIP_FILL` full and a size floor; with fewer, a
+  size floor, and 16+ channel groups also need half-filled strips when `kpg`
+  is not a multiple of 16. Past those, `_direct_dgrad_prepass_cost_ratio`
+  predicts the (transpose + main) / igemm cost ratio from small fitted
+  unitless models (costs relative to igemm's fixed per-call cost) -- the
+  transpose linear in the weight elements, the main kernel as GFLOPs scaled
+  by its column-strip, 16-wide output-tile and K-atom padding (and a partial
+  second K atom) and the problem size, igemm as GFLOPs scaled by its 64-wide N-tile padding -- and
+  the pipeline is declined above `_DIRECT_DGRAD_PREPASS_MAX_COST_RATIO`
+  (the transpose runs on every call, so many groups with large filters on
+  small images do not amortize it);
+- tiny images (`W <= 3` or `H*W <= 16`), and `W <= 5` with more than 20 output
+  channels per group: the 16-wide output strips stay mostly empty;
+- wide output (`cpg > 20`) with a narrow reduction (`min(cpg, kpg) <= 10`)
+  needs the column strips `_DIRECT_DGRAD_MIN_STRIP_FILL` full;
+- 1x1 with `kpg >= 16` is igemm's best case (a plain GEMM with a full K):
+  declined at 32 channels, below a size floor or on strips narrower than
+  `_DIRECT_DGRAD_PW_MIN_W`;
+- small problems (fewer than `_DIRECT_DGRAD_SMALL_TILES` igemm workgroups,
+  `ceil(N*H*W/64) * groups`) with a narrow reduction or only 4 channels need a
+  per-class size floor.
+
+Declined shapes run the igemm candidate unchanged. There is no C++ dispatch
+selector to mirror; the kernels themselves are dual-engine (4c and its fused
+forms) or Python-only (the generic `DirectConvSpec` kernel and its pre-pass
+kernels have no C++ mirror yet).
+
+The spec (`ConvGroupedDirectDgradSpec`) carries the knobs and
+`launch_plan(req)`. `block_groups` comes from the `GFX950_DIRECT_DGRAD_RULES`
+table (keyed on `max(cpg, kpg)`, halved for 5x5/7x7); `block_h` from
+`_direct_dgrad_block_h` (whole image, 8-row or 4-row tiles; always 4 rows for
+5x5/7x7; for images of at most 16 rows the tile with the smallest
+`(tile rows + KH - 1) * max(slots, waves)` -- serial row chain including the
+halo, times rounds of waves beyond a slot budget scaled by `block_groups` --
+so a 9..12-row image with a full grid is not cut into a near-empty last tile;
+for taller images the largest tile that reaches a wave target); `block_q` from
+`_direct_dgrad_block_q` (32 when H is tiled, the wider strip adds no W
+padding, the wider channel count is at least 16, or 8 with a 5x5/7x7, and the
+grid keeps enough waves).
+
 ## Img2Col
 
 Source: `library/kernels/common/img2col.py`.
@@ -723,3 +900,9 @@ Grid: `ceil_div(total_output_elements, block_size)`.
 - Direct conv circular accumulator slot is not reset after store.
 - Output descriptor uses NHWC instead of NHWK stride order.
 - Benchmark compares implicit-GEMM graph mode to direct per-launch mode without labeling launch overhead.
+- Multi-kernel pipeline verified with a zero-filled workspace: an unwritten workspace lane reads as 0 and hides the bug. Pre-fill scratch (and the output) with 0xFF bytes -- NaN in fp16 and bf16.
+- Multi-kernel pipeline admitted without a size gate: a pre-pass launch is a fixed cost the single-kernel alternative does not pay, so small problems lose even when the main kernel alone wins. Measure the whole pipeline on small-batch shapes before widening eligibility.
+- Group offset applied twice: indexing a per-group tensor (last dim `kpg`) with an absolute channel index (`g*kpg + k`) passes every `groups == 1` test.
+- Eligibility widened from a cohort that only varied size: a size gate cannot fix a shape class where the main kernel itself loses (here `cpg > kpg` with a small `kpg`). Sweep the channel-ratio and filter-size axes, not only batch and spatial size, and read the per-kernel split before blaming a pre-pass.
+- Tiling policy fitted on a cohort of one group count (here `G = 32`): low-group, short-image, large-batch shapes got 8- or 4-row tiles of a 9- or 10-row image (a near-empty last tile plus a re-loaded halo per tile) and lost. Add a group-count axis to the fitting cohort, and a hold-out set from that region.
+- Pre-pass grid keyed on one channel count (64-lane blocks over `kpg`): with `kpg = 4` most lanes idle and the launch is many times its element count. Index pre-passes flat over the destination.

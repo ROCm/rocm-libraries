@@ -131,6 +131,17 @@ typedef struct rocke_dgrad_conv_spec
      * num_load_waves: extra load waves appended after the math waves (default 4).
      * launch_block_size = block_size + num_load_waves * wave_size. */
     int num_load_waves; /* default 4 */
+
+    /* Mirrors DgradConvSpec.static_sub_gemm: fold the sub-GEMM record into
+     * immediates when the tilde decomposition has exactly one sub-GEMM (no
+     * binary search, no record loads). false keeps the runtime-record path
+     * and tags the kernel name "_dynrec". */
+    bool static_sub_gemm; /* default true */
+
+    /* Mirrors DgradConvSpec.tap_outer_k: stride-1 K loop as (filter tap outer)
+     * x (output-channel chunk inner) where uses_tap_outer_k holds. false
+     * keeps the flat k_dg loop and tags the kernel name "_flatk". */
+    bool tap_outer_k; /* default true */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -138,6 +149,10 @@ typedef struct rocke_dgrad_conv_spec
  * conv_implicit_gemm_dgrad.py: the stride must not be a multiple of the
  * 32-dword LDS bank period or the transpose read degenerates. */
 #define ROCKE_DGRAD_KOUTER_PAD 8
+
+/* Upper bound on fp32 accumulators per lane accepted by
+ * rocke_dgrad_conv_is_valid_spec. Mirrors _MAX_ACC_REGS_PER_LANE. */
+#define ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE 256
 
 rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void);
 

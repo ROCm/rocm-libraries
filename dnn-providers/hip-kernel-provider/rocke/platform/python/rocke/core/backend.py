@@ -893,8 +893,10 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
 def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
     """:class:`DirectConv16cSpec` / :class:`DirectConv4cSpec` -> flat dict.
-    ``kind`` ("16c"|"4c") selects the binding's spec path. The 16c-only
-    ``double_buffer``/``fold_k32`` fields are forwarded when present."""
+    ``kind`` ("16c"|"4c") selects the binding's spec path. The problem
+    ``dtype`` is always forwarded; the 16c-only ``double_buffer``/``fold_k32``
+    and the 4c-only ``dgrad_fused_weights``/``dgrad_weights_lds`` fields are
+    forwarded when present."""
     p = spec.problem
     d = dict(
         kind=kind,
@@ -909,13 +911,14 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
             KW=p.KW,
             PAD=p.PAD,
             stride=p.stride,
+            dtype=p.dtype,
         ),
         name=spec.name,
         block_q=spec.block_q,
         block_groups=spec.block_groups,
         wave_size=spec.wave_size,
     )
-    for f in ("double_buffer", "fold_k32"):
+    for f in ("double_buffer", "fold_k32", "dgrad_fused_weights", "dgrad_weights_lds"):
         v = getattr(spec, f, None)
         if v is not None:
             d[f] = v

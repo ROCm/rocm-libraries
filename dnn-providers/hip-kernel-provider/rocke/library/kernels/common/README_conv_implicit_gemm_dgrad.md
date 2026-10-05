@@ -49,7 +49,7 @@ satisfied. Each group becomes one independent sub-GEMM.
 | `mem` | Single-buffer LDS, synchronous loads, no scheduler hints. Default. |
 | `wavelet` | Load/math wave specialization for **gfx1250/WMMA only**. Extra `num_load_waves` waves handle all DRAM→LDS transfers while the `warp_m × warp_n` math waves run WMMA exclusively. Requires gfx1250's separate VMEM and WMMA issue slots to achieve true hardware concurrency. Incompatible with `async_dma=True`, `split_k > 1` and `lds_k_outer=True`. Single-buffer LDS shared by both roles; synchronization via a `barrier_0 / barrier_A / barrier_B` protocol. |
 
-The MFMA/CDNA pipelines (`compv3`, `compv4`) are not supported for dgrad; `is_valid_spec` rejects them.
+On MFMA targets `compv3` / `compv4` are schedule policies only (hint placement, `s_setprio`); the K loop stays single-buffered and is charged one LDS buffer. WMMA dgrad accepts only `mem` and `wavelet`. `async_dma`, `unroll_k` and `chiplet_swizzle` are rejected by `is_valid_dgrad_spec`: the builder implements none of them.
 
 ## Kernel Architecture
 
@@ -57,8 +57,47 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
 
 - The host packs per-sub-GEMM constants into `sub_gemm_buf` (a flat `i32` array).
 - Each CTA binary-searches the buffer to find its sub-GEMM and loads record fields.
+  With exactly one sub-GEMM (stride 1) the record is folded into immediates
+  instead (`static_sub_gemm`, default on): no search, no record loads; the
+  buffer stays in the ABI, unread. The ungrouped pointwise problem is the
+  exception: its descriptors are already divide-free, so it keeps the runtime
+  record (a constant trip count only invites a K-loop unroll that costs it).
 - The K-loop uses runtime descriptor closures that compute `dY` and `W` offsets
-  from the record's coefficients.
+  from the record's coefficients. On the stride-1 path with `kpg % tile_k == 0`
+  it runs as (filter tap outer) x (output-channel chunk inner) (`tap_outer_k`,
+  default on), with the pixel decode loop-invariant, the dY predicate
+  tap-invariant, and the tile's global reads batched ahead of its LDS writes.
+  See `platform/python/rocke/examples/gfx950/conv_dgrad/stride1_igemm_dgrad_case_study.md`.
+- An accumulator tile above 256 fp32 registers per lane is rejected (it fills
+  the whole register file). This is a correctness guard, not a no-spill
+  guarantee: some 256-accumulator configs still spill.
+- A flat K loop (no tap-outer loop) with more than 128 fp32 accumulators per
+  lane keeps the runtime record: the folded build spills there.
+- On gfx950, the flat K loop of a folded record with 16-byte dY/W loads gets
+  a derived `waves_per_eu = (2, 6)` when the spec sets none
+  (`flat_fold_acc_waves_per_eu`), but only on the two dispatch warp tiles
+  (64x64x64 with 2x2 warps of 32x32x16, and 128x128x64 with 2x2 warps of
+  16x16x32; `_ACC_HINT_TILES`): it selects the VGPR-form MFMA and removes a
+  per-iteration AGPR <-> VGPR accumulator copy. On other tiles the same hint
+  speeds some configs up and slows others down or makes them spill, with no
+  accumulator-count, atom, warp-count or epilogue rule that separates them,
+  so explicit configs keep the backend default. The ceiling of 6 keeps the
+  scheduler from serializing staged loads to reach full occupancy.
+- On gfx950, the flat K loop of a folded record without that hint batches the
+  tile's global reads ahead of its LDS writes, as the tap-outer loop does
+  (`_FLAT_FOLD_BATCH_ARCHES`): with per-vector load -> store pairs the
+  scheduler serialized each load behind its store, and the fold then ran
+  slower than the runtime record on narrow-load problems (grouped
+  `cpg % 8 != 0`, dense `cpg % 4 != 0`). Other targets keep the pairs.
+- On gfx950, a grouped problem with a folded record and no split-K launches
+  its `(group, tile)` space in XCD-contiguous order
+  (`xcd_contiguous_tile_order`): the launch-order linear id is remapped with
+  `chiplet_transform_chunked`, one chunk per XCD, so each XCD runs whole groups
+  and fetches each group's dY and weights into its own L2. Launch order spreads
+  every group over all XCDs, and on many-group problems whose operands
+  outgrow the L2 the refetch, not the K loop, set the kernel time. Ungrouped
+  problems and the runtime record keep launch order. Python only (the C++
+  builder refuses grouped dgrad).
 - **Epilogue dispatch** based on `needs_atomic`:
   - `False` (1 sub-GEMM, split_k=1): direct `buffer_store` into `dX`.
   - `True` (stride > 1 or split_k > 1): `global_atomic_fadd` into `dX`
@@ -220,8 +259,9 @@ already `"col"` and there is no scatter to remove.
 | `../../../platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
 
-There is no dgrad dispatcher family yet — dgrad is built directly, without a
-`dispatch/` selection policy of its own.
+Library dispatch reaches this kernel through the gfx950 candidate in
+`../../dispatch/grouped_convolution.py`, whose tile comes from the shape-keyed
+table `_gfx950_dgrad_tile`.
 
 ## Differences from Wgrad
 

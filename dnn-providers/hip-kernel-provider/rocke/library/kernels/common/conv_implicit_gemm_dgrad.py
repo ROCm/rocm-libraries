@@ -67,6 +67,7 @@ from rocke.core.ir import (
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
+from rocke.helpers.grid import NUM_XCDS_MI350X, chiplet_transform_chunked
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
 from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
@@ -470,6 +471,36 @@ _LDS_K_OUTER_ARCH = "gfx950"  # the wave64 regime
 # the allocated shape cannot drift. Mirrors ROCKE_DGRAD_KOUTER_PAD.
 _KOUTER_PAD = 8
 
+# Upper bound on fp32 accumulators per lane accepted by is_valid_dgrad_spec.
+# Mirrors ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE.
+_MAX_ACC_REGS_PER_LANE = 256
+# Largest accumulator footprint per lane for which the flat K loop gets the
+# folded record (DgradConvSpec.folds_sub_gemm_record). Above it the folded
+# flat loop spills where the runtime-record build does not. Mirrors
+# ROCKE_DGRAD_FLAT_FOLD_MAX_ACC_REGS.
+_FLAT_FOLD_MAX_ACC_REGS = _MAX_ACC_REGS_PER_LANE // 2
+# Warp tiles (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m,
+# warp_tile_n, warp_tile_k) that get the waves_per_eu hint
+# (flat_fold_acc_waves_per_eu): the two gfx950 dispatch tiles, where it was
+# validated. Outside them no accumulator-count, atom, warp-count or epilogue
+# rule separates the configs the hint speeds up from those it slows down (it
+# changes the scheduler's occupancy target, and with it how staged loads are
+# batched), so explicit sweep configs keep the backend's default.
+# Mirrors ROCKE_DGRAD_ACC_HINT_TILES.
+_ACC_HINT_TILES = (
+    (64, 64, 64, 2, 2, 32, 32, 16),
+    (128, 128, 64, 2, 2, 16, 16, 32),
+)
+
+
+def _acc_regs_per_lane(spec: DgradConvSpec) -> int:
+    """fp32 accumulator registers per lane held by one warp's output tile."""
+    return (
+        spec.mfmas_per_warp_m
+        * spec.mfmas_per_warp_n
+        * (spec.warp_tile_m * spec.warp_tile_n // spec.wave_size)
+    )
+
 
 @dataclass(frozen=True)
 class DgradConvSpec:
@@ -552,6 +583,82 @@ class DgradConvSpec:
     # cshuffle LDS aliasing — same semantics as ImplicitGemmConvSpec.cshuffle_no_alias.
     # Wavelet forces additive (no_alias=True) because A/B stay live across both branches.
     cshuffle_no_alias: bool = False
+    # Fold the sub-GEMM record into compile-time constants whenever the tilde
+    # decomposition yields exactly one sub-GEMM (stride 1 and dilation 1, or a
+    # problem whose other tilde phases are all empty). The record is then a
+    # pure function of (problem, tile_m, tile_n, tile_k, split_k) -- all of
+    # them spec constants -- so the per-CTA binary search, the 21 scalar
+    # global loads that follow it, and every runtime divide by a record field
+    # inside the K loop become immediates. The kernel ABI is unchanged:
+    # sub_gemm_buf / num_sub_gemms stay in the signature and are simply not
+    # read. False keeps the runtime-record path (the only path when there is
+    # more than one sub-GEMM) and tags the kernel name ``dynrec``. The
+    # ungrouped pointwise (1x1, stride 1, no pad) problem is never folded: it
+    # already has its own divide-free descriptors, so folding removes nothing
+    # from its K loop, and a constant trip count lets LLVM unroll that loop,
+    # which doubles the loop body for no gain. Neither is a flat K loop with
+    # more than _FLAT_FOLD_MAX_ACC_REGS accumulators per lane, where the folded
+    # build spills (see :attr:`folds_sub_gemm_record`).
+    static_sub_gemm: bool = True
+    # Stride-1 tap-outer K loop. When every K tile lies inside one filter tap
+    # (per-group output channels divisible by tile_k), run the reduction as
+    # two nested loops -- filter tap (y, x) outer, output-channel chunk inner
+    # -- instead of one flat loop over k_dg = (y, x, k_out). The tap decode
+    # becomes scalar outer-loop arithmetic, the per-row pixel decode (n, hi,
+    # wi) is loop-invariant, and the dY bounds predicate is invariant across
+    # the inner loop; the flat loop recomputes all three, with a divide per
+    # loaded vector, every iteration. Applies only where
+    # :attr:`uses_tap_outer_k` holds; otherwise the flat loop is emitted.
+    # False forces the flat loop and tags the kernel name ``flatk``.
+    tap_outer_k: bool = True
+
+    @property
+    def folds_sub_gemm_record(self) -> bool:
+        """True when the builder emits the record as immediates (see field).
+
+        Excludes the ungrouped pointwise problem, whose K loop keeps the
+        runtime record and therefore an opaque trip count, and a flat K loop
+        (no tap-outer loop) whose accumulator tile exceeds
+        ``_FLAT_FOLD_MAX_ACC_REGS`` per lane: there the folded build spills
+        where the runtime-record build does not.
+        """
+        p = self.problem
+        return (
+            self.static_sub_gemm
+            and not (p.is_pointwise and p.groups <= 1)
+            and len(self.compute_sub_gemms()) == 1
+            and (
+                self._tap_outer_loop_eligible
+                or _acc_regs_per_lane(self) <= _FLAT_FOLD_MAX_ACC_REGS
+            )
+        )
+
+    @property
+    def _tap_outer_loop_eligible(self) -> bool:
+        """:attr:`uses_tap_outer_k` without its folded-record condition."""
+        p = self.problem
+        return (
+            self.tap_outer_k
+            and not self.is_strided
+            and p.kpg % self.tile_k == 0
+            and self.split_k == 1
+            and self.wave_size == 64
+            and self.pipeline != "wavelet"
+        )
+
+    @property
+    def uses_tap_outer_k(self) -> bool:
+        """True when the builder emits the tap-outer K loop (see field).
+
+        Needs: the folded single sub-GEMM (never the ungrouped pointwise
+        problem, see :attr:`folds_sub_gemm_record`); stride 1 and dilation 1
+        (so the tilde slice is the identity and the tap is the plain filter
+        (y, x));
+        a K tile that never straddles a tap (``kpg % tile_k == 0``); no
+        split-K (a K slice could start mid-tap); and the wave64 MFMA loop (the
+        wavelet loader drives its own K loop).
+        """
+        return self.folds_sub_gemm_record and self._tap_outer_loop_eligible
 
     @property
     def block_size(self) -> int:
@@ -728,6 +835,8 @@ class DgradConvSpec:
                 "kouter": self.lds_k_outer,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
+                "dynrec": not self.static_sub_gemm,
+                "flatk": not self.tap_outer_k,
             },
         )
 
@@ -942,6 +1051,37 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
+    # The dgrad builder has no direct global->LDS path, no K-unrolled loop and
+    # no chiplet-swizzled tile order: these knobs used to be accepted and then
+    # silently ignored (async_dma/unroll_k still doubled the charged LDS
+    # below, lowering occupancy for nothing). Reject them so a sweep cannot
+    # report a kernel that differs from what its label says. (The WMMA block
+    # below gave the same answer for its family; this covers both.)
+    for flag, label in (
+        (spec.async_dma, "async_dma"),
+        (spec.unroll_k, "unroll_k"),
+        (spec.chiplet_swizzle, "chiplet_swizzle"),
+    ):
+        if flag:
+            return False, (
+                f"dgrad does not implement {label} (the builder has no such path; "
+                f"the flag would be silently ignored)"
+            )
+
+    # Accumulator footprint per lane. At 512 fp32 accumulators the tile alone
+    # fills a wave64's whole register file (256 VGPRs + 256 AGPRs): the
+    # compiler spills on the order of a thousand registers to scratch, and the
+    # spilled kernel has been observed to return wrong dX (a 256x256 tile with
+    # 1x2 warps of the 16x16x32 atom on a large dense bf16 3x3 problem).
+    # This is a correctness guard, not a no-spill guarantee: some configs at
+    # 256 accumulators still spill (they compute correct dX, only slower).
+    _acc_regs = _acc_regs_per_lane(spec)
+    if _acc_regs > _MAX_ACC_REGS_PER_LANE:
+        return False, (
+            f"accumulator tile needs {_acc_regs} fp32 registers per lane "
+            f"(> {_MAX_ACC_REGS_PER_LANE}); it fills the whole register file"
+        )
+
     if spec.lds_k_outer:
         # This gate has NO counterpart in validate() and that split is the whole
         # point: without it an older target builds cleanly and emits
@@ -986,8 +1126,9 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
-    _ab_lds = _ab_bytes * (2 if _double else 1)
+    # Single-buffered: the K loop never alternates LDS buffers. (compv4 here
+    # is a schedule policy only; async_dma/unroll_k are rejected above.)
+    _ab_lds = _ab_bytes
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
@@ -999,7 +1140,7 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
-            f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}) "
+            f"(A/B={_ab_bytes}, C={_c_lds}) "
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
@@ -1152,6 +1293,125 @@ def build_implicit_gemm_conv_dgrad(
     return _build_tilde_dgrad(spec, arch)
 
 
+# Targets whose grouped kernels with a folded record launch their tiles in
+# XCD-contiguous order (see xcd_contiguous_tile_order), and the XCD count of
+# each. Measured on gfx950 only.
+_XCD_TILE_ORDER_ARCHES = {"gfx950": NUM_XCDS_MI350X}
+
+
+def xcd_contiguous_tile_order(spec: DgradConvSpec, arch: str) -> int:
+    """XCD count to lay the grouped tile order out for, or 0 (launch order).
+
+    The hardware hands workgroups to the XCDs round-robin in launch order
+    (``blockIdx.x`` fastest, the group on ``blockIdx.y``), and each XCD has
+    its own L2. Neighbouring tiles of one group -- the M tiles that read the
+    same group's weight slice and the N tiles that read the same dY rows --
+    therefore land on different XCDs, and every XCD refetches each group's
+    operands through the fabric. On problems whose operands outgrow the L2
+    that refetch, not the K loop, sets the kernel time, and anything that
+    makes the loop issue loads faster (the folded record, the waves_per_eu
+    hint, batched loads) adds L2 misses instead of speed.
+
+    With this order each XCD instead receives one contiguous range of the
+    ``(group, tile)`` space -- whole groups, both N tiles of every M tile --
+    so each group's operands are fetched into one L2 and reused there
+    (:func:`rocke.helpers.grid.chiplet_transform_chunked` with one chunk per
+    XCD; the remainder below a multiple of the XCD count keeps launch order).
+
+    Applies only to grouped problems: a group's operands are disjoint from
+    every other group's, so keeping a group on one XCD removes the refetch
+    outright. An ungrouped problem shares its operands across all tiles, and
+    launch order already splits them across the XCDs. Only with a folded
+    record (:attr:`DgradConvSpec.folds_sub_gemm_record`): with several
+    sub-GEMMs of different sizes the contiguous ranges load the XCDs
+    unevenly. Not with split-K, whose slices ride ``blockIdx.z``.
+    """
+    num_xcds = _XCD_TILE_ORDER_ARCHES.get(arch, 0)
+    if not num_xcds:
+        return 0
+    if spec.problem.groups <= 1 or spec.split_k != 1:
+        return 0
+    if not spec.folds_sub_gemm_record:
+        return 0
+    num_wgs = spec.compute_sub_gemms()[-1].block_end * spec.problem.groups
+    if num_wgs < num_xcds:
+        return 0
+    return num_xcds
+
+
+# Targets where flat_fold_acc_waves_per_eu applies (measured on gfx950 only;
+# gfx90a/gfx942 also have AGPRs but were not measured) and the hint's
+# waves-per-EU ceiling. The ceiling is below the hardware maximum of 8 on
+# purpose: with 8, the scheduler's occupancy target (64 VGPRs) makes it
+# serialize each staged global load with its LDS store through one register
+# quad on some problems, which costs more than the accumulator copy saves.
+# A ceiling of 6 leaves room to batch the loads.
+_ACC_VGPR_HINT_ARCHES = ("gfx950",)
+_ACC_HINT_MAX_WAVES_PER_EU = 6
+# Targets where the flat K loop of a folded record batches its global reads
+# (all of the tile's loads, then all of its LDS stores, as the tap-outer loop
+# does). With per-vector load->store pairs and the record folded, the
+# scheduler serialises every staged load behind its LDS store through one
+# register quad (one full memory latency per load), which made the folded
+# flat loop slower than the runtime-record build on some grouped and
+# odd-channel problems. Measured on gfx950 only. Mirrors
+# ROCKE_DGRAD_FLAT_FOLD_BATCH_ARCH.
+_FLAT_FOLD_BATCH_ARCHES = ("gfx950",)
+
+
+def flat_fold_acc_waves_per_eu(
+    spec: DgradConvSpec, arch: str, load_vec_a: int, load_vec_b: int
+) -> tuple[int, int] | None:
+    """``waves_per_eu`` hint that keeps the flat folded K loop's MFMA
+    accumulators in arch VGPRs, or None.
+
+    On gfx950 the backend picks the AGPR form of the MFMA
+    whenever the VGPR budget may exceed 256 (the default occupancy floor of
+    one wave). In the flat K loop of a folded record
+    (:attr:`DgradConvSpec.folds_sub_gemm_record` without
+    :attr:`DgradConvSpec.uses_tap_outer_k`) it then copies the whole
+    accumulator AGPR -> VGPR -> AGPR on every iteration. A floor of two waves
+    caps the VGPR budget at 256, which selects the VGPR-form MFMA and removes
+    the copies; the ceiling of six waves (see ``_ACC_HINT_MAX_WAVES_PER_EU``)
+    keeps the scheduler from trading load batching for occupancy. Applied
+    only with 16-byte dY and W loads: with narrower loads there are more
+    loads per K tile, and the occupancy-driven scheduler then serializes each
+    load with its LDS store under the VGPR form (measured with per-vector
+    load->store pairs; unhinted flat loops now batch their loads instead,
+    see ``_FLAT_FOLD_BATCH_ARCHES``). Applied only to the two
+    dispatch warp tiles (``_ACC_HINT_TILES``): on other tiles the hint
+    spills or loses load batching on some problems and helps on others, with
+    no rule that separates them. Never overrides an explicit
+    ``spec.waves_per_eu``.
+    """
+    if spec.waves_per_eu is not None:
+        return None
+    if arch not in _ACC_VGPR_HINT_ARCHES:
+        return None
+    if not spec.folds_sub_gemm_record or spec.uses_tap_outer_k:
+        return None
+    if spec.pipeline != "mem":
+        return None
+    sixteen_bit = ("fp16", "bf16")
+    if spec.data.dtype_a not in sixteen_bit or spec.data.dtype_b not in sixteen_bit:
+        return None
+    if load_vec_a != 8 or load_vec_b != 8:
+        return None
+    tile = (
+        spec.tile_m,
+        spec.tile_n,
+        spec.tile_k,
+        spec.warp_m,
+        spec.warp_n,
+        spec.warp_tile_m,
+        spec.warp_tile_n,
+        spec.warp_tile_k,
+    )
+    if tile not in _ACC_HINT_TILES:
+        return None
+    return (2, _ACC_HINT_MAX_WAVES_PER_EU)
+
+
 _RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord
 
 
@@ -1203,7 +1463,9 @@ def _build_tilde_dgrad(
 
     A parameter buffer holds per-sub-GEMM constants. Each CTA binary-searches
     it to find its sub-GEMM, loads the record fields, and uses runtime
-    arithmetic for tensor offsets.
+    arithmetic for tensor offsets. With a single sub-GEMM the record is folded
+    into immediates instead (``static_sub_gemm``), and on stride 1 the K loop
+    may run tap-outer (``tap_outer_k``); see the spec fields.
 
     For stride=1 (1 sub-GEMM, split_k=1): ``needs_atomic`` is False and the
     epilogue emits a direct buffer_store — equivalent to the old fast path.
@@ -1259,13 +1521,42 @@ def _build_tilde_dgrad(
 
     # Use a 1D grid: block_id_x covers all sub-GEMMs' tiles.
     flat_block_id = b.block_id_x()
+    # XCD-contiguous tile order (see xcd_contiguous_tile_order): remap the
+    # launch-order linear id over (group, tile) so that each XCD receives one
+    # contiguous range, then split it back into the tile and the group.
+    swizzled_group: Value | None = None
+    num_xcds = xcd_contiguous_tile_order(spec, arch)
+    if num_xcds:
+        flat_tiles = sub_gemms[-1].block_end
+        num_wgs = flat_tiles * p.groups
+        c_flat_tiles = b.const_i32(flat_tiles)
+        linear_id = b.add(flat_block_id, b.mul(b.block_id_y(), c_flat_tiles))
+        logical_id = chiplet_transform_chunked(
+            b,
+            linear_id,
+            num_wgs=num_wgs,
+            num_xcds=num_xcds,
+            chunk_size=num_wgs // num_xcds,
+        )
+        flat_block_id = b.mod(logical_id, c_flat_tiles)
+        swizzled_group = b.div(logical_id, c_flat_tiles)
 
-    # Binary search to find which sub-GEMM this CTA belongs to.
-    sg_idx = _emit_binary_search(b, flat_block_id, sub_gemm_buf, num_sub_gemms)
+    # Single sub-GEMM: the record is a compile-time constant (see
+    # DgradConvSpec.static_sub_gemm), so there is nothing to search and every
+    # field is an immediate. Otherwise binary-search the packed record buffer
+    # for this CTA's sub-GEMM and load its fields at runtime.
+    fold_record = spec.folds_sub_gemm_record
+    if fold_record:
+        _rec_const = pack_sub_gemm_buffer(sub_gemms, block_m, block_n)
 
-    # Load all record fields for this sub-GEMM.
-    def _ld(field_idx: int) -> Value:
-        return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx)
+        def _ld(field_idx: int) -> Value:
+            return b.const_i32(_rec_const[field_idx])
+
+    else:
+        sg_idx = _emit_binary_search(b, flat_block_id, sub_gemm_buf, num_sub_gemms)
+
+        def _ld(field_idx: int) -> Value:
+            return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx)
 
     rec_block_start = _ld(0)
     rec_num_m_tiles = _ld(1)
@@ -1290,7 +1581,8 @@ def _build_tilde_dgrad(
     rec_d_w_offset = _ld(20)
 
     # Compute local tile indices within this sub-GEMM.
-    local_flat = b.sub(flat_block_id, rec_block_start)
+    # block_start of the only sub-GEMM is 0, so the folded path skips the sub.
+    local_flat = flat_block_id if fold_record else b.sub(flat_block_id, rec_block_start)
     local_m_tile = b.div(local_flat, rec_num_n_tiles)
     local_n_tile = b.mod(local_flat, rec_num_n_tiles)
 
@@ -1349,9 +1641,11 @@ def _build_tilde_dgrad(
     # base (k_out = g*kpg + local) on dY/W and the absolute input-channel base
     # (c = g*cpg + local) on W/dX, and the k_sub decode divides by kpg (not the
     # total K).  For groups == 1 nothing is emitted, keeping the IR byte-identical.
+    # Under the XCD-contiguous tile order the group comes from the remapped id
+    # instead (swizzled_group, see xcd_contiguous_tile_order).
     grouped = p.groups > 1
     if grouped:
-        group_idx = b.block_id_y()
+        group_idx = b.block_id_y() if swizzled_group is None else swizzled_group
         c_kpg = b.const_i32(p.kpg)
         k_out_group_base = b.mul(group_idx, c_kpg)
         c_group_base = b.mul(group_idx, b.const_i32(p.cpg))
@@ -1470,6 +1764,19 @@ def _build_tilde_dgrad(
     else:
         load_vec_b = 1
         axis_b = "col"
+
+    _acc_wpe = flat_fold_acc_waves_per_eu(spec, arch, load_vec_a, load_vec_b)
+    if _acc_wpe is not None:
+        b.kernel.attrs["waves_per_eu"] = _acc_wpe
+    # A folded record batches the tile's global reads (see emit_load_phase):
+    # always on the tap-outer loop, and on the flat loop on the targets in
+    # _FLAT_FOLD_BATCH_ARCHES unless the waves_per_eu hint above applies --
+    # its six-wave ceiling already lets the scheduler batch the loads, and
+    # explicit batching measured no faster there. Elsewhere the flat loop was
+    # not measured and keeps its per-vector load->store pairs.
+    batch_loads = fold_record and (
+        spec.uses_tap_outer_k or (arch in _FLAT_FOLD_BATCH_ARCHES and _acc_wpe is None)
+    )
 
     # Buffer resources for A (dY), B (W), D (dX).
     dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
@@ -1595,6 +1902,52 @@ def _build_tilde_dgrad(
         safe_offset = b_.select(valid, offset, b_.const_i32(0))
         return safe_offset, valid
 
+    # ---- Tap-outer descriptors (DgradConvSpec.tap_outer_k) ----
+    # The K loop is (tap outer) x (output-channel chunk inner); tap_capture
+    # carries the scalars of the current iteration:
+    #   outer: "dh"/"dw" = pH - y / pW - x, "dy_tap" = (dh*Wo + dw)*K, and
+    #          "tap_cs" = tap*cstride (W offset of the tap within a k_out row);
+    #   inner: "kb" = absolute output-channel chunk base (g*kpg + chunk), and
+    #          "w_k" = kb*Y*X*cstride + tap_cs.
+    # Each descriptor is written so the loop-invariant part is an operand
+    # subtree of its own: (n, hi, wi) and the column term depend on the
+    # thread only, (pix + dy_tap) and the bounds predicate on the tap only,
+    # and the inner loop adds one scalar. Stride 1 makes the tilde slice the
+    # identity (ho = hi + pH - y), so no record field is involved, and the
+    # dY predicate needs no select of its own: the loader already maps an
+    # invalid lane to the OOB sentinel, which the buffer load zeroes.
+    use_tap_outer = spec.uses_tap_outer_k
+    tap_capture: dict = {}
+    _w_cstride = p.cpg
+
+    def tap_dy_descriptor(b_: IRBuilder, row: Value, col: Value):
+        m_sub = b_.add(block_m_off_v, row)
+        c_hw = b_.const_i32(p.Hi * p.Wi)
+        n = b_.div(m_sub, c_hw)
+        m_rem = b_.mod(m_sub, c_hw)
+        hi = b_.div(m_rem, c_Wi)
+        wi = b_.mod(m_rem, c_Wi)
+        ho = b_.add(hi, tap_capture["dh"])
+        wo = b_.add(wi, tap_capture["dw"])
+        ho_ok = b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho))
+        wo_ok = b_.land(b_.cmp_ge(wo, c0), b_.cmp_lt(wo, c_Wo))
+        valid = b_.land(ho_ok, wo_ok)
+        # NHWK: ((n*Ho + hi)*Wo + wi)*K + col, then + the tap and chunk terms.
+        pix = b_.add(
+            b_.mul(b_.add(b_.mul(b_.add(b_.mul(n, c_Ho), hi), c_Wo), wi), c_K), col
+        )
+        offset = b_.add(b_.add(pix, tap_capture["dy_tap"]), tap_capture["kb"])
+        return offset, valid
+
+    def tap_w_descriptor(b_: IRBuilder, row: Value, col: Value):
+        # KYXC: ((k_abs*Y + y)*X + x)*cstride + c with k_abs = kb + col and
+        # tap = y*X + x, i.e. col*Y*X*cstride + c + w_k. k_abs < (g+1)*kpg and
+        # tap < Y*X hold by construction, so there is no predicate.
+        c_val = b_.add(block_n_off_v, row)
+        c_yxc = b_.const_i32(p.Y * p.X * _w_cstride)
+        offset = b_.add(b_.add(b_.mul(col, c_yxc), c_val), tap_capture["w_k"])
+        return offset, None
+
     # Loaders (sync only for now — no async_dma in tilde kernel).
     a_sync_loader = CoalescedTileLoader(
         tile_rows=block_m,
@@ -1636,13 +1989,15 @@ def _build_tilde_dgrad(
     schedule = SchedulePolicy.for_pipeline(spec.pipeline)
     schedule.emit_prologue(b)
 
+    _a_desc_fn = tap_dy_descriptor if use_tap_outer else dy_descriptor
+    _w_desc_base = tap_w_descriptor if use_tap_outer else w_descriptor
     if spec.lds_k_outer:
 
         def _b_desc_fn(b_: IRBuilder, row: Value, col: Value):
-            return w_descriptor(b_, col, row)
+            return _w_desc_base(b_, col, row)
 
     else:
-        _b_desc_fn = w_descriptor
+        _b_desc_fn = _w_desc_base
 
     # The fragment length is per-atom, not a constant: on wave64 it is 8 for
     # 32x32x16 and the MFMA 16x16x32, 4 for 16x16x16 and 32x32x8; on wave32 the
@@ -1692,8 +2047,32 @@ def _build_tilde_dgrad(
 
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
+        if use_tap_outer:
+            # k_off is the chunk base within the group; the scalars for the
+            # chunk are computed once here, not per loaded vector.
+            kb = b.add(k_off, k_out_group_base) if grouped else k_off
+            tap_capture["kb"] = kb
+            tap_capture["w_k"] = b.add(
+                b.mul(kb, b.const_i32(p.Y * p.X * _w_cstride)), tap_capture["tap_cs"]
+            )
+        if batch_loads:
+            # Issue every global read of the tile before the first LDS write.
+            # With the record folded the address math is gone (tap-outer) or
+            # constant-folded (flat), so the per-vector load->store pairs no
+            # longer give the scheduler anything to overlap, and it serialises
+            # them behind one vmcnt(0) each through one register quad;
+            # batching keeps all the tile's reads in flight together.
+            a_staged = a_sync_loader.load_global(
+                b, tid=tid, descriptor=_a_desc_fn, rsrc=dy_rsrc
+            )
+            b_staged = b_sync_loader.load_global(
+                b, tid=tid, descriptor=_b_desc_fn, rsrc=w_rsrc
+            )
+            a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
+            b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
+            return
         a_sync_loader.load(
-            b, tid=tid, smem_dst=A_dst, descriptor=dy_descriptor, rsrc=dy_rsrc
+            b, tid=tid, smem_dst=A_dst, descriptor=_a_desc_fn, rsrc=dy_rsrc
         )
         # The K-outer tile is indexed (k, free) while w_descriptor takes
         # (free, k). w_descriptor itself is untouched, so the global addressing
@@ -1984,14 +2363,43 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
-    for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        emit_load_phase(k0, A_smem, B_smem)
-        b.sync()
-        new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-        b.sync()
-        b.scf_yield(*new_accs)
-    final_accs = for_op.results
+    if use_tap_outer:
+        # Tap outer, output-channel chunk inner (DgradConvSpec.tap_outer_k).
+        # Same reduction order within a tap as the flat loop; the flat k_dg
+        # index of (tap, kb) is tap*kpg + kb.
+        tap_for = b.scf_for_iter(
+            c0, b.const_i32(p.Y * p.X), b.const_i32(1), accs, iv_name="tap"
+        )
+        with tap_for as (tap, tap_vars):
+            ydot = b.div(tap, c_X)
+            xdot = b.mod(tap, c_X)
+            dh = b.sub(b.const_i32(p.pH), ydot)
+            dw = b.sub(b.const_i32(p.pW), xdot)
+            tap_capture["dh"] = dh
+            tap_capture["dw"] = dw
+            tap_capture["dy_tap"] = b.mul(b.add(b.mul(dh, c_Wo), dw), c_K)
+            tap_capture["tap_cs"] = b.mul(tap, b.const_i32(_w_cstride))
+            chunk_accs = [(f"{name}_t", v) for (name, _), v in zip(accs, tap_vars)]
+            chunk_for = b.scf_for_iter(
+                c0, c_kpg if grouped else c_K, c_block_k, chunk_accs, iv_name="kb"
+            )
+            with chunk_for as (kb0, iter_vars):
+                emit_load_phase(kb0, A_smem, B_smem)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+                b.sync()
+                b.scf_yield(*new_accs)
+            b.scf_yield(*chunk_for.results)
+        final_accs = tap_for.results
+    else:
+        for_op = b.scf_for_iter(k_lo, k_hi, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            emit_load_phase(k0, A_smem, B_smem)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        final_accs = for_op.results
 
     # ---- epilogue ----
     # Epilogue dispatch.  Two independent axes:
