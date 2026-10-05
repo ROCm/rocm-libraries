@@ -386,6 +386,48 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipkernel:Gfx950AttentionDense is not shipped for gfx950 by this configuration - skipping gfx950-attention-dense-external-integration-check")
     endif()
 
+    # hipkernel:Gfx950ConvFwd: the same shape as the dense-attention target above --
+    # gated on the bundle actually shipping for gfx950, routed into the gfx950 shard,
+    # GTEST_FILTER and ENVIRONMENT kept out of the categorization-only argument list.
+    set(_gfx950_conv_fwd_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_CONV_FWD_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_conv_fwd_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_FWD_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-fwd-external-integration
+        )
+    endif()
+
+    set(_hkp_gfx950_conv_fwd FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_conv_fwd_available(_hkp_gfx950_conv_fwd)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND HIPKERNELPROVIDER_ENABLE_ROCKE
+       AND _hkp_gfx950_conv_fwd
+       AND TARGET hipdnn_integration_tests)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_shard_args
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950)
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvFwd"
+            INSTALL_SUBDIR hip_kernel_provider
+            ${_gfx950_shard_args}
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwd.toml
+            GTEST_FILTER   "quick_Gfx950ConvFwd*:standard_Gfx950ConvFwd*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ${_gfx950_conv_fwd_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx950ConvFwd is not shipped for gfx950 by this configuration - skipping gfx950-conv-fwd-external-integration-check")
+    endif()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can

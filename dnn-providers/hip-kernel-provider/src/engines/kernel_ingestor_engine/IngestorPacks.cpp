@@ -37,6 +37,7 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerGfx950AttentionDenseSymbols,
          true,
          &resetGfx950AttentionDenseModuleCache},
+        {"hipkernel:Gfx950ConvFwd", &registerGfx950ConvFwdSymbols, &resetGfx950ConvFwdModuleCache},
     };
     return s_packs;
 }

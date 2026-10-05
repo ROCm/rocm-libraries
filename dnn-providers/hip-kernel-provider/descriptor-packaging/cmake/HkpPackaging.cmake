@@ -1376,6 +1376,33 @@ function(hkp_gfx950_attention_dense_available out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_available(<out>)
+#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle:
+#   the `product` pack target is wired, gfx950 is among the architectures it was wired
+#   for, and the authored content it carries declares hipkernel:Gfx950ConvFwd for gfx950.
+#   Same three conjuncts, and the same reason for the third, as
+#   hkp_gfx950_attention_dense_available() above.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_available out_var)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    if(NOT "gfx950" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_root GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_product)
+    _hkp_root_declares_engine_for_arch(_declares "${_root}"
+                                       "hipkernel:Gfx950ConvFwd" "gfx950")
+    set(${out_var} "${_declares}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_resolve_rocke_args(out_args out_comgr_lib)
 #   Resolve the rocKE toolchain once and return the keyword list every pack target is
 #   wired with, plus the comgr library the ctest entries forward. Called once for all
@@ -1579,7 +1606,7 @@ endfunction()
 #   at configure.
 #
 #   The root defaults to the provider's in-tree descriptor root, which holds the rocKE
-#   gfx950 attention_dense descriptors, so production packaging runs wherever the build
+#   gfx950 attention_dense and conv_fwd descriptors, so production packaging runs wherever the build
 #   packs for an architecture a descriptor under it declares. Root empty, or holding no
 #   descriptor = dormant. The default root also goes dormant when no descriptor under it
 #   declares an architecture this build packs for; a named root in the same state is the

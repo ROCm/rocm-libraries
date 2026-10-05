@@ -2,10 +2,19 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
-`rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and is dormant for every other build
-unless the cache variable below is pointed elsewhere.
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two bundles, each of whose KDPs
+declares gfx950 only, so production packaging runs for a build whose GPU targets include
+gfx950 and is dormant for every other build unless the cache variable below is pointed
+elsewhere:
+
+| Bundle | Engine | Native pack |
+|---|---|---|
+| `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
+| `rocKE/gfx950_conv_fwd/` | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
+
+`rocKE/gfx950_conv_fwd/` is generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd.yaml`; see
+`docs/gfx950_conv_fwd/README.md` for its catalog scope and regeneration procedure.
 
 ## Authoring a bundle
 

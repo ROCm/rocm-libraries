@@ -57,6 +57,7 @@ from rocke import (
     select_3d_config,
     use_2d_kernel,
 )
+from rocke.core.backend import resolve_backend
 from rocke.helpers import (
     AsyncTileLoader,
     CoalescedTileLoader,
@@ -3632,7 +3633,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("av_lds")
         p = b.param("p", PtrType(I32, "lds"), align=16)
         b.av_load_b128(p)
-        with self.assertRaises(ValueError):
+        error_type = RuntimeError if resolve_backend() == "cpp" else ValueError
+        with self.assertRaisesRegex(
+            error_type,
+            r"av_load_b128: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     def test_av_store_b128_requires_v4i32_data(self):
@@ -3731,7 +3737,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b = self._builder("sprefetch_lds")
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
-        with self.assertRaises(ValueError):
+        error_type = RuntimeError if resolve_backend() == "cpp" else ValueError
+        with self.assertRaisesRegex(
+            error_type,
+            r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
+            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+        ):
             lower_kernel_to_llvm(b.kernel)
 
     # ---- async buffer / global -> LDS ----

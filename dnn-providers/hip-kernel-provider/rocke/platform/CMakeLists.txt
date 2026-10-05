@@ -394,6 +394,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_convolution_forward_packaging.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")

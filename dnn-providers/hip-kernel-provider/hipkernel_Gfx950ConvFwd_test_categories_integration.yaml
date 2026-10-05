@@ -1,0 +1,71 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx950ConvFwd external integration test categories.
+#
+# Pinned to hipkernel:Gfx950ConvFwd via --test-engine. Matches the bundles
+# under integration-test-bundles/{quick,standard}/Gfx950ConvFwd/.
+# The harness skips any case the engine does not service.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Quick gfx950 forward convolution bundle coverage"
+    test_patterns:
+      - "quick_Gfx950ConvFwd*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard gfx950 forward convolution bundle coverage"
+    test_patterns:
+      - "quick_Gfx950ConvFwd*"
+      - "standard_Gfx950ConvFwd*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive gfx950 forward convolution coverage"
+    test_patterns:
+      - "*Gfx950ConvFwd*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full gfx950 forward convolution coverage"
+    test_patterns:
+      - "*Gfx950ConvFwd*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: gfx950 forward convolution quick bundles"
+    test_patterns:
+      - "quick_Gfx950ConvFwd*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

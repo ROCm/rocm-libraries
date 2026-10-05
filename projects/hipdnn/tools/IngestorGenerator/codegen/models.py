@@ -148,6 +148,13 @@ class KmdField:
     #: ``None`` means the field is mandatory on every kernel; that is the KMD's
     #: own semantics.
     default_value: object = None
+    #: Generator-only (never emitted): the builder's spec dataclass defaults this
+    #: field to ``default_value`` too, so a kernel may state it in neither its
+    #: metadata nor its ``kernel_source.spec``. This is how a field added to an
+    #: existing engine leaves the shipped descriptors' bytes unchanged. The
+    #: packer still proves the two defaults agree: it compares the completed
+    #: metadata with the hydrated spec's attribute for every bound field.
+    builder_default: bool = False
 
     @property
     def is_mandatory(self) -> bool:
