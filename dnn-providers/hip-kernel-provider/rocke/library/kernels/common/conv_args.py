@@ -348,6 +348,12 @@ _GEMM_AXES = {
     "dgrad": ("p_dg_M", "p_dg_N", "p_dg_K"),
 }
 
+# The forward implicit-GEMM loaders decode the filter-channel reduction index
+# k -> (y, x, c) with 24-bit multiplies (``mul_u24``), and every operand of
+# those products is bounded by the reduction extent. The K loop runs up to one
+# tile past that extent, so the bound keeps a bit of headroom below 2**24.
+MUL24_REDUCTION_LIMIT = 1 << 23
+
 
 @dataclass
 class ConvArgs:
@@ -621,6 +627,15 @@ class ConvArgs:
         """
         if split_k < 1:
             raise ValueError(f"split_k must be >= 1 (got {split_k})")
+        if (
+            self.algorithm == "implicit_gemm"
+            and self.direction == "fwd"
+            and self.gemm_k >= MUL24_REDUCTION_LIMIT
+        ):
+            raise ValueError(
+                f"implicit-GEMM fwd needs a reduction extent (Z*Y*X*cpg) below "
+                f"2**23 for its 24-bit address products; got {self.gemm_k}"
+            )
         abi = self.arg_names(two_stage=ws_ptr is not None)
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

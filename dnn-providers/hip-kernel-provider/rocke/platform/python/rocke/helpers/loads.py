@@ -47,7 +47,7 @@ read), not by handing the intrinsic a swizzled destination pointer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, I64, IRBuilder, Type, Value
 
@@ -345,27 +345,6 @@ class CoalescedTileLoader:
         for row, col, v in staged:
             self._store_tile(b, smem_dst, row, col, v)
 
-    def chunks(self, b: IRBuilder, *, tid: Value) -> List[Tuple[Value, Value]]:
-        """Every chunk's tile-local ``(row, col)``, emitted at the call site.
-
-        A caller that hoists per-row address math out of its K loop calls this
-        once before the loop, precomputes what depends only on ``row`` (keyed
-        by the returned row Values) and passes the list to :meth:`load`, which
-        then reuses these exact Values instead of re-deriving them.
-        """
-        c_threads = b.const_i32(self.block_size)
-        c_load_vec = b.const_i32(self.load_vec)
-        c_span = b.const_i32(
-            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
-        )
-        out = []
-        for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            out.append(
-                self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
-            )
-        return out
-
     def load(
         self,
         b: IRBuilder,
@@ -375,7 +354,6 @@ class CoalescedTileLoader:
         descriptor: DescriptorFn,
         rsrc: Optional[Value] = None,
         ptr: Optional[Value] = None,
-        chunks: Optional[Sequence[Tuple[Value, Value]]] = None,
     ) -> None:
         """Emit the per-thread load loop.
 
@@ -409,13 +387,10 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         for e in range(self.vecs_per_thread):
-            if chunks is not None:
-                row, col = chunks[e]
-            else:
-                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                row, col = self._decode_row_col(
-                    b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
-                )
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
 

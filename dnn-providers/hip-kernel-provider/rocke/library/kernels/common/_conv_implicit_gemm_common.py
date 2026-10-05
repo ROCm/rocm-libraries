@@ -43,6 +43,7 @@ from rocke.helpers.spec import choose_load_vec
 from rocke.helpers.transforms import (
     TensorDescriptor,
     DynamicTensorDescriptor,
+    do_magic_division_dynamic,
     embed,
     embed_dynamic,
     pad,
@@ -954,6 +955,39 @@ def emit_wavelet_kloop_dynamic(
 # -----------------------------------------------------------------------
 # Dynamic (AOT) descriptor builders — shared by all conv directions
 # -----------------------------------------------------------------------
+
+
+def mul_u24(b: IRBuilder, x: Value, y: Value) -> Value:
+    """``x * y`` for operands known to be non-negative and below 2**24.
+
+    Masking both operands to 24 bits lets the backend select the full-rate
+    ``v_mul_u32_u24`` instead of the quarter-rate ``v_mul_lo_u32``; the masks
+    themselves fold away. Only for K-loop terms whose bound the host enforces
+    (``conv_args.MUL24_REDUCTION_LIMIT``) -- a wider operand loses its high bits.
+    """
+    c24 = b.const_i32(0xFFFFFF)
+    return b.mul(b.land(x, c24), b.land(y, c24))
+
+
+def magic_divmod(
+    b: IRBuilder, val: Value, mult, shift, dim, *, u24: bool = False
+) -> Tuple[Value, Value]:
+    """``(val // dim, val % dim)`` through a magic pair, as one unmerge step.
+
+    Same emission as a :class:`UnmergeMagicDynamic` step: each of ``mult`` /
+    ``shift`` / ``dim`` may be a runtime ``Value`` or a build-time ``int``, and
+    a build-time ``dim == 1`` skips the division. ``u24`` computes the
+    ``quot * dim`` product with :func:`mul_u24`.
+    """
+
+    def as_value(x):
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    if isinstance(dim, int) and dim == 1:
+        return val, b.const_i32(0)
+    quot = do_magic_division_dynamic(b, val, as_value(mult), as_value(shift))
+    prod = (mul_u24 if u24 else IRBuilder.mul)(b, quot, as_value(dim))
+    return quot, b.sub(val, prod)
 
 
 def _magic_triple(params, prefix: str, name: str, dim: Value):

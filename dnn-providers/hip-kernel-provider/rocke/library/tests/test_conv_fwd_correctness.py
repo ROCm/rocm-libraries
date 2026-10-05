@@ -320,7 +320,9 @@ def _run_one(
     try:
         kernel = build_implicit_gemm_conv(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build error): {e}"
+        # The validator admitted this spec, so a build error is a bug, not a
+        # configuration the arch lacks -- fail rather than skip.
+        return False, f"build error for a spec the validator admitted: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -480,8 +482,8 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
 
     def _sweep(self, **knobs) -> None:
         # Both loops are MFMA-only (WMMA conv rejects async_dma and unroll_k).
-        # On MFMA every case must build and run: a skip -- a build error
-        # included -- is a failure, not a quiet pass.
+        # On MFMA every case must build and run: a skip (an invalid spec)
+        # is a failure, not a quiet pass.
         if not _IS_MFMA:
             self.skipTest(f"{knobs} fwd is MFMA-only; running on {GPU_ARCH}")
         for shape in self._CASES:

@@ -266,6 +266,20 @@ def test_dgrad_launch_values_cover_the_abi():
     assert sorted(values) == sorted(expected)
 
 
+def test_fwd_launch_values_reject_a_reduction_past_the_mul24_bound():
+    """The fwd K-loop decodes k with 24-bit multiplies; the host enforces it."""
+    # Y = X = 3, cpg = 2**20: Z*Y*X*cpg = 9 * 2**20 >= 2**23.
+    big = ConvProblem(N=1, Hi=4, Wi=4, C=1 << 20, K=8, Y=3, X=3, pH=1, pW=1)
+    with pytest.raises(ValueError, match="2\\*\\*23"):
+        ConvArgs.from_problem(big, tile_m=64, tile_n=64).to_launch_values(
+            1, 2, 3, 4, 5, 6
+        )
+    # wgrad decodes no filter-channel index in its K loop: no bound there.
+    ConvArgs.from_problem(
+        big, direction="wgrad", tile_m=64, tile_n=64, tile_k=32
+    ).to_launch_values(1, 2, 3, 4, 5, 6)
+
+
 def test_dgrad_3d_abi_exists_but_the_spec_refuses_to_build_it():
     """The 3-D dgrad ABI is declared; only the spec validator says no.
 
@@ -1254,6 +1268,63 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     monkeypatch.setattr(ks, "current_emitter_digest", lambda: "newer-sources")
     assert run() == (1, 3)  # one kernel's code changed
     assert cache.meta(jobs[0].identity)["blob"] != before
+
+
+# Set by test_compile_jobs_survives_a_dead_worker before the pool forks.
+_CRASH_IDENTITY: list = []
+_REAL_COMPILE_WORKER: list = []
+
+
+def _crashing_compile_worker(payload):
+    if payload[1].identity.stable_hash() in _CRASH_IDENTITY:
+        import os
+
+        os._exit(1)  # what an OOM kill or a segfault in COMGR looks like
+    return _REAL_COMPILE_WORKER[0](payload)
+
+
+def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
+    """A worker dying mid-compile fails that binary, not the whole run."""
+    import multiprocessing
+    import re
+
+    from rocke.core.arch import ArchTarget
+    from benchmarks.common.kernel_cache import KernelCache
+
+    if multiprocessing.get_start_method() != "fork":
+        pytest.skip("the crashing worker is injected by monkeypatch + fork")
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    jobs = [
+        j
+        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+    ][:3]
+    _REAL_COMPILE_WORKER[:] = [ks._compile_worker]
+    _CRASH_IDENTITY[:] = [jobs[0].identity.stable_hash()]
+    monkeypatch.setattr(ks, "_compile_worker", _crashing_compile_worker)
+    cache = KernelCache(tmp_path, _ARCH)
+    lines = []
+    try:
+        ks.compile_jobs(
+            cache=cache,
+            all_jobs=jobs,
+            build=ks.build_kernel,
+            arch=_ARCH,
+            dtype="fp16",
+            directions=("fwd",),
+            jobs=2,
+            log=lines.append,
+        )
+    finally:
+        _CRASH_IDENTITY.clear()
+        _REAL_COMPILE_WORKER.clear()
+    log = "\n".join(lines)
+    assert "a worker process died" in log
+    assert "[fail]" in log and "worker process died" in log
+    assert not cache.has(jobs[0].identity)
+    assert re.search(r"[1-9]\d* failed", lines[-1])
 
 
 @pytest.mark.parametrize("two_stage", [False, True])

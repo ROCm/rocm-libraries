@@ -78,6 +78,7 @@ from concurrent.futures import (
     as_completed,
     wait,
 )
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (
     Dict,
@@ -1073,6 +1074,45 @@ def _compile_worker(payload):
         return key, None, None, f"{type(exc).__name__}: {exc}"
 
 
+# A main compile pool that keeps breaking is not a single bad kernel.
+_MAX_POOL_RESTARTS = 20
+
+_WORKER_DIED = "worker process died (out of memory, or a crash in the compiler)"
+
+
+def _run_isolated(suspects, jobs: int):
+    """Run each ``(kind, payload)`` in its own single-worker pool.
+
+    Yields ``(kind, payload, result)`` with the worker's usual result tuple; a
+    job whose worker dies again gets that tuple with :data:`_WORKER_DIED` as
+    its error, so it is reported like any other failure instead of taking the
+    run down. At most ``jobs`` of these pools are alive at a time.
+    """
+    pending = list(suspects)
+    while pending:
+        batch, pending = pending[:jobs], pending[jobs:]
+        pools = [ProcessPoolExecutor(max_workers=1) for _ in batch]
+        try:
+            futs = [
+                pool.submit(
+                    _emit_worker if kind == "emit" else _compile_worker, payload
+                )
+                for pool, (kind, payload) in zip(pools, batch)
+            ]
+            for (kind, payload), fut in zip(batch, futs):
+                try:
+                    result = fut.result()
+                except BrokenProcessPool:
+                    if kind == "emit":
+                        result = (payload[1], None, None, _WORKER_DIED)
+                    else:
+                        result = (payload[-1], None, None, _WORKER_DIED)
+                yield kind, payload, result
+        finally:
+            for pool in pools:
+                pool.shutdown(wait=True)
+
+
 def _pool_map(fn, payloads, jobs: int, on_result) -> None:
     if jobs <= 1:
         for payload in payloads:
@@ -1210,6 +1250,10 @@ def compile_jobs(
        recompiled, identities that emit the same code share one compile, and
        an interrupted run keeps every entry it finished.
 
+    A worker that dies outright (OOM kill, native crash in COMGR) breaks the
+    pool: its in-flight jobs are rerun one per process, a job that kills its
+    worker again is reported as failed, and the run goes on.
+
     ``limit`` caps how many jobs go through steps 2-3 (smoke tests).
     """
     digest = current_emitter_digest()
@@ -1324,34 +1368,82 @@ def compile_jobs(
         # the window a compile waits behind at most ~2*jobs emits.
         window = 2 * jobs
         emit_iter = iter(emit_payloads)
-        with ProcessPoolExecutor(max_workers=jobs) as pool:
-            futures: Dict = {}
+        # Work handed over from a pool that broke (see below).
+        carry: List[Tuple[str, tuple]] = []
+        restarts = 0
+        while True:
+            broken: List[Tuple[str, tuple]] = []
+            with ProcessPoolExecutor(max_workers=jobs) as pool:
+                futures: Dict = {}
 
-            def submit_compile(payload) -> None:
-                futures[pool.submit(_compile_worker, payload)] = "compile"
+                def submit(kind: str, payload) -> None:
+                    fn = _emit_worker if kind == "emit" else _compile_worker
+                    futures[pool.submit(fn, payload)] = (kind, payload)
 
-            def refill() -> None:
-                while len(futures) < window:
-                    payload = next(emit_iter, None)
-                    if payload is None:
-                        return
-                    futures[pool.submit(_emit_worker, payload)] = "emit"
+                def submit_compile(payload) -> None:
+                    submit("compile", payload)
 
-            refill()
-            while futures:
-                # The timeout keeps the progress line coming while only a few
-                # slow kernels are left and nothing finishes for minutes.
-                ready, _ = wait(
-                    list(futures), timeout=log_every_s, return_when=FIRST_COMPLETED
-                )
-                _progress()
-                for fut in ready:
-                    kind = futures.pop(fut)
-                    if kind == "emit":
-                        on_emitted(fut.result(), submit_compile)
-                    else:
-                        on_compiled(fut.result())
+                def refill() -> None:
+                    while len(futures) < window:
+                        payload = next(emit_iter, None)
+                        if payload is None:
+                            return
+                        submit("emit", payload)
+
+                for kind, payload in carry:
+                    submit(kind, payload)
+                carry = []
                 refill()
+                try:
+                    while futures:
+                        # The timeout keeps the progress line coming while only
+                        # a few slow kernels are left and nothing finishes for
+                        # minutes.
+                        ready, _ = wait(
+                            list(futures),
+                            timeout=log_every_s,
+                            return_when=FIRST_COMPLETED,
+                        )
+                        _progress()
+                        for fut in ready:
+                            kind, payload = futures[fut]
+                            result = fut.result()
+                            del futures[fut]
+                            if kind == "emit":
+                                on_emitted(result, submit_compile)
+                            else:
+                                on_compiled(result)
+                        refill()
+                except BrokenProcessPool:
+                    # A worker died outright -- killed by the OOM killer, or a
+                    # native crash inside the compiler -- and took the whole
+                    # pool with it. Every job still in flight is a suspect.
+                    broken = list(futures.values())
+                    futures.clear()
+            if not broken:
+                break
+            restarts += 1
+            if restarts > _MAX_POOL_RESTARTS:
+                raise RuntimeError(
+                    f"compile workers died {restarts} times; giving up. A worker "
+                    f"dying repeatedly usually means memory pressure -- rerun "
+                    f"with a lower --jobs (was {jobs})."
+                )
+            log(
+                f"  [warn] a worker process died (out of memory, or a crash in "
+                f"the compiler); rerunning its {len(broken)} in-flight job(s) "
+                f"one per process to find the culprit. Lower --jobs if this "
+                f"repeats."
+            )
+            # Rerun the suspects one per single-worker pool, so a job that
+            # kills its worker again breaks only its own pool and is reported.
+            # Compiles they trigger go to the next main pool.
+            for kind, payload, result in _run_isolated(broken, jobs):
+                if kind == "emit":
+                    on_emitted(result, lambda p: carry.append(("compile", p)))
+                else:
+                    on_compiled(result)
+            _progress()
 
     _progress(force=True)
     log(

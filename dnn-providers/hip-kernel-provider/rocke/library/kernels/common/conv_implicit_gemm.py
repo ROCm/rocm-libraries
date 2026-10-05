@@ -56,7 +56,7 @@ This module re-exports the shared helpers to keep existing callers stable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dc_replace
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
     BF16,
@@ -81,7 +81,6 @@ from rocke.helpers.tensor_view import (
 )
 from rocke.helpers.transforms import (
     TensorDescriptor,
-    do_magic_division_dynamic,
     pad,
     unmerge_magic,
 )
@@ -106,6 +105,8 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     make_a_descriptor_dynamic,
     make_b_descriptor_dynamic,
     make_d_descriptor_dynamic,
+    magic_divmod,
+    mul_u24,
 )
 
 
@@ -1177,6 +1178,8 @@ def _build_implicit_gemm_conv_impl(
             if m_index_fn is not None
             else b_.add(block_m_off_v, row)
         )
+        if split_ab:
+            return a_offset_split(b_, m_val, k_val)
         return A_desc.offset(b_, m=m_val, k=k_val, **_a_group_kw)
 
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
@@ -1190,6 +1193,8 @@ def _build_implicit_gemm_conv_impl(
             k_ok = b_.cmp_lt(k_out, _c_K_ir)
             c_ok = b_.cmp_lt(kg, _c_C_ir)
             return off, b_.land(k_ok, c_ok)
+        if split_ab:
+            return b_offset_split(b_, k_out, kg)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
 
     # `k_off_capture` lets the closures pick up the current k0 from
@@ -1252,77 +1257,75 @@ def _build_implicit_gemm_conv_impl(
             a_wavelet_loader = None
             b_wavelet_loader = None
 
-    # ---- K-invariant address math, hoisted out of the K loop ----
-    # A loader chunk's row fixes its output position m -> (n, ho, wo), its
-    # input base offset and its (hi, wi) origin; only the filter/channel
-    # coordinates (y, x, c) move with k. Computing the row part once here
-    # keeps the magic divisions by Ho/Wo, the n/hi/wi stride products and
-    # the kernargs they read out of the loop body.
-    _a_rows: Dict[int, Tuple[Value, Value, Value]] = {}
-    _b_rows: Dict[int, Value] = {}
-    a_chunks = b_chunks = None
-    import os as _os
+    # ---- A/B addressing, split into a K-invariant and a K-varying part ----
+    # The descriptor DAG forms A's offset as n*s_n + hi*s_hi + wi*s_wi + c with
+    # hi = ho*sH + y*dH - pH: every stride multiplies a sum of an output-position
+    # term (fixed per loader row) and a filter-position term (moving with k), so
+    # no product in it is loop-invariant. Distributing the strides separates a
+    # row part -- the Ho/Wo magic divisions and the n/hi/wi products, which LLVM
+    # hoists out of the K loop -- from a k part of one stride step per filter
+    # axis. The k decode's remainder products and B's filter strides (both
+    # bounded by the reduction extent) use 24-bit multiplies; the host enforces
+    # the bound (conv_args.MUL24_REDUCTION_LIMIT).
+    split_ab = not p.is_pointwise and not p.is_3d and a_mhw_index_fn is None
+    if split_ab:
+        s_hi = params["p_A_stride_hi"]
+        s_wi = params["p_A_stride_wi"]
+        neg_pH = b.sub(c0, p_pH)
+        neg_pW = b.sub(c0, p_pW)
+        # One filter row / column step in A's offset.
+        a_ystep = b.mul(p_dH, s_hi)
+        a_xstep = b.mul(p_dW, s_wi)
+        a_group_base = b.mul(group_idx, p_cpg) if grouped else None
 
-    _hoist = (
-        _os.environ.get("ROCKE_NO_HOIST") is None
-        and not spec.async_dma
-        and spec.pipeline != "wavelet"
-        and a_load_override is None
-        and m_index_fn is None
-        and a_mhw_index_fn is None
-        and not p.is_pointwise
-        and not p.is_3d
-    )
-    if _hoist:
-        a_chunks = a_sync_loader.chunks(b, tid=tid)
-        b_chunks = b_sync_loader.chunks(b, tid=tid)
-        _shi = params["p_A_stride_hi"]
-        _swi = params["p_A_stride_wi"]
-        _neg_pH = b.sub(b.const_i32(0), p_pH)
-        _neg_pW = b.sub(b.const_i32(0), p_pW)
-        for row, _ in a_chunks:
-            m_val = b.add(block_m_off_v, row)
-            q_wo = do_magic_division_dynamic(
-                b, m_val, params["p_magic_m_Wo_mult"], params["p_magic_m_Wo_shift"]
-            )
-            wo = b.sub(m_val, b.mul(q_wo, p_Wo))
-            n = do_magic_division_dynamic(
-                b, q_wo, params["p_magic_m_Ho_mult"], params["p_magic_m_Ho_shift"]
-            )
-            ho = b.sub(q_wo, b.mul(n, p_Ho))
-            hi0 = b.add(b.mul(ho, p_sH), _neg_pH)
-            wi0 = b.add(b.mul(wo, p_sW), _neg_pW)
-            base = b.add(
-                b.add(b.mul(n, params["p_A_stride_n"]), b.mul(hi0, _shi)),
-                b.mul(wi0, _swi),
-            )
-            if grouped:
-                base = b.add(base, b.mul(group_idx, p_cpg))
-            _a_rows[id(row)] = (base, hi0, wi0)
-        for row, _ in b_chunks:
-            k_out = b.add(block_n_off_v, row)
-            if grouped:
-                k_out = b.add(k_out_group_base, k_out)
-            _b_rows[id(row)] = b.mul(k_out, params["p_B_stride_k"])
-        # K-step strides: one filter row / column step in A.
-        _a_ystep = b.mul(p_dH, _shi)
-        _a_xstep = b.mul(p_dW, _swi)
-
-    def _k_decode(b_: IRBuilder, k_val: Value):
-        """k -> (y, x, c) with the runtime magic pairs for cpg and X."""
-        q_c = do_magic_division_dynamic(
-            b_, k_val, params["p_magic_k_cpg_mult"], params["p_magic_k_cpg_shift"]
+    def k_decode(b_: IRBuilder, k_val: Value) -> Tuple[Value, Value, Value]:
+        """k -> (y, x, c) through the runtime magic pairs for cpg and X."""
+        q_c, c = magic_divmod(
+            b_,
+            k_val,
+            params["p_magic_k_cpg_mult"],
+            params["p_magic_k_cpg_shift"],
+            p_cpg,
+            u24=True,
         )
-        c = b_.sub(k_val, b_.mul(q_c, p_cpg))
-        y = do_magic_division_dynamic(
-            b_, q_c, params["p_magic_k_X_mult"], params["p_magic_k_X_shift"]
+        y, x = magic_divmod(
+            b_,
+            q_c,
+            params["p_magic_k_X_mult"],
+            params["p_magic_k_X_shift"],
+            p_X,
+            u24=True,
         )
-        x = b_.sub(q_c, b_.mul(y, p_X))
         return y, x, c
 
-    def a_descriptor_hoisted(b_: IRBuilder, row: Value, col: Value):
-        base, hi0, wi0 = _a_rows[id(row)]
-        y, x, c = _k_decode(b_, b_.add(k_off_capture[0], col))
+    def a_offset_split(b_: IRBuilder, m_val: Value, k_val: Value):
+        # Row part: m -> (n, ho, wo), the (hi, wi) origin and the base offset.
+        q_wo, wo = magic_divmod(
+            b_,
+            m_val,
+            params["p_magic_m_Wo_mult"],
+            params["p_magic_m_Wo_shift"],
+            p_Wo,
+        )
+        n, ho = magic_divmod(
+            b_,
+            q_wo,
+            params["p_magic_m_Ho_mult"],
+            params["p_magic_m_Ho_shift"],
+            p_Ho,
+        )
+        hi0 = b_.add(b_.mul(ho, p_sH), neg_pH)
+        wi0 = b_.add(b_.mul(wo, p_sW), neg_pW)
+        base = b_.add(
+            b_.add(b_.mul(n, params["p_A_stride_n"]), b_.mul(hi0, s_hi)),
+            b_.mul(wi0, s_wi),
+        )
+        if grouped:
+            base = b_.add(base, a_group_base)
+        # k part.
+        y, x, c = k_decode(b_, k_val)
+        # Plain multiplies on purpose: masking these two kept extra values
+        # live and pushed large tiles past an occupancy step.
         hi = b_.add(hi0, b_.mul(y, p_dH))
         wi = b_.add(wi0, b_.mul(x, p_dW))
         ok = b_.land(
@@ -1330,16 +1333,16 @@ def _build_implicit_gemm_conv_impl(
             b_.land(b_.cmp_ge(wi, c0), b_.cmp_lt(wi, p_Wi)),
         )
         ok = b_.land(ok, b_.cmp_lt(y, p_Y))
-        off = b_.add(b_.add(b_.add(base, b_.mul(y, _a_ystep)), b_.mul(x, _a_xstep)), c)
+        off = b_.add(b_.add(b_.add(base, b_.mul(y, a_ystep)), b_.mul(x, a_xstep)), c)
         return off, ok
 
-    def b_descriptor_hoisted(b_: IRBuilder, row: Value, col: Value):
-        base = _b_rows[id(row)]
-        y, x, c = _k_decode(b_, b_.add(k_off_capture[0], col))
+    def b_offset_split(b_: IRBuilder, k_out: Value, kg: Value):
+        base = b_.mul(k_out, params["p_B_stride_k"])
+        y, x, c = k_decode(b_, kg)
         off = b_.add(
             b_.add(
-                b_.add(base, b_.mul(y, params["p_B_stride_y"])),
-                b_.mul(x, params["p_B_stride_x"]),
+                b_.add(base, mul_u24(b_, y, params["p_B_stride_y"])),
+                mul_u24(b_, x, params["p_B_stride_x"]),
             ),
             c,
         )
@@ -1413,17 +1416,15 @@ def _build_implicit_gemm_conv_impl(
                 b,
                 tid=tid,
                 smem_dst=A_dst,
-                descriptor=a_descriptor_hoisted if _hoist else a_descriptor,
+                descriptor=a_descriptor,
                 rsrc=a_rsrc,
-                chunks=a_chunks,
             )
         b_sync_loader.load(
             b,
             tid=tid,
             smem_dst=B_dst,
-            descriptor=b_descriptor_hoisted if _hoist else b_descriptor,
+            descriptor=b_descriptor,
             rsrc=b_rsrc,
-            chunks=b_chunks,
         )
 
     def emit_wmma_phase(

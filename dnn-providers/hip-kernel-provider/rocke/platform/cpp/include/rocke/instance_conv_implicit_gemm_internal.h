@@ -506,7 +506,34 @@ typedef struct rocke_conv_build_ctx
      * phase reads final_accs. */
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
     int num_final_accs;
+
+    /* ---- forward A/B addressing split into a K-invariant and a K-varying part ----
+     * Python's split_ab block: when set, rocke_conv_a_descriptor /
+     * rocke_conv_b_descriptor distribute the strides so LLVM can hoist the row
+     * part out of the K loop. The constants are emitted by ctx_init before the
+     * schedule prologue. */
+    bool split_ab;
+    rocke_value_t* split_neg_pH;
+    rocke_value_t* split_neg_pW;
+    rocke_value_t* split_ystep; /* dH * A_stride_hi */
+    rocke_value_t* split_xstep; /* dW * A_stride_wi */
+    rocke_value_t* split_group_base; /* group_idx * cpg, NULL when ungrouped */
 } rocke_conv_build_ctx_t;
+
+/* Python mul_u24: x * y with both operands masked to 24 bits so the backend
+ * selects v_mul_u32_u24. Only for terms the host bounds (conv_args.MUL24_REDUCTION_LIMIT). */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+
+/* Python magic_divmod with runtime Values: *quot = val // dim through the
+ * magic pair, *rem = val - quot * dim (rocke_conv_mul_u24 when u24). */
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem);
 
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / module-level helper.
