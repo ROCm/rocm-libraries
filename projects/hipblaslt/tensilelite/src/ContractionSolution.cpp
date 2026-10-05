@@ -2815,6 +2815,16 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU);
 
+        // A persistent kernel strides by its ComputeUnits kernarg, so it and the
+        // ComputeUnits grid must be the same value. Cap it like Tensile's persistent
+        // grids, by the caller's SM-count target and persistentMaxCUs.
+        int computeUnits = pAMDGPU->computeUnitCount;
+        if(problem.getParams().smCountTarget() > 0)
+            computeUnits = std::min(computeUnits, problem.getParams().smCountTarget());
+        if(pAMDGPU->persistentMaxCUs > 0)
+            computeUnits = std::min(computeUnits, pAMDGPU->persistentMaxCUs);
+        computeUnits = std::max(1, computeUnits);
+
         if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
@@ -2933,7 +2943,7 @@ namespace TensileLite
                     dim = launch.grid;
                     break;
                 case CustomGridSize::ComputeUnits:
-                    dim = static_cast<size_t>(std::max(1, pAMDGPU->computeUnitCount));
+                    dim = static_cast<size_t>(computeUnits);
                     break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
@@ -3201,9 +3211,7 @@ namespace TensileLite
                         rv.args.append("beta", inputs.beta, problem.betaType());
                     break;
                 case CustomArgSemantic::ComputeUnits:
-                    rv.args.appendCustomType("ComputeUnits",
-                                             std::max(1, pAMDGPU->computeUnitCount),
-                                             arg.type);
+                    rv.args.appendCustomType("ComputeUnits", computeUnits, arg.type);
                     break;
                 case CustomArgSemantic::SplitK:
                 {
