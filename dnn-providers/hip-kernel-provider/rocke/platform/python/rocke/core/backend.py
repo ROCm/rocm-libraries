@@ -922,6 +922,44 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
     return d
 
 
+def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
+    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        tile_h=spec.tile_h,
+        tile_w=spec.tile_w,
+        tile_k=spec.tile_k,
+        ck=spec.ck,
+        waves_m=spec.waves_m,
+        waves_n=spec.waves_n,
+        atom=spec.atom,
+        wave_size=spec.wave_size,
+        lds_pad=spec.lds_pad,
+        chiplet_swizzle=spec.chiplet_swizzle,
+        swizzle_wgm=spec.swizzle_wgm,
+        chiplet_chunk=spec.chiplet_chunk,
+        num_xcds=spec.num_xcds,
+        double_buffer=spec.double_buffer,
+        iglp=spec.iglp,
+        waves_per_eu=spec.waves_per_eu,
+    )
+
+
 def img2col_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`Img2ColSpec` -> flat dict (problem nested)."""
     return dict(
@@ -1493,6 +1531,43 @@ def lower_conv_direct_grouped(
         py_fn,
         lambda: eng.conv_direct_grouped_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_grouped_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_nongrouped(
+    spec: Any,
+    *,
+    arch: str = "gfx950",
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectNongroupedConvSpec` (the ``groups == 1`` direct conv)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_conv_nongrouped(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_nongrouped_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_nongrouped",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
