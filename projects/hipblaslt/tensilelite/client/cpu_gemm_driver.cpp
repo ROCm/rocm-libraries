@@ -288,9 +288,10 @@ namespace
 
 #ifndef _WIN32
                 // MX scale tensor layout follows the ContractionProblem tensor
-                // descriptors. Even with padScaleTensor=false, setMXScaleA/B
-                // can pad the scale-K dimension, so using k/mxBlock as the
-                // free-dimension stride would address the wrong scale element.
+                // descriptors. Compact descriptors match Ceil(K/mxBlock);
+                // Gfx950 / Gfx1250 pad modes can enlarge scale-K, so using
+                // k/mxBlock as the free-dimension stride would address the
+                // wrong scale element.
                 //
                 // Both MX operands have positive blocks and non-null scale
                 // buffers here. Block shape is validated in runGemm. When the
@@ -709,13 +710,19 @@ int runGemm(size_t         m,
     {
         if(mxBlockA > 0 || mxBlockB > 0)
         {
-            // Use unpadded MX scale tensors so the columnMajorGemm reference
+            // Use Compact MX scale tensors so the columnMajorGemm reference
             // indexing matches: mxsa = {m, k/mxBlockA} with m as leading
-            // stride (and analogous for B). Default padScaleTensor=true would
-            // round M up to next 32 and K/mxBlockA/B up to next 8, breaking
-            // the index math below.
-            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
-            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
+            // stride (and analogous for B). Gfx950 pad would round M up to
+            // next 32 and K/mxBlockA/B up to next 8; Gfx1250 dimk is also
+            // not "no pad" — pass Compact explicitly for NoSwizzle layout.
+            contraction.setMXScaleA(rocisa::DataType::E8,
+                                    mxBlockA,
+                                    /*saStride=*/{},
+                                    ContractionProblemGemm::MXScaleTensorPad::Compact);
+            contraction.setMXScaleB(rocisa::DataType::E8,
+                                    mxBlockB,
+                                    /*sbStride=*/{},
+                                    ContractionProblemGemm::MXScaleTensorPad::Compact);
 
             size_t nmxsa = contraction.mxsa().totalLogicalElements();
             size_t nmxsb = contraction.mxsb().totalLogicalElements();

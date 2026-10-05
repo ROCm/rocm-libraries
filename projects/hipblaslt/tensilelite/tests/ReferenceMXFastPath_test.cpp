@@ -43,8 +43,14 @@ namespace
                                                             M * N,
                                                             0.0);
 
-        problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
-        problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
+        problem.setMXScaleA(rocisa::DataType::E8,
+                            mxBlock,
+                            {},
+                            ContractionProblemGemm::MXScaleTensorPad::Compact);
+        problem.setMXScaleB(rocisa::DataType::E8,
+                            mxBlock,
+                            {},
+                            ContractionProblemGemm::MXScaleTensorPad::Compact);
         problem.setComputeInputTypeA(typeA);
         problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);

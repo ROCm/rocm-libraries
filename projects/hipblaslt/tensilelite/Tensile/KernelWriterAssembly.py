@@ -4917,6 +4917,17 @@ class KernelWriterAssembly(KernelWriter):
       swizzleSize0 = 32 # M,N direction
       swizzleSize1 = 256 # K direction
       swizzleBlockSize = swizzleSize0 * swizzleSize1 // mxBlock
+      _mxNoSwizzleScaleDepthU = None
+    elif ("MXS" in tc) and useFixedSrd2:
+      # NoSwizzle MX: address space is scale blocks (DepthU/mxBlock), not data-K.
+      # Using DepthU here overstates Srd+2 by mxBlock and skips HW OOB clamping
+      # for partial-K gathers that touch the scale-K window (compact Ceil(K/mxBlock)).
+      tcab = "A" if tc == "MXSA" else "B"
+      mxBlock = max(1, int(kernel["ProblemType"].get("MXBlock%s" % tcab, 1)))
+      swizzleSize0 = 1
+      swizzleSize1 = 1
+      swizzleBlockSize = 1
+      _mxNoSwizzleScaleDepthU = kernel["DepthU"] // mxBlock
     else:
       if isSwizzledSubtile:
         swizzleSize0 = 16 # M,N direction
@@ -4925,6 +4936,7 @@ class KernelWriterAssembly(KernelWriter):
         swizzleSize0 = 1 # M,N direction
         swizzleSize1 = 1 # K direction
       swizzleBlockSize = swizzleSize0 * swizzleSize1
+      _mxNoSwizzleScaleDepthU = None
 
     allocateTensor2dSize = use64bShadowLimit and not useFixedSrd2
     numDim = len(indices)
@@ -4977,6 +4989,8 @@ class KernelWriterAssembly(KernelWriter):
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
             extra_bytes = swizzleBlockSize * (kernel["DepthU"] // swizzleSize1)
+            if _mxNoSwizzleScaleDepthU is not None:
+              extra_bytes = _mxNoSwizzleScaleDepthU
 
             for i in range(0, numDim):
               idx = indices[i]

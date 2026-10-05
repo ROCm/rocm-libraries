@@ -3681,7 +3681,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     module.add(globalReadDTLInitCommonSgpr(self, kernel))
     if kernel["ProblemType"].get("MXBlockA", 0) or kernel["ProblemType"].get("MXBlockB", 0):
-      module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+      module.add(globalReadScaleDTLInitCommonSgpr(self, kernel))
 
     module.add(self.graAddresses(kernel, tensorParametersA))
     if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
@@ -5314,17 +5314,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Swizzled layouts only; Solution.py rejects NoSwizzle under UseSubtileImpl.
+    # HostPreSwizzle / InMemorySwizzle only: scale GR steps one group per 32
+    # rows of the free dim, so StridesMXS* must hold that group's byte span,
+    # roundUp(ceil(K/mxBlock), 8) * 32.  Both numbers are properties of the
+    # swizzled layout: preSwizzleScalesGFX950 pads the K blocks to a multiple
+    # of 8 and groups 32 rows of the free dim.  The span is derived from K
+    # rather than read back out of Strides+0, which only equals paddedKBlocks
+    # when the free dim is the slow one and the host did pad -- an assumption
+    # this code cannot check.  NoSwizzle keeps canonical scale strides
+    # (K/MXBlock elements); applying this rewrite breaks NoSwizzle gather
+    # addressing.  Costs four SALU in the prologue, once.
     # TODO: Move this calculation to host-side?
-    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
-      # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
-      # must hold that group's byte span, roundUp(ceil(K/mxBlock), 8) * 32.  Both
-      # numbers are properties of the swizzled layout: preSwizzleScalesGFX950 pads
-      # the K blocks to a multiple of 8 and groups 32 rows of the free dim.  The
-      # span is therefore derived from K on every layout rather than read back out
-      # of Strides<tc>+0, which only equals paddedKBlocks when the free dim is the
-      # slow one and the host did pad -- an assumption this code cannot check and
-      # which NoSwizzle breaks.  Costs four SALU in the prologue, once.
+    mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+    if ((kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])
+        and kernel["UseSubtileImpl"]
+        and mxScaleFormat in ("HostPreSwizzle", "InMemorySwizzle")):
       SWIZZLE_GROUP_ROWS = 32   # free-dim rows per scale group
       K_BLOCK_PAD        = 8    # K blocks the host pads up to
       for tc in ("MXSA", "MXSB"):
@@ -5398,7 +5402,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if mxsatileInfo != None and mxsbtileInfo != None:
       if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
-        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+        module.add(globalReadScaleDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
     if self.states.doShadowInit:
@@ -5464,8 +5468,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
 
     if not hasTDM:
-      module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
+      module.add(graTileAssignmentScale(self, kernel))
+    module.add(lraTileAssignmentScale(self, kernel))
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
@@ -7376,6 +7380,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
     if kernel["UseSubtileImpl"]:
+      # applyLdsLayout sizes MX scale LDS for the HostPreSwizzle-shaped slot
+      # (loadWidthGR * wavefront * numWaves). NoSwizzle remaps into that same
+      # layout, so it keeps the wide allocation rather than canonical MT*Ks.
       applyLdsLayout(self, kernel)
 
 

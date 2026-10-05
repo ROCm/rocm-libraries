@@ -1199,18 +1199,51 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        // How setMXScaleA/B sizes MX scale tensor descriptors.
+        // Caution: the historical bool padScaleTensorFreeDim=false selected
+        // Gfx1250 (dimk pad), not "no padding". Use Compact explicitly for
+        // NoSwizzle / VEC32 (matches rocRoller {M, Ceil(K/mxBlock)}).
+        enum class MXScaleTensorPad : int
+        {
+            Compact = 0, // NoSwizzle: CeilDivide(K, mxBlock), unpadded free dim
+            Gfx950  = 1, // HostPreSwizzle: K-blocks → ×8, free → ×32
+            Gfx1250 = 2, // gfx1250: K-blocks → multiple of 128/mxBlock
+        };
+
+        void setMXScaleA(rocisa::DataType        mxType,
+                         int                     mxBlock,
+                         std::vector<size_t>     saStride = {},
+                         MXScaleTensorPad        padMode  = MXScaleTensorPad::Gfx950);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType        mxType,
+                         int                     mxBlock,
+                         std::vector<size_t>     sbStride = {},
+                         MXScaleTensorPad        padMode  = MXScaleTensorPad::Gfx950);
 
         rocisa::DataType mxTypeB() const
         {
             return m_mxTypeB;
+        }
+
+        // In-device / API MX scale layout. Encoded as:
+        //   0 = NoSwizzle       (canonical row/column layout; e.g. VEC32_UE8M0)
+        //   1 = HostPreSwizzle  (gfx950 host-preswizzled; e.g. BLK32_UE8M0_32_8_EXT)
+        //   2 = InMemorySwizzle (solution-level; gfx1250 TDM-populated layout)
+        // Matching predicates use only the API layouts 0/1 when ProblemType
+        // explicitly names them. Value 2 is never a host matching key.
+        int mxScaleFormat() const
+        {
+            return m_mxScaleFormat;
+        }
+
+        void setMXScaleFormat(int mxScaleFormat)
+        {
+            m_mxScaleFormat = mxScaleFormat;
         }
 
         bool swizzleTensorA() const
@@ -1548,6 +1581,7 @@ namespace TensileLite
         int              m_mxBlockB                = 0;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
+        int              m_mxScaleFormat           = 0;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;

@@ -397,8 +397,22 @@ class StreamK(TileProcessingStrategy):
         tensors always use DepthU even in multi-DU mode (where _DepthU{A,B} is
         the smaller per-uid swizzle sub-stride, not a compression).
 
-        For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
-        is 32 * 256 so an additional *32 multiplier is needed.
+        For MXSA/MXSB under UseSubtileImpl the StreamK K-step depends on
+        MXScaleFormat (must match KernelWriter's StridesMXS{A,B} rewrite):
+
+          * HostPreSwizzle / InMemorySwizzle: KernelWriter rewrites
+            StridesMXS* to the swizzle group span
+            (roundUp(ceil(K/mxBlock), 8) * 32) so M-strides are in data-K
+            units; apply *32 to _DepthUMXS{A,B} (= DepthU/MXBlock) to
+            recover a DepthU-sized StreamK K-step that matches those strides.
+          * NoSwizzle: keeps canonical scale strides and advances
+            the SRD by scaleDepthU*bpe per unroll
+            (SubtileScaleEmit.emitScaleGRPtrUpdate). Use the unscaled
+            _DepthUMXS{A,B} so StreamKLocalStart offsets the correct K window.
+
+        USO admits mxScaleFormat 0 (NoSwizzle) and 1 (HostPreSwizzle);
+        InMemorySwizzle (2) remains refused
+        (ContractionSolution.streamKUniformSummationOrderObstacle).
 
         For Sparse problems the compressed data operand and the Metadata
         tensor genuinely hold fewer elements per DepthU of computation, so
@@ -409,7 +423,12 @@ class StreamK(TileProcessingStrategy):
             key = "_DepthU%s" % tc
             if key in kernel:
                 _DepthU = kernel[key]
-                if kernel.get("UseSubtileImpl"):
+                # Pair with KernelWriter's swizzle group-span rewrite on
+                # StridesMXS{A,B} for HostPreSwizzle / InMemorySwizzle only;
+                # NoSwizzle must keep canonical depthU.
+                mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
+                if (kernel.get("UseSubtileImpl")
+                        and mxFmt in ("HostPreSwizzle", "InMemorySwizzle")):
                     _DepthU = (_DepthU * 32)
                 return _DepthU
             return kernel["DepthU"]

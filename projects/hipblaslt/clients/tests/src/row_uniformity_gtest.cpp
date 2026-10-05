@@ -1757,19 +1757,43 @@ namespace
                                  return std::string(info.param.name);
                              });
 
-    // The granule is derived for HostPreSwizzle, block size 32 and
+    // The granule is derived for HostPreSwizzle (1), block size 32 and
     // MatrixInstK 128. Outside that envelope 256 is the wrong number rather
     // than a violated one, so the envelope is pinned too.
+    //
+    // NoSwizzle (0) and HostPreSwizzle (1) are admitted under this envelope
+    // (StreamK._depthUForTc is format-gated for both). InMemorySwizzle (2)
+    // and any unexpected format remain refused until audited.
     TEST(RowUniformityStreamKRejection_pre_checkin, MXScaleFormatEnvelope)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
-        solution->problemType.mxBlockA      = 32;
-        solution->problemType.mxBlockB      = 32;
-        solution->problemType.mxScaleFormat = 2; // InMemorySwizzle
+        const auto hardware = probeHardware();
 
-        EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
-            << "An unaudited MX scale layout must be refused";
+        auto refuseFormat = [&](int mxScaleFormat, const char* name) {
+            auto solution                     = probeSolution();
+            solution->problemType.mxBlockA    = 32;
+            solution->problemType.mxBlockB    = 32;
+            solution->problemType.mxScaleFormat = mxScaleFormat;
+
+            EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
+                << "MX scale format " << name << " (" << mxScaleFormat
+                << ") under StreamK USO must be refused until audited";
+        };
+
+        auto admitFormat = [&](int mxScaleFormat, const char* name) {
+            auto solution                       = probeSolution();
+            solution->problemType.mxBlockA      = 32;
+            solution->problemType.mxBlockB      = 32;
+            solution->problemType.mxScaleFormat = mxScaleFormat;
+
+            EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
+                << "MX scale format " << name << " (" << mxScaleFormat
+                << ") under the MX StreamK USO envelope must be admitted";
+        };
+
+        admitFormat(0, "NoSwizzle");
+        admitFormat(1, "HostPreSwizzle");
+        refuseFormat(2, "InMemorySwizzle");
+        refuseFormat(3, "Unexpected");
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)

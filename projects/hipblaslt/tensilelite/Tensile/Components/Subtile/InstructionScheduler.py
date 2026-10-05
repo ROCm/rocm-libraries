@@ -533,14 +533,19 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
     _emitPreMfma(scheduled)
     scheduled.add(placer.assemble(mfmas))
 
-    # Post-pass: adjust vmcnt of any SWaitCnt to account for buffer_loads
-    # that the scheduler placed before it within this subIterK.
+    # Post-pass: adjust WaitGR vmcnt for buffer_loads the scheduler placed
+    # before it within this subIterK. Only SWaitCntEx with adjustVmcnt=True
+    # (WaitGR) participates — plain SWaitCnt (e.g. NoSwizzle scale gather
+    # drains with vlcnt=0) must keep their emitted count. Defaulting
+    # adjustVmcnt to True previously weakened those drains to vmcnt(N)
+    # (= number of prior loads), which returns immediately and packs
+    # stale scale bytes; that broke NoSwizzle mainloop for itersPerTile>=3.
     bufLoadCount = 0
     for inst in scheduled.flatitems():
         if _isBufferLoad(inst):
             bufLoadCount += 1
         elif _isWaitCnt(inst) and inst.vlcnt >= 0:
-            if getattr(inst, 'adjustVmcnt', True):
+            if getattr(inst, 'adjustVmcnt', False):
                 inst.vlcnt += bufLoadCount
 
     return scheduled

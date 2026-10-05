@@ -120,11 +120,14 @@ from .SubtileLREmit import (
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
 )
 from .SubtileScaleEmit import (
+    scaleGRPtrIncBytes,
     emitScaleGRLoad, emitScaleLRLoad,
     emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
-    graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
+    graTileAssignmentScale, graTileAssignmentScaleSwizzled,
+    lraTileAssignmentScale, lraTileAssignmentScaleSwizzled,
     globalReadDoScaleSubtile, localReadDoScaleSubtile,
     globalReadScalePtrUpdates, globalReadScaleSwizzledDTLInitCommonSgpr,
+    globalReadScaleDTLInitCommonSgpr,
     emitSubtileScaleDsRead,
 )
 
@@ -362,7 +365,12 @@ CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',
 CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
-  """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
+  """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB').
+
+  Geometry is selected by data dtype (B4 vs B8). MXScaleFormat selects the
+  emit path (HostPreSwizzle DTL vs NoSwizzle canonical gather) rather than a
+  distinct tile-pair for TN BufferLoad FP4; both formats share MXS*_B4/B8.
+  """
   data_tc = 'A' if tc == 'MXSA' else 'B'
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
@@ -469,7 +477,13 @@ class TileInfo:
         self.depthU = kernel["_DepthU%s" % tc]
         self.scaleDepthU = self.depthU
       self.waveGroupSize = kernel["MIWaveGroup"][0 if isA else 1]
-      self.isSwizzled = isinstance(geometry, MXScaleTilePair)
+      # MX scale "swizzled" refers to HostPreSwizzle / InMemorySwizzle LDS
+      # packing, not merely being an MXScaleTilePair (NoSwizzle is canonical).
+      if isinstance(geometry, MXScaleTilePair):
+        self.isSwizzled = kernel.get("MXScaleFormat", "NoSwizzle") in (
+            "HostPreSwizzle", "InMemorySwizzle")
+      else:
+        self.isSwizzled = False
     elif isinstance(geometry, CDTileGeometry):
       self.macroTile = None  # C/D uses macroTile0/1
       self.macroTile0 = kernel["MacroTile0"]
@@ -784,6 +798,11 @@ class TileInfo:
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
+      # NoSwizzle only: double-buffer swap mask for GR ds_store.
+      # HostPreSwizzle / InMemorySwizzle use SGPR LocalWriteBaseAddr swap and
+      # must not take this VGPR or later numbering drifts from pre-NoSwizzle asm.
+      if kernel.get("MXScaleFormat", "NoSwizzle") == "NoSwizzle":
+        self._sharedVgprGROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffsetSwap")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
@@ -823,7 +842,8 @@ class TileInfo:
     if self.lr is not None:
       self.lr.deallocOffsetRegisters(self, writer, kernel)
     # MXScaleTilePair dealloc
-    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
+    for attr in ('_sharedVgprGROffset', '_sharedVgprGROffsetSwap',
+                 '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
       for v in getattr(self, attr, []):
         writer.vgprPool.checkIn(v)
       if hasattr(self, attr):
@@ -900,6 +920,11 @@ class TileInfo:
   def sharedVgprGROffset(self):
     if self.gr: return self.gr.sharedVgprGROffset
     return getattr(self, '_sharedVgprGROffset', [])
+
+  @property
+  def sharedVgprGROffsetSwap(self):
+    """Double-buffer swap mask for NoSwizzle scale GR ds_store."""
+    return getattr(self, '_sharedVgprGROffsetSwap', [])
 
   @property
   def sharedVgprLROffset(self):
@@ -1289,11 +1314,13 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   Undo exactly one per-macro-iteration GR advance on each SRD. On this branch the
   per-macro-iteration advance is what the multi-DU GR_INC pass emits as one
   GRIncOp per (tensor, uid): `numUnroll[tensor]` increments per tensor, each of
-  `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0) and of
-  `lrSubtileSize*lrGlobalSubtileGrid[1]` for scale (SubtileScaleEmit.emitScaleGRPtrUpdate).
+  `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0). Scale increments
+  must match SubtileScaleEmit.emitScaleGRPtrUpdate's format gate:
+  HostPreSwizzle/InMemorySwizzle use `lrSubtileSize*lrGlobalSubtileGrid[1]`
+  (swizzle granule); NoSwizzle uses canonical `scaleDepthU*bpe`.
   So the rewind is numUnroll[tensor] * (per-inc bytes). Verified by codegen + a
   runtime SrdX-AddressX probe: each of the four SRDs is over-advanced by exactly
-  one macro-DU (256B for the MT256x256 MXFP8 repro).
+  one macro-DU (256B for the MT256x256 MXFP8 repro under HostPreSwizzle).
 
   Gated at runtime on this workgroup having actually run >=1 main macro iteration.
   The gate is the *per-WG* main-iter count (`mainIterSgpr`, a snapshot of
@@ -1309,13 +1336,16 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   skipped). Single-DU never reaches here (not _is_multi_du()).
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
-  scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+  # scaleGRPtrIncBytes mirrors emitScaleGRPtrUpdate (HostPreSwizzle /
+  # InMemorySwizzle granule vs NoSwizzle scaleDepthU*bpe). Using the
+  # HostPreSwizzle granule for NoSwizzle undoes the
+  # wrong byte count on SrdMXSA/SrdMXSB after a PGR=1 multi-DU partial tail.
   incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
           ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
   if scaleTiA is not None:
-    incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
+    incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleGRPtrIncBytes(scaleTiA, kernel)))
   if scaleTiB is not None:
-    incs.append(("MXSB", int(numUnroll.get('SB', 1)) * scaleInc(scaleTiB)))
+    incs.append(("MXSB", int(numUnroll.get('SB', 1)) * scaleGRPtrIncBytes(scaleTiB, kernel)))
   module.addComment0(
       "Undo the PGR=1 prefetch over-advance of one macro-DU on the data/scale "
       "GR SRDs for the partial last macro tile (only for WGs that ran a main "

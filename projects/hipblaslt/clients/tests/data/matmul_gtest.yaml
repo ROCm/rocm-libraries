@@ -2802,6 +2802,9 @@ Tests:
   unit_check: 1
   gpu_arch: '942'
 
+# Broad MX datatype matrix. Pure f4xf4 in *real_precisions_mx covers both
+# NoSwizzle (scaleA:3, compact VEC32) and HostPreSwizzle (scaleA:1001).
+# K=128 exercises NoSwizzle with K-blocks < DepthU/mxBlock (compact, not pad-8).
 - name: matmul_mx_datatypes
   category: pre_checkin
   function:
@@ -2865,7 +2868,8 @@ Tests:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
     - { a_type: f6_r, b_type: f6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    # HostPreSwizzle: hardcoded solution_index 0x82040404 is an MXSFHPS tile.
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
   M: [256]
   N: [256]
   K: [256]
@@ -3443,6 +3447,74 @@ Tests:
   unit_check: 0
   norm_check: 1
   requested_solution_num: 10
+  gpu_arch: '950'
+
+# ------------------------------------------------------------------------------
+# Subtile MXFP4 NoSwizzle (scaleA/B: 3 = Block_32_UE8M0 / VEC32 / MXScaleFormat 0)
+# Companion to the HostPreSwizzle (1001) suite above. Focused — not full HPS parity.
+# Requires device libs with MXScaleFormat=NoSwizzle F4BS solutions (non-MXSFHPS).
+# Scoped to BF16 dest (F4BS) and sizes that match currently shipping NoSwizzle
+# Origami coverage (batch=1, aligned tiles; no bias / odd-size until libs expand).
+# ------------------------------------------------------------------------------
+
+# Basic correctness — BF16, K<DepthU / K=DepthU / MultiDU, modest aligned tiles
+- name: matmul_subtile_fp4_noswizzle_basic
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [64, 96, 128, 256]
+  N: [64, 96, 128, 256]
+  K: [128, 256, 512]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# K < DepthU partial path (shipping NoSwizzle tiles are DepthU=256)
+- name: matmul_subtile_fp4_noswizzle_k_partial
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [64, 96, 128]
+  N: [64, 96, 128]
+  K: [128]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: [0.0, 2.0]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# Beta path (no bias) — exercises C accumulation with NoSwizzle scales
+- name: matmul_subtile_fp4_noswizzle_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [128, 192]
+  N: [128, 192]
+  K: [128, 256, 512]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: [0.0, 2.0]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
   gpu_arch: '950'
 
 # ==============================================================================
