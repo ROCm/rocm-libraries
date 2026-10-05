@@ -400,8 +400,9 @@ TEST(MUBUFVerificationTest, BufferLoadB32_WrongVdstType_Fails) {
 // ==============================================================================
 // GLOBAL saddr addressing modes
 //
-// global_prefetch_b8 operands: S0=vaddr(vgpr,64), S1=saddr(sreg,64). vaddr is a
-// 64-bit address with a null saddr, or a 32-bit offset from a register saddr.
+// vaddr fields tagged SADDR_OFFSET (e.g. global_prefetch_b8: S0=vaddr(vgpr,64),
+// S1=saddr(sreg,64)) are a 64-bit address with a null saddr, or a 32-bit
+// offset from a register saddr. The width must match the mode exactly.
 // ==============================================================================
 
 namespace {
@@ -449,6 +450,16 @@ TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_OffSaddr32BitVaddr_Fails) {
         << "Error should mention expected width 2";
 }
 
+// global_prefetch_b8 v[2:3], s[62:63] -- a register saddr reads only a 32-bit offset.
+TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_RegisterSaddr64BitVaddr_Fails) {
+    Function func("kernel");
+    buildGlobalPrefetchB8(func, vgpr(2, 2), sgpr(62, 2));
+    std::string error = validateStinkyIR(func);
+    EXPECT_FALSE(error.empty()) << "64-bit vaddr with register saddr should fail";
+    EXPECT_NE(error.find("src[0]"), std::string::npos) << "Error should mention src[0] (vaddr)";
+    EXPECT_NE(error.find("expected 1"), std::string::npos)
+        << "Error should mention expected width 1";
+}
 // ==============================================================================
 // VOP3_2SRC shift verification (AIHPBLAS-4142)
 //
