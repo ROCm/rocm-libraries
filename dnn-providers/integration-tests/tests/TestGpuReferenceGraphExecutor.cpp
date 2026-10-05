@@ -24,6 +24,7 @@
 #include "LayernormBwdGraphTestUtils.hpp"
 #include "LayernormFwdGraphTestUtils.hpp"
 #include "MatmulGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
@@ -639,6 +640,35 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseIsApplicable)
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+// Covers GpuPointwisePlan, which has no dedicated test file.
+TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    GpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    EXPECT_FALSE(executor.isApplicable(ragged.data(), ragged.size()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRaggedBinaryGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    hipdnn_test_sdk::utilities::PointwiseGraphSpec spec;
+    spec.mode = PointwiseMode::ADD;
+    spec.secondInputDims = spec.inputDims;
+    auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+
+    GpuReferenceGraphExecutor executor;
+    ASSERT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
+    EXPECT_FALSE(executor.isApplicable(ragged.data(), ragged.size()));
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)

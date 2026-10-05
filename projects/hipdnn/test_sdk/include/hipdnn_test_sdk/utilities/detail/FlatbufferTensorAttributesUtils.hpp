@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "hipdnn_data_sdk/utilities/RaggedTensor.hpp"
+#include "hipdnn_data_sdk/utilities/Tensor.hpp"
 #include <optional>
 #include <unordered_map>
 
@@ -140,7 +142,71 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     }
 }
 
-inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createRaggedTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                       const std::vector<int64_t>& dims,
+                       const std::vector<int64_t>& strides,
+                       std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offsets,
+                       int64_t raggedOffsetMultiplier = 1)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    using namespace hipdnn_data_sdk::types;
+    switch(dataType)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<RaggedTensor<float>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
+        return std::make_unique<RaggedTensor<half>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<RaggedTensor<bfloat16>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<RaggedTensor<double>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
+        return std::make_unique<RaggedTensor<uint8_t>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
+        return std::make_unique<RaggedTensor<int32_t>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
+        return std::make_unique<RaggedTensor<int8_t>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3:
+        return std::make_unique<RaggedTensor<fp8_e4m3>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
+        return std::make_unique<RaggedTensor<fp8_e5m2>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT64:
+        return std::make_unique<RaggedTensor<int64_t>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E8M0:
+        return std::make_unique<RaggedTensor<fp8_e8m0>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
+        return std::make_unique<RaggedTensor<fp4_e2m1>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
+        return std::make_unique<RaggedTensor<uint8_t>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        return std::make_unique<RaggedTensor<fp6_e2m3>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        return std::make_unique<RaggedTensor<fp6_e3m2>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+        return std::make_unique<RaggedTensor<bool>>(
+            dims, strides, BSHD_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+    default:
+        throw std::runtime_error("Unsupported data type for tensor");
+    }
+}
+
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
     bool packSubByteElements = false)
 {
@@ -157,6 +223,23 @@ inline bool isSubByteDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dat
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
+}
+
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    createRaggedTensorFromAttributeAndOffset(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
+        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset)
+{
+    auto dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
+    auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
+        attribute.strides());
+
+    return createRaggedTensor(attribute.data_type(),
+                              dims,
+                              strides,
+                              std::move(raggedOffset),
+                              attribute.ragged_offset_multiplier());
 }
 
 } // namespace hipdnn_test_sdk::detail

@@ -12,6 +12,9 @@ from tempfile import TemporaryDirectory
 
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "verify_golden_bundles.py"
 
+sys.path.insert(0, str(SCRIPT_PATH.parent))
+import verify_golden_bundles  # noqa: E402
+
 
 class TestVerifyGoldenBundlesCli(unittest.TestCase):
     def run_verifier(
@@ -254,6 +257,48 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             )
             self.assertIn(
                 "full_test_name: quick_BatchnormFwdInference_nchw_fp32_Small.Small",
+                completed.stdout,
+            )
+
+    def test_variant_directory_bundle_keeps_variant_in_canonical_path_and_suite(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "canonical_path: quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small/",
+                completed.stdout,
+            )
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+                completed.stdout,
+            )
+
+    def test_tier_named_ancestor_directory_is_excluded_from_suite(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "quick" / "checkout"
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
                 completed.stdout,
             )
 
@@ -837,6 +882,87 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 "cannot have bundles larger than 2 MiB because they would quickly explode our test artifact sizes",
                 completed.stderr,
             )
+
+
+class TestDeriveAdvisory(unittest.TestCase):
+    def derive(self, relative_path: str):
+        result = verify_golden_bundles.VerificationResult()
+        advisory = verify_golden_bundles.derive_advisory(
+            Path(relative_path), result, "quick"
+        )
+        return advisory, result
+
+    def messages(self, result, severity: str) -> list[str]:
+        return [d.message for d in result.diagnostics if d.severity == severity]
+
+    def test_without_tier_uses_default_tier(self) -> None:
+        advisory, result = self.derive("Op/nhwc/fp32/Small/Small.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/Small/")
+        self.assertEqual(advisory.full_test_name, "quick_Op_nhwc_fp32_Small.Small")
+        self.assertEqual(self.messages(result, "error"), [])
+        warnings = self.messages(result, "warning")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("variant directories cannot be recovered", warnings[0])
+
+    def test_without_tier_too_short_is_layout_error(self) -> None:
+        advisory, result = self.derive("nhwc/fp32/Small/Small.json")
+
+        self.assertIsNone(advisory)
+        self.assertEqual(
+            self.messages(result, "error"),
+            [verify_golden_bundles.ADVISORY_LAYOUT_ERROR],
+        )
+
+    def test_with_tier_too_short_is_layout_error(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/Small/Small.json")
+
+        self.assertIsNone(advisory)
+        self.assertEqual(
+            self.messages(result, "error"),
+            [verify_golden_bundles.ADVISORY_LAYOUT_ERROR],
+        )
+
+    def test_multiple_variant_directories_are_kept(self) -> None:
+        advisory, result = self.derive(
+            "standard/Op/bshd/bf16/hd128/causal/Small/Small.json"
+        )
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(
+            advisory.canonical_path, "standard/Op/bshd/bf16/hd128/causal/Small/"
+        )
+        self.assertEqual(
+            advisory.test_suite, "standard_Op_bshd_bf16_hd128_causal_Small"
+        )
+        self.assertEqual(advisory.test_case, "Small")
+        self.assertFalse(result.has_errors())
+
+    def test_variant_named_after_tier_is_kept_as_variant(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/fp32/full/Small/Small.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/Small/")
+        self.assertEqual(advisory.test_suite, "quick_Op_nhwc_fp32_full_Small")
+        self.assertFalse(result.has_errors())
+
+    def test_bundle_named_after_tier_is_kept_as_name(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/fp32/full/full.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/")
+        self.assertEqual(advisory.test_case, "full")
+        self.assertFalse(result.has_errors())
+
+    def test_tier_named_ancestor_and_variant_anchor_on_bundle_tier(self) -> None:
+        advisory, result = self.derive(
+            "quick/checkout/quick/Op/nhwc/fp32/full/Small/Small.json"
+        )
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.full_test_name, "quick_Op_nhwc_fp32_full_Small.Small")
+        self.assertFalse(result.has_errors())
 
 
 if __name__ == "__main__":

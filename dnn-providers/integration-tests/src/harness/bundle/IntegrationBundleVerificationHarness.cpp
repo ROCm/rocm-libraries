@@ -511,6 +511,18 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
+
+    // The generic fill recipes cannot produce a valid monotonic offset table, and
+    // garbage offsets would send the engine reading out of bounds.
+    const bool anyRagged
+        = std::any_of(tensorAttrMap.begin(), tensorAttrMap.end(), [](const auto& entry) {
+              return entry.second->ragged_offset_tensor_uid().has_value();
+          });
+    if(anyRagged)
+    {
+        return unverifiable("ragged inputs require golden blobs");
+    }
+
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
 

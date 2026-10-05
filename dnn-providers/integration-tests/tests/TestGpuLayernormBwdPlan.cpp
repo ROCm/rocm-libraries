@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "LayernormBwdGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuLayernormBwdSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -178,6 +179,54 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
 
     EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
                                                batchnormGraphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuLayernormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    constexpr int64_t DY_UID = 10;
+    constexpr int64_t X_UID = 11;
+    constexpr int64_t SCALE_UID = 12;
+    constexpr int64_t DX_UID = 13;
+    constexpr int64_t DSCALE_UID = 14;
+    constexpr int64_t DBIAS_UID = 15;
+    constexpr int64_t EPSILON_UID = 16;
+    constexpr int64_t MEAN_UID = 17;
+    constexpr int64_t INV_VARIANCE_UID = 18;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+
+    auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                X_UID,
+                                                SCALE_UID,
+                                                DX_UID,
+                                                DSCALE_UID,
+                                                DBIAS_UID,
+                                                EPSILON_UID,
+                                                MEAN_UID,
+                                                INV_VARIANCE_UID,
+                                                {2, 3, 4, 5},
+                                                TensorLayout::NCHW,
+                                                epsilon,
+                                                2,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT);
+
+    const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto denseWrap = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap = GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuLayernormBwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)

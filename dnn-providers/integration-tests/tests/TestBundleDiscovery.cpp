@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -14,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -127,6 +129,53 @@ protected:
         writeBin(3, 12);
         writeBin(4, 12);
         writeBin(5, 480);
+    }
+
+    // x (uid 0) and the golden y (uid 5) are BSHD-ragged on the int32 offset tensor uid 6,
+    // which is declared last so both load passes must defer their ragged tensors.
+    static void createRaggedLoadableBundle(const std::filesystem::path& dir,
+                                           const std::string& name,
+                                           const std::vector<int32_t>& offsets)
+    {
+        std::filesystem::create_directories(dir);
+        std::ofstream(dir / (name + ".json"))
+            << R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
+               R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
+               R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
+               R"("compute_data_type": "float", "name": ""}], "tensors": [)"
+               R"({"name": "", "uid": 0, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
+               R"("data_type": "float", "virtual": false, "ragged_offset_tensor_uid": 6}, )"
+               R"({"name": "", "uid": 1, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+               R"("data_type": "float", "virtual": false}, )"
+               R"({"name": "", "uid": 2, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+               R"("data_type": "float", "virtual": false}, )"
+               R"({"name": "", "uid": 3, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+               R"("data_type": "float", "virtual": false}, )"
+               R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+               R"("data_type": "float", "virtual": false}, )"
+               R"({"name": "", "uid": 5, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
+               R"("data_type": "float", "virtual": false, "ragged_offset_tensor_uid": 6}, )"
+               R"({"name": "", "uid": 6, "strides": [1, 1, 1, 1], "dims": [3, 1, 1, 1], )"
+               R"("data_type": "int32", "virtual": false}], "io_data_type": "float", )"
+               R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
+        writeMetadata(dir, name);
+
+        const auto basePath = (dir / name).string();
+        auto writeBin = [&](int64_t uid, const void* data, size_t byteCount) {
+            std::ofstream out(basePath + ".tensor" + std::to_string(uid) + ".bin",
+                              std::ios::binary);
+            out.write(static_cast<const char*>(data), static_cast<std::streamsize>(byteCount));
+        };
+
+        const std::vector<float> raggedData(static_cast<size_t>(offsets.back()), 0.0f);
+        const std::vector<float> statsData(3, 0.0f);
+        writeBin(0, raggedData.data(), raggedData.size() * sizeof(float));
+        for(const int64_t uid : {1, 2, 3, 4})
+        {
+            writeBin(uid, statsData.data(), statsData.size() * sizeof(float));
+        }
+        writeBin(5, raggedData.data(), raggedData.size() * sizeof(float));
+        writeBin(6, offsets.data(), offsets.size() * sizeof(int32_t));
     }
 
     static size_t elementSizeBytes(const std::string& dataType)
@@ -956,6 +1005,41 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleWrongSizeBinIsTensorLoadError)
     const auto jsonPath = dir / "badbin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleLoadsInputsAndGoldenOutputs)
+{
+    auto dir = _tempDir / "op" / "ragged";
+    createRaggedLoadableBundle(dir, "ragged", {0, 40, 60});
+
+    auto result = loadIntegrationTestBundle(dir / "ragged.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    EXPECT_TRUE(bundle.hasGoldenOutputs);
+    ASSERT_TRUE(bundle.tensors.has_value());
+    ASSERT_EQ(bundle.tensors->size(), 7u);
+    const auto* offsetTensor = bundle.tensors->at(6).get();
+    for(const int64_t uid : {0, 5})
+    {
+        const auto* ragged
+            = dynamic_cast<const hipdnn_data_sdk::utilities::RaggedTensorBase<float>*>(
+                bundle.tensors->at(uid).get());
+        ASSERT_NE(ragged, nullptr) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedOffset(), offsetTensor) << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 40, 60}))
+            << "uid " << uid;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleWithInvalidOffsetsIsTensorLoadError)
+{
+    auto dir = _tempDir / "op" / "badragged";
+    createRaggedLoadableBundle(dir, "badragged", {1, 40, 60});
+
+    auto result = loadIntegrationTestBundle(dir / "badragged.json");
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
     EXPECT_EQ(std::get<LoadError>(result), LoadError::TENSOR_LOAD_FAILED);
 }

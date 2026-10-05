@@ -32,7 +32,7 @@ namespace hipdnn_integration_tests::bundle
 // Loaded tensors keyed by tensor UID. Inputs carry their data. Outputs carry
 // expected golden values only when output blobs are present; otherwise the
 // harness verifies outputs against a reference executor.
-using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+using TensorMap = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 // One test's worth of bundle data loaded from disk.
 //
@@ -326,7 +326,10 @@ inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& b
         attrByUid[attributes->uid()] = attributes;
     }
 
+    // Ragged tensors are constructed from their offset tensor, so they load last.
+    // Offset tensors are always inputs, so an output's offset is already loaded.
     const auto loadUids = [&](const std::vector<int64_t>& uids, TensorMap& into) {
+        std::vector<int64_t> raggedUids;
         for(const int64_t uid : uids)
         {
             const auto it = attrByUid.find(uid);
@@ -334,8 +337,20 @@ inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& b
             {
                 continue;
             }
+            if(it->second->ragged_offset_tensor_uid().has_value())
+            {
+                raggedUids.push_back(uid);
+                continue;
+            }
             into[uid] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(blobPathForUid(uid),
                                                                                 *it->second);
+        }
+        for(const int64_t uid : raggedUids)
+        {
+            const auto* attributes = attrByUid.at(uid);
+            const int64_t offsetUid = attributes->ragged_offset_tensor_uid().value();
+            into[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
+                blobPathForUid(uid), *attributes, into.at(offsetUid));
         }
     };
 
