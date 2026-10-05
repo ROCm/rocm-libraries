@@ -857,6 +857,82 @@ _KNOB_AB_COHORT = [
 ]
 
 
+def _tolerance(dtype):
+    return 2e-2 if dtype == "fp16" else 4e-2
+
+
+def _lse_test_scale(dtype, head_size):
+    """Softmax scale for the random-input LSE tests.
+
+    FP16 keeps the nondefault 0.5 so the tests prove the kernel honors ``scale``.
+    BF16 uses the standard ``1/sqrt(head_size)``: at 0.5 the existing dense kernel
+    (unchanged by LSE, LSE-off included) rounds ``Q * scale * log2(e)`` to BF16 and
+    exceeds the 4e-2 O/LSE tolerance. That pre-existing limit is tracked separately.
+    """
+    return 0.5 if dtype == "fp16" else 1.0 / math.sqrt(head_size)
+
+
+def _lse_reference(q, k, v, scale, *, causal, window=0):
+    """Independent FP32 O and natural-log LSE, including truly empty rows.
+
+    Scores use unrounded FP32 Q/K, not the emitter's input-dtype scaled Q.
+    """
+    sq, hq = q.shape[1:3]
+    skv, hkv = k.shape[1:3]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
+    qi = torch.arange(sq, device=q.device).view(-1, 1)
+    ki = torch.arange(skv, device=q.device).view(1, -1)
+    allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
+    if causal:
+        allowed &= ki <= qi
+    if window:
+        allowed &= ki > qi - window
+    scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
+    lse = torch.logsumexp(scores, dim=-1)
+    has_mass = torch.isfinite(lse)
+    safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
+    probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
+    probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
+    out = torch.matmul(probabilities, vh).transpose(1, 2)
+    return out, lse.unsqueeze(-1)
+
+
+def _lse_spec(dtype, d, hq, hkv, persistent, **kwargs):
+    """The shipped dispatch spec for the row, with the LSE output enabled."""
+    return dataclasses.replace(
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, persistent, **kwargs)), emit_lse=True
+    )
+
+
+def _run_lse_and_off(spec, q, k, v, scale):
+    """Launch ``spec`` with LSE and its LSE-off twin on the same inputs."""
+    out = torch.empty_like(q)
+    lse = torch.full(
+        (spec.batch, spec.num_query_heads, spec.seqlen_q, 1),
+        float("nan"),
+        device=q.device,
+        dtype=torch.float32,
+    )
+    returned = run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
+    )
+    off_out = torch.empty_like(q)
+    run_attention_dense_torch(
+        spec=dataclasses.replace(spec, emit_lse=False),
+        q=q,
+        k=k,
+        v=v,
+        out=off_out,
+        scale=scale,
+    )
+    torch.cuda.synchronize()
+    assert returned is out
+    return out, lse, off_out
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype,d,persistent,overrides", _KNOB_AB_COHORT)
@@ -886,6 +962,264 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
         f"{dtype} D{d} {'persist' if persistent else 'default'} {overrides}: "
         f"diverged from the shipped default (max_abs={max_abs:.3e})"
     )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+class TestDenseLseNumericGfx942:
+    """Direct-runner LSE coverage on gfx942; no dispatcher or hipDNN feature implied.
+
+    Every random-input row also requires O to be bitwise identical to the LSE-off
+    kernel: those rows have no keyless query, so LSE must not perturb O.
+    """
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("heads", [(8, 8), (8, 2)], ids=["mha", "gqa"])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    @pytest.mark.parametrize("causal", [True, False], ids=["causal", "full"])
+    def test_output_and_lse(self, dtype, d, heads, persistent, causal):
+        hq, hkv = heads
+        spec = _lse_spec(dtype, d, hq, hkv, persistent, causal=causal, batch=2)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = _lse_test_scale(dtype, d)
+        torch.manual_seed(11)
+        q = torch.randn(2, 512, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(2, 512, hkv, d, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=causal)
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_sliding_window_lse(self, dtype, d, persistent):
+        spec = _lse_spec(dtype, d, 8, 2, persistent, sliding_window=128)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = _lse_test_scale(dtype, d)
+        torch.manual_seed(13)
+        q = torch.randn(1, 512, 8, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, 512, 2, d, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=128)
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out, off_out)
+
+    @pytest.mark.parametrize("width", [1, 2])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_narrow_o_store(self, width, persistent):
+        """BF16 store widths 1/2: keyless rows are zero, keyed rows match LSE-off."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        spec = dataclasses.replace(
+            tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=1,
+                    nhead_q=4,
+                    nhead_k=1,
+                    seqlen_q=256,
+                    seqlen_k=64,
+                    hdim_q=128,
+                    hdim_v=128,
+                    arch="gfx942",
+                    mask_type=1,
+                    dtype="bf16",
+                    sliding_window=64,
+                ),
+                "gfx942_dense",
+                {"persistent": bool(persistent), "o_store_width": width},
+            ).kernel_spec,
+            emit_lse=True,
+        )
+        assert spec.o_store_width == width
+        scale = _lse_test_scale("bf16", 128)
+        torch.manual_seed(17)
+        q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
+        # Rows 0..126 see at least one key; rows 127.. see none.
+        assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
+            "bf16"
+        )
+        assert torch.equal(out[:, :127], off_out[:, :127])
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        finite = torch.isfinite(lse_ref)
+        assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize(
+        "persistent", [False, True], ids=["ordinary", "persistent"]
+    )
+    def test_empty_window_rows(self, dtype, persistent):
+        """Sq256/Skv64/window64: rows 63/126/127 see 64/1/0 keys (analytic LSE)."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        spec = dataclasses.replace(
+            tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=1,
+                    nhead_q=4,
+                    nhead_k=1,
+                    seqlen_q=256,
+                    seqlen_k=64,
+                    hdim_q=128,
+                    hdim_v=128,
+                    arch="gfx942",
+                    mask_type=1,
+                    dtype=dtype,
+                    sliding_window=64,
+                ),
+                "gfx942_dense",
+                {"persistent": bool(persistent)},
+            ).kernel_spec,
+            emit_lse=True,
+        )
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.zeros(1, 256, 4, 128, device="cuda", dtype=tdt)
+        k = torch.zeros(1, 64, 1, 128, device=q.device, dtype=tdt)
+        v = torch.ones_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse = torch.full(
+            (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5)
+        torch.cuda.synchronize()
+        rows = torch.arange(256, device=q.device)
+        counts = (
+            (
+                torch.minimum(rows + 1, torch.full_like(rows, 64))
+                - (rows - 63).clamp_min(0)
+            )
+            .clamp_min(0)
+            .float()
+        )
+        assert counts[63].item() == 64
+        assert counts[126].item() == 1
+        assert counts[127].item() == 0
+        analytic_lse = counts.view(1, 1, 256, 1).expand(1, 4, 256, 1).log()
+        ref, lse_ref = _lse_reference(q, k, v, 0.5, causal=True, window=64)
+        finite = torch.isfinite(analytic_lse)
+        assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
+        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
+        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        assert torch.isneginf(lse[:, :, 127:]).all().item()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            "missing",
+            "unexpected",
+            "dtype",
+            "shape",
+            "layout",
+            "device",
+            "overlap_q",
+            "overlap_k",
+            "overlap_v",
+            "overlap_out",
+            "companion",
+        ],
+    )
+    def test_lse_buffer_errors(self, failure):
+        spec = _lse_spec("bf16", 128, 4, 1, False, batch=2, sq=256)
+        q = torch.zeros(2, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.zeros(2, 256, 1, 128, device=q.device, dtype=q.dtype)
+        v = torch.zeros_like(k)
+        out = torch.empty_like(q)
+        lse = torch.empty(2, 4, 256, 1, device=q.device, dtype=torch.float32)
+        if failure == "missing":
+            lse = None
+        elif failure == "unexpected":
+            spec = dataclasses.replace(spec, emit_lse=False)
+        elif failure == "dtype":
+            lse = lse.bfloat16()
+        elif failure == "shape":
+            lse = lse[..., 0]
+        elif failure == "layout":
+            lse = torch.empty(2, 4, 256, 2, device=q.device, dtype=torch.float32)[
+                ..., :1
+            ]
+        elif failure == "device":
+            lse = lse.cpu()
+        elif failure in {"overlap_q", "overlap_k", "overlap_v", "overlap_out"}:
+            tensor = {
+                "overlap_q": q,
+                "overlap_k": k,
+                "overlap_v": v,
+                "overlap_out": out,
+            }[failure]
+            # Reinterpret the real input/output allocation, not a copied tensor.
+            lse = tensor.view(torch.float32).view(-1)[:2048].view(2, 4, 256, 1)
+        elif failure == "companion":
+            k = k.cpu()
+        with pytest.raises(ValueError):
+            run_attention_dense_torch(
+                spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=0.5
+            )
+
+    def test_lse_runtime_shape_reuse(self):
+        """One LSE binary serves two runtime shapes; LSE-off keeps its own binary."""
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        specs = [
+            _lse_spec("bf16", 128, 8, 2, False, batch=batch, sq=sq)
+            for batch, sq in [(1, 512), (2, 1024)]
+        ]
+        assert specs[0].runtime_shape, "LSE row is not on the runtime-shape path"
+        off_specs = [dataclasses.replace(spec, emit_lse=False) for spec in specs]
+        keys = {
+            attention_dense_cache_key(spec, arch="gfx942") for spec in specs + off_specs
+        }
+        # Own every potentially affected slot. Always restore prior entries.
+        old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in keys}
+        scale = _lse_test_scale("bf16", 128)
+        launchers = []
+        try:
+            for index, spec in enumerate(specs):
+                torch.manual_seed(29 + index)
+                q = torch.randn(
+                    spec.batch,
+                    spec.seqlen_q,
+                    8,
+                    128,
+                    device="cuda",
+                    dtype=torch.bfloat16,
+                )
+                k = torch.randn(
+                    spec.batch, spec.seqlen_kv, 2, 128, device=q.device, dtype=q.dtype
+                )
+                v = torch.randn_like(k)
+                out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)
+                ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+                assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+                assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+                assert torch.equal(out, off_out)
+                launchers.append(_launcher_for(spec))
+            assert launchers[0] is not None
+            assert launchers[0] is launchers[1]
+            assert _launcher_for(off_specs[-1]) is not launchers[0]
+        finally:
+            for key, entry in old_entries.items():
+                _DENSE_LAUNCHER_CACHE.pop(key, None)
+                if entry is not None:
+                    _DENSE_LAUNCHER_CACHE[key] = entry
 
 
 if __name__ == "__main__":

@@ -237,7 +237,7 @@ LSE buffer checks use metadata only.
 
 LSE is available only through this direct runner with an explicit spec. This
 does not add LSE to the prefill CLI, dispatcher, hipDNN, unified attention, or
-split-KV decode.
+split-KV decode. The gfx942 dense kernel has the same opt-in.
 
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):

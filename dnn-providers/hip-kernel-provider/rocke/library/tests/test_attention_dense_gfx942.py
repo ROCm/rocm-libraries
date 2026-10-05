@@ -329,6 +329,7 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "emit_lse": (True, False),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -936,7 +937,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast"})
+#   emit_lse: an optional extra output, legal on every config the body accepts.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse"})
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -1015,6 +1017,9 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    # --- private: emit_lse (no rejected region -- see the comment above) ---
+    dict(emit_lse=False),
+    dict(emit_lse=True, persistent=True, num_persistent=304),
 ]
 
 

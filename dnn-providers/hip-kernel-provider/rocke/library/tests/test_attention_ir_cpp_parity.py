@@ -122,6 +122,48 @@ def test_attention_ir_cpp_python_byte_identity():
             }
         )
 
+    # gfx942 has one shared epilogue for both grids; cover each grid with and
+    # without keyless rows (the harness has no gfx942 dense builder).
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        build_attention_dense as build_gfx942_dense,
+    )
+
+    gfx942_base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=8,
+        num_kv_heads=2,
+        head_size=128,
+        dtype="bf16",
+        emit_lse=True,
+    )
+    for label, overrides in (
+        ("ordinary", {}),
+        ("persistent", {"persistent": True, "num_persistent": 304}),
+        ("empty_window", {"seqlen_q": 256, "seqlen_kv": 64, "sliding_window": 64}),
+        (
+            "persistent_empty_window",
+            {
+                "persistent": True,
+                "num_persistent": 304,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+    ):
+        spec = Gfx942AttentionDenseSpec(**{**gfx942_base, **overrides})
+        cases.append(
+            {
+                "family": "attention_dense",
+                "case_id": f"attention_dense_gfx942_lse_{label}",
+                "arch": "gfx942",
+                "build": lambda spec=spec: build_gfx942_dense(spec, arch="gfx942"),
+            }
+        )
+
     prev = os.environ.get("ROCKE_CPP_STRICT")
     os.environ["ROCKE_CPP_STRICT"] = "1"
     mism = []

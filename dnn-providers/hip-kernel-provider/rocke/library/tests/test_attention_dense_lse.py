@@ -7,10 +7,12 @@ from dataclasses import replace
 
 import pytest
 
+from kernels.gfx942 import attention_dense as gfx942_dense
 from kernels.gfx950 import attention_dense as gfx950_dense
 
 _RUNNERS = {
     "gfx950": (gfx950_dense.Gfx950AttentionDenseSpec, gfx950_dense),
+    "gfx942": (gfx942_dense.Gfx942AttentionDenseSpec, gfx942_dense),
 }
 
 

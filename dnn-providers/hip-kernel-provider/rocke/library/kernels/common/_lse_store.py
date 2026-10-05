@@ -3,7 +3,7 @@
 
 """Natural-log LSE output from an existing base-2 softmax state.
 
-Shared by the dense prefill kernels: the IR helpers emit the
+Shared by the gfx942 and gfx950 dense prefill kernels: the IR helpers emit the
 optional LSE store and empty-row output masking; ``validate_dense_lse`` is the
 host-side contract for the caller-owned LSE buffer.
 """

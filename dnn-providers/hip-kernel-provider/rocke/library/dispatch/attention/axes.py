@@ -155,7 +155,7 @@ DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
 # problem fields, and never swept: a tuning point must not add or drop an output.
 DENSE_OUTPUT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"emit_lse"}),
-    "gfx942": frozenset(),
+    "gfx942": frozenset({"emit_lse"}),
 }
 DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # Knobs with nothing to sweep: the validator accepts a single value, or (gfx942
