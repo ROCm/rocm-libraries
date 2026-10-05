@@ -1295,7 +1295,7 @@ class StreamK(TileProcessingStrategy):
             writer.sgprPool.checkIn(tmpSgpr)
 
             # check flag
-            tmpSgpr = writer.sgprPool.checkOut(2, "globalWriteElements")
+            tmpSgpr = writer.sgprPool.checkOut(3, "globalWriteElements")
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sFlagIdx), shiftHex=log2(4), comment="flag offset based on wg index"))
 
             module.add(skFixupWaitForFlag) # loop to wait for flag

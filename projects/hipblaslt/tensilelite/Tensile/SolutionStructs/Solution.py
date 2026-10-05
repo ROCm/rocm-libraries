@@ -7115,8 +7115,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Use E does not support len(PackedC1IndicesX) > 1.")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Use E only supports BufferStore due to no suppress no store.")
-      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
-        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1.")
+      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1 or isPersistent(state)):
+        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1 or with a persistent TileProcessingStrategy.")
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Use E does not support GroupLoadStore.")
 
