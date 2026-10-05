@@ -6,12 +6,15 @@ CPU-only (no GPU / no comgr): asserts that the grouped-convolution dispatcher
 admits grouped backward-weight requests, and that the launch grid it derives
 matches the kernel's block_id_z contract --
 
-    grid = (ceil(wg_N / tile_n), ceil(wg_M / tile_m), groups * split_k)
+    grid = (ceil(wg_N / tile_n), ceil(wg_M / tile_m), (groups / Gm) * split_k)
 
-with the per-group dims wg_M = kpg, wg_N = spatial * cpg. This is the same grid
-the GPU correctness test (platform tests ``test_conv_wgrad_correctness.py``)
-launches and validates numerically, so a match here proves the dispatch path
-launches a correct grid.
+with the per-tile dims wg_M = kpg * Gm, wg_N = spatial * cpg * Gm. ``Gm`` is the
+merged-group degree: it folds Gm consecutive groups into one tile, so it
+multiplies both GEMM extents and divides the group axis of the grid. It is 1
+for everything except gfx950 depthwise, where dispatch picks it -- see
+``TestWgradMergeDegree``. This is the same grid the GPU correctness test (platform
+tests ``test_conv_wgrad_correctness.py``) launches and validates numerically, so
+a match here proves the dispatch path launches a correct grid.
 """
 
 from __future__ import annotations
@@ -23,6 +26,9 @@ from dispatch.grouped_convolution import (
     ConvGroupedRequest,
     _block,
     _problem,
+    # Deliberately the alias dispatch itself calls, not a fresh import from
+    # kernels: the test asserts on exactly the predicate dispatch consults.
+    _wgrad_atomic_epilogue_available,
     conv_grouped_candidates,
     dispatch_conv_grouped,
 )
@@ -50,16 +56,17 @@ def _wgrad(arch="gfx942", **kw):
 
 
 def _expected_grid(req, spec):
-    # Mirror dispatch._wgrad_grid: per-group tiling on x/y, and z = groups *
-    # split_k with the group riding block_id_z alongside the K-slice. split_k
-    # == -1 is the auto sentinel; resolve it via the same CK formula the grid
-    # uses so this stays an independent re-derivation of the wiring.
+    # Mirror dispatch._wgrad_grid: per-tile tiling on x/y, and z = (groups/Gm)
+    # * split_k with the merged group riding block_id_z alongside the K-slice.
+    # split_k == -1 is the auto sentinel; resolve it via the same CK formula
+    # the grid uses so this stays an independent re-derivation of the wiring.
     p = _problem(req)
     spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-    kpg = p.K // p.groups
-    cpg = p.C // p.groups
-    wg_M = kpg
-    wg_N = spatial * cpg
+    gm = max(1, getattr(spec, "group_merge", 1))
+    # Merging folds Gm groups into one tile, so it scales both GEMM extents
+    # and shrinks the group axis by the same factor.
+    wg_M = (p.K // p.groups) * gm
+    wg_N = spatial * (p.C // p.groups) * gm
     gx = math.ceil(wg_N / spec.tile_n)
     gy = math.ceil(wg_M / spec.tile_m)
     split_k = spec.split_k
@@ -74,10 +81,10 @@ def _expected_grid(req, spec):
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
-            groups=p.groups,
+            groups=p.groups // gm,
             block_size=_block(spec)[0],
         ).split_k
-    return (gx, gy, p.groups * split_k)
+    return (gx, gy, (p.groups // gm) * split_k)
 
 
 class TestGroupedWgradDispatch(unittest.TestCase):
@@ -180,6 +187,62 @@ class TestTwoStageSelection(unittest.TestCase):
         ws = r.spec.to_wgrad_spec(_problem(r.request))
         self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
         self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")
+
+    def test_merged_split_k_never_takes_the_packed_atomic(self):
+        # Merging makes two_stage a *correctness* requirement rather than a
+        # performance choice, and it overrides atomic availability. A merged
+        # tile computes a Gm x Gm block of group *pairs* and wants only the
+        # diagonal, which the packed-atomic epilogue has no way to mask off.
+        # Taking it anyway would accumulate an off-diagonal pair's partial sum
+        # into a live dW element -- wrong gradients, and nothing raises.
+        #
+        # Today the `gm > 1` clause in _resolve_wgrad_split_k is *subsumed*, and
+        # this test deliberately does not pretend otherwise. Dispatch emits only
+        # fp16/bf16, and merging is depthwise-only, so cpg == 1 forces a
+        # store-vector width of 1 and wgrad_atomic_epilogue_available already
+        # returns False on every shape that can merge -- `not atomic_ok` carries
+        # the invariant unaided. The clause is a belt kept for the case that
+        # stops being true (an fp32 dW, or merging extended past depthwise),
+        # where it becomes the only thing standing between a merged tile and a
+        # silently wrong gradient. What is asserted below is the invariant
+        # itself, which holds either way; `atomic_ok` is asserted False so that
+        # if the subsumption ever lifts, this test says so out loud instead of
+        # quietly changing meaning.
+        seen_merged = 0
+        for G, Y, X in ((256, 3, 3), (128, 3, 3), (512, 1, 3), (64, 5, 5)):
+            for dtype in ("fp16", "bf16"):
+                r = dispatch_conv_grouped(
+                    _wgrad(
+                        "gfx950",
+                        C=G,
+                        K=G,
+                        G=G,
+                        Y=Y,
+                        X=X,
+                        pad_h=Y // 2,
+                        pad_w=X // 2,
+                        dtype=dtype,
+                    )
+                )
+                p = _problem(r.request)
+                ws = r.spec.to_wgrad_spec(p)
+                if ws.group_merge <= 1 or ws.split_k <= 1:
+                    continue
+                seen_merged += 1
+                where = (
+                    f"G={G} {Y}x{X} {dtype} gm={ws.group_merge} split_k={ws.split_k}"
+                )
+                self.assertTrue(
+                    ws.two_stage, f"{where}: merged split-K must be two-stage"
+                )
+                atomic_ok, _ = _wgrad_atomic_epilogue_available(p, dtype, None)
+                self.assertFalse(
+                    atomic_ok,
+                    f"{where}: the packed atomic became available on a mergeable "
+                    f"shape -- the `gm > 1` clause in _resolve_wgrad_split_k is no "
+                    f"longer subsumed and is now the sole guard; re-read it",
+                )
+        self.assertGreater(seen_merged, 0, "no merged split-K case was exercised")
 
 
 class TestTwoStageGridShape(unittest.TestCase):
@@ -419,6 +482,148 @@ class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
             _replace(ws, ws_replicas=ws.ws_replicas + 1).kernel_name(),
             "ws_replicas changes the scratch addressing, so it must reach the "
             "name the compile cache keys on",
+        )
+
+
+class TestWgradMergeDegree(unittest.TestCase):
+    """gfx950 depthwise wgrad must pick a ``Gm`` the kernel accepts.
+
+    Depthwise wgrad is the degenerate wgrad GEMM: wg_M = kpg = 1 and
+    wg_N = Y*X*cpg = Y*X, so the free axis is one element per group and every
+    load is scalar. Merging Gm groups into one tile is what restores a
+    vectorisable run, and the degree is bounded by ``spatial * Gm <= tile_n``.
+
+    The tile is *not* a free variable: the selector keeps the shipped tile and
+    chooses only the degree, so these tests assert ``tile_n == 64`` everywhere
+    alongside the degree.
+
+    The sharp edge: at ``split_k == -1`` the gate's split-K clause is vacuous,
+    so ``support()`` validates little more than that tile bound. A degree the
+    gate refuses does not merely merge badly -- it makes ``support()`` reject,
+    and depthwise wgrad stops dispatching at all. Hence
+    :meth:`test_every_choice_is_admissible`, the load-bearing one here.
+    """
+
+    def _dw(self, G, Y, X, arch="gfx950", **kw):
+        # Depthwise is C == K == groups (cpg == kpg == 1).
+        return _wgrad(arch, C=G, K=G, G=G, Y=Y, X=X, pad_h=Y // 2, pad_w=X // 2, **kw)
+
+    # ---- admissibility -------------------------------------------------------
+
+    def test_every_choice_is_admissible(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            wgrad_group_merge_available,
+        )
+
+        n = 0
+        for G in (8, 32, 96, 240, 672, 2048):
+            # No 1x1: grouped pointwise wgrad is refused upstream of dispatch.
+            for Y, X in ((1, 3), (3, 3), (5, 5), (7, 7), (11, 11), (3, 5)):
+                for dtype in ("fp16", "bf16"):
+                    r = dispatch_conv_grouped(self._dw(G, Y, X, dtype=dtype))
+                    inst = r.spec.to_wgrad_spec(_problem(r.request))
+                    ok, why = wgrad_group_merge_available(inst, arch="gfx950")
+                    self.assertTrue(
+                        ok,
+                        f"G={G} {Y}x{X} {dtype} -> tile_n={r.spec.tile_n} "
+                        f"gm={r.spec.group_merge}: {why}",
+                    )
+                    inst.validate()
+                    n += 1
+        self.assertGreater(n, 0)
+
+    def test_merging_shrinks_the_group_axis_of_the_grid(self):
+        r = dispatch_conv_grouped(self._dw(256, 3, 3))
+        self.assertGreater(r.spec.group_merge, 1, "3x3 depthwise must merge")
+        self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+        self.assertEqual(r.grid[2] % (256 // r.spec.group_merge), 0)
+
+    # ---- blast radius --------------------------------------------------------
+
+    def test_non_depthwise_is_untouched(self):
+        # cpg/kpg > 1 shapes never merge: the kernel gate forbids it.
+        for C, K, G in ((64, 64, 4), (64, 64, 1), (256, 128, 8), (64, 128, 32)):
+            r = dispatch_conv_grouped(_wgrad("gfx950", C=C, K=K, G=G))
+            self.assertEqual(r.spec.group_merge, 1, f"C={C} K={K} G={G}")
+            self.assertEqual(r.spec.tile_n, 64, f"C={C} K={K} G={G}")
+
+    def test_other_arches_are_untouched(self):
+        # Merging is a gfx950 candidate decision; nothing else started merging.
+        for arch in ("gfx942", "gfx1250"):
+            r = dispatch_conv_grouped(self._dw(256, 3, 3, arch=arch))
+            self.assertEqual(r.spec.group_merge, 1, arch)
+
+    def test_a_single_group_never_merges(self):
+        # C == K == G == 1 looks depthwise by the cpg/kpg test but has nothing
+        # to merge. (The tile is not asserted: this is also the scalar-B case,
+        # which pins its own narrower geometry.)
+        r = dispatch_conv_grouped(_wgrad("gfx950", C=1, K=1, G=1))
+        self.assertEqual(r.spec.group_merge, 1)
+
+    # ---- the degree table ----------------------------------------------------
+
+    def test_degree_table(self):
+        # Group count is a power of two well above every ladder rung, so these
+        # cases isolate the tile bound (spatial * Gm <= 64) from divisibility.
+        # The degree falls as the filter grows and reaches 1 once a single pair
+        # of groups no longer fits the tile -- which is also the point where
+        # merging stops being offered at all.
+        from dispatch.grouped_convolution import _wgrad_merge_degree
+
+        cases = {
+            (1, 3): 16,  # spatial 3: 3*16 = 48 <= 64, 3*32 > 64
+            (1, 7): 8,  # spatial 7: 7*8 = 56 <= 64
+            (3, 3): 4,  # spatial 9: 9*4 = 36 <= 64, 9*8 > 64
+            (3, 5): 4,  # spatial 15: 15*4 = 60 <= 64
+            (5, 5): 2,  # spatial 25: 25*2 = 50 <= 64
+            (7, 7): 1,  # spatial 49: 49*2 > 64, nothing merges
+            (11, 11): 1,  # spatial 121
+            (13, 13): 1,  # spatial 169
+        }
+        for (Y, X), want in cases.items():
+            req = self._dw(2048, Y, X)
+            self.assertEqual(_wgrad_merge_degree(req), want, f"{Y}x{X}")
+            spec = dispatch_conv_grouped(req).spec
+            self.assertEqual(spec.group_merge, want, f"{Y}x{X}")
+            # The tile is never spent on merging -- that was fitted and lost.
+            self.assertEqual(spec.tile_n, 64, f"{Y}x{X}")
+
+    def test_degree_is_ladder_capped_not_only_tile_capped(self):
+        # A 1x1 filter would fit 64 groups in the 64-wide tile and still have
+        # room; the degree stops at 64 because that is the last rung the kernel
+        # offers. (Checked on the selector directly: grouped pointwise wgrad is
+        # refused upstream, so this shape never reaches dispatch.)
+        from dispatch.grouped_convolution import _wgrad_merge_degree
+
+        self.assertEqual(_wgrad_merge_degree(self._dw(2048, 1, 1)), 64)
+
+    def test_degree_respects_group_divisibility(self):
+        # 1x3 leaves room for 16 under the tile bound, so below that the only
+        # thing left to cap the degree is what divides the group count.
+        from dispatch.grouped_convolution import _wgrad_merge_degree
+
+        for G, want in ((2048, 16), (96, 16), (24, 8), (12, 4), (6, 2), (3, 1)):
+            self.assertEqual(_wgrad_merge_degree(self._dw(G, 1, 3)), want, f"G={G}")
+
+    def test_unmergeable_shapes_dispatch_unmerged(self):
+        # A filter too large for two groups to share a tile, and a group count
+        # no ladder rung divides, both fall back to the shipped unmerged spec.
+        for req in (self._dw(2048, 13, 13), self._dw(3, 3, 3)):
+            spec = dispatch_conv_grouped(req).spec
+            self.assertEqual(spec.group_merge, 1)
+            self.assertEqual(spec.tile_n, 64)
+
+    # ---- the name the compile cache keys on ----------------------------------
+
+    def test_merge_degree_reaches_the_kernel_name(self):
+        from dataclasses import replace
+
+        base = dispatch_conv_grouped(self._dw(2048, 3, 3)).spec
+        self.assertIn(f"gm{base.group_merge}", base.kernel_name())
+        self.assertNotEqual(
+            base.kernel_name(),
+            replace(base, group_merge=1).kernel_name(),
+            "group_merge is a different GEMM -- it must not share a name",
         )
 
 
