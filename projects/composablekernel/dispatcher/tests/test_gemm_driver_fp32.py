@@ -28,6 +28,8 @@ sys.path.insert(0, str(GEMM_TE_DIR))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 import codegen_common as cc  # noqa: E402
+from arch_filter import ArchFilter, OperatorType  # noqa: E402
+from arch_filter import KernelConfig as FilterConfig  # noqa: E402
 import gemm_full_benchmark as drv  # noqa: E402
 from ctypes_utils import (  # noqa: E402
     KernelConfig,
@@ -175,6 +177,41 @@ def test_gfx1250_fp32_rejects_only_the_spilling_tile(
 ):
     reason = cc.gfx1250_fp32_tile_reject_reason(arch, dtype, tile_m, tile_n, num_waves)
     assert bool(reason) == rejected
+
+
+@pytest.mark.parametrize(
+    "arch, dtype, tile_n, operator, rejected",
+    [
+        ("gfx1250", "fp32", 256, OperatorType.GEMM, True),
+        ("gfx1250", "fp32", 256, OperatorType.GEMM_STREAMK, True),
+        ("gfx1250", "fp32", 128, OperatorType.GEMM, False),
+        ("gfx1250", "fp32", 256, OperatorType.CONV_FWD, False),
+        ("gfx1250", "fp16", 256, OperatorType.GEMM, False),
+        ("gfx950", "fp32", 256, OperatorType.GEMM, False),
+    ],
+)
+def test_arch_filter_applies_the_gfx1250_fp32_tile_gate(
+    arch, dtype, tile_n, operator, rejected
+):
+    # Same rule as the codegen and expand_sweep, for GEMM operators only.
+    config = FilterConfig(
+        datatype_a=dtype,
+        datatype_b=dtype,
+        datatype_c=dtype,
+        tile_m=256,
+        tile_n=tile_n,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=4,
+        pipeline="compv3",
+        operator=operator,
+    )
+    errors = ArchFilter(arch).validate_kernel(config).errors
+    assert (cc.GFX1250_FP32_ACC_REJECT_REASON in errors) == rejected
 
 
 def test_gfx1250_fp32_sweep_applies_both_gates(tmp_path):
