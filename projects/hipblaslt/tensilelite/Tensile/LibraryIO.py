@@ -23,6 +23,7 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .ExactLogicSidecar import attachSidecar
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
@@ -552,9 +553,13 @@ def parseLibraryLogicFile(
         lazyLibraryLoading: bool,
         archRenames: Optional[Dict[str, str]] = None,
     ):
-    """Wrapper function to read and parse a library logic file."""
+    """Wrapper function to read and parse a library logic file.
+
+    A GridBased ``ExactLogic`` table stored in a ``.exactlogic.bin.xz`` sidecar
+    next to *filename* is attached before parsing (see ``ExactLogicSidecar``).
+    """
     return parseLibraryLogicData(
-               read(filename, True),
+               attachSidecar(read(filename, True), filename),
                filename,
                assembler,
                splitGSU,
