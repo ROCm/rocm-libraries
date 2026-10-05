@@ -210,6 +210,22 @@ INSTANTIATE_TEST_SUITE_P(
             ));
 TEST_P(Alibi, DataTypeConfig) { fmha_bwd_test(GetParam()); }
 
+// ALiBi with more than 65536 key positions; the distance |i - j| must not wrap at 16 bits.
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwdLongSeqlen,
+                         Alibi,
+                         Combine(Values(mode_enum::batch),
+                                 Values(std::tuple{128, -1}),
+                                 Values(std::tuple{true, true}), // perm
+                                 Values("a:0"),
+                                 Values(false),                   // use_dbias
+                                 Values(0.0f),                    // p_drop
+                                 Values(std::tuple{0, 0, false}), // seed/offset/prefs
+                                 Values(FmhaBwdDimsMaskParam{1, 2, 2, 16, 65537, "0"},
+                                        FmhaBwdDimsMaskParam{1, 2, 2, 16, 70000, "0"},
+                                        FmhaBwdDimsMaskParam{1, 2, 2, 16, 70000, "b"}),
+                                 Values(false) // deterministic
+                                 ));
+
 class Dropout : public TestWithParam<FmhaBwdTestParam>
 {
 };

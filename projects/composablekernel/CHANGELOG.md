@@ -35,6 +35,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed incorrect results in grouped convolution backward data and XDL GEMM kernels caused by an invalid `__restrict__` qualifier on LDS pointers.
 * Fixed incorrect accumulation in atomic and split-K kernels on gfx1250 by issuing buffer atomic adds with device scope coherence.
 * Fixed memory faults in FMHA batch prefill with a paged KV cache when the page size is a single token.
+* Fixed incorrect FMHA forward, backward, paged-KV, and batch prefill results with ALiBi when the query or key sequence length exceeds 65536.
 * Fixed the softmax sink gradient shape in the FMHA backward kernel and corrected sliding window progression when the attention sink is enabled.
 * Fixed incorrect results in microscaling (MX) XDL GEMM and B preshuffle kernels when the B operand is more densely packed than A, such as FP8 by FP4.
 * Fixed intermittent incorrect results in microscaling (MX) GEMM on gfx1250 caused by missing LDS read ordering in the double-buffered pipeline.
