@@ -51,24 +51,28 @@ namespace cs = miopen::ai::tuning::candidate_selection;
 
 struct TableCase
 {
+    const char* arch;
     const char* solver;
     std::vector<std::string> configs; // known kernel strings (no split_k) present in the table
 };
 
 const std::vector<TableCase>& Cases()
 {
+    static const std::string fwd =
+        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 128, 16, Default, 32, 32, 4, 2, 4, "
+        "4, 4, 1, 1, 1>";
+    static const std::string fwd_pad0 =
+        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 128, 16, Filter1x1Pad0, 32, 32, 4, "
+        "2, 4, 4, 4, 1, 1, 1>";
+    static const std::string bwd3d =
+        "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_Large_Tensor<256, 128, 128, 32, 8, 8, "
+        "Default, 32, 32, 2, 2, 1, 1, 1, 1>";
     static const std::vector<TableCase> cases = {
-        {"ConvHipImplicitGemmGroupFwdXdlops",
-         {"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 128, 16, Default, 32, 32, 4, 2, "
-          "4, 4, 4, 1, 1, 1>",
-          "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 128, 16, Filter1x1Pad0, 32, 32, "
-          "4, 2, 4, 4, 4, 1, 1, 1>"}},
-        {"ConvHipImplicitGemm3DGroupFwdXdlops",
-         {"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 128, 16, Default, 32, 32, 4, 2, "
-          "4, 4, 4, 1, 1, 1>"}},
-        {"ConvHipImplicitGemm3DGroupBwdXdlops",
-         {"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_Large_Tensor<256, 128, 128, 32, 8, 8, "
-          "Default, 32, 32, 2, 2, 1, 1, 1, 1>"}},
+        {"gfx950", "ConvHipImplicitGemmGroupFwdXdlops", {fwd, fwd_pad0}},
+        {"gfx950", "ConvHipImplicitGemm3DGroupFwdXdlops", {fwd}},
+        {"gfx950", "ConvHipImplicitGemm3DGroupBwdXdlops", {bwd3d}},
+        {"gfx942", "ConvHipImplicitGemmGroupFwdXdlops", {fwd, fwd_pad0}},
+        {"gfx942", "ConvHipImplicitGemm3DGroupBwdXdlops", {bwd3d}},
     };
     return cases;
 }
@@ -87,8 +91,8 @@ class CPU_ConfigEmbeddingTable : public ::testing::TestWithParam<TableCase>
 
 TEST_P(CPU_ConfigEmbeddingTable, ShipsLoadsAndHits)
 {
-    const std::string arch = "gfx950";
     const auto& tc         = GetParam();
+    const std::string arch = tc.arch;
     const auto path        = TablePath(arch, tc.solver);
     if(!miopen::fs::exists(path))
         GTEST_SKIP() << "table not installed: " << path;
