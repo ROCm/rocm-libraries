@@ -226,10 +226,18 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
+
+      # The probes pack the production gfx950 rocKE descriptors for an
+      # architecture this lane does not build (GPU_TARGETS is the lane's own).
+      # Their pack targets are not part of the default build, and the ctest
+      # entries fail without their output, so build them before "Run tests".
+      - name: Build packaging probes
+        run: cmake --build build --target hkp_packaging_probes
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
@@ -247,6 +255,16 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      # ctest reports skipped and missing tests as success. Re-run the probe
+      # entries alone and compare the junit against the manifest configure
+      # wrote, so a probe that did not run fails the job.
+      - name: Check packaging probes ran
+        run: |
+          ctest --test-dir build -R '^hkp-probe-' --no-tests=error --output-on-failure --output-junit probe-junit.xml
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/probe-junit.xml \
+            --manifest build/hkp-probes/manifest.txt
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -470,10 +488,18 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
+
+      # The probes pack the production gfx950 rocKE descriptors for an
+      # architecture this lane does not build (GPU_TARGETS is the lane's own).
+      # Their pack targets are not part of the default build, and the ctest
+      # entries fail without their output, so build them before "Run tests".
+      - name: Build packaging probes
+        run: cmake --build build --target hkp_packaging_probes
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
@@ -487,6 +513,16 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      # ctest reports skipped and missing tests as success. Re-run the probe
+      # entries alone and compare the junit against the manifest configure
+      # wrote, so a probe that did not run fails the job.
+      - name: Check packaging probes ran
+        run: |
+          ctest --test-dir build -R '^hkp-probe-' --no-tests=error --output-on-failure --output-junit probe-junit.xml
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/probe-junit.xml \
+            --manifest build/hkp-probes/manifest.txt
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.

@@ -1442,6 +1442,11 @@ function(hkp_add_packaging)
         PACK_JOBS 1)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
+    if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
+        include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
+        hkp_load_packaging_probes(
+            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_rocke_args})
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------

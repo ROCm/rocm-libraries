@@ -335,6 +335,15 @@ native pack whose symbols a bundle's UKDs must name before it serves. The packag
 dependencies are documented from the repository root in
 `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`.
 
+**Required: add a packaging probe for every new architecture or integration.** CI builds
+only a few architectures, so packaging for the others breaks silently unless a probe packs
+them. Declare one `hkp_add_packaging_probe(...)` in
+`dnn-providers/hip-kernel-provider/descriptor-packaging/probes/probes.cmake` (arch, `KIND
+rocke`, the production directory, KDP file and a representative UKD name), then run the
+mutation checks listed under "Packaging probes" in the descriptor-packaging README. No
+CMake guard detects a missing probe, so this step is the only enforcement; no workflow
+edit is needed.
+
 Build the provider, validator and required test targets through the configured
 superbuild. For packaged engines, run `hkp_packaging_product` after the full build and
 after any reconfigure; require the final staged descriptors, not a packaging stamp or an
