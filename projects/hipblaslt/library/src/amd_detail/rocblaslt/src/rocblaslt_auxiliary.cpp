@@ -2109,6 +2109,9 @@ rocblaslt_status
                     pref->search_mode);
             break;
         case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
+            if(auto status = validateWorkspaceSize(__func__, *(uint64_t*)data);
+               status != rocblaslt_status_success)
+                return status;
             pref->max_workspace_bytes = *(uint64_t*)data;
             log_api(__func__,
                     "matmulPref",
@@ -2674,6 +2677,9 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    if(auto status = validateWorkspaceSize(__func__, maxWorkspaceBytes);
+       status != rocblaslt_status_success)
+        return status;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         log_api(
