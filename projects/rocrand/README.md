@@ -50,8 +50,8 @@ Optional:
   * Use `GTEST_ROOT` to specify the GoogleTest location (see also
     [FindGTest](https://cmake.org/cmake/help/latest/module/FindGTest.html))
   * Note: If GoogleTest is not already installed, it will be automatically downloaded and built
-* Fortran compiler (required only for Fortran wrapper)
-  * `gfortran` is recommended
+* Fortran compiler (required only for the Fortran bindings)
+  * `amdflang` and `gfortran` are both supported
 * Python 3.5+ (required only for Python wrapper)
 * [doxygen](https://www.doxygen.nl/) to build the documentation
 * [AMD SMI](https://github.com/ROCm/amdsmi)
@@ -206,7 +206,7 @@ When possible, we advise using the host API over the device API, as its kernel c
 ## Wrappers
 
 * C++ wrappers for the rocRAND host API are in [`rocrand.hpp`](./library/include/rocrand/rocrand.hpp).
-* [Fortran wrappers](./library/src/fortran/).
+* [Fortran bindings](./fortran/): a generated `rocrand` module (`use rocrand`).
 * [Python wrappers](./python/): [rocRAND](./python/rocrand).
 
 ## Building the documentation locally

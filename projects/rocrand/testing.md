@@ -66,7 +66,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 | C++ wrapper | `test/test_rocrand_cpp_wrapper.cpp`, `test_rocrand_cpp_basic.cpp`, `test/cpp_wrapper/` | Validate the `rocrand.hpp` C++ interface builds and behaves | Yes | PR / Nightly |
 | cuRAND parity | `test/parity/` | Compare rocRAND output/stream against cuRAND | Yes (CUDA backend) | as available |
 | hipGraph capture | `test/test_rocrand_hipgraphs.cpp` | Validate generation under HIP graph capture/replay | Yes | PR / Nightly |
-| Fortran wrapper | `test/fortran/` | Validate Fortran bindings (FRUIT) | Yes | Nightly |
+| Fortran bindings | `fortran/test/` | Validate the generated `rocrand` module: `.f03` programs (uniform and normal for each generator in both precisions, log-normal and Poisson through philox, and the `rocrand_version` query), plus the FRUIT suite `test_rocrand.f90` (harness vendored under `fortran/test/fruit/`) | Yes (except `rocrand_version`) | Nightly |
 | Package / install | `test/package/` | Post-install smoke test via `find_package(rocrand)` | Yes | Release / packaging |
 
 * **What requires GPU hardware:** all of the above except pure host-side compilation/linkage checks.
@@ -148,7 +148,7 @@ Because engines and distributions are decoupled, `test/internal/` includes libra
 * **ffm-quick / ffm-full** categories (`ctest -L ffm-quick`) — Full-Feature-Matrix focused runs (timeout budget up to 2 hours).
 * Slow/niche tests enabled via `RUN_SLOW_TESTS=1`.
 * Additional hardware coverage: gfx94X, gfx950, and gfx11xx (specifically gfx1151).
-* cuRAND parity and Fortran-wrapper suites run here rather than on PRs.
+* cuRAND parity and the Fortran binding tests run here rather than on PRs.
 
 ## Supported Configurations
 GPU targets come from the top-level `CMakeLists.txt` default target list.

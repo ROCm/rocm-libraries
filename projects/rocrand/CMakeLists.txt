@@ -34,7 +34,9 @@ endif()
 # Build options
 include(CMakeDependentOption)
 
-option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
+# Also declared here so that the configuration summary, printed before
+# add_subdirectory(fortran), has a value; OFF on Windows (no ROCm Fortran compiler).
+option(BUILD_FORTRAN_BINDINGS "Build the rocRAND Fortran bindings" "${UNIX}")
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 cmake_dependent_option(BUILD_BENCHMARK_TUNING
@@ -194,15 +196,19 @@ include(cmake/Summary.cmake)
 print_configuration_summary()
 
 # The "tools" and "library" targets may be skipped under certain conditions when USE_SYSTEM_LIB=ON
-if ((NOT BUILD_BENCHMARK) AND (NOT BUILD_FORTRAN_WRAPPER) AND BUILD_TEST AND USE_SYSTEM_LIB)
+if ((NOT BUILD_BENCHMARK) AND BUILD_TEST AND USE_SYSTEM_LIB)
   message(STATUS "Skipping the 'tools' and 'library' targets as only BUILD_TEST=ON and USE_SYSTEM_LIB=ON were specified")
 else()
   # Tools
   add_subdirectory(tools)
 
-  # rocRAND library, adds library target "rocrand" and includes Fortran wrapper
+  # rocRAND library, adds library target "rocrand"
   add_subdirectory(library)
 endif()
+
+# Fortran bindings; self-guarding. Outside the branch above: they only need
+# librocrand to link, and find an installed one when it is not built here.
+add_subdirectory(fortran)
 
 if(BUILD_TEST OR BUILD_BENCHMARK)
   rocm_package_setup_component(clients)
