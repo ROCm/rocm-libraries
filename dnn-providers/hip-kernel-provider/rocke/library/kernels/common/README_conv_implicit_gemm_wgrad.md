@@ -125,10 +125,11 @@ The cshuffle path avoids this entirely:
   the existing `cpg % 2 == 0` constraint).
 - The caller must zero-initialise `dW` before launch (atomic-adds only).
 
-The benchmark driver (`benchmark_implicit_gemm_conv.py`) was updated to generate
-only `split_k=0` (runtime-atomic) combos by default instead of `(1, 0)`, so the
-`epilogue="cshuffle"` requirement is respected without filtering cshuffle combos
-out of the sweep.
+The split degree is never compiled in: every `split_k > 1` builds the same
+kernel (named `..._spk`), which takes the degree as the `ks_count` / `ks`
+kernargs. The benchmark driver (`benchmark_implicit_gemm_conv.py --split-k 0`)
+therefore compiles one split-K kernel per configuration and times it at every
+degree, instead of compiling one kernel per degree.
 
 ### Pointwise explicit-GEMM fast path
 

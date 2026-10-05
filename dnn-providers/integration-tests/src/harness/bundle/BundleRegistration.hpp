@@ -148,14 +148,15 @@ using LoadOutcome = std::variant<LoadedBundle, FailedLoad, SkippedLoad>;
 // from registerBundleTests() so the decision (did this bundle load, and if
 // not, why) is a pure function that can be unit tested without touching
 // ::testing::RegisterTest, which is only valid to call before RUN_ALL_TESTS()
-// runs and so can't be exercised from within a running test body.
-inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
+// runs and so can't be exercised from within a running test body. `sweeps` is
+// shared across one load pass so each sweep manifest is parsed once.
+inline LoadOutcome classifyBundle(const DiscoveredBundle& disc, SweepManifestCache& sweeps)
 {
     const auto diagnosticPath = disc.diagnosticPath();
     LoadResult loadResult;
     try
     {
-        loadResult = loadIntegrationTestBundle(disc);
+        loadResult = loadIntegrationTestBundle(disc, sweeps);
     }
     catch(const RuntimePassByValueInvariantError& e)
     {
@@ -335,9 +336,15 @@ inline std::optional<std::vector<LoadedBundle>>
     std::vector<LoadedBundle> bundles;
     bundles.reserve(discovered.bundles.size());
 
+    // Every discovered bundle is loaded here, before --gtest_filter is applied, so
+    // say how many: a large bundle root otherwise looks like a hang.
+    std::cerr << "Loading " << discovered.bundles.size() << " discovered bundle test(s) from "
+              << discovered.dataDir << "\n";
+
+    SweepManifestCache sweeps;
     for(const auto& disc : discovered.bundles)
     {
-        auto outcome = classifyBundle(disc);
+        auto outcome = classifyBundle(disc, sweeps);
 
         if(auto* failed = std::get_if<FailedLoad>(&outcome))
         {

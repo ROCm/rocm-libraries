@@ -4154,9 +4154,9 @@ class Solution(collections.abc.Mapping):
             ## turn-off padding for directToLds
             if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
               ldsPadM = 0
-            # TDM's pad_amount field is dword-granular
+            # TDM pads must be an even number of dwords (see LDS_PAD_STEP_BYTES).
             if state["TDMInst"] and ldsPadM != 0:
-              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), LDS_PAD_STEP_BYTES)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -4202,7 +4202,7 @@ class Solution(collections.abc.Mapping):
             pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
-            err = ldsPadError(int(val), 4 if tc == "Metadata" else LDS_PAD_STEP_BYTES)
+            err = ldsPadError(int(val), LDS_PAD_STEP_BYTES)
             if err:
               reject(state, printRejectionReason,
                      f"ldsPad{tc}={int(val)}: {err} for the TDM pad_amount field")
@@ -6752,6 +6752,21 @@ class Solution(collections.abc.Mapping):
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
+    # Classic persistent TDM epilogues reuse LDS for vectors. Without PAP,
+    # a tile-end rendezvous lets compute reuse that storage. With PAP, the
+    # successor's compute data is already live during the epilogue, so the
+    # vectors need storage outside every compute bank.
+    state["_PersistentVectorEpilogueLds"] = bool(
+      epilogueSize and isPersistent(state) and state["enableTDMA"] and state["enableTDMB"]
+      and not state["UseSubtileImpl"] and not state["StoreRemapVectorWidth"]
+      and not state["ProblemType"]["Gradient"])
+    state["_SeparateEpilogueLds"] = bool(
+      state["_PersistentVectorEpilogueLds"] and state["PrefetchAcrossPersistent"])
+    if state["_SeparateEpilogueLds"]:
+      epilogueOffset = int(math.ceil(ldsNumBytes / 16) * 16)
+      state["LdsOffsetBias"] = epilogueOffset
+      state["LdsOffsetBiasNonGSU"] = epilogueOffset
+      state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
 
     state["LdsBytesNoAmax"] = ldsNumBytes

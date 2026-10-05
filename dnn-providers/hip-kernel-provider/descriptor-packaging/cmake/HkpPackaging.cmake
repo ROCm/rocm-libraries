@@ -62,7 +62,21 @@ endfunction()
 # hkp_selected_arches(<out_var> <out_source_var>)
 #   Normalize GPU_TARGETS (or AMDGPU_TARGETS) into a bare gfx arch list,
 #   stripping feature suffixes (gfx942:xnack-) and dropping anything that is not
-#   a concrete gfx name. <out_source_var> receives the name of the variable the
+#   a concrete gfx target name.
+#
+#   A concrete name is a lowercase processor id (gfx942) optionally followed by
+#   lowercase hyphen-separated words that name a distinct target (gfx1250-strict).
+#   Dropped:
+#     - TheRock family names, recognised by any hyphen-separated word of
+#       dcgpu, dgpu, igpu or all, so a variant such as gfx950-dcgpu-asan is
+#       dropped with its family (gfx94X-dcgpu, gfx950-dcgpu, gfx906-dgpu,
+#       gfx90c-igpu, gfx950-all);
+#     - generic targets (gfx11-generic), which no device reports;
+#     - anything else not of that shape (native, GFX942, gfx).
+#   Only the shape is checked: an unrecognised lowercase suffix (gfx1250-typo) is
+#   kept and fails in the compiler rather than here.
+#
+#   <out_source_var> receives the name of the variable the
 #   targets came from, or empty when neither is set, so a caller can name it in a
 #   diagnostic. No intersection with a fixed fixture set: the tool compiles from
 #   authored sources for whatever arch is requested.
@@ -95,12 +109,13 @@ function(hkp_selected_arches out_var out_source_var)
         if(NOT _bare)
             continue()
         endif()
-        if(NOT _bare MATCHES "^gfx[0-9a-f]+$")
+        if(NOT _bare MATCHES "^gfx[0-9a-f]+(-[a-z]+)*$"
+           OR _bare MATCHES "-(generic|all|dcgpu|dgpu|igpu)(-|$)")
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
-                "architecture and cannot be passed to hipcc --offload-arch. Nothing "
-                "is packed for it. Name real gfx architectures in ${_source} to pack "
-                "for them.")
+                "target name (a TheRock family, a generic target, or an unrecognised "
+                "spelling), so no device can select it. Nothing is packed for it. "
+                "Name concrete gfx targets in ${_source} to pack for them.")
             continue()
         endif()
         list(APPEND _selected "${_bare}")
@@ -1758,7 +1773,7 @@ function(_hkp_add_census_entry _target _suite _arch _shard _cases)
 
     # Control: the loaded packs carry a stamp other than the expected one. Identical to
     # the entry but for the expected arch: 'gfxhkpcensuscontrol' fails
-    # hkp_selected_arches()'s ^gfx[0-9a-f]+$ filter, the only path by which an arch
+    # hkp_selected_arches()'s ^gfx[0-9a-f]+(-[a-z]+)*$ filter, the only path by which an arch
     # reaches a shard name. The regex is the stamp comparison's own wording.
     _hkp_add_census_test("${_name}-control-unexpected-stamp" "${_target}" "${_suite}.*"
                          "${_env_without_arch};HIPDNN_TEST_EXPECTED_ARCH=gfxhkpcensuscontrol;HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
