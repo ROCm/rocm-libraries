@@ -266,8 +266,9 @@ if(BUILD_CODE_COVERAGE)
     "SHELL:-Xarch_host -fprofile-instr-generate"
     "SHELL:-Xarch_host -fcoverage-mapping"
   )
+  # Not for consumers linked by a Fortran compiler: flang rejects these flags.
   target_link_options(hiprand PUBLIC
-    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "$<$<NOT:$<STREQUAL:$<TARGET_PROPERTY:LINKER_LANGUAGE>,Fortran>>:SHELL:-Xarch_host -fprofile-instr-generate>"
   )
 endif()
 
