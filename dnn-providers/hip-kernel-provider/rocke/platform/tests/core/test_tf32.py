@@ -360,6 +360,12 @@ def test_parsed_mma_rejects_wrong_operands():
 
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
+@pytest.mark.skip(
+    reason=(
+        "Temporarily disabled (#12612): native recipe replay attempts a source "
+        "build from installed test artifacts"
+    )
+)
 def test_recipe_replay_preserves_ir(m, mode, monkeypatch):
     from rocke.portable_ir.src.recording_builder import record_kernel
     from rocke.portable_ir.src import online, recipe_bundle

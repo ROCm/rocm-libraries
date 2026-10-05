@@ -734,13 +734,10 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
 
-    // The softmax scale is a REQUIRED launch argument with no default.
-    if(!attributes.attn_scale_value().has_value())
-    {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"attn_scale_value"} << "attn_scale_value is not set");
-        return std::nullopt;
-    }
-    const float scale = attributes.attn_scale_value().value();
+    // The softmax scale is an f32 launch argument. An absent attn_scale_value means 1.0,
+    // cuDNN's default: its SDPA node multiplies by attn_scale only when one is set. It is
+    // resolved here, once, and prepare() launches with the bound value.
+    const float scale = attributes.attn_scale_value().value_or(1.0F);
 
     BoundTokens bound;
     bound[std::string(Q_TOKEN)] = attributes.q_tensor_uid();

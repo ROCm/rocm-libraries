@@ -45,7 +45,7 @@ implementation.
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
-ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped conv. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
+ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-GEMM / direct grouped conv kernel takes `(A, B, D, A_bytes, B_bytes, D_bytes)` followed by the problem block -- extents, strides, padding, dilation, groups and the host-computed magic-division constants -- whose names and order come from `kernels.common.conv_abi` (`conv_arg_names(direction)` / `conv_direct_arg_names(direction)`; C++ twin `instance_conv_abi.h`). Hosts fill them with `kernels.common.conv_args.ConvArgs.from_problem(...).to_launch_values(...)`; wgrad appends the split-K `ks` / `ks_count` pair (and the two-stage `ws_ptr` / `ws_bytes`), dgrad its sub-GEMM table. See `instances/convolution.md`. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
 Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 

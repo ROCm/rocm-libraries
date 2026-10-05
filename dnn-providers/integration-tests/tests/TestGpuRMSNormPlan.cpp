@@ -9,6 +9,7 @@
 
 #include "ScalarTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuRMSNormPlan.hpp"
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -20,6 +21,7 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_integration_tests::test_utils;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 // =============================================================
 // Test GpuRMSNormFwdPlan
@@ -422,9 +424,9 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<YType> gpuY(ioDims, ioStrides);
 
     constexpr unsigned int SEED = 42;
-    xTensor.fillWithRandomValues(static_cast<XType>(-1.0f), static_cast<XType>(1.0f), SEED);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleType>(-1.0f), static_cast<ScaleType>(1.0f), SEED + 1);
+    fillWithRandomValues(xTensor, static_cast<XType>(-1.0f), static_cast<XType>(1.0f), SEED);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleType>(-1.0f), static_cast<ScaleType>(1.0f), SEED + 1);
 
     std::unordered_map<int64_t, void*> gpuVariantPack;
     gpuVariantPack[nodeAttributes->x_tensor_uid()] = xTensor.rawDeviceData();
@@ -581,14 +583,14 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<ScaleType> dGpuBiasTensor(derivedDims, derivedStrides);
 
     unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(
-        static_cast<GradOutputType>(-1.0f), static_cast<GradOutputType>(1.0f), seed++);
-    xTensor.fillWithRandomValues(
-        static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f), seed++);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleType>(-1.0f), static_cast<ScaleType>(1.0f), seed++);
-    invRMSTensor.fillWithRandomValues(
-        static_cast<ComputeType>(.5f), static_cast<ComputeType>(2.0f), seed++);
+    fillWithRandomValues(
+        dyTensor, static_cast<GradOutputType>(-1.0f), static_cast<GradOutputType>(1.0f), seed++);
+    fillWithRandomValues(
+        xTensor, static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f), seed++);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleType>(-1.0f), static_cast<ScaleType>(1.0f), seed++);
+    fillWithRandomValues(
+        invRMSTensor, static_cast<ComputeType>(.5f), static_cast<ComputeType>(2.0f), seed++);
 
     std::unordered_map<int64_t, void*> gpuVariantPack;
     gpuVariantPack[nodeAttributes->dy_tensor_uid()] = dyTensor.rawDeviceData();

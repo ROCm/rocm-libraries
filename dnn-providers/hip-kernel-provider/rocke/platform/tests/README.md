@@ -25,6 +25,9 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
+See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
+for the required source backend matrix and installed CI replay procedure.
+
 ## Layout / coverage matrix
 
 This table is an **inventory** of what lives where. It does *not* imply every
