@@ -12,6 +12,9 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
+from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import check_golden as _check_golden
+
 
 def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -23,8 +26,8 @@ def safe(name: str) -> str:
 
 def current_flavor() -> str:
     """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 for 7.2-7.12, llvm23 for 7.13+). The golden stores all of them; the
-    gate compares only this one."""
+    llvm22 for 7.2-7.12, llvm23 for 7.13+). Only the plain dump run (no
+    ``--check`` / ``--write``) uses it; the gate checks every flavor."""
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -3165,8 +3168,8 @@ def cases():
 # gate (check_golden) verifies all of them from any host: the flavor is an
 # argument to lowering, so nothing about the running ROCm vintage limits which
 # sub-documents can be checked. The same committed golden is therefore valid,
-# and verified, on ROCm < 7.2 (llvm20), 7.2-7.12 (llvm22), and 7.13+ (llvm23).
-GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
+# and verified, on every ROCm vintage. GOLDEN_FLAVORS is LLVM_FLAVORS, so a new
+# flavor fails the gate until the golden is re-blessed.
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
@@ -3218,55 +3221,9 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
     """Compare a fresh run against the golden sub-doc(s). Empty list == OK.
 
     With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
-    just the one this host autodetects. Lowering takes the flavor as an
-    argument, so the extra runs cost a few hundred milliseconds -- whereas
-    checking only the host's flavor leaves the other sub-documents unverified
-    by any machine that does not happen to run that ROCm vintage. The llvm23
-    sub-document, for instance, is only reachable on ROCm >= 7.13, so it would
-    otherwise sit in the golden untested.
-
-    Drift strings are prefixed with the flavor when more than one is checked.
+    just the one this host autodetects; see :func:`rocke.core.ir_golden.check_golden`.
     """
-    doc = json.loads(golden_path.read_text())
-    have = doc.get("flavors", {})
-    wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
-    errors: list[str] = []
-    for fl in wanted:
-        base = have.get(fl)
-        if base is None:
-            errors.append(
-                f"golden has no entry for flavor {fl!r} (have {sorted(have)})"
-            )
-            continue
-        prefix = "" if len(wanted) == 1 else f"[{fl}] "
-        errors.extend(prefix + e for e in compare(base, run(flavor=fl)))
-    return errors
-
-
-def compare(base, cur):
-    errors = []
-    for section in ("cases", "expected_failures"):
-        bkeys = set(base.get(section, {}))
-        ckeys = set(cur.get(section, {}))
-        for missing in sorted(bkeys - ckeys):
-            errors.append(f"{section}: missing current {missing}")
-        for new in sorted(ckeys - bkeys):
-            errors.append(f"{section}: new current {new}")
-    for cid, brec in sorted(base.get("cases", {}).items()):
-        crec = cur.get("cases", {}).get(cid)
-        if not crec:
-            continue
-        if brec.get("sha256") != crec.get("sha256"):
-            errors.append(f"{cid}: {brec.get('sha256')} -> {crec.get('sha256')}")
-    for cid, brec in sorted(base.get("expected_failures", {}).items()):
-        crec = cur.get("expected_failures", {}).get(cid)
-        if not crec:
-            continue
-        if brec.get("type") != crec.get("type") or brec.get("message") != crec.get(
-            "message"
-        ):
-            errors.append(f"{cid}: failure changed {brec} -> {crec}")
-    return errors
+    return _check_golden(golden_path, lambda fl: run(flavor=fl), flavor)
 
 
 def main():
