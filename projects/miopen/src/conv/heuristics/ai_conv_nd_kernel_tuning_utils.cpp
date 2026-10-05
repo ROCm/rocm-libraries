@@ -65,7 +65,7 @@ int LayoutStringToCode(const std::string& layout, const bool& is3d)
 
 // Helper: Extract 3D convolution features
 std::map<std::string, float>
-GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
+GetFeaturesND(const ProblemDescription& problem, int max_cu, const std::string& arch)
 {
     std::map<std::string, float> features;
 
@@ -152,6 +152,12 @@ GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::stri
 
     // 29: group_count
     features["group_count"] = static_cast<float>(problem.GetGroupCount());
+
+    // Combined multi-arch (gfx950+gfx1250) candidate-selection models add num_cu and a binary arch
+    // input. These keys are only consumed when the model's metadata lists them in input_params
+    // (the per-arch gfx942/gfx950 models omit them), so populating them here is a no-op otherwise.
+    features["num_cu"] = static_cast<float>(max_cu);
+    features["arch"]   = (arch.find("gfx1250") != std::string::npos) ? 1.0f : 0.0f;
 
     return features;
 }

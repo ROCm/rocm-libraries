@@ -1,0 +1,153 @@
+{
+    "generated_on": "14 Sep 2026, 05:59:31",
+    "gpu": {
+        "num_cu": 256,
+        "arch": "gfx950_gfx1250"
+    },
+    "version_info": {
+        "miopen_version": "91815205"
+    },
+    "source": "perf_db",
+    "device_run_id": 335,
+    "num_inputs": 21,
+    "num_solvers": 23,
+    "num_outputs": 17,
+    "encodings": {
+        "in_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "fil_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "out_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "precision": {
+            "BF16": 0,
+            "FP16": 1,
+            "FP32": 2,
+            "INT8": 3
+        },
+        "direction": {
+            "B": 0,
+            "F": 1,
+            "W": 2
+        },
+        "solver": {
+            "ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC": 0,
+            "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC": 1,
+            "ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC": 2,
+            "ConvBinWinogradRxSf2x3": 3,
+            "ConvBinWinogradRxSf2x3g1": 4,
+            "ConvBinWinogradRxSf3x2": 5,
+            "ConvDepthwiseFwd2D": 6,
+            "ConvDirectNaiveConvBwd": 7,
+            "ConvDirectNaiveConvFwd": 8,
+            "ConvDirectNaiveConvWrw": 9,
+            "ConvHipConv": 10,
+            "ConvHipImplicitGemmGroupBwdXdlops": 11,
+            "ConvHipImplicitGemmGroupFwdXdlops": 12,
+            "ConvHipImplicitGemmGroupWrwXdlops": 13,
+            "GemmBwd1x1_stride1": 14,
+            "GemmBwd1x1_stride2": 15,
+            "GemmBwdRest": 16,
+            "GemmFwd1x1_0_1": 17,
+            "GemmFwd1x1_0_2": 18,
+            "GemmFwdRest": 19,
+            "GemmWrw1x1_stride1": 20,
+            "GemmWrwUniversal": 21,
+            "fft": 22
+        }
+    },
+    "conv_params_used_as_features": [
+        "in_channels",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_h",
+        "out_w",
+        "fil_h",
+        "fil_w",
+        "pad_h",
+        "pad_w",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count",
+        "num_cu",
+        "arch"
+    ],
+    "redundant_columns": {
+        "spatial_dim": 2,
+        "in_d": 1,
+        "out_d": 1,
+        "fil_d": 1,
+        "pad_d": 0,
+        "conv_stride_d": 1,
+        "dilation_d": 1,
+        "bias": 0
+    },
+    "decodings": {
+        "solver": {
+            "0": "ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC",
+            "1": "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
+            "2": "ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",
+            "3": "ConvBinWinogradRxSf2x3",
+            "4": "ConvBinWinogradRxSf2x3g1",
+            "5": "ConvBinWinogradRxSf3x2",
+            "6": "ConvDepthwiseFwd2D",
+            "7": "ConvDirectNaiveConvBwd",
+            "8": "ConvDirectNaiveConvFwd",
+            "9": "ConvDirectNaiveConvWrw",
+            "10": "ConvHipConv",
+            "11": "ConvHipImplicitGemmGroupBwdXdlops",
+            "12": "ConvHipImplicitGemmGroupFwdXdlops",
+            "13": "ConvHipImplicitGemmGroupWrwXdlops",
+            "14": "GemmBwd1x1_stride1",
+            "15": "GemmBwd1x1_stride2",
+            "16": "GemmBwdRest",
+            "17": "GemmFwd1x1_0_1",
+            "18": "GemmFwd1x1_0_2",
+            "19": "GemmFwdRest",
+            "20": "GemmWrw1x1_stride1",
+            "21": "GemmWrwUniversal",
+            "22": "fft"
+        }
+    },
+    "input_params": [
+        "in_channels",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_h",
+        "out_w",
+        "fil_h",
+        "fil_w",
+        "pad_h",
+        "pad_w",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count",
+        "num_cu",
+        "arch"
+    ],
+    "note": "Combined multi-arch TunaNet dataset: gfx950(cu=256,bin=0) + gfx1250(cu=256,bin=1). Union solver vocab; per-arch applicability via p=0/t=NaN. Added input features: num_cu (numeric), arch (binary)."
+}
