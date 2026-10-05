@@ -32,6 +32,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
+from kernels.common.conv_abi import conv_manifest_args_signature
 from kernels.common.conv_direct_grouped import (
     DirectConv16cSpec,
     DirectConvProblem,
@@ -164,6 +165,7 @@ def main() -> int:
         cpg=p.cpg,
         kpg=p.kpg,
         conv_layout="direct_grouped",
+        args_signature=conv_manifest_args_signature(conv_layout="direct_grouped"),
         grid_explicit=[q_tiles, g_tiles, p.N],
         warmup_iters=5,
         timed_iters=50,
