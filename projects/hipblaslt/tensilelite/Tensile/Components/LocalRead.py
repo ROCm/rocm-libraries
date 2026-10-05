@@ -868,6 +868,38 @@ class LocalReadMFMA(LocalRead):
         halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c"%tc]
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
+
+            # ds_read_tr hands lane L the tile row (m_base + L): a transpose group reads
+            # NUM_CONT_READ_ELEMENTS *contiguous* rows and all lanes in the group share one
+            # m_base, so the lane->row stride is locked at 1 and cannot be widened to VW.
+            # Wave tiles are therefore always MatrixInstM*MatrixInstBM*MIWaveGroup apart,
+            # never VW-interleaved. MIWaveGroupShape[tile01] carries VectorWidth{A,B} in its
+            # definition above, so divide it back out to get that spacing.
+            #
+            # When VW > 1 the store still wants the VW-interleaved row order; that is
+            # restored once in the epilogue by accumShuffleForLDSTrVW (KernelWriterAssembly),
+            # not here.
+            #
+            # A group of VW consecutive wave tiles covers one MIWaveGroupShape-wide block of
+            # the macro tile, and within that block the wave's VW tiles sit MI*MIB apart --
+            # the waves of the group interleave at that granularity. So the group index steps
+            # by MIWaveGroupShape and the tile-within-group steps by MI*MIB, recovered from
+            # MIWaveGroupShape (= MI*MIB*MIWaveGroup*VW) rather than re-derived.
+            #
+            # With MIWaveGroup[tile01] == 1 this collapses to (MIWaveGroupShape//VW) * tIdx,
+            # and at VW == 1 to MIWaveGroupShape * tIdx.
+            #
+            # tileVW must be the REAL VectorWidth -- never the LDSTr clamp of 1. It is not a
+            # "how wide is one read" value; it is the divisor that recovers MI*MIB from
+            # MIWaveGroupShape[tile01], which is itself built with the real VectorWidthA.
+            # Clamping it collapses mTileOffset to MIWaveGroupShape*tIdx, a tile stride VW
+            # times too large. Use the tile01-indexed VectorWidth so it matches exactly what
+            # is baked into MIWaveGroupShape[tile01] (not the tc-aliased VectorWidth%s).
+            tileVW = kernel["VectorWidthA"] if tile01 == 0 else kernel["VectorWidthB"]
+            tileStep = MIWaveGroupShape[tile01] // (tileVW * kernel["MIWaveGroup"][tile01])
+            def mTileOffset(tIdx):
+                return MIWaveGroupShape[tile01] * (tIdx // tileVW) + tileStep * (tIdx % tileVW)
+
             if writer.states.asmCaps["HasWMMA_V3"]:
                 if tP["bpeDS"] == 0.5:
                     LocalReadX = instruction.getInst(0)
@@ -878,7 +910,7 @@ class LocalReadMFMA(LocalRead):
 
                     for tIdx in range(numberMTilesPerWave):
                         for ti in range(0, numTilePerInst):
-                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + mTileOffset(tIdx)) * tP["bpeDS"])
                             for outerIdx in range(MIInputPerThUnroll//kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]):
                                 for innerIdx in range(kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]//vwTrLoad):
                                     paddedOffset = constOffset
@@ -903,7 +935,7 @@ class LocalReadMFMA(LocalRead):
                     numVgprsPerLoad = 4 #use 3 for upcoming compiler change
 
                     for tIdx in range(numberMTilesPerWave):
-                        constOffset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        constOffset = int((tP["localReadOffset"] + mTileOffset(tIdx)) * tP["bpeDS"])
                         for outerIdx in range(MIInputPerThUnroll//kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]):
                             for innerIdx in range(kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]//vwTrLoad):
                                 paddedOffset = constOffset
@@ -928,7 +960,7 @@ class LocalReadMFMA(LocalRead):
                     vwTrLoad = 8
                     numberLRVWPerMIInput = MIInputPerThUnroll // kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                     for tIdx in range(numberMTilesPerWave):
-                        offset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        offset = int((tP["localReadOffset"] + mTileOffset(tIdx)) * tP["bpeDS"])
                         if tP["isM"]:
                             numLoadTrPerMetadata = max(MIInputPerThUnroll // vwTrLoad, 1)
                             for v in range(numLoadTrPerMetadata):
@@ -974,7 +1006,7 @@ class LocalReadMFMA(LocalRead):
                 elif tP["bpeDS"] == 2:
                     numberLRVWPerMIInput = MIInputPerThUnroll // kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                     for tIdx in range(0, numberMTilesPerWave):
-                        offset_val = int((tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"])
+                        offset_val = int((tP["localReadOffset"]+mTileOffset(tIdx)) * tP["bpeDS"])
                         unpaddedOffset = offset_val
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                             offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
@@ -1043,7 +1075,7 @@ class LocalReadMFMA(LocalRead):
                     valuiIdx = int(valufIdx)
                     LocalReadX = instruction.getInst(highBits)
 
-                    offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
+                    offset_val = (tP["localReadOffset"]+mTileOffset(tIdx)) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
 
                     def applyPad(offset_val):
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):

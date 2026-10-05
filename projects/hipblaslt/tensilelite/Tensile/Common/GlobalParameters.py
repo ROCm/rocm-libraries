@@ -490,6 +490,7 @@ defaultBenchmarkCommonParameters = [
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
+    {"AccumShuffle": [0]},
     {"VectorStore": [-1]},
     {"StoreVectorWidth": [-1]},
     {"GlobalReadVectorWidthA": [-1]},
