@@ -4251,15 +4251,12 @@ try
 
             // now dimIdx dimension is contiguous on all bricks
             midFFTItems.clear();
-            // first transform needs to apply load operations
-            const std::optional<LoadOps> loadOps = dimIdx == nonContiguousDims.front()
-                                                       ? std::optional<LoadOps>{desc.loadOps}
-                                                       : std::nullopt;
+            // load ops were already applied by the contiguousInputDims FFT
             C2CField(transposedField,
                      {dimIdx},
                      transposeOutputBufs,
                      transposeOutputBufs,
-                     loadOps,
+                     std::nullopt,
                      std::nullopt,
                      transposeItems,
                      midFFTItems);
