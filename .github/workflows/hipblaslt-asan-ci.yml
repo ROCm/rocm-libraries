@@ -52,6 +52,9 @@ jobs:
         id: matrix
         run: |
           build='[{"family":"gfx90a"}]'
+          # Use the OSS CI pool to work around intermittent ASAN startup hangs
+          # on linux-gfx90a-gpu-rocm while the cause is investigated:
+          # https://github.com/ROCm/TheRock-Infra/issues/978
           test='[{"family":"gfx90a","runs_on":"linux-gfx90a-1gpu-ossci-rocm"}]'
           echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
