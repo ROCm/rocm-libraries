@@ -158,6 +158,11 @@ namespace TensileLite
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
+
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+                    if(ctx != nullptr && Debug::Instance().useTilewright())
+                        lib.loadTilewright(ctx->filename);
+#endif
                 }
             }
             const static bool flow = false;

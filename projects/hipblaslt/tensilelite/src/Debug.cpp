@@ -180,6 +180,11 @@ namespace TensileLite
         return m_predictionLib;
     }
 
+    bool Debug::useTilewright() const
+    {
+        return m_tilewright;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
@@ -253,6 +258,10 @@ namespace TensileLite
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
 
+        const char* tilewright = std::getenv("TENSILE_USE_TILEWRIGHT");
+        if(tilewright)
+            m_tilewright = strtol(tilewright, nullptr, 0) != 0;
+
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)
             m_solution_index = strtol(solution_index, nullptr, 0);
@@ -300,6 +309,9 @@ namespace TensileLite
 
         const char* db2 = std::getenv("TENSILE_DB2");
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
+
+        const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
+        m_predictionLib = prediction_only && strtol(prediction_only, nullptr, 0) != 0;
 
         const char* sk5Force    = (std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") ? std::getenv("TENSILE_PERSISTENT_HYBRID_FORCE_MODE") : std::getenv("TENSILE_STREAMK5_FORCE_MODE"));
         m_streamK5ForceMode     = -1;

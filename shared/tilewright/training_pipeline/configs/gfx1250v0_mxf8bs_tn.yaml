@@ -1,0 +1,115 @@
+# MXFP8 GEMM (E8M0 scales per 32-element block, bf16 output), TN layout,
+# on gfx1250v0: the library a gfx1250 build produces in
+# Tensile/library/gfx1250v0 from Logic/asm_full/gfx1250-strict/
+# gfx1250-strict/Origami/gfx1250-strict_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAV_UserArgs.yaml
+# README.md documents every key.
+config_id: gfx1250v0_mxf8bs_tn
+arch: gfx1250v0
+
+hipblaslt:
+  a_type: f8_r
+  b_type: f8_r
+  c_type: bf16_r
+  d_type: bf16_r
+  scale_type: f32_r
+  compute_type: c_f32_r
+  # hipblaslt-bench scaling format 3 = Block_32_UE8M0 (MX).
+  scaleA: 3
+  scaleB: 3
+  transA: T
+  transB: N
+  library_stem: TensileLibrary_F8F8_BF8_HA_MXAE8B32_MXBE8B32_Bias_SAV_UA_Type_F8B_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250
+
+runtime:
+  devices: [0, 1, 2, 3]
+  rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+
+seed:
+  target_per_cell: 30
+  shapes_per_cell: 30
+  seed: 42
+  n_strata: 2
+  # Shape regions left out of the benchmark: min(M, N) <= 3, and K >= 8000.
+  exclude:
+    - {max_mn: 3}
+    - {min_k: 8000}
+
+probe:
+  first_line_iters: 10
+  first_line_cold_iters: 10
+  other_lines_iters: 1
+  other_lines_cold_iters: 0
+  duration_us: 2000
+  skip_ratio_mode: sigmoid
+  skip_ratio_min: 0.05
+  skip_ratio_max: 0.95
+  skip_ratio_center_us: 30
+  skip_ratio_k: 1.5
+
+bench:
+  blocks_per_gpu: 1
+  warmup_pass: false
+  # Budget for a bench process's first output (library load), then for the
+  # gap between outputs; a silent bench is killed and its shape skipped.
+  startup_grace_s: 1800
+  stall_timeout_s: 600
+  skip_slow_solution_ratio: 0.5
+  rotating_mb: 512
+  rotating_target_blocks: 16
+  # hipblaslt-bench times each kernel adaptively, so stage02 does not run.
+  # Times are in milliseconds.
+  adaptive:
+    enabled: true
+    warmup_time: 1.0
+    sample_time: 0.5
+    measure_time: 1.5
+    max_measure_time: 8.0
+    min_iters: 3
+    max_iters: 0
+    noise_threshold: 0.05
+
+train:
+  workers: 32
+  threads_per_worker: 0
+  epochs: 200
+  device: cpu
+  eval_sample_frac: 1.0
+  smart_k: 15
+  smart_k_max: 25
+  smart_k_min: 5
+  smart_k_saturation_eps: 0.005
+  min_cell_gemms: 30
+
+validate:
+  sel_eff_threshold: 0.95
+  # A split needs this many new GEMMs on each side, so it stays at most half
+  # of the new GEMMs a leaf gets per round (seed.shapes_per_cell).
+  min_cell_gemms: 12
+  split_floor: 0.83
+  split_min_improvement: 0.02
+  split_after_attempts: 0
+  max_split_depth: 1
+  structural_split_min_octaves: 0.0
+
+full:
+  total_rounds: 8
+
+deploy:
+  target_sel_eff: 0.95
+  on_final_round: true
+  stop_when_target_reached: false
+  weight_dtype: int8
+  rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
+  # One model serves the library of every directory listed here.
+  targets: [gfx1250v0, gfx1250]
+  apply_patch: true
+  build_after_apply: true
+  build_jobs: null
+
+stage07:
+  parity_sample_trained: 1000
+  bench_yamls: []
+  timing_request_sizes: [1, 8]
+
+stage08:
+  datasets: []

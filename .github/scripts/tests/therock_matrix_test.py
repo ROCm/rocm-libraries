@@ -36,6 +36,19 @@ class TheRockMatrixTest(unittest.TestCase):
             blas_entry["projects_to_test"].split(","),
         )
 
+    def test_collect_projects_to_run_for_tilewright_subtree(self):
+        # TensileLite links shared/tilewright, so a tilewright-only change must
+        # build and test what a TensileLite change does, hipSPARSELt included.
+        subtrees = ["shared/tilewright"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        blas_entry = project_to_run[0]
+        projects_to_test = blas_entry["projects_to_test"].split(",")
+        self.assertIn("hipblaslt", projects_to_test)
+        self.assertIn("tensilelite", projects_to_test)
+        self.assertIn("hipsparselt", projects_to_test)
+
     def test_collect_projects_to_run_hipthreads(self):
         subtrees = ["projects/hipthreads"]
 

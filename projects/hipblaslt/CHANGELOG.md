@@ -14,6 +14,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Complex CGEMM/ZGEMM support for gfx1250.
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
+* `TENSILE_USE_TILEWRIGHT` environment variable to rank the kernels of Prediction libraries with the tilewright learned kernel recommender (`shared/tilewright`) when a model ships for the library, falling back to the Origami ranking otherwise. Models ship for gfx950 and gfx1250 libraries; hipBLASLt builds tilewright into TensileLite and installs the models next to the Tensile libraries unless `HIPBLASLT_ENABLE_TILEWRIGHT=OFF`.
 
 ### Changed
 
@@ -25,6 +26,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Stream-K workspace size reported by the heuristic APIs is now smaller, and the SK grid is bounded, so `TENSILE_STREAMK_GRID_MULTIPLIER` values past that bound no longer take effect.
 * Solution cache key now includes `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` and the StreamK tile scheduling mode, so the same problem can select a different kernel than before.
 * A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
+* `TENSILE_PREDICTION_LIB=1` now also skips GridBased and FreeSize rows, so it returns only Prediction-library solutions, and none for a problem type without Prediction rows. Prediction selection implied by dynamic Stream-K scheduling still uses those rows.
+* `hipblaslt-bench` "Skip solution" lines now print warm-up times in fixed notation and end with the solution index.
 
 ### Removed
 

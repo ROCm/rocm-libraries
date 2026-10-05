@@ -1,0 +1,6 @@
+# Build requirements (pip installs them automatically for `pip install .`)
+nanobind>=2.0
+scikit-build-core>=0.10
+
+# Test requirements
+pytest>=7.0
