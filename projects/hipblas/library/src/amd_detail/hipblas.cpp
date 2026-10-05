@@ -42,36 +42,47 @@
 
 extern "C" hipblasStatus_t hipblasConvertStatus(rocblas_status_ error);
 
-// Attempt a rocBLAS call; if it gets an allocation error, query the
-// size needed and attempt to allocate it, retrying the operation
+// Attempt a rocBLAS call; if it gets an allocation error and rocBLAS is managing
+// device memory (auto-grow enabled), query the size needed, pre-allocate exactly
+// that much for one retry, then restore rocblas_managed so later calls can grow.
+// If the user set a workspace (hipblasSetWorkspace) or fixed device memory size,
+// return ALLOC_FAILED so the caller can resize and call hipblasSetWorkspace again.
 static hipblasStatus_t hipblasDemandAlloc(rocblas_handle                   handle,
                                           std::function<hipblasStatus_t()> func)
 {
     hipblasStatus_t status = func();
     if(status == HIPBLAS_STATUS_ALLOC_FAILED)
     {
+        if(!rocblas_is_managing_device_memory(handle))
+            return status;
+
         rocblas_status blas_status = rocblas_start_device_memory_size_query(handle);
         if(blas_status != rocblas_status_success)
-            status = hipblasConvertStatus(blas_status);
-        else
+            return hipblasConvertStatus(blas_status);
+
+        status = func();
+        if(status != HIPBLAS_STATUS_SUCCESS)
         {
-            status = func();
-            if(status == HIPBLAS_STATUS_SUCCESS)
-            {
-                size_t size;
-                blas_status = rocblas_stop_device_memory_size_query(handle, &size);
-                if(blas_status != rocblas_status_success)
-                    status = hipblasConvertStatus(blas_status);
-                else
-                {
-                    blas_status = rocblas_set_device_memory_size(handle, size);
-                    if(blas_status != rocblas_status_success)
-                        status = hipblasConvertStatus(blas_status);
-                    else
-                        status = func();
-                }
-            }
+            size_t ignored = 0;
+            rocblas_stop_device_memory_size_query(handle, &ignored);
+            return status;
         }
+
+        size_t size = 0;
+        blas_status = rocblas_stop_device_memory_size_query(handle, &size);
+        if(blas_status != rocblas_status_success)
+            return hipblasConvertStatus(blas_status);
+
+        // Managed grow allocates size + default padding, which can fail when the
+        // exact queried size would fit. Pin that size for one retry only.
+        blas_status = rocblas_set_device_memory_size(handle, size);
+        if(blas_status == rocblas_status_success)
+            status = func();
+        else
+            status = hipblasConvertStatus(blas_status);
+
+        // Always restore rocblas_managed auto-grow; do not leave user_managed pinned.
+        rocblas_set_device_memory_size(handle, 0);
     }
     return status;
 }
