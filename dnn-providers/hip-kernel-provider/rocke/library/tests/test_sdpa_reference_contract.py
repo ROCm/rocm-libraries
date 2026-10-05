@@ -52,6 +52,18 @@ def test_cohort_preserves_existing_sdpa_parameterizations():
     assert len({case.id for case in CASES}) == 8
 
 
+def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
+    import kernels
+
+    target = get_architecture("gfx942")
+    library_root = Path(kernels.__file__).resolve().parent.parent
+    for case in CASES:
+        spec = target.prepare(case, str(library_root))
+        assert spec.persistent is case.persistent
+        assert spec.dtype == case.dtype
+        assert spec.head_size == case.head_dim
+
+
 def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
     values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
     encoded = encode(values.view(np.float32), "bf16")
