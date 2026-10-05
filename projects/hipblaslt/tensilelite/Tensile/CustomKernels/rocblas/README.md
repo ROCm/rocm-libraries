@@ -120,6 +120,8 @@ Where plain-GEMM logic already ships for the same hardware, the Range file
 reuses its header so both share a placeholder, and its tuned sizes keep their
 kernels. A matched range whose kernel fails its own predicates (strides, K
 bound) returns nothing, so the problem falls through to the next library.
+General-batched (pointer-array) problems skip custom kernels altogether, since
+these take plain A/B/C/D addresses.
 
 The gfx950 files use the MI350 (`0x75a0`) header. MI355X searches its own tuned
 logic (`gfx950_id75a3`) first, so its tuned sizes keep their kernels. On MI350
