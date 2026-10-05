@@ -364,7 +364,9 @@ Packaging observes the actual builder object and compares **every consumer** ind
 before publication, recording effective values and declaration digests, authored inputs,
 producer identities and origins, descriptors, KMD content, completed metadata, architecture
 and library/toc-key/symbol/payload hashes; authored passthrough never overwrites fresh
-observations. Full checking verifies that record against the current descriptors and named
+observations. That record, like all of a packed UKD's provenance, ships in the
+descriptor's `{stem}.provenance.json.gz` sidecar bound by `kernel_source.sha256`, not
+inline. Full checking verifies that record against the current descriptors and named
 payload bytes without importing rocKE on the verifier, structural-only checking cannot
 supply missing compiler agreement, and neither proves machine-code equivalence, native
 semantics or numerical correctness -- see the

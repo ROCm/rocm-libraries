@@ -5,12 +5,15 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 
@@ -40,6 +43,16 @@ std::vector<std::filesystem::path> descriptorSearchDirectories();
 /// Container::copyEngineIds advertise ids before any engine is constructed. A malformed
 /// descriptor costs its pack, never the provider. Memoized, so two scans can't disagree.
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets();
+
+/// The state manager discovery built while validating set @p index of
+/// discoverDescriptorSets(), or null once taken. One-shot: the first engine constructed for
+/// that set takes it, and any later one -- a Container created after an earlier one was
+/// destroyed -- builds its own from the set, so no state manager is shared between two
+/// engines. A state manager no engine takes stays alive until the provider unloads, beside
+/// the retained set it was built from: a process that enumerates engines but never
+/// constructs a Container keeps one extra state manager per set.
+std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
+    takeDiscoveredStateManager(size_t index);
 
 /// The device resolver every descriptor-backed engine in this provider shares.
 /// Process-lifetime: a device-property cache with no engine-specific state.

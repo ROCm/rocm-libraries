@@ -106,8 +106,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
         // One ingestor engine per discovered descriptor set, and a set is now a file on
         // disk: adding an engine is an install, not an edit here.
-        for(const auto& set : kernel_ingestor_engine::discoverDescriptorSets())
+        const auto& sets = kernel_ingestor_engine::discoverDescriptorSets();
+        for(size_t index = 0; index < sets.size(); ++index)
         {
+            const auto& set = sets[index];
             // engineNameToId, not a provider-side registration: the loader already interned
             // and registered this name, and a second registry over the same process-wide
             // string_view map risks a dangling view.
@@ -120,19 +122,31 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  set.engine.name,
                  // set aliases discoverDescriptorSets()'s memoized, process-lifetime vector.
                  // Capture by reference: [set] would re-copy a DescriptorSet per engine.
-                 [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                 [&set, index](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                      -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                      try
                      {
                          // Device facts are resolved per call from the handle, not from
-                         // the construction-time provider.
+                         // the construction-time provider. The first engine for this set
+                         // takes the state manager discovery already built; a later one
+                         // builds its own.
+                         if(auto stateManager
+                            = kernel_ingestor_engine::takeDiscoveredStateManager(index))
+                         {
+                             return hipdnn_plugin_sdk::ingestor::
+                                 makeEngine<Handle, Settings, Context>(
+                                     set.engine,
+                                     std::move(stateManager),
+                                     kernel_ingestor_engine::deviceResolver());
+                         }
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
                              set, kernel_ingestor_engine::deviceResolver());
                      }
                      catch(const std::exception& error)
                      {
-                         // The loader validates each set, but its probe and this construction
-                         // are different objects, so that's convention, not a guarantee.
+                         // The loader validates each set, but a later Container rebuilds its
+                         // state manager from the set, and the engine wrapping either can
+                         // still throw, so that's convention, not a guarantee.
                          // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name

@@ -2,7 +2,8 @@
 set", exercising the SHIPPED `hkp_pack.desk_check` module rather than a copy.
 
 Invariant 1 reads the authored spec, which packing moves from ``kernel_source`` to
-``provenance.spec``, so a check reading ``kernel_source.spec`` on packed output
+``provenance.spec`` (shipped in the ``{stem}.provenance.json.gz`` sidecar and
+reattached on read), so a check reading ``kernel_source.spec`` on packed output
 always sees ``{}`` and reports "none" regardless of real drift
 (``test_runbook_scripts_invariant_1_is_dead_on_packed_output`` pins that against a
 real ``run_pipeline`` pack with injected drift). Invariants 2-4 read only
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import read_shipped, write_shipped
 from hkp_pack.desk_check import (
     DEFAULT_MATCHER_FIELDS,
     MODES,
@@ -71,7 +73,7 @@ def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_di
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
-    return _read(tmp_path / "out" / ARCH / "attention.kdp.json")
+    return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
 def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
@@ -91,7 +93,7 @@ def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
-    return _read(tmp_path / "out" / ARCH / "attention.kdp.json")
+    return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +311,7 @@ def _run_cli(*args, mode="structural"):
 class TestCliEndToEnd:
     def test_clean_real_pack_exits_zero(self, packed_desk_check, tmp_path):
         kdp_path = tmp_path / "clean.kdp.json"
-        kdp_path.write_text(
-            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
-        )
+        write_shipped(kdp_path, {"kernelDescriptors": _kernels(packed_desk_check)})
         proc = _run_cli(str(kdp_path))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout
@@ -324,9 +324,7 @@ class TestCliEndToEnd:
         structural run must say what it did NOT check.
         """
         kdp_path = tmp_path / "clean.kdp.json"
-        kdp_path.write_text(
-            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
-        )
+        write_shipped(kdp_path, {"kernelDescriptors": _kernels(packed_desk_check)})
         proc = _run_cli(str(kdp_path))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "compiled specialization agreement: NOT CHECKED" in proc.stdout
@@ -336,9 +334,7 @@ class TestCliEndToEnd:
         """No default: a run whose mode is unstated cannot be read back out of a
         log, and the weaker result would read as the stronger."""
         kdp_path = tmp_path / "clean.kdp.json"
-        kdp_path.write_text(
-            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
-        )
+        write_shipped(kdp_path, {"kernelDescriptors": _kernels(packed_desk_check)})
         proc = subprocess.run(
             [sys.executable, str(_TOOL), str(kdp_path)],
             capture_output=True,
@@ -365,7 +361,7 @@ class TestCliEndToEnd:
         kernels = json.loads(json.dumps(_kernels(packed_desk_check)))
         kernels[1]["metadata"]["head_size"] = 999
         kdp_path = tmp_path / "drifted.kdp.json"
-        kdp_path.write_text(json.dumps({"kernelDescriptors": kernels}))
+        write_shipped(kdp_path, {"kernelDescriptors": kernels})
 
         proc = _run_cli(str(kdp_path))
 

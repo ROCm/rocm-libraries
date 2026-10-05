@@ -16,6 +16,12 @@ under the staged roots the binary serves, and compares the two:
             `rel_dir` and its `source_file`, then compares that whole path
             against the registered one.
 
+A packed UKD carries no provenance inline. The packer writes it to the
+`{stem}.provenance.json.gz` sidecar beside `{stem}.kdp.json` or
+`{stem}.ukd.json`, keyed by UKD id and bound to the UKD by its
+`kernel_source.sha256`. A missing sidecar, a missing entry and a binding that
+does not hold each fail.
+
 The check runs over emitted JSON alone. It imports no part of the packer, so it
 restates the contract instead of recomputing one side of it from the other.
 
@@ -59,6 +65,7 @@ either direction to catch.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -66,6 +73,9 @@ from pathlib import Path
 EMBEDDED_SOURCE_KIND = "embedded_source"
 
 PROVENANCE_FIELDS = ("rel_dir", "source_file", "source_label")
+
+SIDECAR_SUFFIX = ".provenance.json.gz"
+SIDECAR_STEMMED = (".kdp.json", ".ukd.json")
 
 STALE_TREE_HINT = (
     "A stale staged tree reports this too: a deleted descriptor survives an "
@@ -183,13 +193,64 @@ def stamped_root_failures(stamps: list[Path]) -> list[str]:
     return failures
 
 
+def sidecar_path(descriptor: Path) -> Path | None:
+    """The provenance sidecar of one packed descriptor, None for a file that has none."""
+    for suffix in SIDECAR_STEMMED:
+        if descriptor.name.endswith(suffix):
+            stem = descriptor.name[: -len(suffix)]
+            return descriptor.with_name(stem + SIDECAR_SUFFIX)
+    return None
+
+
+def read_sidecar(descriptor: Path, target: str) -> tuple[dict | None, list[str]]:
+    """The `entries` of one descriptor's sidecar, or the failure that stops it."""
+    path = sidecar_path(descriptor)
+    if path is None or not path.is_file():
+        return None, [
+            f"{descriptor}: target '{target}' finds no provenance sidecar "
+            f"{'beside it' if path is None else path.name}, so its "
+            f"embedded_source descriptors record no authored location.\n"
+            f"  {STALE_TREE_HINT}"
+        ]
+    try:
+        sidecar = json.loads(gzip.decompress(path.read_bytes()))
+    except (OSError, EOFError, ValueError) as exc:
+        return None, [f"{path}: cannot read the provenance sidecar: {exc}"]
+    entries = sidecar.get("entries") if isinstance(sidecar, dict) else None
+    if not isinstance(entries, dict):
+        return None, [f"{path}: the provenance sidecar holds no 'entries' object."]
+    return entries, []
+
+
+def sidecar_provenance(
+    obj: dict, entries: dict, descriptor: Path, target: str
+) -> tuple[dict, list[str]]:
+    """One object's provenance from its sidecar entry, once the sha256 binding holds."""
+    ident = obj.get("id")
+    entry = entries.get(ident)
+    if not isinstance(entry, dict):
+        return {}, [
+            f"{descriptor}: target '{target}' finds no provenance sidecar entry "
+            f"for UKD {ident!r}.\n  {STALE_TREE_HINT}"
+        ]
+    expected = obj["kernel_source"].get("sha256")
+    if entry.get("kernel_source_sha256") != expected:
+        return {}, [
+            f"{descriptor}: the provenance sidecar entry for UKD {ident!r} is bound "
+            f"to kernel_source.sha256 {entry.get('kernel_source_sha256')!r}, but "
+            f"the UKD names {expected!r}, so the two come from different packs.\n"
+            f"  {STALE_TREE_HINT}"
+        ]
+    provenance = entry.get("provenance")
+    return (provenance if isinstance(provenance, dict) else {}), []
+
+
 def embedded_source_objects(doc: object) -> list[dict]:
     """Every object of one descriptor document that names a source to embed.
 
-    A KDP carries one object per inline entry of `kernelDescriptors`, and each
-    entry holds its own `kernel_source` and `provenance`. A standalone UKD holds
-    both at the document root. Return the objects themselves, so a caller reads
-    the two blocks off one object either way.
+    A KDP carries one object per inline entry of `kernelDescriptors`, and a
+    standalone UKD is one object at the document root. Each holds its own
+    `kernel_source` and `id`, which keys its provenance in the sidecar.
     """
     if not isinstance(doc, dict):
         return []
@@ -210,6 +271,7 @@ def embedded_source_objects(doc: object) -> list[dict]:
 
 def check_object(
     obj: dict,
+    provenance: dict,
     descriptor: Path,
     target: str,
     table: dict[str, str],
@@ -223,9 +285,6 @@ def check_object(
             f"names no source_file.\n  {STALE_TREE_HINT}"
         ]
 
-    provenance = (
-        obj.get("provenance") if isinstance(obj.get("provenance"), dict) else {}
-    )
     absent = [
         f"provenance.{field}"
         for field in PROVENANCE_FIELDS
@@ -312,10 +371,24 @@ def verify(
             except (OSError, ValueError) as exc:
                 failures.append(f"{descriptor}: cannot read the descriptor: {exc}")
                 continue
-            for obj in embedded_source_objects(doc):
+            objects = embedded_source_objects(doc)
+            if not objects:
+                continue
+            entries, problems = read_sidecar(descriptor, target)
+            if entries is None:
+                checked += len(objects)
+                failures.extend(problems)
+                continue
+            for obj in objects:
                 checked += 1
+                provenance, problems = sidecar_provenance(
+                    obj, entries, descriptor, target
+                )
                 failures.extend(
-                    check_object(obj, descriptor, target, table, source_roots)
+                    problems
+                    or check_object(
+                        obj, provenance, descriptor, target, table, source_roots
+                    )
                 )
     return failures, checked, len(table)
 

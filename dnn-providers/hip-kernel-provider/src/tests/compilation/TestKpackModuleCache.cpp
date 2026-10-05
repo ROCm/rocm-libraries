@@ -3,12 +3,18 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
+#include <system_error>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -25,6 +31,8 @@ using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelSource;
 using hip_kernel_provider::testing::testKpackArchive;
 using hip_kernel_provider::testing::unitKpackRoot;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 /// The arch and toc key of rocm-kpack's own test archive, which testKpackArchive() resolves
 /// from this binary's location. Its entries are placeholder payloads rather than HSA code
@@ -42,6 +50,75 @@ constexpr const char* DIGEST = "0123456789abcdef0123456789abcdef0123456789abcdef
 /// the local arch. The ordinal case below needs a code object HIP actually accepts, which
 /// the test kpack archive's placeholder payloads deliberately are not.
 constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
+
+/// Closes every shared archive when a case ends. kpack keeps an archive's file open and
+/// Windows will not delete an open file, so declare this after the case's scratch directory.
+class ReleaseSharedArchives
+{
+public:
+    ReleaseSharedArchives() = default;
+    ReleaseSharedArchives(const ReleaseSharedArchives&) = delete;
+    ReleaseSharedArchives& operator=(const ReleaseSharedArchives&) = delete;
+    ~ReleaseSharedArchives()
+    {
+        SharedKpackArchives::resetForTesting();
+    }
+};
+
+/// How load() fails for an arch @p archive lacks: at ARCH_LOOKUP once the archive opens,
+/// before any HIP call, or at OPEN_ARCHIVE when it does not. Empty if it did not fail.
+std::optional<KpackModuleLoadFailure> loadForAnAbsentArch(const std::filesystem::path& archive)
+{
+    try
+    {
+        KpackModuleCache::load(archive.string(), ARCHIVE_TOC_KEY, "gfx90a", 0, DIGEST);
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        return failure;
+    }
+    return std::nullopt;
+}
+
+constexpr std::uintmax_t CORRUPTION_BYTE_COUNT = 64;
+
+/// Overwrites @p archive in place with bytes kpack cannot open. False if the write did not
+/// land, so no case mistakes an intact archive for a reused handle.
+[[nodiscard]] bool corruptInPlace(const std::filesystem::path& archive)
+{
+    {
+        std::ofstream corrupt(archive, std::ios::binary | std::ios::trunc);
+        corrupt << std::string(CORRUPTION_BYTE_COUNT, '\0');
+        corrupt.close();
+        if(corrupt.fail())
+        {
+            return false;
+        }
+    }
+    std::error_code error;
+    return std::filesystem::file_size(archive, error) == CORRUPTION_BYTE_COUNT && !error;
+}
+
+/// Copies the test archive to @p archive with its TOC's `gfx_arches` key renamed to one of
+/// the same length, so the reader opens it and finds no architecture list. False if the
+/// key was not found or the copy did not land.
+[[nodiscard]] bool copyWithoutArchitectures(const std::filesystem::path& archive)
+{
+    std::ifstream in(testKpackArchive(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string key = "gfx_arches";
+    const auto at = bytes.find(key);
+    if(at == std::string::npos)
+    {
+        return false;
+    }
+    bytes[at + key.size() - 1] = 'z';
+
+    std::ofstream out(archive, std::ios::binary | std::ios::trunc);
+    out << bytes;
+    out.close();
+    return !out.fail();
+}
 
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
 {
@@ -154,6 +231,87 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
         EXPECT_NE(message.find(ARCHIVE_ARCH), std::string::npos)
             << "the message must name the arches the archive provides: " << message;
     }
+}
+
+TEST(TestKpackModuleCacheLoad, ReportsAnArchiveThatDeclaresNoArchitectures)
+{
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const ReleaseSharedArchives release;
+    const std::filesystem::path archive = scratch.path() / "no-arches.kpack";
+    ASSERT_TRUE(copyWithoutArchitectures(archive)) << "could not write " << archive;
+
+    // Twice: a second load must refuse the same way rather than answer from a handle the
+    // first left open and report the archive as built for some other GPU.
+    for(int attempt = 0; attempt < 2; ++attempt)
+    {
+        const auto failure = loadForAnAbsentArch(archive);
+        ASSERT_TRUE(failure.has_value()) << "attempt " << attempt;
+        EXPECT_EQ(failure->stage(), KpackLoadStage::ARCH_LOOKUP) << failure->what();
+        EXPECT_NE(std::string(failure->what()).find("declares no architectures"), std::string::npos)
+            << "attempt " << attempt << ": " << failure->what();
+    }
+}
+
+TEST(TestKpackModuleCacheLoad, ALaterLoadReusesTheArchiveAnEarlierOneOpened)
+{
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const ReleaseSharedArchives release;
+    const std::filesystem::path archive = scratch.path() / "shared.kpack";
+    std::filesystem::copy_file(testKpackArchive(), archive);
+
+    const auto first = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(first->stage(), KpackLoadStage::ARCH_LOOKUP) << first->what();
+
+    // Reopening would now fail at OPEN_ARCHIVE; reaching ARCH_LOOKUP again means the
+    // second load was answered by the handle the first left open.
+    ASSERT_TRUE(corruptInPlace(archive)) << "could not rewrite " << archive << " in place";
+    const auto second = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->stage(), KpackLoadStage::ARCH_LOOKUP) << second->what();
+}
+
+TEST(TestKpackModuleCacheLoad, AFailedOpenIsRetriedRatherThanRemembered)
+{
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const ReleaseSharedArchives release;
+    const std::filesystem::path archive = scratch.path() / "arrives-later.kpack";
+
+    const auto absent = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(absent.has_value());
+    EXPECT_EQ(absent->stage(), KpackLoadStage::OPEN_ARCHIVE) << absent->what();
+    EXPECT_NE(std::string(absent->what()).find("does not exist"), std::string::npos)
+        << absent->what();
+
+    // The same path, once the archive exists, opens: the failure was not cached.
+    std::filesystem::copy_file(testKpackArchive(), archive);
+    const auto present = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(present.has_value());
+    EXPECT_EQ(present->stage(), KpackLoadStage::ARCH_LOOKUP) << present->what();
+}
+
+TEST(TestKpackModuleCacheLoad, AResetMakesTheNextLoadReadAnArchiveCorruptedInPlace)
+{
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const ReleaseSharedArchives release;
+    const std::filesystem::path archive = scratch.path() / "corrupted.kpack";
+    std::filesystem::copy_file(testKpackArchive(), archive);
+    const auto opened = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(opened.has_value());
+    ASSERT_EQ(opened->stage(), KpackLoadStage::ARCH_LOOKUP) << opened->what();
+
+    // The integration suite's broken-archive order: corrupt the open archive, then reset.
+    ASSERT_TRUE(corruptInPlace(archive)) << "could not rewrite " << archive << " in place";
+    SharedKpackArchives::resetForTesting();
+
+    const auto reread = loadForAnAbsentArch(archive);
+    ASSERT_TRUE(reread.has_value());
+    EXPECT_EQ(reread->stage(), KpackLoadStage::OPEN_ARCHIVE) << reread->what();
+    EXPECT_NE(std::string(reread->what()).find("could not be read"), std::string::npos)
+        << reread->what();
 }
 
 TEST(TestKpackModuleCacheLoad, ASecondOrdinalDoesNotAnswerFromTheFirstOrdinalsEntry)

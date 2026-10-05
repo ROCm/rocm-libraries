@@ -8,6 +8,7 @@ hand and invokes the script as a subprocess. Nothing imports the packer: a test
 that recomputed a key from the packer would pass on two sides of one mistake.
 """
 
+import gzip
 import json
 import subprocess
 import sys
@@ -50,14 +51,39 @@ def _provenance(rel_dir, authored, label=LABEL):
     return provenance
 
 
+def _sidecar_of(descriptor):
+    for suffix in (".kdp.json", ".ukd.json"):
+        if descriptor.name.endswith(suffix):
+            stem = descriptor.name[: -len(suffix)]
+            return descriptor.with_name(f"{stem}.provenance.json.gz")
+    raise ValueError(f"{descriptor} is neither a KDP nor a UKD")
+
+
 def _write(path, doc):
+    """Write one descriptor as the packer ships it: compact, with each UKD's
+    provenance moved to the `{stem}.provenance.json.gz` sidecar beside it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    if path.name.endswith(".kdp.json"):
+        kdp_id = doc["id"]
+        ukds = [e for e in doc["kernelDescriptors"] if isinstance(e, dict)]
+    else:
+        kdp_id = None
+        ukds = [doc]
+    entries = {
+        ukd["id"]: {
+            "kernel_source_sha256": ukd["kernel_source"].get("sha256"),
+            "provenance": ukd.pop("provenance", {}),
+        }
+        for ukd in ukds
+    }
+    sidecar = json.dumps({"kdp_id": kdp_id, "entries": entries}, sort_keys=True)
+    _sidecar_of(path).write_bytes(gzip.compress(sidecar.encode("utf-8")))
+    path.write_text(json.dumps(doc, separators=(",", ":")) + "\n", encoding="utf-8")
     return path
 
 
 def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LABEL):
-    """A standalone UKD, which carries both blocks at its document root."""
+    """A standalone UKD, whose provenance its own sidecar holds."""
     doc = {
         "version": "1.0",
         "id": name,
@@ -75,7 +101,7 @@ def _ukd(shard, name, key, rel_dir=".", authored=None, provenance=True, label=LA
 
 
 def _kdp(shard, name, keys, rel_dir="."):
-    """A KDP, whose provenance sits on each inline entry and not at its root."""
+    """A KDP, whose sidecar holds one provenance entry per inline entry."""
     entries = [
         {
             "version": "1.0",
@@ -639,6 +665,70 @@ def test_each_inline_entry_of_a_kdp_is_read_with_its_own_provenance(tmp_path):
     # provenance would report the latter for every entry, including the matching one.
     assert "embeds no source under the key" in result.stderr
     assert "provenance" not in result.stderr
+
+
+def _rewrite_sidecar(descriptor, mutate):
+    sidecar = _sidecar_of(descriptor)
+    data = json.loads(gzip.decompress(sidecar.read_bytes()))
+    mutate(data)
+    sidecar.write_bytes(gzip.compress(json.dumps(data).encode("utf-8")))
+
+
+@pytest.mark.quick
+def test_a_descriptor_whose_sidecar_is_missing_is_an_error(tmp_path):
+    root = tmp_path / "unit" / "pointwise"
+    descriptor = _ukd(root / ARCH, "pointwise_add", KEY)
+    _sidecar_of(descriptor).unlink()
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+
+    result = _run(manifest, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert "finds no provenance sidecar" in result.stderr
+    assert _sidecar_of(descriptor).name in result.stderr
+    assert "clean build directory" in result.stderr
+
+
+@pytest.mark.quick
+def test_a_sidecar_without_the_descriptors_entry_is_an_error(tmp_path):
+    root = tmp_path / "unit" / "pointwise"
+    descriptor = _ukd(root / ARCH, "pointwise_add", KEY)
+    _rewrite_sidecar(
+        descriptor,
+        lambda data: data.update(
+            {"entries": {"another_kernel": data["entries"]["pointwise_add"]}}
+        ),
+    )
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+
+    result = _run(manifest, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert "finds no provenance sidecar entry for UKD 'pointwise_add'" in result.stderr
+
+
+@pytest.mark.quick
+def test_a_sidecar_entry_bound_to_another_kernel_source_is_an_error(tmp_path):
+    root = tmp_path / "unit" / "pointwise"
+    descriptor = _ukd(root / ARCH, "pointwise_add", KEY)
+    _rewrite_sidecar(
+        descriptor,
+        lambda data: data["entries"]["pointwise_add"].update(
+            {"kernel_source_sha256": "0" * 64}
+        ),
+    )
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+
+    result = _run(manifest, [root], _labels(tmp_path))
+
+    assert result.returncode == 1
+    assert "come from different packs" in result.stderr
 
 
 # --- A stamped pack root holds at least one descriptor ----------------------

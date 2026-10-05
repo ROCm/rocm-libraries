@@ -82,6 +82,18 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         deviceResolver);
 }
 
+/// The engine for @p engine over a state manager already built from its set, e.g. the one
+/// loadValidatedDescriptorSets built while validating that set.
+template <typename THandle, typename TSettings, typename TContext>
+std::unique_ptr<IEngine<THandle, TSettings, TContext>>
+    makeEngine(EngineDescriptor engine,
+               std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
+               const IDeviceResolver<THandle>& deviceResolver)
+{
+    return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
+        std::move(engine), std::move(stateManager), deviceResolver);
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -8,6 +8,9 @@ between metadata and the authored spec, duplicate matcher tuples, toc_key
 uniqueness, symbol tolerance. It never reports compiled agreement. It accepts an
 authored (`kernel_source.spec`) or shipped (`provenance.spec`) KDP, since the drift
 check falls back between the two.
+A shipped KDP's per-UKD provenance is read from its `{stem}.provenance.json.gz`
+sidecar; a missing sidecar or entry, or a `kernel_source.sha256` it does not bind,
+fails the run.
 
 `--mode full` additionally binds every kernel to the producing compiler's
 `provenance.effective_spec` record and to the archive bytes the descriptor names:

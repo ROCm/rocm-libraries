@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import struct
@@ -40,6 +41,39 @@ try:
     import msgpack
 except ImportError:
     msgpack = None
+
+
+def write_shipped(path, doc):
+    """Write `doc` at `path` as the packer ships it: a copy with each UKD's
+    provenance moved to the sidecar beside it. Returns the copy as written."""
+    from hkp_pack import provenance_sidecar
+
+    path = Path(path)
+    doc = json.loads(json.dumps(doc))
+    name, data = provenance_sidecar.detach(path.name, doc)
+    path.with_name(name).write_bytes(data)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return doc
+
+
+def read_shipped(path):
+    """A packed descriptor as its consumers read it: each UKD's provenance put
+    back from the sidecar beside it.
+
+    First asserts what attach alone does not: the sidecar exists, which attach
+    requires only of a `kpack` UKD, and a KDP's `kernelDescriptors` is its last
+    key -- the layout the runtime loader reads in a single pass. With the sidecar
+    present, attach refuses any UKD that still carries provenance inline.
+    """
+    from hkp_pack import provenance_sidecar
+
+    path = Path(path)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert provenance_sidecar.sidecar_path(path).is_file(), f"{path} ships no sidecar"
+    if path.name.endswith(".kdp.json"):
+        assert list(doc)[-1] == "kernelDescriptors", f"{path}: kernels are not last"
+    return provenance_sidecar.attach(path, doc)
+
 
 _ROCKE_UKD_SOURCE = "kernels/gfx950/attention_dense.py"
 _ROCKE_UKD_BUILDER = "build_attention_dense"

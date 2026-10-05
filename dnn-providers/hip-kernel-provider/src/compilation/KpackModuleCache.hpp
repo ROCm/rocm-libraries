@@ -12,8 +12,10 @@
 #include "utilities/Digest.hpp"
 
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -51,6 +53,90 @@ private:
 };
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
+
+/// An open archive and the architecture list read from it once, shared by every load that
+/// names the same path.
+struct OpenKpackArchive
+{
+    KpackArchive archive;
+    std::vector<std::string> arches;
+};
+
+/// Every kpack archive a load has opened, by the path it was asked for, kept open for the
+/// life of the process. Opening per module-cache miss repaid kpack_open for every newly
+/// used kernel -- for a zstd archive that reads the whole compressed blob and keeps it
+/// resident -- and the reader's kpack_get_kernel is documented thread-safe on one handle,
+/// so every load can share it. A failed open is not kept, so a later call retries.
+///
+/// A handle keeps its file open and is never reopened. An archive replaced on disk
+/// mid-process is not seen, and an uncompressed archive rewritten in place is read
+/// through the entry offsets taken at open; the per-entry sha256 check in
+/// KpackModuleCache::load catches either rather than silently accepting it.
+class SharedKpackArchives
+{
+public:
+    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
+    static std::shared_ptr<const OpenKpackArchive> open(const std::string& archivePath)
+    {
+        auto& shared = state();
+        const std::lock_guard<std::mutex> guard(shared.mutex);
+        if(const auto found = shared.open.find(archivePath); found != shared.open.end())
+        {
+            return found->second;
+        }
+
+        auto opened = std::make_shared<OpenKpackArchive>();
+        KpackError error;
+        if(!opened->archive.open(archivePath, error))
+        {
+            if(error.archiveAbsent)
+            {
+                throw KpackModuleLoadFailure(error.stage,
+                                             "kpack archive '" + archivePath + "' does not exist ("
+                                                 + error.codeName + ")");
+            }
+            throw KpackModuleLoadFailure(error.stage,
+                                         "kpack archive '" + archivePath + "' could not be read ("
+                                             + error.codeName + ")");
+        }
+        if(!opened->archive.architectures(opened->arches, error))
+        {
+            throw KpackModuleLoadFailure(error.stage,
+                                         "cannot read the architecture list of kpack archive '"
+                                             + archivePath + "' (" + error.codeName + ")");
+        }
+        if(opened->arches.empty())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
+                                         "kpack archive '" + archivePath
+                                             + "' declares no architectures; its gfx_arches "
+                                               "entry is absent or malformed");
+        }
+        return shared.open.emplace(archivePath, std::move(opened)).first->second;
+    }
+
+    /// Tests only: closes every archive, so the next load reopens it from disk, as a test that
+    /// corrupts or deletes an archive needs. A load already holding a handle keeps it.
+    static void resetForTesting()
+    {
+        auto& shared = state();
+        const std::lock_guard<std::mutex> guard(shared.mutex);
+        shared.open.clear();
+    }
+
+private:
+    struct State
+    {
+        std::mutex mutex;
+        std::unordered_map<std::string, std::shared_ptr<const OpenKpackArchive>> open;
+    };
+
+    static State& state()
+    {
+        static State s_state;
+        return s_state;
+    }
+};
 
 /// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
 /// sha256), loaded lazily and shared.
@@ -110,37 +196,9 @@ public:
                                   int deviceOrdinal,
                                   const std::string& expectedSha256)
     {
-        KpackArchive archive;
+        const auto opened = SharedKpackArchives::open(archivePath);
+        const auto& arches = opened->arches;
         KpackError error;
-
-        if(!archive.open(archivePath, error))
-        {
-            if(error.archiveAbsent)
-            {
-                throw KpackModuleLoadFailure(error.stage,
-                                             "kpack archive '" + archivePath + "' does not exist ("
-                                                 + error.codeName + ")");
-            }
-            throw KpackModuleLoadFailure(error.stage,
-                                         "kpack archive '" + archivePath + "' could not be read ("
-                                             + error.codeName + ")");
-        }
-
-        std::vector<std::string> arches;
-        if(!archive.architectures(arches, error))
-        {
-            throw KpackModuleLoadFailure(error.stage,
-                                         "cannot read the architecture list of kpack archive '"
-                                             + archivePath + "' (" + error.codeName + ")");
-        }
-
-        if(arches.empty())
-        {
-            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
-                                         "kpack archive '" + archivePath
-                                             + "' declares no architectures; its gfx_arches "
-                                               "entry is absent or malformed");
-        }
 
         // Deliberate pre-check rather than letting kpack_get_kernel fail: a bare
         // KERNEL_NOT_FOUND cannot distinguish "wrong GPU" from "wrong toc_key", and
@@ -169,7 +227,7 @@ public:
         }
 
         KpackCodeObject codeObject;
-        if(!archive.codeObject(tocKey, *matched, codeObject, error))
+        if(!opened->archive.codeObject(tocKey, *matched, codeObject, error))
         {
             if(error.stage == KpackLoadStage::ENTRY_LOOKUP)
             {
