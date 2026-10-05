@@ -19,8 +19,8 @@ retune either decode mode or the GDN prefill path.
 - [Files](#files)
 - [Environment](#environment)
 - [Check correctness](#check-correctness)
-- [Benchmark dispatched kernels](#benchmark-dispatched-kernels)
-- [Retune the tile table](#retune-the-tile-table)
+- [Benchmark registered candidates](#benchmark-registered-candidates)
+- [Measure candidate tiles](#measure-candidate-tiles)
 - [Run tests](#run-tests)
 - [Prefill](#prefill)
 - [Understand the output](#understand-the-output)
@@ -32,15 +32,16 @@ retune either decode mode or the GDN prefill path.
 | File | Purpose |
 |---|---|
 | [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent fp32 reference |
-| [`tune.py`](tune.py) | Search every legal tile for GDN or KDA; GDN reports by batch, KDA compares equal-work head geometries |
-| [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, scalar/vector gate delta, and GPU mapping |
-| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark GDN's dispatcher-selected kernel |
-| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the production dispatcher; optionally sweep all legal tiles |
-| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Store gfx950 capability plus separate GDN batch-keyed and KDA work-keyed tables |
+| [`tune.py`](tune.py) | Measure legal GDN registry candidates or KDA work-keyed candidates |
+| [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
+| [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry candidate and the static dispatcher default |
+| [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally sweep all legal tiles |
+| [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
+| [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, pool-index range |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
-| [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness, tuned tiles, and dispatch-to-launch coverage |
+| [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
 | [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds |
 | [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
 | [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
@@ -109,81 +110,58 @@ python3 library/builders/gfx950/gdn/gdn_decode.py \
 `--no-check` skips the fp32 reference and should be used only for focused
 measurement after correctness has already been established.
 
-## Benchmark dispatched kernels
+## Benchmark registered candidates
 
-Both benchmarks ask dispatch which tile production would use for each batch;
-neither times one hardcoded tile across the whole range.
-
-GDN:
+The GDN benchmark asks the registry for every legal candidate. The default D128
+request admits 54 of 180 configured triples and also reports the static
+dispatcher-default `auto` selection:
 
 ```bash
 python3 library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py \
   --batches 1,16,64,256
 ```
 
-KDA, production fused and recurrence-only precomputed-log-decay variants:
+Each row includes a stable `spec_id`
+`nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`. Dispatcher `auto`
+prefers `(2, 16, 8)` whenever legal; measurements never change that choice.
+
+KDA remains a separate work-keyed benchmark:
 
 ```bash
 python3 -m benchmarks.gfx950.gdn.benchmark_kda_decode \
   --batches 1,8,32,128
 ```
 
-The KDA benchmark also offers the diagnostic simple emitter and an exhaustive
-legal-tile proof:
-
-```bash
-python3 -m benchmarks.gfx950.gdn.benchmark_kda_decode \
-  --batches 8 --variants fused,precomputed,simple \
-  --sweep-tiles --top 5
-```
-
-`precomputed` excludes log-decay production cost; it measures recurrence-only
-cost, not an unfused production pipeline. `--sweep-tiles` prints the
-dispatcher-selected tile, fastest legal tile, their ratio, and top candidates.
-
 Both benchmarks print eager and device timing. Eager includes host launch and
 synchronisation; device timing uses replayed HIP graphs. Small-batch decode can
-be launch-bound, so the two clocks answer different questions.
+be launch-bound, so the two clocks answer different questions. If graph capture
+is unavailable, pass `--no-device`.
 
-If graph capture is unavailable, pass `--no-device`.
+## Measure candidate tiles
 
-## Retune the tile tables
-
-The dispatcher tables are empirical. Re-run the sweep after changing the
-kernel, compiler, target, or supported shape.
-
-GDN uses its original batch-keyed table:
+`tune.py` consumes the dispatch candidate set. It correctness-checks every tile
+against the FP32 reference, graph-times the correct candidates, then reports
+them fastest first:
 
 ```bash
 python3 library/builders/gfx950/gdn/tune.py \
-  --gate-kind gdn --batches 1,16,64,256
+  --gate-kind gdn --batches 1,16,64,256 --top 5
 ```
 
-KDA uses `work = batch × num_v_heads`, so compare equal-work cells across head
-geometries:
+For every GDN cell, it also reports the static dispatcher default, the fastest
+legal candidate, the default's rank and time ratio, and a manual
+`DEFAULT_TILE` recommendation. Measurements never update the shipped default.
+
+Use KDA's work-keyed study across head geometries when retuning KDA:
 
 ```bash
 python3 library/builders/gfx950/gdn/tune.py \
-  --gate-kind kda \
-  --geometries 16/32,8/16,4/8 \
-  --batches 1,2,4,8,16,32,64,128 \
-  --top 5
+  --gate-kind kda --geometries 16/32,8/16,4/8 \
+  --batches 1,2,4,8,16,32,64,128 --top 5
 ```
 
-The sweep:
-
-1. enumerates the configured tile search space;
-2. lets `is_valid_spec` reject illegal combinations;
-3. computes the fp32 reference once per shape;
-4. runs every valid tile and rejects numerically wrong results;
-5. graph-times the remaining tiles and prints them fastest first;
-6. reports whether equal-work KDA cells agree on the best tile.
-
-Device time is the tuning metric because host launch overhead is nearly the
-same for every tile and can hide kernel differences at small batch. Update
-`_TUNED_TILES_GDN` or `_TUNED_TILES_KDA` as appropriate, keep bands coarse,
-and rerun dispatch wiring plus numeric tests. Only measured points are
-evidence; boundaries between measured points are interpolation.
+GDN measurements are report-only. KDA's measured winners may justify updating
+its work-keyed bands; rerun dispatch wiring and numeric tests after doing so.
 
 ## Run tests
 
@@ -193,7 +171,9 @@ CPU-only coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
   library/tests/test_gdn_decode_golden.py \
+  library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
+  library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```
 
@@ -268,9 +248,9 @@ For the simple reference path, there is no V split:
 grid = batch * num_v_heads
 ```
 
-At small batch, `blocks_per_v_dim` may be greater than one to create more
-workgroups and fill the GPU. At large batch, dispatch normally reduces the split
-because the batch already provides enough workgroups.
+For GDN, `auto` always uses the static `(2, 16, 8)` registry priority when it
+is legal; batch changes the grid but not the tile. KDA alone changes its
+work-keyed table choice with `batch * num_v_heads`.
 
 `out_err` and `state_err` are maximum absolute errors against the fp32 reference.
 In the current coverage, state error is larger than output error. Both remain
