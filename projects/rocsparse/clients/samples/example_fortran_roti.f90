@@ -124,8 +124,10 @@ program example_fortran_roti
 
     type(c_ptr) :: handle
 
-    integer :: version
+    integer(c_int) :: version
 
+!   NUL-terminated C string; 64 bytes, as in the C clients.
+    character(kind=c_char), target :: rev_buf(64)
     character(len=12) :: rev
 
 !   Input data
@@ -146,12 +148,12 @@ program example_fortran_roti
     s = 1.3
 
 !   Allocate device memory
-    call HIP_CHECK(hipMalloc(d_xind, (int(nnz, c_size_t) + 1) * 4))
+    call HIP_CHECK(hipMalloc(d_xind, int(nnz, c_size_t) * 4))
     call HIP_CHECK(hipMalloc(d_xval, int(nnz, c_size_t) * 8))
     call HIP_CHECK(hipMalloc(d_y, int(M, c_size_t) * 8))
 
 !   Copy host data to device
-    call HIP_CHECK(hipMemcpy(d_xind, c_loc(h_xind), (int(nnz, c_size_t) + 1) * 4, 1))
+    call HIP_CHECK(hipMemcpy(d_xind, c_loc(h_xind), int(nnz, c_size_t) * 4, 1))
     call HIP_CHECK(hipMemcpy(d_xval, c_loc(h_xval), int(nnz, c_size_t) * 8, 1))
     call HIP_CHECK(hipMemcpy(d_y, c_loc(h_y), int(M, c_size_t) * 8, 1))
 
@@ -160,7 +162,13 @@ program example_fortran_roti
 
 !   Get rocSPARSE version
     call ROCSPARSE_CHECK(rocsparse_get_version(handle, version))
-    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, rev))
+!   Pre-fill so the 12-byte copy below stops at a NUL.
+    rev_buf = c_null_char
+    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, c_loc(rev_buf)))
+    rev = transfer(rev_buf(1:len(rev)), rev)
+
+!   Blank the NUL terminator and everything past it so it is not printed
+    if (index(rev, c_null_char) > 0) rev(index(rev, c_null_char):) = ' '
 
 !   Print version on screen
     write(*,fmt='(A,I0,A,I0,A,I0,A,A)') 'rocSPARSE version: ', version / 100000, '.', &

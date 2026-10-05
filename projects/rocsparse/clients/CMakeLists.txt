@@ -67,8 +67,14 @@ if(NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel.")
 endif()
 
-if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
-  set( CMAKE_Fortran_COMPILER "gfortran" )
+# Before project(): without the target, enabling Fortran there would fail.
+# BUILD_FORTRAN_CLIENTS is shadowed, not written back to the shared cache entry.
+if ( BUILD_FORTRAN_CLIENTS AND NOT TARGET rocsparse_fortran )
+  message(STATUS
+    "rocSPARSE: the Fortran bindings were not built, so the Fortran clients are "
+    "skipped. They come from projects/rocsparse/fortran, which needs "
+    "BUILD_FORTRAN_BINDINGS on, a Fortran compiler, and BUILD_ROCSPARSE_ILP64 off.")
+  set( BUILD_FORTRAN_CLIENTS OFF )
 endif()
 
 # This project may compile dependencies for clients
@@ -78,20 +84,6 @@ endif()
 
 # This project may compile dependencies for clients
 project(rocsparse-clients LANGUAGES CXX ${fortran_language})
-
-if ( BUILD_FORTRAN_CLIENTS )
-  set(rocsparse_fortran_source
-      ../library/src/rocsparse_enums.f90
-      ../library/src/rocsparse.f90
-  )
-
-  # Set Fortran module output directory
-  set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/rocsparse)
-
-  # Create rocBLAS Fortran module
-  add_library(rocsparse_fortran OBJECT ${rocsparse_fortran_source})
-
-endif()
 
 # OpenMP
 if(NOT WIN32)

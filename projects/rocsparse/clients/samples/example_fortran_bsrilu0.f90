@@ -122,14 +122,16 @@ program example_fortran_bsrilu0
     integer(c_int) :: dir
     integer(c_int) :: stat
     integer(c_int), target :: pivot
-    integer(c_size_t), target :: buffer_size
+    integer(c_size_t) :: buffer_size
 
     type(c_ptr) :: handle
     type(c_ptr) :: descr
     type(c_ptr) :: info
 
-    integer :: version
+    integer(c_int) :: version
 
+!   NUL-terminated C string; 64 bytes, as in the C clients.
+    character(kind=c_char), target :: rev_buf(64)
     character(len=12) :: rev
 
 !   Input data
@@ -176,7 +178,13 @@ program example_fortran_bsrilu0
 
 !   Get rocSPARSE version
     call ROCSPARSE_CHECK(rocsparse_get_version(handle, version))
-    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, rev))
+!   Pre-fill so the 12-byte copy below stops at a NUL.
+    rev_buf = c_null_char
+    call ROCSPARSE_CHECK(rocsparse_get_git_rev(handle, c_loc(rev_buf)))
+    rev = transfer(rev_buf(1:len(rev)), rev)
+
+!   Blank the NUL terminator and everything past it so it is not printed
+    if (index(rev, c_null_char) > 0) rev(index(rev, c_null_char):) = ' '
 
 !   Print version on screen
     write(*,fmt='(A,I0,A,I0,A,I0,A,A)') 'rocSPARSE version: ', version / 100000, '.', &
@@ -202,7 +210,7 @@ program example_fortran_bsrilu0
                                                         d_bsr_col_ind, &
                                                         block_dim, &
                                                         info, &
-                                                        c_loc(buffer_size)))
+                                                        buffer_size))
 
 !   Allocate temporary buffer
     write(*,fmt='(A,I0,A)') 'Allocating ', buffer_size / 1024, 'kB temporary storage buffer'
