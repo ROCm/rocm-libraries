@@ -497,7 +497,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 "default); got " +
                 std::to_string(cfg) + ".");
         }
-        const int resolved = cfg < INT_MAX ? cfg : config_.dsReadPerCap;
+        // The arch default is per WMMA window; the span covers a whole batch.
+        const int resolved = cfg < INT_MAX ? cfg : config_.dsReadPerCap * wmmaBatchSize();
         // The arch default is static data, so a bad one is a build-time mistake
         // in this file rather than a caller error.
         assert(resolved > 0 && "arch config dsReadPerCap must be positive");
@@ -555,15 +556,37 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsIssueCapSpan() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsIssueCapSpanCycles;
         if (cfg > 0) return cfg;
-        const int latency =
-            wmmaIssueConfig.latency > 0 ? wmmaIssueConfig.latency : config_.dsIssueCapSpanCycles;
-        const int resolved = wmmaBatchWindowCycles(latency, wmmaIssueConfig.issueCycles);
+        const int resolved = regionBatchWindow();
         assert(resolved > 0 && "arch config dsIssueCapSpanCycles must be positive");
         return resolved;
     }
     // Cycles one batch of wmmaBatchSize() WMMAs of cost {issue, latency} opens.
     int wmmaBatchWindowCycles(int latency, int issue) const {
         return latency + (wmmaBatchSize() - 1) * std::max(0, latency - issue);
+    }
+    // One batch window of this region's WMMA (arch fallback latency if none).
+    int regionBatchWindow() const {
+        const int latency =
+            wmmaIssueConfig.latency > 0 ? wmmaIssueConfig.latency : config_.dsIssueCapSpanCycles;
+        return wmmaBatchWindowCycles(latency, wmmaIssueConfig.issueCycles);
+    }
+    // Cycle <-> WMMA-count conversions. A batch of N WMMAs spans one batch window,
+    // so a WMMA advances the timeline by regionBatchWindow()/N on average; N=1
+    // reduces to cycles / L and wmmas * L.
+    int cyclesToWmmas(int cycles) const {
+        return cycles * wmmaBatchSize() / regionBatchWindow();
+    }
+    int cyclesToWmmasCeil(int cycles) const {
+        const int window = regionBatchWindow();
+        return (cycles * wmmaBatchSize() + window - 1) / window;
+    }
+    int wmmasToCycles(int wmmas) const {
+        return wmmas * regionBatchWindow() / wmmaBatchSize();
+    }
+    // WMMAs in the open window (1 outside a batch), the unit per-window capacities
+    // (fill quota, co-issue slots, global reads) scale by.
+    int activeBatchWmmas() const {
+        return std::max<int>(1, activeWmmaBatch_.size());
     }
     int dsReadThrottleWait() const {
         return dsReadInflight_.throttleWait();
@@ -631,7 +654,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     bool criticalMayIssue() const {
         if (activeWmmaNode_ == nullptr || coIssueCyclePos_ >= activeWmmaLatency_) return true;
-        if (fillsThisWindow_ < popcount16(activeWmmaNode_->inst->coIssueWindow)) return true;
+        int windowSlots = 0;  // co-issue slots of every WMMA in the open window
+        for (const DAGNode* wmma : activeWmmaBatch_)
+            windowSlots += popcount16(wmma->inst->coIssueWindow);
+        if (fillsThisWindow_ < windowSlots) return true;
         const int windowsLeft = wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_;
         return regionFillerTotal_ - fillersIssuedThisRegion_ >= windowsLeft * regionCoIssueSlots_;
     }
@@ -641,7 +667,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // a free filler outranks it, so the quota must not close the window yet.
     mutable bool memWorkFitsWindow_ = false;
     bool fillQuotaMet() const {
-        return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= fillQuotaPerWindow_;
+        // The quota is per WMMA; a batch window is owed one per member.
+        return fillQuotaPerWindow_ > 0 &&
+               fillsThisWindow_ >= fillQuotaPerWindow_ * activeBatchWmmas();
     }
     // Region-wide actual and required cumulative non-WMMA issue counts.
     int nonWmmaIssuedThisRegion_ = 0;
@@ -891,7 +919,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
         for (int w : barrierWaitWindows_) {
             if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
-            return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
+            // hold until its two-window run-up (a window is a batch of WMMAs)
+            return wmmaIssuedCountThisRegion_ < w - 2 * wmmaBatchSize();
         }
         return false;
     }
@@ -1641,7 +1670,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // here: the next tensor_load of a group still issues in this window instead of waiting
     // behind the next WMMA and its barrier.
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
-        (globalReadCounter < globalReadPerWMMA || otherQueue.empty() || fillQuotaMet())) {
+        (globalReadCounter < globalReadPerWMMA * activeBatchWmmas() || otherQueue.empty() ||
+         fillQuotaMet())) {
         // A tensor_load whose source is still inside a live hazard-gate window
         // carries that wait, so it ranks as a hidden-stall candidate and defers
         // behind free work (whatever fills the gap). It is still eligible when
@@ -1861,7 +1891,9 @@ DsLoadBudgetConfig CDNA5ReadyQueue::dsLoadBudgetConfig() const {
     config.dsReadThrottleLatency = dsReadThrottleLatency();
     config.dsReadThrottleTransitionFactor = dsReadThrottleTransitionFactor();
     config.dsReadThrottleTransitionEntries = dsReadThrottleTransitionEntries();
-    config.wmmaLatency = wmmaIssueConfig.latency;
+    // One budget window = one batch window, spread back onto WMMA indices.
+    config.wmmaLatency = wmmaIssueConfig.latency > 0 ? regionBatchWindow() : 0;
+    config.wmmasPerWindow = wmmaBatchSize();
     return config;
 }
 
@@ -1963,7 +1995,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             configuredDrainLatency > 0
                 ? configuredDrainLatency
                 : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
-        const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
+        const int latencyWmmaBudget = cyclesToWmmas(latencyForAfterThreshold) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
@@ -2173,12 +2205,11 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
 
         // Step 3: residualCycles = max(0, MaximumWMMAIdx * wmmaIssueConfig.latency
         //                               - targetDSLoadLatency)
-        int residualCycles =
-            std::max(0, maximumWMMAIdx * (int)wmmaIssueConfig.latency - targetDSLoadLatency);
+        int residualCycles = std::max(0, wmmasToCycles(maximumWMMAIdx) - targetDSLoadLatency);
 
         // Step 4: base before cap (in WMMA count units) from residual cycles.
-        int beforeN = (residualCycles / (int)wmmaIssueConfig.latency);
-        int maxFinalWmmaIdx = targetDSLoadLatency / (int)wmmaIssueConfig.latency;
+        int beforeN = cyclesToWmmas(residualCycles);
+        int maxFinalWmmaIdx = cyclesToWmmas(targetDSLoadLatency);
         // Step 4.1: Consider the number of ds_load to be issued in this range.
         const int dsLoadCount = static_cast<int>(matchingDSReads.size());
         for (StinkyInstruction* barrier : group.barriers)
@@ -2886,8 +2917,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (!hasWmmaHideBudgetBase) {
                 const HwInstDesc* desc = inst.getHwInstDesc();
                 const int ldScaleCycles = desc != nullptr && desc->blockedScaleMask != 0 ? 1 : 0;
+                // Per WMMA: the batch window's free cycles shared by its N WMMAs.
+                const int n = wmmaBatchSize();
                 wmmaHideBudgetBase =
-                    std::max(0, inst.latencyCycles - inst.issueCycles - ldScaleCycles);
+                    std::max(0, (wmmaBatchWindowCycles(inst.latencyCycles, inst.issueCycles) -
+                                 n * (inst.issueCycles + ldScaleCycles)) /
+                                    n);
                 hasWmmaHideBudgetBase = true;
             }
         } else if (isDSRead(inst)) {
@@ -3115,17 +3150,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 // Slack is 2 + 2 WMMA windows of before/after barrier budget,
                 // plus 1 for the tensor load. It is a gap between the two
                 // thresholds, so the claim windows themselves stay unchanged.
-                const int separationSlack = 2 + 2 + 1;
+                const int separationSlack = (2 + 2 + 1) * wmmaBatchSize();
                 // Extra gap so a tensor load is not issued next to the
                 // before-side ds_loads. ModuleOptions::TensorLoadDsLoadGapCycles
-                // cycles, rounded up to whole WMMA windows of this region's
-                // matrix latency. 0 disables the extra gap.
+                // cycles, rounded up to whole WMMAs at this region's batch
+                // rate (cyclesToWmmasCeil). 0 disables the extra gap.
                 const int tensorLoadDsLoadGapCycles = this->tensorLoadDsLoadGapCycles();
-                const int wmmaLatency = wmmaIssueConfig.latency > 0
-                                            ? wmmaIssueConfig.latency
-                                            : std::max(1, config_.dsIssueCapSpanCycles);
-                const int tensorLoadDsLoadGapWmma =
-                    (tensorLoadDsLoadGapCycles + wmmaLatency - 1) / wmmaLatency;
+                const int tensorLoadDsLoadGapWmma = cyclesToWmmasCeil(tensorLoadDsLoadGapCycles);
                 const int baseAfterEnd = afterGroup.baseThreshold;
                 const int baseBeforeBegin = beforeGroup.baseThreshold;
                 const int baseAfterBegin = std::max(0, baseAfterEnd - afterGroup.claimWindow);

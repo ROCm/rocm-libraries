@@ -1752,6 +1752,24 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanCoversTheWmmaBatchWindow) {
     ASSERT_NE(spanPos, std::string::npos);
     EXPECT_EQ(std::stoi(captured.str().substr(spanPos + 5)), 8 + 4 * 7)
         << "{1,8} WMMA, batch of 5: 8 + (5-1)*(8-1)";
+    // Arch default cap (3 per WMMA window) applies per batch window: 3 * 5.
+    const int cap =
+        std::stoi(captured.str().substr(pos + std::string("[CDNA5 dsCap] dsReadPerCap=").size()));
+    EXPECT_EQ(cap, 15);
+}
+
+// A batch window's ds_load budget lands on the batch's first WMMA; the rest of
+// the batch gets 0, so the cumulative budget after the batch is the window's.
+TEST_F(DAGSchedulerPassTest, WmmaBatchDsBudgetDistributionIsPerBatchWindow) {
+    DsLoadBudgetConfig config;
+    config.dsReadPerCap = 2;
+    config.wmmasPerWindow = 3;
+    const std::vector<int> expected{2, 0, 0, 2, 0, 0, 1, 0, 0};
+    EXPECT_EQ(computeDsLoadWmmaWindowDistribution(/*dsLoadCount=*/5, config), expected);
+    EXPECT_EQ(computeDsLoadWmmaWindowsNeeded(/*dsLoadCount=*/5, config), 9);
+    config.wmmasPerWindow = 1;
+    EXPECT_EQ(computeDsLoadWmmaWindowDistribution(/*dsLoadCount=*/5, config),
+              (std::vector<int>{2, 2, 1}));
 }
 
 TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanIsEightForTheDefaultFormat) {

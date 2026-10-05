@@ -94,6 +94,13 @@ std::vector<int> computeDsLoadWmmaWindowDistribution(int dsLoadCount,
             distribution.resize(static_cast<size_t>(target) + 1, 0);
         ++distribution[static_cast<size_t>(target)];
     }
+    if (config.wmmasPerWindow > 1) {
+        // Back to WMMA indices: [c0, 0..0, c1, 0..0, ...], N entries per window.
+        std::vector<int> perWmma(distribution.size() * config.wmmasPerWindow, 0);
+        for (size_t w = 0; w < distribution.size(); ++w)
+            perWmma[w * config.wmmasPerWindow] = distribution[w];
+        distribution = std::move(perWmma);
+    }
     return distribution;
 }
 
