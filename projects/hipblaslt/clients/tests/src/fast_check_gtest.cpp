@@ -12,6 +12,8 @@
 #include <gtest/gtest.h>
 
 #include "fast_check.hpp"
+#include "hipBuffer.hpp"
+#include "hip_placement.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -925,6 +927,50 @@ namespace
         }
     }
 
+    // In every supported type, the poison bits are kFastCheckPoisonValue as the type stores it,
+    // and the count of changed poison finds a single changed element.
+    TEST(FastCheckDevice_pre_checkin, every_type_counts_changed_poison)
+    {
+        const size_t elements = 300;
+        for(const auto& tc : kTypes)
+        {
+            std::vector<char> poison(tc.size);
+            store_as(tc.type, kFastCheckPoisonValue, poison.data());
+            uint64_t bits = fast_check_poison_bits(tc.type);
+            EXPECT_EQ(std::memcmp(&bits, poison.data(), tc.size), 0) << tc.name;
+
+            std::vector<char> h(elements * tc.size);
+            for(size_t idx = 0; idx < elements; idx++)
+                std::memcpy(h.data() + idx * tc.size, poison.data(), tc.size);
+            char* d = nullptr;
+            ASSERT_EQ(hipMalloc(&d, h.size()), hipSuccess);
+            ASSERT_EQ(hipMemcpy(d, h.data(), h.size(), hipMemcpyHostToDevice), hipSuccess);
+            auto changed = fast_check_count_changed_device(d, tc.type, elements, 0);
+            EXPECT_TRUE(changed.ok) << tc.name;
+            EXPECT_EQ(changed.count, 0u) << tc.name;
+
+            store_as(tc.type, 1, h.data() + 217 * tc.size);
+            ASSERT_EQ(hipMemcpy(d, h.data(), h.size(), hipMemcpyHostToDevice), hipSuccess);
+            changed = fast_check_count_changed_device(d, tc.type, elements, 0);
+            (void)hipFree(d);
+            EXPECT_TRUE(changed.ok) << tc.name;
+            EXPECT_EQ(changed.count, 1u) << tc.name;
+            EXPECT_EQ(changed.first, 217u) << tc.name;
+        }
+    }
+
+    // A type the scans do not support is an error, never a clean scan.
+    TEST(FastCheckDevice_pre_checkin, scans_refuse_an_unsupported_type)
+    {
+        DeviceMatrix    m;
+        FastCheckMatrix complex = m.matrix();
+        complex.type            = HIP_C_32F;
+        auto res = fast_check_scan_padding_device(complex, DeviceMatrix::batch, 8, true, 0);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scan failed"), std::string::npos) << res.message;
+        EXPECT_FALSE(fast_check_count_changed_device(m.d, HIP_C_32F, 8, 0).ok);
+    }
+
     // Configurations fast_check cannot check exactly are refused with a reason, before any sums.
     TEST(FastCheck_pre_checkin, unsupported_configurations_are_refused)
     {
@@ -1033,6 +1079,166 @@ namespace
         auto res            = fast_check_gemm(p);
         EXPECT_FALSE(res.passed);
         EXPECT_FALSE(res.message.empty());
+    }
+
+    // Reads word `word` of `base` twice: through the correct address, and through an address whose
+    // low 32 bits were computed without carrying into the high 32 bits.
+    __global__ void read_with_dropped_carry(const uint32_t* base,
+                                            uint64_t        word,
+                                            uint32_t*       correct,
+                                            uint32_t*       dropped)
+    {
+        uint64_t b       = reinterpret_cast<uint64_t>(base);
+        uint64_t right   = b + word * 4;
+        uint64_t wrapped = (b & ~uint64_t(0xffffffff)) | uint32_t(uint32_t(b) + uint32_t(word * 4));
+        *correct         = *reinterpret_cast<const uint32_t*>(right);
+        *dropped         = *reinterpret_cast<const uint32_t*>(wrapped);
+    }
+
+    __global__ void write_with_dropped_carry(uint32_t* base, uint64_t word, uint32_t value)
+    {
+        uint64_t b       = reinterpret_cast<uint64_t>(base);
+        uint64_t wrapped = (b & ~uint64_t(0xffffffff)) | uint32_t(uint32_t(b) + uint32_t(word * 4));
+        *reinterpret_cast<uint32_t*>(wrapped) = value;
+    }
+
+    // The placement harness must turn a dropped-carry read into a poison value instead of a fault,
+    // and report a dropped-carry write with the element it was meant for.
+    TEST(FastCheckDevice_pre_checkin, placed_region_catches_dropped_carry)
+    {
+        const size_t bytes = 8 << 20, below = 4 << 20;
+        std::string  why;
+        bool         unsupported = false;
+        auto         region = PlacedRegion::create(bytes, below, HIP_R_32F, &why, &unsupported);
+        if(!region && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(region) << why;
+
+        const uint64_t start = reinterpret_cast<uint64_t>(region->ptr());
+        ASSERT_EQ(region->boundary() - start, below);
+
+        std::vector<uint32_t> data(bytes / 4);
+        for(size_t n = 0; n < data.size(); n++)
+            data[n] = uint32_t(n);
+        ASSERT_EQ(hipMemcpy(region->ptr(), data.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+
+        const uint64_t word = below / 4 + 100; // 100 words past the boundary
+        uint32_t*      d_out;
+        ASSERT_EQ(hipMalloc(&d_out, 2 * sizeof(uint32_t)), hipSuccess);
+        hipLaunchKernelGGL(read_with_dropped_carry,
+                           dim3(1),
+                           dim3(1),
+                           0,
+                           0,
+                           static_cast<const uint32_t*>(region->ptr()),
+                           word,
+                           d_out,
+                           d_out + 1);
+        uint32_t out[2];
+        ASSERT_EQ(hipMemcpy(out, d_out, sizeof(out), hipMemcpyDeviceToHost), hipSuccess);
+        (void)hipFree(d_out);
+        const float poison = kFastCheckPoisonValue;
+        uint32_t    poison_bits;
+        std::memcpy(&poison_bits, &poison, sizeof(poison_bits));
+        EXPECT_EQ(out[0], uint32_t(word));
+        EXPECT_EQ(out[1], poison_bits);
+
+        auto clean = region->verify_poison("A", 0);
+        EXPECT_TRUE(clean.passed) << clean.message;
+
+        hipLaunchKernelGGL(write_with_dropped_carry,
+                           dim3(1),
+                           dim3(1),
+                           0,
+                           0,
+                           static_cast<uint32_t*>(region->ptr()),
+                           word,
+                           0x12345678u);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        auto written = region->verify_poison("A", 0);
+        ASSERT_FALSE(written.passed);
+        EXPECT_NE(
+            written.message.find("1 elements of the poison window 4 GiB below A were written"),
+            std::string::npos)
+            << written.message;
+        EXPECT_NE(written.message.find("A element " + std::to_string(word)), std::string::npos)
+            << written.message;
+
+        ASSERT_EQ(region->fill_poison(0), hipSuccess);
+        auto refilled = region->verify_poison("A", 0);
+        EXPECT_TRUE(refilled.passed) << refilled.message;
+    }
+
+    TEST(FastCheckDevice_pre_checkin, placement_rejects_requests_that_cannot_cross)
+    {
+        std::string why;
+        bool        unsupported = false;
+        if(!PlacedRegion::create(1 << 20, 0, HIP_R_32F, &why, &unsupported) && unsupported)
+            GTEST_SKIP() << why;
+        EXPECT_FALSE(PlacedRegion::create(4096, 8192, HIP_R_32F, &why, &unsupported));
+        EXPECT_FALSE(unsupported);
+        EXPECT_NE(why.find("cannot cross"), std::string::npos) << why;
+        EXPECT_FALSE(PlacedRegion::create(1 << 20, 100, HIP_R_32F, &why, &unsupported));
+        EXPECT_NE(why.find("multiple of the mapping granularity"), std::string::npos) << why;
+    }
+
+    // Solutions use different amounts of one placed workspace, and each one's range must cross the
+    // boundary while staying inside the mapped window. A write past the end of a placed buffer,
+    // into the rest of its mapped window, must be reported.
+    TEST(FastCheckDevice_pre_checkin, placed_workspace_straddles_for_every_size)
+    {
+        const size_t bytes = (size_t(16) << 20) - 4096;
+        std::string  why;
+        bool         unsupported = false;
+        auto         region      = PlacedRegion::create(bytes, 0, HIP_R_8I, &why, &unsupported);
+        if(!region && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(region) << why;
+
+        // As the harness places a workspace: twice the largest size, so any solution may use all
+        // of it from wherever its own range starts.
+        const uint64_t lo   = reinterpret_cast<uint64_t>(region->ptr());
+        const size_t   room = bytes / 2;
+        for(size_t ws : {size_t(300), size_t(4096), size_t(1) << 20, size_t(5) << 20, room})
+        {
+            void*          p  = region->straddle(ws, room);
+            const uint64_t at = reinterpret_cast<uint64_t>(p);
+            EXPECT_TRUE(region->crosses(p, ws)) << ws;
+            EXPECT_EQ(at % 256, 0u) << ws;
+            EXPECT_GE(at, lo) << ws;
+            EXPECT_LE(at + room, lo + bytes) << ws;
+        }
+
+        auto clean = region->verify_poison("workspace", 0);
+        EXPECT_TRUE(clean.passed) << clean.message;
+        if(region->span() > bytes)
+        {
+            ASSERT_EQ(hipMemset(static_cast<char*>(region->ptr()) + bytes, 1, 1), hipSuccess);
+            auto tail = region->verify_poison("workspace", 0);
+            EXPECT_FALSE(tail.passed);
+            EXPECT_NE(tail.message.find("past the end of workspace"), std::string::npos)
+                << tail.message;
+        }
+    }
+
+    // std::vector growth moves its elements. A placed buffer must keep its address through the
+    // move, and the moved-from object must not touch the placed memory when it is destroyed.
+    TEST(FastCheckDevice_pre_checkin, placed_buffer_survives_vector_growth)
+    {
+        std::string                  why;
+        bool                         unsupported = false;
+        std::vector<HipDeviceBuffer> buffers;
+        buffers.emplace_back(HIP_R_32F, size_t(1 << 20), size_t(0), &why, &unsupported);
+        if(!buffers.back().buf() && unsupported)
+            GTEST_SKIP() << why;
+        ASSERT_TRUE(buffers.back().buf()) << why;
+        void* placed = buffers[0].buf();
+        for(int n = 0; n < 16; n++)
+            buffers.emplace_back(HIP_R_32F, size_t(1024));
+        EXPECT_EQ(buffers[0].buf(), placed);
+        ASSERT_TRUE(buffers[0].placement());
+        EXPECT_EQ(buffers[0].placement()->ptr(), placed);
+        EXPECT_EQ(hipMemset(placed, 0, 4 << 20), hipSuccess);
     }
 
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)

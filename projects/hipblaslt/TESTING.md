@@ -244,7 +244,7 @@ There is no separate unit-test binary. The host-only tests that do exist are com
 | `caching_library_gtest.cpp` | `CachingLibraryCollision` | Solution-cache keying under a forced hash collision |
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
-| `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results (`FastCheck`, no GPU), and the device padding, poison and probe-sum kernels on small buffers (`FastCheckDevice`, no hipBLASLt kernels) |
+| `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of

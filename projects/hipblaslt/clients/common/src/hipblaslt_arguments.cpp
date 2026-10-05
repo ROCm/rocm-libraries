@@ -118,6 +118,8 @@ void Arguments::init()
     unit_check     = 1;
     ulp_check      = 0;
     fast_check     = 0;
+    placement[0]   = 0;
+    placement_offset = 0;
     timing         = 0;
 
     transA = '*';

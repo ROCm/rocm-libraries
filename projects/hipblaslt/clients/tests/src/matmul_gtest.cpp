@@ -171,6 +171,8 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.placement[0])
+                    name << "_PLACE_" << arg.placement;
                 // grouped gemm only supports ext
                 if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";

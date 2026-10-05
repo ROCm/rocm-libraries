@@ -648,6 +648,8 @@ Arguments:
   - unit_check: c_int8
   - ulp_check: c_int8
   - fast_check: c_int8
+  - placement: c_char*16
+  - placement_offset: c_size_t
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -757,6 +759,8 @@ Defaults:
   unit_check: 1
   ulp_check: 0
   fast_check: 0
+  placement: ''
+  placement_offset: 0
   timing: 0
   iters: 10
   cold_iters: 2

@@ -151,6 +151,24 @@ std::string fast_check_describe_buffers(const std::vector<FastCheckBuffer>& buff
 // memory; total_elements is the size of its allocation in elements, which may extend past the
 // last batch.
 
+// Bytes per element, or 0 when fast_check does not support the type.
+size_t fast_check_element_size(hipDataType type);
+
+// The bit pattern of kFastCheckPoisonValue in the given type, in the low bytes.
+uint64_t fast_check_poison_bits(hipDataType type);
+
+// Counts the elements of a device range that no longer hold kFastCheckPoisonValue.
+struct FastCheckChanged
+{
+    uint64_t count = 0;
+    uint64_t first = 0; // index of the first changed element, when count > 0
+    bool     ok    = true; // false when the scan itself failed
+};
+FastCheckChanged fast_check_count_changed_device(const void* data,
+                                                 hipDataType type,
+                                                 size_t      elements,
+                                                 hipStream_t stream);
+
 // Fills every element of a device buffer with fast_check_sentinel_bits(type). Returns the launch
 // error, or hipErrorInvalidValue for a type fast_check does not support.
 hipError_t fast_check_fill_sentinel_device(void*       buffer,
