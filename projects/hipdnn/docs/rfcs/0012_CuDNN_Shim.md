@@ -531,22 +531,24 @@ separately.
 **Notes — per-note triage, not blanket no-op.** A blanket "accept and
 ignore" is unsafe: silently running without a requested filter can be
 *wrong*, not merely slower. Each `NumericalNote_t` / `BehaviorNote_t` is
-triaged into one of three handlings:
+triaged into one of four handlings:
 
 - **Map to engine capability** — when hipDNN can honor the constraint
-  through its engine/knob system. The deterministic ("non-deterministic"
-  filter) case is the worked example: now that the note system exists,
-  hipDNN can likely express it, and the shim should wire it through.
+  through its engine/knob system. Deterministic
+  (`deselect_numeric_notes({NONDETERMINISTIC})`) maps to engines that
+  positively claim determinism; error if no engine survives.
 - **Warn and ignore** — for notes that are advisory and safe to drop
-  (logged at WARN on first use).
-- **Error** — for correctness-critical notes hipDNN cannot honor. If a user
-  requests deterministic behavior and the shim cannot guarantee it, it is
-  **wrong** to run anyway; the shim must error rather than silently produce
-  non-deterministic results. (Recorded-error mechanism, §4.4.2.)
+  (logged at WARN).
+- **Error** — for correctness-critical notes hipDNN cannot honor, e.g.
+  deselecting `REDUCED_PRECISION_REDUCTION` or selecting `STRICT_NAN_PROP`.
+  Running anyway could silently violate the caller's constraint, so the
+  shim errors instead. (Recorded-error mechanism, §4.4.2.)
+- **No-op** — `NOT_SET`, which requests nothing.
 
-The per-note classification table lives in
+The per-note classification table is maintained in
+[KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters);
 [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)
-and must be reviewed note-by-note before Phase 4 lands.
+records the classification principle.
 
 **Resource caps.** The workspace-size cap is enforced post-hoc against
 hipDNN's existing `get_workspace_size()` (and the workspace *knobs* need a
@@ -556,8 +558,7 @@ the shim **rejects a non-zero `deselect_shared_mem_greater_than`** rather
 than silently ignoring it (Reference §4).
 
 For the full upstream method enumeration (with `graph_interface.h` line
-numbers), behaviour table, and the open question about hipDNN-side
-metadata extensions, see
+numbers) and the open question about hipDNN-side metadata extensions, see
 [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api).
 
 ### 4.6 Error handling and logging
@@ -984,10 +985,12 @@ the corresponding cuDNN FE sample.
 - Implement `HeurMode_t`, `NumericalNote_t`, `BehaviorNote_t` enum mapping.
 - Wire the plan-filter methods on the shim's `Graph`, applying the
   per-note triage (§4.5; classification table in
-  [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)):
+  [KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters)):
   - `select_*` / `deselect_*` notes — map to engine capability where
-    hipDNN can honor it, warn-and-ignore where advisory, **error** where
-    correctness-critical and unsupported (e.g. deterministic). No blanket
+    hipDNN can honor it (e.g. deselect `NONDETERMINISTIC`; error if no
+    engine survives), warn-and-ignore where advisory, **error** where
+    correctness-critical and unsupported (e.g. deselect
+    `REDUCED_PRECISION_REDUCTION`, select `STRICT_NAN_PROP`). No blanket
     no-op.
   - `deselect_workspace_greater_than` — filter hipDNN plans by
     workspace size before `build_plans()` (hipDNN's
