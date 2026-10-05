@@ -2,15 +2,15 @@
 # name: test_r5_subtile_kern_tlu1_gfx950_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT128x128x64_MI16la_tZLfhaJXGkQkioGlYgDs2KI1es_NmmUqkmgjuBYw=',
+      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT128x128x64_MI162pMVK6pvCQV3tOOM_WAogZsSJ04arUrpyNjqq1e9x9M=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT128x64x64_MI16x5A9pl_Q7Uuo-fZeyyoDxja6JmVotW01A7wEiB2BGlVo=',
+      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT128x64x64_MI16x1WfLJlRaAS_OYElrggkWG9WRFHHD1ZYe_DiJtMbtWxA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT64x64x64_MI16x1CeBgd6YxK37Lbzy81ipp0TYUkQ1KKwuoqzuMGb9haRs=',
+      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT64x64x64_MI16x1NquyOzzBbMllXzY1RzVCZRQX-bZBqJXy6Q2R5YfoY4A=',
       'err': 0,
     }),
   ])
