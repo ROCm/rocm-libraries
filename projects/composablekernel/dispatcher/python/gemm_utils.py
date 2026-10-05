@@ -2980,7 +2980,9 @@ def expand_sweep(
     ):
         # Tile/CShuffle correctness gate. A block tile must split evenly across
         # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
-        # genuinely invalid.
+        # genuinely invalid. Stream-K also checks K, matching
+        # TileConfig.is_valid(); other variants keep their existing M/N-only
+        # gate so their sweeps are unchanged.
         #
         # Narrowed CShuffle-store gate (issue #9684): the CShuffle epilogue only
         # mis-stores the accumulator for one specific combination -- an ODD
@@ -2992,14 +2994,10 @@ def expand_sweep(
         # 12. The previous "per-wave repeat must be a power of two" rule was too
         # broad and needlessly dropped 90 valid configs. The "default" epilogue
         # stores directly and is exempt.
-        # Match TileConfig.is_valid(): the K block must divide across all K waves.
-        if variant == "stream_k":
-            k_div = wk * wtk
-            if k_div <= 0 or tk < k_div or tk % k_div != 0:
-                continue
         m_div = wm * wtm
         n_div = wn * wtn
-        if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
+        k_div = wk * wtk if variant == "stream_k" else 1
+        if min(m_div, n_div, k_div) <= 0 or tm % m_div or tn % n_div or tk % k_div:
             continue
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
