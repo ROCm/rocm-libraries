@@ -72,6 +72,31 @@ typedef enum hipblas_matrix_type_
 
 } hipblas_matrix_type;
 
+//! @brief Serially pre-fault (touch) each page of a host buffer before a
+//! parallel init loop writes it.
+//!
+//! Under HSA_XNACK=1 on a discrete GPU (e.g. gfx942 MI300X), buffer pages that
+//! an earlier H2D copy migrated to VRAM are faulted back RAM<-VRAM on the next
+//! CPU access. When the OpenMP-parallel init below does that from 40+ threads at
+//! once, they serialize on the amdgpu SVM migration mutex (perf: ~98% osq_lock),
+//! turning init into an hours-long stall. Performing the migration once, up
+//! front, from a single thread removes the lock contention while keeping the
+//! fill itself fully parallel. On integrated APUs (unified memory) and non-XNACK
+//! builds this is just a cheap serial page walk with nothing to migrate.
+//!
+//! `bytes` must not exceed the buffer's allocation; callers pass the exact span
+//! their parallel loop writes.
+static inline void hipblas_prefault_pages(void* base, size_t bytes)
+{
+    if(!base || !bytes)
+        return;
+    volatile char*   p     = static_cast<volatile char*>(base);
+    constexpr size_t kPage = 4096; // touch at 4 KiB granularity (covers 4K/64K pages)
+    for(size_t off = 0; off < bytes; off += kPage)
+        p[off] = p[off]; // read-modify-write faults the page in (VRAM->RAM)
+    p[bytes - 1] = p[bytes - 1]; // ensure the final partial page is touched
+}
+
 template <typename T>
 void hipblas_init(
     T* A, int64_t M, int64_t N, int64_t lda, hipblasStride stride = 0, int64_t batch_count = 1)
@@ -105,6 +130,10 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
         auto* A = hA[batch_index];
+
+        // Serial pre-fault before the parallel fill (see hipblas_prefault_pages).
+        if(N > 0 && M > 0)
+            hipblas_prefault_pages(A, (size_t((N - 1) * lda + M)) * sizeof(*A));
 
         if(matrix_type == hipblas_general_matrix)
         {
@@ -143,6 +172,16 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 template <typename T>
 void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t incx)
 {
+    // Serial pre-fault before the parallel fill (see hipblas_prefault_pages).
+    // Do this on the ORIGINAL x (buffer start) before the incx<0 adjustment: the
+    // fill accesses the whole span x[0 .. (N-1)*|incx|] regardless of sign, so
+    // pre-faulting from the shifted (near-end) x would overrun the allocation.
+    if(N > 0)
+    {
+        const int64_t abs_incx = incx < 0 ? -incx : incx;
+        hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
+    }
+
     if(incx < 0)
         x -= (N - 1) * incx;
 
@@ -167,6 +206,14 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
         int64_t M   = hA.m();
         int64_t N   = hA.n();
         int64_t lda = hA.lda();
+
+        // Serially migrate this batch's pages back to RAM before the parallel
+        // fill, to avoid 40+ threads contending on the SVM migration mutex.
+        // The parallel loops below index up to A[(N-1)*lda + (M-1)], so the
+        // written span is (N-1)*lda + M elements.
+        if(N > 0 && M > 0)
+            hipblas_prefault_pages(A, (size_t((N - 1) * lda + M)) * sizeof(*A));
+
         if(matrix_type == hipblas_general_matrix)
         {
 #ifdef _OPENMP
@@ -333,6 +380,17 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 template <typename T>
 void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
 {
+    // Serially migrate this vector's pages back to RAM before the parallel fill
+    // (see hipblas_prefault_pages). Do this on the ORIGINAL x (buffer start)
+    // before the incx<0 adjustment: the fill spans x[0 .. (N-1)*|incx|]
+    // regardless of sign, so pre-faulting from the shifted (near-end) x would
+    // overrun the allocation.
+    if(N > 0)
+    {
+        const int64_t abs_incx = incx < 0 ? -incx : incx;
+        hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
+    }
+
     if(incx < 0)
         x -= (N - 1) * incx;
 
@@ -355,6 +413,10 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
         auto  M   = hA.m();
         auto  N   = hA.n();
         auto  lda = hA.lda();
+
+        // Serial pre-fault before the parallel fill (see hipblas_prefault_pages).
+        if(N > 0 && M > 0)
+            hipblas_prefault_pages(A, (size_t((N - 1) * lda + M)) * sizeof(*A));
 
         if(matrix_type == hipblas_general_matrix)
         {
@@ -451,6 +513,15 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
 template <typename T>
 void hipblas_init_vector_trig(T* x, int64_t N, int64_t incx, bool seedReset = false)
 {
+    // Serial pre-fault before the parallel fill (see hipblas_prefault_pages), on
+    // the ORIGINAL x (buffer start) before the incx<0 adjustment -- the fill
+    // spans x[0 .. (N-1)*|incx|] regardless of sign.
+    if(N > 0)
+    {
+        const int64_t abs_incx = incx < 0 ? -incx : incx;
+        hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
+    }
+
     if(incx < 0)
         x -= (N - 1) * incx;
 
