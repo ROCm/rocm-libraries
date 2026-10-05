@@ -20,22 +20,56 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from typing import Optional, OrderedDict, Callable
 import sys
 import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
-sys.path.append(f"{os.path.dirname(__file__)}")
 
-from tuner.base_tuner import TunerArgs
-from tuning_device_binary_search import Tuner as TunerDeviceBinarySearch
+from utils import TYPE_CONFIGS
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
 
-class Tuner(TunerDeviceBinarySearch):
+"""
+Inclusive range for params tuning, edit these to adjust tuning grid range.
+"""
+BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
+IPT = list(range(1, 17))
+
+
+class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_lower_bound')
+        return TunerArgs(algo_full_name='device_find_first_of')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
+
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+        params = OrderedDict()
+        params['block_size_x'] = BLOCK_SIZES
+        params['ipt'] = IPT
+        
+        return params
+
+    def _get_key_type_name(self) -> str:
+        return "value_type"
+
+    def _get_value_type_name(self):
+        return ""
+
+    def _get_restrictions(self, types):
+
+        def validate(params):
+            return True
+
+        return validate
+
+    def tune_all(self) -> None:
+        """Tune for all value type combinations"""
+
+        for value_type in COMMON_VALUE_TYPES:
+            self.tune_type({"value_type" : value_type})
+
 
 if __name__ == "__main__":
     Tuner.cli()
