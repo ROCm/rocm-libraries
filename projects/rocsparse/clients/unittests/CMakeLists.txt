@@ -196,6 +196,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- AISPARSE-654: forced-clamp coverage of rocsparse::conjugate ------------
+  # Distinct anchor at the end of the device source list. Needs
+  # rocsparse_conjugate.cpp compiled in (see ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_common_conjugate.cpp
+  # --- AISPARSE-649: forced-clamp coverage of gthr_strided_batched ----------
+  # Needs rocsparse_gthr_impl.cpp compiled in (see
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_level1_gthr_grids.cpp
+  # --- AISPARSE-656: bsrsv solve grid vs. the dispatch limit -----------------
+  # Drives the public rocsparse_dbsrsv_* entry points; no compile-in TUs.
+  unit_test_internal_level2_bsrsv_limit.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -274,6 +285,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # AISPARSE-654: rocsparse::conjugate is hidden in librocsparse; defining TU for
+  # unit_test_internal_common_conjugate.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_conjugate.cpp
+  # AISPARSE-649: rocsparse::gthr_strided_batched_template is hidden in
+  # librocsparse; defining TU for unit_test_internal_level1_gthr_grids.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure

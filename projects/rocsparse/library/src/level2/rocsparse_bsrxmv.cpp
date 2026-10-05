@@ -25,6 +25,7 @@
 #include "internal/level2/rocsparse_bsrxmv.h"
 #include "rocsparse_bsrxmv.hpp"
 #include "rocsparse_bsrxmv_spzl.hpp"
+#include "rocsparse_grid.hpp"
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          handle,
@@ -307,7 +308,8 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
     if(mb == 0 || nb == 0)
     {
         // matrix never accessed however still need to update y vector
-        rocsparse_int ysize = (bsr_mask_ptr == nullptr) ? block_dim * mb : block_dim * size_of_mask;
+        int64_t ysize = (bsr_mask_ptr == nullptr) ? static_cast<int64_t>(block_dim) * mb
+                                                  : static_cast<int64_t>(block_dim) * size_of_mask;
         if(ysize > 0)
         {
             if(y == nullptr && beta_device_host == nullptr)
@@ -315,8 +317,10 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
                 return rocsparse_status_invalid_pointer;
             }
 
+            const uint32_t nblocks = rocsparse::get_grid_size_x(handle, (ysize - 1) / 256 + 1, 256);
+
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmv_scale_array<256>),
-                                               dim3((ysize - 1) / 256 + 1),
+                                               dim3(nblocks),
                                                dim3(256),
                                                0,
                                                handle->stream,

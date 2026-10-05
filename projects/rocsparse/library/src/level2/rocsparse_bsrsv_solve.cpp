@@ -26,24 +26,49 @@
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_bsrsv.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsrsv_device.h"
 
+#define BSRSV_SOLVE_DIM 128
+
+// The solve kernels map one wavefront to one block row, with no grid-stride
+// loop, and spin-wait on the done flags of the rows it depends on. That wait
+// only ends because every block owning an earlier row of the level-ordered map
+// has already been dispatched. A clamped grid would skip block rows, and
+// grid-striding could deadlock: a resident block in a later sweep would wait on
+// a row owned by a block that cannot be dispatched until it exits. A block-row
+// count that one dispatch cannot hold is rejected instead.
+rocsparse_status rocsparse::bsrsv_solve_check_grid(rocsparse_handle handle, int64_t mb)
+{
+    const int64_t nblocks
+        = (static_cast<int64_t>(handle->wavefront_size) * mb - 1) / BSRSV_SOLVE_DIM + 1;
+    if(rocsparse::get_grid_size_x(handle, nblocks, BSRSV_SOLVE_DIM) < nblocks)
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_not_implemented,
+            "the matrix has too many block rows for bsrsv to solve in a single dispatch");
+    }
+    return rocsparse_status_success;
+}
+
 namespace rocsparse
 {
-#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>), \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                \
-                                       dim3(wfsize, bsize / wfsize),                         \
-                                       0,                                                    \
-                                       stream,                                               \
-                                       dir,                                                  \
-                                       nnzb,                                                 \
-                                       (rocsparse_int*)trm_info->get_transposed_perm(),      \
-                                       bsr_val,                                              \
-                                       bsrt_val,                                             \
-                                       block_dim)
+#define LAUNCH_BSRSV_GTHR_DIM(bsize, wfsize, dim)                                    \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                        \
+        dim3(rocsparse::get_grid_size_x(                                             \
+            handle, (static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1, wfsize)), \
+        dim3(wfsize, bsize / wfsize),                                                \
+        0,                                                                           \
+        stream,                                                                      \
+        dir,                                                                         \
+        nnzb,                                                                        \
+        (rocsparse_int*)trm_info->get_transposed_perm(),                             \
+        bsr_val,                                                                     \
+        bsrt_val,                                                                    \
+        block_dim)
 
 #define LAUNCH_BSRSV_GTHR(bsize, wfsize, dim) \
     if(dim <= 2)                              \
@@ -95,7 +120,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)           \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_lower_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -118,7 +143,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_UPPER_SHARED(bsize, wfsize, dim, arch)           \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_upper_shared<bsize, wfsize, dim, arch>),               \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -170,7 +195,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, arch)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_lower_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -193,7 +218,7 @@ namespace rocsparse
 #define LAUNCH_BSRSV_UPPER_GENERAL(bsize, wfsize, arch)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (bsrsv_upper_general<bsize, wfsize, arch>),                   \
-        dim3((wfsize * mb - 1) / bsize + 1),                          \
+        dim3((static_cast<int64_t>(wfsize) * mb - 1) / bsize + 1),    \
         dim3(bsize),                                                  \
         0,                                                            \
         stream,                                                       \
@@ -373,6 +398,9 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+        // Checked before anything is written so a rejected call leaves y untouched.
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_solve_check_grid(handle, mb));
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -445,26 +473,41 @@ namespace rocsparse
             if(block_dim <= 8)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 8, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    BSRSV_SOLVE_DIM,
+                                    64,
+                                    8,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else if(block_dim <= 16)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 16, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    BSRSV_SOLVE_DIM,
+                                    64,
+                                    16,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else if(block_dim <= 32)
             {
                 // Launch shared memory based kernel for small BSR block dimensions
-                LAUNCH_BSRSV_SHARED(
-                    fill_mode, handle->pointer_mode, 128, 64, 32, gcn_arch_name, asicRev);
+                LAUNCH_BSRSV_SHARED(fill_mode,
+                                    handle->pointer_mode,
+                                    BSRSV_SOLVE_DIM,
+                                    64,
+                                    32,
+                                    gcn_arch_name,
+                                    asicRev);
             }
             else
             {
                 // Launch general algorithm for large BSR block dimensions (> 32x32)
                 LAUNCH_BSRSV_GENERAL(
-                    fill_mode, handle->pointer_mode, 128, 64, gcn_arch_name, asicRev);
+                    fill_mode, handle->pointer_mode, BSRSV_SOLVE_DIM, 64, gcn_arch_name, asicRev);
             }
         }
         else
@@ -475,7 +518,8 @@ namespace rocsparse
             // LCOV_EXCL_START;
 
             // Launch general algorithm
-            LAUNCH_BSRSV_GENERAL(fill_mode, handle->pointer_mode, 128, 32, gcn_arch_name, asicRev);
+            LAUNCH_BSRSV_GENERAL(
+                fill_mode, handle->pointer_mode, BSRSV_SOLVE_DIM, 32, gcn_arch_name, asicRev);
 
             // LCOV_EXCL_STOP;
         }
@@ -643,3 +687,4 @@ C_IMPL(rocsparse_dbsrsv_solve, double);
 C_IMPL(rocsparse_cbsrsv_solve, rocsparse_float_complex);
 C_IMPL(rocsparse_zbsrsv_solve, rocsparse_double_complex);
 #undef C_IMPL
+#undef BSRSV_SOLVE_DIM

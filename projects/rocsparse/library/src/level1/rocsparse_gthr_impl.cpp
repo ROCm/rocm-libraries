@@ -26,6 +26,7 @@
 #include "rocsparse_gthr.hpp"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "gthr_device.h"
@@ -61,21 +62,42 @@ rocsparse_status rocsparse::gthr_strided_batched_template(rocsparse_handle     h
     hipStream_t stream = handle->stream;
 
 #define GTHR_DIM 512
-    dim3 gthr_blocks((nnz - 1) / GTHR_DIM + 1, batch_count);
-    dim3 gthr_threads(GTHR_DIM);
+    // Clamp both grid dimensions against the device limits. The straight-line
+    // kernel covers one element and one batch per thread, so it only runs when
+    // neither clamp binds; otherwise the kernel grid-strides over nnz (x) and
+    // batch_count (y).
+    const int64_t  gthr_blocks_x = (nnz - 1) / GTHR_DIM + 1;
+    const uint32_t gthr_grid_x   = rocsparse::get_grid_size_x(handle, gthr_blocks_x, GTHR_DIM);
+    const uint32_t gthr_grid_y   = rocsparse::get_grid_size_y(handle, batch_count);
+    dim3           gthr_blocks(gthr_grid_x, gthr_grid_y);
+    dim3           gthr_threads(GTHR_DIM);
 
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gthr_kernel<GTHR_DIM, I, T>),
-                                       gthr_blocks,
-                                       gthr_threads,
-                                       0,
-                                       stream,
-                                       nnz,
-                                       reinterpret_cast<const T*>(y),
-                                       y_stride,
-                                       reinterpret_cast<T*>(x_val),
-                                       x_val_stride,
-                                       reinterpret_cast<const I*>(x_ind),
-                                       idx_base);
+    const auto launch_gthr = [&](auto grid_stride) -> rocsparse_status {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::gthr_kernel<GTHR_DIM, decltype(grid_stride)::value, I, T>),
+            gthr_blocks,
+            gthr_threads,
+            0,
+            stream,
+            nnz,
+            batch_count,
+            reinterpret_cast<const T*>(y),
+            y_stride,
+            reinterpret_cast<T*>(x_val),
+            x_val_stride,
+            reinterpret_cast<const I*>(x_ind),
+            idx_base);
+        return rocsparse_status_success;
+    };
+
+    if(gthr_grid_x < gthr_blocks_x || gthr_grid_y < batch_count)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(launch_gthr(std::true_type{}));
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(launch_gthr(std::false_type{}));
+    }
 #undef GTHR_DIM
     return rocsparse_status_success;
 }
