@@ -750,9 +750,12 @@ struct FmhaBwdDQDKDVKernel
                   "DKDV workspace omission is restricted to non-deterministic batch mode");
     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
 
+    // Product-dual kernels keep their own CTA order: the q-major dQ grid indexes Q tiles
+    // (mirror pairing assumes K tiles), and the DKDV-only kernel was tuned unpaired.
     static constexpr bool kMaskTilePairing =
 #if CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
-        kHasMask && !kUsePersistent && !kUseQrQtrDorPipeline && !kIsGroupMode;
+        kHasMask && !kUsePersistent && !kUseQrQtrDorPipeline && !kUseQMajorDQ &&
+        !kSkipDqWorkspace && !kIsGroupMode;
 #else
         false;
 #endif
