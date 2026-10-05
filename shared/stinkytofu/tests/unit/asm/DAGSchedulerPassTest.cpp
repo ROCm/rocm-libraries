@@ -174,7 +174,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // barrierHalfSlack < 0 leaves DagFeatures' default (2).
+    // barrierHalfSlack < 0 leaves DagFeatures' default (0).
     void runPassWithUnrollGemm(int barrierHalfSlack = -1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -1004,7 +1004,7 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairSpreadsSignalAndWait) {
     StinkyInstruction* beforeConsumer =
         createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
 
-    runPassWithUnrollGemm();
+    runPassWithUnrollGemm(/*barrierHalfSlack=*/2);
 
     const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
     ASSERT_NE(overlaps, nullptr);
