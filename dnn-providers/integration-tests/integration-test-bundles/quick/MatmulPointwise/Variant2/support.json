@@ -113,10 +113,26 @@
           "3_16_128_fp32_ncl_operationswish_fwd_norlo_norhi_cebf7a"
         ],
         "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
