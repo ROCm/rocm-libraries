@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -282,9 +282,29 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
               return ret;
           };
 
+    // avoid UB (TODO: remove once ruled out by design)
+    if(strideA.size() < lengthA.size() || strideB.size() < lengthB.size()
+       || lengthB.size() < lengthA.size())
+        return false;
+
     std::vector<iodim> iodimA = make_sorted_iodim_vec(lengthA, strideA);
     std::vector<iodim> iodimB = make_sorted_iodim_vec(lengthB, strideB);
     return std::equal(iodimA.begin(), iodimA.end(), iodimB.begin());
+}
+
+// Output lengths, and the matching strides, that a node actually writes.
+static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(TreeNode& node)
+{
+    auto len    = node.UseOutputLengthForPadding() ? node.GetOutputLength() : node.length;
+    auto stride = node.outStride;
+    // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
+    if(node.fuseBlue == BFT_INV_CHIRP_MUL && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
+    {
+        len.erase(len.begin(), len.begin() + 2);
+        len.insert(len.begin(), node.lengthBlueN);
+        stride.erase(stride.begin() + 1);
+    }
+    return {len, stride};
 }
 
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
@@ -302,11 +322,10 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // to always fit.  This function accepts OB_USER_IN also to mean
     // the input side of an in-place R2C transform (which the plan
     // would normally call OB_USER_OUT).
-    auto dataFits = [&execPlan](const TreeNode& node, OperatingBuffer buffer) {
-        auto outLengthBlueN = {node.lengthBlueN};
-        auto nodeLen        = (node.fuseBlue == BFT_NONE) ? node.GetOutputLength() : outLengthBlueN;
-        auto bufLen         = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
-                                                    : execPlan.rootPlan->length;
+    auto dataFits = [&execPlan](TreeNode& node, OperatingBuffer buffer) {
+        auto [nodeLen, nodeStride] = OutputFootprint(node);
+        auto bufLen                = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
+                                                           : execPlan.rootPlan->length;
 
         // if node's output is complex and buffer's format is real,
         // adjust output length to be 2x to make the units of
@@ -315,11 +334,9 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         bool outBufferIsReal
             = (buffer == OB_USER_OUT && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
               || (buffer == OB_USER_IN && execPlan.rootPlan->inArrayType == rocfft_array_type_real);
-        if(outBufferIsReal)
-        {
-            if(!kernelOutputIsReal)
-                nodeLen.front() *= 2;
-        }
+        const bool doubleFront = outBufferIsReal && !kernelOutputIsReal;
+        if(doubleFront)
+            nodeLen.front() *= 2;
 
         if(BufferIsUnitStride(execPlan, buffer))
         {
@@ -333,11 +350,27 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         // length+stride might not match what's declared on the
         // buffer.
         if(MatchingLengthStride(nodeLen,
-                                node.outStride,
+                                nodeStride,
                                 bufLen,
                                 buffer == OB_USER_OUT ? execPlan.rootPlan->outStride
                                                       : execPlan.rootPlan->inStride))
             return true;
+
+        // nodeLen was paired with nodeStride for MatchingLengthStride, but the
+        // decomposition below always needs the output lengths, which may differ
+        // (fused Bluestein nodes writing to user buffers are excluded as they have
+        // a behavior of their own that OutputFootprint handles).
+        // TODO: maintain consistency of axis ordering between input and output
+        // for all nodes (e.g. implicit-stride transpose AxB -> BxA can be made
+        // self-explanatory with explicit strides [1, A] -> [B, 1] without
+        // changing the ordering of axes). That would remove the ambiguity of
+        // "which length to use in this context?"
+        if(node.fuseBlue == BFT_NONE)
+        {
+            nodeLen = node.GetOutputLength();
+            if(doubleFront)
+                nodeLen.front() *= 2;
+        }
 
         // ensure that the node's dimensions fit exactly into the
         // buffer's dimensions.  e.g. if the node wants XxYxZ and the
@@ -424,18 +457,11 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
     auto getBufSize = [](TreeNode* node, bool input) {
-        auto lengthBlueN = {node->lengthBlueN};
-        auto outputLen   = node->fuseBlue == BFT_NONE ? node->GetOutputLength() : lengthBlueN;
-
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-        else
-        {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
-                                   node->outStride,
-                                   node->batch,
-                                   node->oDist);
-        }
+
+        const auto [outLen, outStride] = OutputFootprint(*node);
+        return compute_ptrdiff(outLen, outStride, node->batch, node->oDist);
     };
 
     size_t sizeBufIn  = 0;

@@ -385,6 +385,8 @@ const auto adhoc_tokens = {
     "real_forward_len_378_42_single_ip_batch_66000_istride_44_1_R_ostride_22_1_HI_idist_16632_odist_8316_ioffset_0_0_ooffset_0_0",
     "real_forward_len_527_25_single_ip_batch_67500_istride_26_1_R_ostride_13_1_HI_idist_13702_odist_6851_ioffset_0_0_ooffset_0_0",
     "real_forward_len_630_38_single_ip_batch_65540_istride_40_1_R_ostride_20_1_HI_idist_25200_odist_12600_ioffset_0_0_ooffset_0_0",
+    // multi-kernel fused Bluestein with padded output batches (odist > length)
+    "complex_forward_len_8209_single_op_batch_2_istride_1_CI_ostride_1_CI_idist_8209_odist_20000_ioffset_0_0_ooffset_0_0",
     // degenerate length-1 test cases
     "complex_forward_len_1_single_ip_batch_2_istride_1_CI_ostride_1_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_1_single_op_batch_2_istride_1_CI_ostride_1_CI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
