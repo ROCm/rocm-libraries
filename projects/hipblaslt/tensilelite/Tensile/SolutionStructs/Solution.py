@@ -3808,6 +3808,21 @@ class Solution(collections.abc.Mapping):
     resetGlobalReadVectorWidthB = state["GlobalReadVectorWidthB"]
     tuning = (state.get("SolutionIndex", -1) == -1)
 
+    # Resolved here because the auto-LRVW path below calls calcLdsPad(), which
+    # reads UnrollMajorLDSMetadata. Keep after _applySubIterSetting() above: it
+    # reads TransposeLDSMetadata while that is still the -1 sentinel.
+    if state["ProblemType"]["Sparse"]:
+      transposeLDSMetadata = int(state["TransposeLDSMetadata"])
+      if transposeLDSMetadata == -1:
+        state["TransposeLDSMetadata"] = int(not state["ProblemType"]["TLUMetadata"])
+      else:
+        state["TransposeLDSMetadata"] = int(transposeLDSMetadata)
+
+      state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+
+      if not state["DirectToVgprSparseMetadata"]:
+        state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]
+
     while True:
       userDepthU = depthuList[index[0]]
       state["StaggerUStride"] = resetStaggerUStride
@@ -4014,13 +4029,6 @@ class Solution(collections.abc.Mapping):
         optPadB = lrvwB
         readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
         readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
-        if state["ProblemType"]["Sparse"]:
-          if state["ProblemType"]["Sparse"] == 2:
-            optPadB //= 2
-            readRegsB //= 2
-          else:
-            optPadA //= 2
-            readRegsA //= 2
         if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
           reject(state, "LocalReadVectorWidth results in attempting to read LDS larger than b192, reject")
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
@@ -4126,8 +4134,8 @@ class Solution(collections.abc.Mapping):
           ldsPadB = calcLdsPadPerOperand("B", 1, numBytesB, lrvwB, optPadB)
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-          optPadM = (optPadB if state["ProblemType"]["Sparse"] == 2 else optPadA) // 4
-          grvwM = (state["GlobalReadVectorWidthB"] if state["ProblemType"]["Sparse"] == 2 else state["GlobalReadVectorWidthA"])  // 4
+          optPadM = max(4, (optPadB if state["ProblemType"]["Sparse"] == 2 else optPadA) // 4)
+          grvwM = min(state["GlobalReadVectorWidthMetadata"], 8)
           vwM = (state["VectorWidthB"] if state["ProblemType"]["Sparse"] == 2 else state["VectorWidthA"]) // 4
 
           if ldsPadM == -1:
@@ -4447,7 +4455,7 @@ class Solution(collections.abc.Mapping):
             maxLRVWA = 32
           if state["LocalReadVectorWidthA"] == -1:
             autoLRVWA = True
-            if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
+            if state["TransposeLDS"] or (state["MIInputPerThreadA"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
               state["LocalReadVectorWidthA"] = maxLRVWA
             else:
               state["LocalReadVectorWidthA"] = min(state["MIInputPerThreadA"], maxLRVWA)
@@ -4462,9 +4470,9 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA(%d) * BytePerMacDataTypeA(%s) > %d bytes." % (state["LocalReadVectorWidthA"], state["ProblemType"]["MacDataTypeA"].numBytes(), maxNumDsLoadBytesA))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeA"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
-                reject(state, printRejectionReason, "LocalReadVectorWidthA < %u" %(state["MIInputPerThread"])) # << Rejected here
-            if state["LocalReadVectorWidthA"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
+              if state["LocalReadVectorWidthA"] < state["MIInputPerThreadA"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+                reject(state, printRejectionReason, "LocalReadVectorWidthA < %u" %(state["MIInputPerThreadA"])) # << Rejected here
+            if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidth require Transpose LDS")
 
           if autoLRVWA:
@@ -4482,7 +4490,7 @@ class Solution(collections.abc.Mapping):
             maxLRVWB = 32
           if state["LocalReadVectorWidthB"] == -1:
             autoLRVWB = True
-            if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB):
+            if state["TransposeLDS"] or (state["MIInputPerThreadB"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB):
               state["LocalReadVectorWidthB"] = maxLRVWB
             else:
               state["LocalReadVectorWidthB"] = min(state["MIInputPerThreadB"], maxLRVWB)
@@ -4498,9 +4506,9 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB(%d) * BytePerMacDataTypeB(%s) > %d bytes." % (state["LocalReadVectorWidthB"], state["ProblemType"]["MacDataTypeB"].numBytes(), maxNumDsLoadBytesB))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeB"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
-                reject(state, printRejectionReason, "LocalReadVectorWidthB < %u" %(state["MIInputPerThread"]))
-            if state["LocalReadVectorWidthB"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
+              if state["LocalReadVectorWidthB"] < state["MIInputPerThreadB"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+                reject(state, printRejectionReason, "LocalReadVectorWidthB < %u" %(state["MIInputPerThreadB"]))
+            if state["LocalReadVectorWidthB"] > state["MIInputPerThreadB"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidthB require Transpose LDS")
 
           if autoLRVWB:
@@ -4510,8 +4518,8 @@ class Solution(collections.abc.Mapping):
                 state["LocalReadVectorWidthB"] //= 2
 
           if autoLRVWA or autoLRVWB:
-            wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
-            wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThread"], 1)
+            wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"], 1)
+            wlrB = max(state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"], 1)
             if (wlrA > 1) or (wlrB > 1):
               padA, padB, padM, padMXSA, padMXSB = calcLdsPad(isaInfoMap)
               ldsBlockSizePerPadA = calcLdsBlockSizePerPad("A", state["LocalReadVectorWidthA"])
@@ -5425,18 +5433,6 @@ class Solution(collections.abc.Mapping):
     ########################################
     # LDS
     ########################################
-
-    if state["ProblemType"]["Sparse"]:
-      transposeLDSMetadata = int(state["TransposeLDSMetadata"])
-      if transposeLDSMetadata == -1:
-        state["TransposeLDSMetadata"] = int(not state["ProblemType"]["TLUMetadata"])
-      else:
-        state["TransposeLDSMetadata"] = int(transposeLDSMetadata)
-
-      state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
-
-      if not state["DirectToVgprSparseMetadata"]:
-        state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]
 
     # Determine if we can load directly-to-LDS.
     # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
