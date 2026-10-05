@@ -42,6 +42,7 @@
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
 #include "SolutionIterator.hpp"
+#include "SynchronizerValidator.hpp"
 #include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
 
@@ -268,6 +269,9 @@ namespace TensileLite
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
+                ("check-synchronizer",       po::value<bool>()->default_value(true),
+                "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
+                " Solutions known not to use the buffer are skipped.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -932,6 +936,10 @@ int main(int argc, const char* argv[])
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
+            // Before ReferenceValidator: postSolution runs listeners in
+            // reverse, so the dirty-buffer verdict lands after the reference
+            // one rather than being overwritten by it.
+            listeners.addListener(std::make_shared<SynchronizerValidator>(args));
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);

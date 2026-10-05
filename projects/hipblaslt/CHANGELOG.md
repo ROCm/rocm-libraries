@@ -6,6 +6,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
+  dirty-buffer check for the handle's inter-workgroup flag buffers, which their
+  kernels must leave at zero (`1`, `on` or `true` to enable; anything else
+  disables). It scans the whole `Synchronizer` buffer used by GSU
+  MultipleBufferSingleKernel and amaxD, and the Stream-K flag block bound to the
+  launch's stream. Covers `rocblaslt_matmul_impl` only. Unlike
+  `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
+  device-to-host copy, so this is single-threaded debugging use only, not for
+  concurrent-stream workloads.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
