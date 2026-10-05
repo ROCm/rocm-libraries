@@ -24,9 +24,9 @@
  *
  *******************************************************************************/
 
-#include "gemm_kernel_base.hpp"
+#include "../gemm_kernel_base_instantiations.hpp"
 
 namespace rocwmma
 {
-    bool KernelI::sHeaderPrinted = false;
+    ROCWMMA_INSTANTIATE_GEMM_KERNEL_BASE(float64_t, float64_t, float64_t);
 } // namespace rocwmma
