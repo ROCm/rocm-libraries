@@ -298,3 +298,27 @@ Tests:
   N: [1]
   denseld: [1005002000]
   matrix: [rocsparse_matrix_random]
+
+# AISPARSE-691 regression: on the medium path (m > 1024) the forward elimination and
+# backward substitution launches size grid.y as (n - 1) / NUM_RHS + 1 with NUM_RHS = 8
+# and both kernels index with NUM_RHS * hipBlockIdx_y + rhs and no loop, so the launch
+# became illegal once the count of right-hand side blocks passed the hardware cap of
+# 65535, i.e. from n = 524281 on. The small path is already correct because it puts the
+# same count on grid.x. The medium path now clamps grid.y and both kernels grid-stride
+# over the blocks in steps of NUM_RHS.
+#
+# m = 1025 is the smallest size that forces the medium path; a small-m case passes
+# against the unfixed code and proves nothing. n = 524289 asks for 65537 blocks, the
+# smallest count the runtime actually rejects, since it accepts a grid.y of 65536 even
+# though the device reports 65535, so the last two blocks of right-hand sides are
+# reachable only through the new loop. denseld = m keeps this to about 2 GB of dense
+# right-hand sides plus an equally sized temporary buffer, which is why it sits in
+# pre_checkin. The harness residual check verifies all ldb * n entries numerically.
+- name: gtsv_no_pivot
+  category: pre_checkin
+  function: gtsv_no_pivot
+  precision: *single_precision
+  M: [1025]
+  N: [524289]
+  denseld: [1025]
+  matrix: [rocsparse_matrix_random]
