@@ -195,6 +195,7 @@ from kernels.common.attention_dense_spec import (
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
     check_dense_spec_preflight,
+    partial_tile_reason,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -966,7 +967,12 @@ def supports_attention_dense(
     if spec.varlen:
         return False, "gfx942 attention_dense: varlen not yet supported"
     if spec.ragged:
-        return False, "gfx942 attention_dense: ragged not yet supported"
+        # The factory sets ragged for any graph whose lengths leave a partial tile;
+        # name the length and tile rather than calling an ordinary graph ragged.
+        return False, (
+            f"gfx942 attention_dense needs whole tiles: {partial_tile_reason(spec)} "
+            f"(the partial-tile path is not yet supported)"
+        )
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
     if spec.use_sinks:

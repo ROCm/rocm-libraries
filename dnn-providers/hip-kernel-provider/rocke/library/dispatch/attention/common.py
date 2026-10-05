@@ -229,7 +229,7 @@ def _request_errors(req: OperatorRequest) -> list[str]:
             errors.append(f"{field} must be positive")
     if req.hdim_q != req.hdim_v:
         errors.append("only hdim_q == hdim_v is supported")
-    if int(req.nhead_q) % int(req.nhead_k):
+    if int(req.nhead_k) > 0 and int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
     try:
         _parse_attention_mask_type(req.mask_type)
@@ -240,6 +240,20 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     except KeyError as e:
         errors.append(str(e))
     return errors
+
+
+def _check_dense_factory_request(req: AttentionRequest) -> None:
+    """Raise ``ValueError`` for a request no dense spec can carry.
+
+    The dense spec factories are also called directly (the IngestorGenerator
+    profile tools pair ``dense_spec_for_request`` with ``supports_attention_dense``
+    and never consult ``Capability``), so a request field the spec has no slot for
+    must fail here rather than be dropped into a plain dense spec. The spec has one
+    ``head_size``.
+    """
+    errors = _request_errors(req)
+    if errors:
+        raise ValueError("; ".join(errors))
 
 
 def _device_num_cus() -> "int | None":

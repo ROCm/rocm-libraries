@@ -36,6 +36,29 @@ _COMMON_PERSIST_DECODES = frozenset({"auto", "qb_major", "hkv_major"})
 INT32_LIMIT = 2**31
 
 
+def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
+    """Say which sequence length leaves a partial tile on a ``ragged`` spec.
+
+    The dispatch factories set ``ragged`` for an ordinary graph whose lengths are
+    not tile multiples (Sq == Skv == 384 at block_m 256, say), so a refusal that
+    only says "ragged" reads as a varlen problem. This names the length and tile.
+    """
+    parts = []
+    if spec.seqlen_q % spec.block_m:
+        parts.append(
+            f"seqlen_q {spec.seqlen_q} is not a multiple of block_m {spec.block_m}"
+        )
+    if spec.seqlen_kv % spec.block_n:
+        parts.append(
+            f"seqlen_kv {spec.seqlen_kv} is not a multiple of block_n {spec.block_n}"
+        )
+    return "; ".join(parts) or (
+        f"ragged=True at seqlen_q {spec.seqlen_q} and seqlen_kv {spec.seqlen_kv}, "
+        f"which are already multiples of block_m {spec.block_m} and block_n "
+        f"{spec.block_n}"
+    )
+
+
 @dataclass(frozen=True)
 class AttentionDenseSpec:
     """Shared compile-time problem and geometry for dense attention."""
@@ -120,7 +143,11 @@ class AttentionDenseSpec:
             if self.varlen:
                 raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
+                raise ValueError(
+                    "sliding_window needs whole tiles: "
+                    f"{partial_tile_reason(self)} (the partial-tile path has no "
+                    "window mask)"
+                )
         else:
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
@@ -448,4 +475,5 @@ __all__ = [
     "INT32_LIMIT",
     "attention_dense_cache_key",
     "check_dense_spec_preflight",
+    "partial_tile_reason",
 ]
