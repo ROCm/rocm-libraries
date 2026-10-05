@@ -1,0 +1,29 @@
+{
+  "description": "An opcode set with one member.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "675eef40-32d9-57ee-b3db-c1d359b24ad7",
+    "name": "ued_fixture:one_of_single_member",
+    "metadata": "fd4997ec-550a-5a60-ba4a-b664e2f5242c",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": {
+            "one_of": [
+              "pointwise"
+            ]
+          },
+          "operands": {
+            "in_0": "$a"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

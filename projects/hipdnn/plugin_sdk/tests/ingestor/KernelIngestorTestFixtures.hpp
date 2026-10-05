@@ -349,7 +349,7 @@ inline std::unique_ptr<KernelIngestorStateManager<TestHandle>>
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_MATCH_SYMBOL,
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL},
         "engine 'test fixture'",
         cacheCapacity);
 }
@@ -664,7 +664,7 @@ inline std::unique_ptr<StateManager>
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(scoreSymbol),
-        "test.graph",
+        NativeGraphMatch{"test.graph"},
         "engine 'test fixture'",
         cacheCapacity);
 }
@@ -685,7 +685,7 @@ inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& en
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        "test.graph",
+        NativeGraphMatch{"test.graph"},
         "engine 'test fixture'",
         StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
         engineName);
@@ -849,7 +849,7 @@ inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateMana
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
 }
 
 inline EngineDescriptor

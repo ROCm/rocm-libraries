@@ -1,0 +1,32 @@
+{
+  "description": "An opcode set whose members declare every bound edge with the same optionality.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "0cc74e10-425d-521a-952c-c0b3785a7565",
+    "name": "ued_fixture:nodes_one_of_valid",
+    "metadata": "52bbfd34-12dc-5f27-b764-d97869d723af",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "norm",
+          "op": {
+            "one_of": [
+              "layernorm",
+              "rms_norm"
+            ]
+          },
+          "operands": {
+            "x": "$x",
+            "scale": "$scale",
+            "epsilon": "$epsilon"
+          },
+          "results": {
+            "y": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

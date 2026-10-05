@@ -1,0 +1,26 @@
+{
+  "description": "A single pointwise node binding both inputs and the output.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "3da7d0ca-0af2-51ba-a933-716167286866",
+    "name": "ued_fixture:nodes_single_pointwise_valid",
+    "metadata": "5382a981-4e6a-5d71-be42-8b1dfc3592b5",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

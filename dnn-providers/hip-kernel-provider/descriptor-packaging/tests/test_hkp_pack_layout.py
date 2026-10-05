@@ -882,6 +882,66 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
         )
 
 
+def _named_native_symbols(path, doc):
+    """The native symbols one descriptor names, by the field that names each.
+
+    A UED names one only on the `native` arm of `graph_match`; a `nodes`
+    pattern is resolved against the op-schema registry, not a native symbol.
+    """
+    kind = path.name.split(".")[-2]
+    if kind == "ued":
+        native = (doc.get("graph_match") or {}).get("native")
+        return {native} if native else set()
+    if kind == "umd":
+        return {doc["match_symbol"]}
+    if kind == "udd":
+        return {doc["dispatch_symbol"]}
+    if kind == "uhd" and doc.get("kind") == "native":
+        return {doc["payload"]}
+    return set()
+
+
+@pytest.mark.quick
+def test_example_tree_native_symbols_are_registered():
+    """Symbols the descriptors name must exist in a compiled native pack.
+
+    A descriptor can only resolve to something the C++ side registered. Naming
+    an unregistered symbol produces a tree that packs cleanly and then fails to
+    dispatch -- the packer has no way to know the difference.
+    """
+    packs_dir = (
+        Path(__file__).resolve().parent.parent.parent
+        / "src/engines/kernel_ingestor_engine/packs"
+    )
+    if not packs_dir.is_dir():
+        pytest.skip(f"native packs not present at {packs_dir}")
+
+    registered = set()
+    for cpp in packs_dir.glob("*.cpp"):
+        registered.update(re.findall(r'"(hipkernel\.[\w.]+)"', cpp.read_text()))
+    assert registered, "no native symbols found; the scan is broken, not the tree"
+
+    named = {}
+    for path in _descriptor_files(EXAMPLE_ROOT):
+        for symbol in _named_native_symbols(path, _read(path)):
+            named.setdefault(symbol, set()).add(path.name)
+    # Every example engine uses the native arm, so a graph_match the walk no
+    # longer reads would show up as no UED symbol at all.
+    assert any(
+        name.endswith(".ued.json") for names in named.values() for name in names
+    ), "no UED names a native graph_match; the walk is broken, not the tree"
+
+    unknown = {
+        symbol: sorted(names)
+        for symbol, names in named.items()
+        if symbol not in registered
+    }
+    assert not unknown, (
+        f"example descriptors name unregistered native symbols {unknown}; "
+        f"registered: {sorted(registered)}"
+    )
+
+
 def test_library_resolves_for_a_nested_standalone_ukd(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
@@ -1017,14 +1077,15 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
         ({"name": "test:engine\n"}, None, "scoped"),
         ({"tensor_roots": ["input_a"]}, None, "tensor_roots"),
         ({"graph_match": None}, None, "graph_match"),
-        ({"graph_match": {}}, None, "native"),
+        ({"graph_match": {}}, None, "exactly one of 'nodes' or 'native'"),
         ({"graph_match": {"native": ""}}, None, "native"),
         ({"graph_match": {"native": 7}}, None, "native"),
         (
             {"graph_match": {"native": "hipkernel.pointwise.graph_match", "nodes": []}},
             None,
-            "nodes",
+            "exactly one of 'nodes' or 'native'",
         ),
+        ({"graph_match": {"nodes": "pointwise"}}, None, "'nodes' must be a nonempty"),
         ({"knobs": "block_size"}, None, "knobs"),
         ({"knobs": ["block_size", "block_size"]}, None, "duplicates"),
         ({"numerical_notes": [7]}, None, "numerical_notes"),
@@ -1646,8 +1707,18 @@ def test_embedded_source_generics_are_identical_across_shards(
     authored = root / "pointwise"
     ued_path = authored / "solo.ued.json"
     ued = _read(ued_path)
+    # A declarative pattern packs like any other generic: validated, then
+    # shipped byte for byte.
     ued["graph_match"] = {
-        "native": "hipkernel.pointwise.graph_match",
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pointwise",
+                "op": "pointwise",
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ],
         "x-producer": {"build": "coherent"},
     }
     # Use unusual spacing to catch JSON rewriting.

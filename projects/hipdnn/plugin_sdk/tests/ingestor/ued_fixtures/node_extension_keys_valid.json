@@ -1,0 +1,38 @@
+{
+  "description": "Extension keys inside a node object and inside its op object are ignored.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "d40d37f0-baba-50a3-8e09-fd2b617de6d9",
+    "name": "ued_fixture:node_extension_keys_valid",
+    "metadata": "b4cc0d41-10ac-56c5-9063-b560bb956f59",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "norm",
+          "op": {
+            "one_of": [
+              "layernorm",
+              "rms_norm"
+            ],
+            "x-note": "family"
+          },
+          "operands": {
+            "x": "$x",
+            "scale": "$scale",
+            "epsilon": "$epsilon"
+          },
+          "results": {
+            "y": "$y"
+          },
+          "x-author": "fixture",
+          "_comment": "ignored",
+          "provenance": {
+            "tool": "fixture"
+          }
+        }
+      ]
+    }
+  }
+}

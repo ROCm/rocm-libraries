@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -1054,7 +1055,7 @@ TEST_F(TestGfx950AttentionDensePacks, RanksThroughItsRegisteredScoreSymbol)
 /// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950AttentionDensePacks, CarriesNoGraphScopedMatcher)
 {
-    EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
+    EXPECT_FALSE(std::holds_alternative<std::monostate>(_set->engine.graphMatch));
     const auto graphScoped
         = std::count_if(_set->matchers.begin(), _set->matchers.end(), [](const auto& matcher) {
               return matcher.scope == ingestor::MatchScope::GRAPH;

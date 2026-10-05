@@ -1,0 +1,25 @@
+{
+  "description": "'?' on an operand the registry declares required.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "3663cc46-821b-5bf8-99a8-41d4a45b97b9",
+    "name": "ued_fixture:optional_required_operand",
+    "metadata": "4e379164-8896-579e-844c-7aeb1d5fb920",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a?"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "description": "A result name bound under operands.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "36133160-68f3-5114-917a-0c321e92c73a",
+    "name": "ued_fixture:wrong_direction_edge",
+    "metadata": "0ea1b927-d869-5492-8054-a3008c9c804d",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "out_0": "$input_a"
+          },
+          "results": {}
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "description": "Extension keys beside the arm inside graph_match are ignored.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "7cbea444-7b58-5c8e-ae4a-aa2f9d28520a",
+    "name": "ued_fixture:graph_match_extension_key_valid",
+    "metadata": "1c1d2c8d-30e7-5df9-91a5-3fe508b3a891",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ],
+      "x-producer": {
+        "tool": "fixture"
+      },
+      "_comment": "ignored"
+    }
+  }
+}

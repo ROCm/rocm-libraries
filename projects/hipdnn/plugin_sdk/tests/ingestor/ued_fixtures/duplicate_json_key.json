@@ -1,0 +1,5 @@
+{
+  "description": "An operands object names the same edge twice; the document parse refuses the duplicate key.",
+  "valid": false,
+  "ued_text": "{\"version\": \"1.0\", \"id\": \"40fdd44c-d92b-5d27-a1e7-bcb4c8b08048\", \"name\": \"ued_fixture:duplicate_json_key\", \"metadata\": \"bd2660a5-e6a0-583d-aaa2-83096ff99134\", \"graph_match\": {\"nodes\": [{\"kind\": \"op\", \"id\": \"pointwise\", \"op\": \"pointwise\", \"operands\": {\"in_0\": \"$input_a\", \"in_0\": \"$input_b\"}, \"results\": {\"out_0\": \"$output\"}}]}}"
+}

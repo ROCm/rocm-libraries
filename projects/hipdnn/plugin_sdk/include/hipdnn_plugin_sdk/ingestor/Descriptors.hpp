@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -142,6 +143,25 @@ struct HeuristicDescriptor
     std::string payload;
 };
 
+class CompiledGraphPattern;
+
+/// The UED's `graph_match` arm by native symbol: a GraphMatchRegistry function that
+/// decides the graph topology and publishes the binding itself.
+struct NativeGraphMatch
+{
+    std::string symbol;
+};
+
+/// How an engine binds a graph, as its UED's `graph_match` declares it.
+///  - std::monostate: no `graph_match`; the engine binds nothing and every graph
+///    proceeds to the UMDs with an empty binding.
+///  - NativeGraphMatch: the `native` arm, resolved through GraphMatchRegistry.
+///  - CompiledGraphPattern: the declarative `nodes` arm, already resolved against the
+///    op-schema registry when the UED was read (see CompiledGraphPattern.hpp). Never
+///    null; immutable and shared by every copy of the descriptor.
+using GraphMatch
+    = std::variant<std::monostate, NativeGraphMatch, std::shared_ptr<const CompiledGraphPattern>>;
+
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
 /// engine-id space; must be globally unique, e.g. "rocke:SDPA".
 struct EngineDescriptor
@@ -161,9 +181,8 @@ struct EngineDescriptor
     /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
     /// yet, so nothing consumes the strings.
     std::vector<std::string> numericalNotes;
-    /// Resolved through GraphMatchRegistry; empty means this engine declares no
-    /// graph-topology match.
-    std::string graphMatchNativeSymbol;
+    /// The graph-topology match; std::monostate when the UED declares none.
+    GraphMatch graphMatch;
 };
 
 /// Which inputs a matcher reads, and so what its failure prunes.

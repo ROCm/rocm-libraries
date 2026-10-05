@@ -139,10 +139,29 @@ bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
            && dtype != nullptr && (*dtype == "FLOAT" || *dtype == "HALF");
 }
 
-/// Requires a published tensor and an in-range axis.
+/**
+ * @brief Reads an integer token the dispatch relies on.
+ *
+ * @throws HipdnnPluginException if @p bound has no integer under @p token.
+ */
+int64_t requireBoundInt(const BoundTokens& bound, std::string_view token)
+{
+    const auto value = tryGetBoundInt(bound, token);
+    if(!value.has_value())
+    {
+        std::string message = "conv_fwd dispatch is missing bound token '";
+        message += token;
+        message += "', or it does not hold an integer";
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       std::move(message));
+    }
+    return *value;
+}
+
+/// @throws HipdnnPluginException if @p root has no published extent at @p axis.
 int64_t dimension(const BoundTokens& bound, std::string_view root, size_t axis)
 {
-    return *tryGetBoundInt(bound, tensorElement(root, "dims", axis));
+    return requireBoundInt(bound, tensorElement(root, "dims", axis));
 }
 
 /// The node this engine's matchers read, or nullptr if the graph is not a single
@@ -164,6 +183,71 @@ const data_objects::ConvolutionFwdAttributes* convFwdNode(const MatchContext& co
     return &node.attributesAs<data_objects::ConvolutionFwdAttributes>();
 }
 
+/// Stride 1, dilation 1, no padding: the only shape the in-kernel p = h - r + 1 /
+/// q = width - s + 1 formula is correct for. The binding carries none of these vectors,
+/// so they are read from the node itself.
+bool isSupportedGeometry(const data_objects::ConvolutionFwdAttributes& attributes)
+{
+    return allEqual(attributes.stride(), SUPPORTED_SPATIAL_RANK, 1)
+           && allEqual(attributes.dilation(), SUPPORTED_SPATIAL_RANK, 1)
+           && allEqual(attributes.pre_padding(), SUPPORTED_SPATIAL_RANK, 0)
+           && allEqual(attributes.post_padding(), SUPPORTED_SPATIAL_RANK, 0);
+}
+
+/**
+ * @brief Every fact the dispatch relies on that the binding carries: one node,
+ *        cross-correlation, three exactly row-major operands of one supported dtype whose
+ *        extents fit an int, and the shapes the kernel computes y from.
+ *
+ * Read from tokens rather than the graph so it holds whichever `graph_match` arm bound
+ * them -- a declarative pattern can pair with this pack's dispatch, and its binding has
+ * passed none of the native graph match's checks.
+ */
+bool isServableBinding(const BoundTokens& bound)
+{
+    const auto* mode = tryGetBoundValue<std::string>(bound, "conv.conv_mode");
+    if(tryGetBoundInt(bound, "graph.node_count") != 1 || mode == nullptr
+       || *mode != "CROSS_CORRELATION" || !isSupportedOperand(bound, X_TOKEN)
+       || !isSupportedOperand(bound, W_TOKEN) || !isSupportedOperand(bound, Y_TOKEN))
+    {
+        return false;
+    }
+
+    // Uniform dtype across operands; mixed precision is a different kernel.
+    const auto* dtype = tryGetBoundValue<std::string>(bound, tensorField(X_TOKEN, DTYPE_FIELD));
+    const auto* wDtype = tryGetBoundValue<std::string>(bound, tensorField(W_TOKEN, DTYPE_FIELD));
+    const auto* yDtype = tryGetBoundValue<std::string>(bound, tensorField(Y_TOKEN, DTYPE_FIELD));
+    if(dtype == nullptr || wDtype == nullptr || yDtype == nullptr || *dtype != *wDtype
+       || *dtype != *yDtype)
+    {
+        return false;
+    }
+
+    // isSupportedOperand admitted all four extents of each operand, so these never throw.
+    const auto xC = dimension(bound, X_TOKEN, 1);
+    const auto xH = dimension(bound, X_TOKEN, 2);
+    const auto xW = dimension(bound, X_TOKEN, 3);
+    const auto wK = dimension(bound, W_TOKEN, 0);
+    const auto wR = dimension(bound, W_TOKEN, 2);
+    const auto wS = dimension(bound, W_TOKEN, 3);
+
+    // Filter channels vs. input channels -- this also refuses grouped conv, which is
+    // encoded purely as a smaller w channel count; the kernel has no notion of groups
+    // and indexes w using c from x alone, so a filter with fewer channels would read
+    // past the end.
+    //
+    // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
+    // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
+    //
+    // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
+    // and w alone, and the kernel writes every index < total into y, so a smaller y
+    // overflows.
+    return dimension(bound, W_TOKEN, 1) == xC && wR <= xH && wS <= xW
+           && dimension(bound, Y_TOKEN, 0) == dimension(bound, X_TOKEN, 0)
+           && dimension(bound, Y_TOKEN, 1) == wK && dimension(bound, Y_TOKEN, 2) == xH - wR + 1
+           && dimension(bound, Y_TOKEN, 3) == xW - wS + 1;
+}
+
 /**
  * @brief Graph-scoped applicability: is this the one conv shape this engine's kernel
  *        can launch? One pack, one operation, so this matcher (unlike Pointwise's)
@@ -171,23 +255,12 @@ const data_objects::ConvolutionFwdAttributes* convFwdNode(const MatchContext& co
  */
 std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
 {
-
     const auto* attributesPtr = convFwdNode(context);
-    if(attributesPtr == nullptr)
+    if(attributesPtr == nullptr || !isSupportedGeometry(*attributesPtr))
     {
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
-
-    // Deliberately narrow: stride 1, dilation 1, no padding is the only shape the
-    // in-kernel p = h - r + 1 / q = width - s + 1 formula is correct for.
-    if(!allEqual(attributes.stride(), SUPPORTED_SPATIAL_RANK, 1)
-       || !allEqual(attributes.dilation(), SUPPORTED_SPATIAL_RANK, 1)
-       || !allEqual(attributes.pre_padding(), SUPPORTED_SPATIAL_RANK, 0)
-       || !allEqual(attributes.post_padding(), SUPPORTED_SPATIAL_RANK, 0))
-    {
-        return std::nullopt;
-    }
 
     const auto* x = findTensor(context, attributes.x_tensor_uid());
     const auto* w = findTensor(context, attributes.w_tensor_uid());
@@ -212,55 +285,10 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     }
     bound.emplace("conv.conv_mode", std::string(mode));
     bound.emplace("conv.compute_data_type", std::string(compute));
-    if(*tryGetBoundValue<std::string>(bound, "conv.conv_mode") != "CROSS_CORRELATION"
-       || !isSupportedOperand(bound, X_TOKEN) || !isSupportedOperand(bound, W_TOKEN)
-       || !isSupportedOperand(bound, Y_TOKEN))
+    if(!isServableBinding(bound))
     {
         return std::nullopt;
     }
-
-    // Uniform dtype across operands; mixed precision is a different kernel.
-    if(*tryGetBoundValue<std::string>(bound, "x.dtype")
-           != *tryGetBoundValue<std::string>(bound, "w.dtype")
-       || *tryGetBoundValue<std::string>(bound, "x.dtype")
-              != *tryGetBoundValue<std::string>(bound, "y.dtype"))
-    {
-        return std::nullopt;
-    }
-
-    const auto xC = dimension(bound, X_TOKEN, 1);
-    const auto xH = dimension(bound, X_TOKEN, 2);
-    const auto xW = dimension(bound, X_TOKEN, 3);
-    const auto wK = dimension(bound, W_TOKEN, 0);
-    const auto wR = dimension(bound, W_TOKEN, 2);
-    const auto wS = dimension(bound, W_TOKEN, 3);
-
-    // Filter channels vs. input channels -- this also refuses grouped conv, which is
-    // encoded purely as a smaller w channel count; the kernel has no notion of groups
-    // and indexes w using c from x alone, so a filter with fewer channels would read
-    // past the end.
-    if(dimension(bound, W_TOKEN, 1) != xC)
-    {
-        return std::nullopt;
-    }
-
-    // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
-    // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
-    if(wR > xH || wS > xW)
-    {
-        return std::nullopt;
-    }
-
-    // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
-    // and w alone, and the kernel writes every index < total into y, so a smaller y
-    // overflows.
-    if(dimension(bound, Y_TOKEN, 0) != dimension(bound, X_TOKEN, 0)
-       || dimension(bound, Y_TOKEN, 1) != wK || dimension(bound, Y_TOKEN, 2) != xH - wR + 1
-       || dimension(bound, Y_TOKEN, 3) != xW - wS + 1)
-    {
-        return std::nullopt;
-    }
-
     return bound;
 }
 
@@ -268,13 +296,28 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
  * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
+ *
+ * This pack's only criterion, so it is also where the dispatch's preconditions are
+ * re-checked: a declarative `graph_match` admits graphs the native one refuses, and a
+ * pack whose criteria pass is one whose dispatch must serve the graph. That includes
+ * the roles: a pattern binding `$x` to the node's `w` edge can pass every shape check
+ * (n == k, h == r, width == s) and launch with x and w exchanged.
  */
-bool convFwdKernelMatches(const MatchContext& /*context*/,
+bool convFwdKernelMatches(const MatchContext& context,
                           const BoundTokens& bound,
                           const KernelDefinition& kernel)
 {
-    const auto* dataType = tryGetBoundValue<std::string>(bound, "x.dtype");
-    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType;
+    const auto* dataType = tryGetBoundValue<std::string>(bound, tensorField(X_TOKEN, DTYPE_FIELD));
+    if(dataType == nullptr || kernel.getStringMetadata(std::string(DTYPE_FIELD)) != *dataType
+       || !isServableBinding(bound))
+    {
+        return false;
+    }
+    const auto* attributes = convFwdNode(context);
+    return attributes != nullptr && isSupportedGeometry(*attributes)
+           && tryGetBoundInt(bound, X_TOKEN) == attributes->x_tensor_uid()
+           && tryGetBoundInt(bound, W_TOKEN) == attributes->w_tensor_uid()
+           && tryGetBoundInt(bound, Y_TOKEN) == attributes->y_tensor_uid();
 }
 
 double convFwdScore(const MatchContext& /*context*/,
@@ -292,21 +335,9 @@ double convFwdScore(const MatchContext& /*context*/,
  */
 ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 {
-    // Every token was written by the engine's graph match, which admitted this graph; a
-    // missing one means the catalog was built by an engine other than ours.
-    const auto read = [&bound](std::string_view token) {
-        const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
-        if(!value.has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "conv_fwd dispatch is missing bound token '" + std::string(token)
-                    + "', or it does not hold a tensor uid");
-        }
-        return *value;
-    };
-
-    return {read(X_TOKEN), read(W_TOKEN), read(Y_TOKEN)};
+    return {requireBoundInt(bound, X_TOKEN),
+            requireBoundInt(bound, W_TOKEN),
+            requireBoundInt(bound, Y_TOKEN)};
 }
 
 // ---------------------------------------------------------------------------

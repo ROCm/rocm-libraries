@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
 from .errors import HkpPackError
+from .graph_pattern import validate_graph_pattern
+from .json_rules import DuplicateKeyError, loads_strict, require_known_keys
 
 KDP_TYPE = "kdp"
 UKD_TYPE = "ukd"
@@ -26,6 +28,26 @@ _SCALAR_TYPES = (str, int, float, bool)
 # authoritative, RFC 0020 §4.2): exactly one colon, neither first nor last, with
 # the name-char class on both halves.
 _UED_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
+
+# The UED members the runtime loader accepts and the ones it requires (loader is
+# authoritative: DescriptorLoader.hpp parseEngineDescriptor). The JSON Schema in
+# projects/hipdnn/plugin_sdk/schemas declares the same sets.
+UED_KEYS = (
+    "version",
+    "id",
+    "name",
+    "sdk_version",
+    "heuristic",
+    "metadata",
+    "knobs",
+    "behavior_notes",
+    "numerical_notes",
+    "graph_match",
+)
+UED_REQUIRED_KEYS = ("version", "id", "name", "metadata")
+
+# The two `graph_match` arms; a UED carries exactly one.
+GRAPH_MATCH_ARMS = ("nodes", "native")
 
 
 def type_from_filename(path):
@@ -93,7 +115,11 @@ def _read_json(path):
     except OSError as exc:
         raise HkpPackError(f"cannot read descriptor {path}: {exc}") from exc
     try:
-        return json.loads(text)
+        return loads_strict(text)
+    except DuplicateKeyError as exc:
+        raise HkpPackError(
+            f"descriptor JSON in {path.name} has duplicate key '{exc.key}'"
+        ) from exc
     except json.JSONDecodeError as exc:
         raise HkpPackError(f"malformed descriptor JSON in {path.name}: {exc}") from exc
 
@@ -416,15 +442,6 @@ def _validate_kdp(desc, log=print):
         _validate_inline_ukd(ukd, path, log)
 
 
-def _require_known_keys(doc, allowed, where):
-    """Allow known fields and the runtime's extension keys."""
-    for key in doc:
-        if key not in allowed and not (
-            key.startswith(("x-", "_")) or key == "provenance"
-        ):
-            raise HkpPackError(f"{where} has unknown key '{key}'")
-
-
 def _require_string(doc, key, where):
     _require(doc, [key], where)
     value = doc[key]
@@ -433,26 +450,17 @@ def _require_string(doc, key, where):
     return value
 
 
-def _validate_ued(desc):
-    """Validate native UED fields; runtime admission is checked separately."""
+def _validate_ued(desc, op_schema_registry=None):
+    """Validate a UED as the runtime loader parses it.
+
+    A `nodes` pattern is resolved against the op-schema registry; see
+    graph_pattern.resolve_op_schema_registry for where op_schema_registry
+    defaults to. Native symbol registration is checked by the runtime alone.
+    """
     doc = desc.doc
     where = f"UED {desc.path.name}"
-    _require_known_keys(
-        doc,
-        {
-            "version",
-            "id",
-            "name",
-            "sdk_version",
-            "heuristic",
-            "metadata",
-            "knobs",
-            "behavior_notes",
-            "numerical_notes",
-            "graph_match",
-        },
-        where,
-    )
+    require_known_keys(doc, UED_KEYS, where)
+    _require(doc, UED_REQUIRED_KEYS, where)
     name = _require_string(doc, "name", where)
     if not _UED_NAME_RE.fullmatch(name):
         raise HkpPackError(
@@ -480,8 +488,15 @@ def _validate_ued(desc):
         graph_where = f"{where} graph_match"
         if not isinstance(graph_match, dict):
             raise HkpPackError(f"{graph_where} must be an object")
-        _require_known_keys(graph_match, {"native"}, graph_where)
-        _require_string(graph_match, "native", graph_where)
+        require_known_keys(graph_match, GRAPH_MATCH_ARMS, graph_where)
+        if sum(arm in graph_match for arm in GRAPH_MATCH_ARMS) != 1:
+            raise HkpPackError(
+                f"{graph_where} must contain exactly one of 'nodes' or 'native'"
+            )
+        if "native" in graph_match:
+            _require_string(graph_match, "native", graph_where)
+        else:
+            validate_graph_pattern(graph_match["nodes"], where, op_schema_registry)
 
 
 # The loader's enum vocabularies, mirrored so a bad spelling is a pack-time
@@ -548,7 +563,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, log=print):
+def _validate_shape(desc, log=print, op_schema_registry=None):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -569,7 +584,7 @@ def _validate_shape(desc, log=print):
     if dtype == KDP_TYPE:
         _validate_kdp(desc, log)
     if dtype == UED_TYPE:
-        _validate_ued(desc)
+        _validate_ued(desc, op_schema_registry)
     if dtype == "umd":
         _validate_umd(desc)
     if dtype == "udd":
@@ -580,7 +595,9 @@ def _validate_shape(desc, log=print):
         _validate_kmd(desc)
 
 
-def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
+def load_flat_input(
+    root, log=print, *, exclude_folders=(), disabled_kinds=(), op_schema_registry=None
+):
     """Load and structurally validate every *.json descriptor under a root.
 
     Walks the root recursively: a descriptor's authored subpath is meaningful
@@ -594,7 +611,12 @@ def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
     dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
     the same way, so nothing the walk passes over is invisible. Raises
     HkpPackError on any malformed / missing-field / unknown-type /
-    dangling-reference descriptor that IS type-tagged.
+    dangling-reference descriptor that IS type-tagged, and on a duplicate JSON
+    key at any depth, which the runtime loader refuses too.
+
+    op_schema_registry names the op-schema registry a UED's `graph_match.nodes`
+    pattern resolves against; graph_pattern.resolve_op_schema_registry gives
+    the default. It is read only when some UED carries a pattern.
 
     `exclude_folders` names top-level child folders of the root that are not
     content in this build: nothing under one is read, validated or shipped.
@@ -671,7 +693,7 @@ def load_flat_input(root, log=print, *, exclude_folders=(), disabled_kinds=()):
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, log)
+        _validate_shape(desc, log, op_schema_registry)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors)

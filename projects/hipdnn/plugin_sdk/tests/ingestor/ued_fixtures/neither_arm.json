@@ -1,0 +1,11 @@
+{
+  "description": "graph_match carries neither 'nodes' nor 'native'.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "ca815293-5cab-5a69-bf02-6defd7d2458d",
+    "name": "ued_fixture:neither_arm",
+    "metadata": "4b7562a1-e023-5d37-9772-7bdd7883e914",
+    "graph_match": {}
+  }
+}

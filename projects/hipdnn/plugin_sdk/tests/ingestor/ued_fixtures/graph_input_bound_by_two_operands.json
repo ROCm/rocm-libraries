@@ -1,0 +1,36 @@
+{
+  "description": "Two operands bind a variable no node produces.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "898d65dd-7757-5663-9b9e-ebd5ddc97f9a",
+    "name": "ued_fixture:graph_input_bound_by_two_operands",
+    "metadata": "e4a94c50-48ce-58a5-9ab7-bf5f2e5a4a70",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "first",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$x"
+          },
+          "results": {
+            "out_0": "$a"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "second",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$x"
+          },
+          "results": {
+            "out_0": "$b"
+          }
+        }
+      ]
+    }
+  }
+}

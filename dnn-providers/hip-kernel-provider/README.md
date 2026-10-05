@@ -71,6 +71,19 @@ Reference-engine limits:
 Packedness does not relax these limits. Launch dimensions and grid sizes must
 fit their kernel and HIP argument types.
 
+A UED may replace either engine's native `graph_match` with a declarative
+`graph_match.nodes` pattern (RFC 0020) and keep the native criteria and dispatch.
+The pattern checks topology only, so these limits are enforced again by the
+criteria both arms run: the pointwise operation criteria re-check the bound
+operands, and the convolution kernel criterion re-checks the bound operands and
+reads stride, dilation, and padding from the node. Use the node ids `pointwise`
+and `conv` and the tensor roots above, or the criteria decline the graph. The
+pattern's choice of variable for each edge is part of the contract: the
+convolution criterion compares the bound `x`, `w`, and `y` UIDs with the node's
+edges, but the pointwise criteria cannot tell a pattern that binds `input_a` to
+`in_1` from a correct one, so a SUB pattern must bind `in_0` to `input_a` and
+`in_1` to `input_b`.
+
 Bindings own their data and are created once per engine reached during a catalog
 build. Cached catalogs reuse them for criteria, ranking, workspace queries, and
 plan construction. Operation and dtype criteria read published values; dispatch

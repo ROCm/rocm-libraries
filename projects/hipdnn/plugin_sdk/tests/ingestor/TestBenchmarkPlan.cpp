@@ -168,7 +168,7 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeThreeKernelStubState
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_MATCH_SYMBOL);
+        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
 }
 
 /// With benchmarking off, buildPlan() builds one plain GenericPlan for the ranked front

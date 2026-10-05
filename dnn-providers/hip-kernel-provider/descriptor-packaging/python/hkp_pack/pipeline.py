@@ -1479,6 +1479,7 @@ def run_pipeline(
     source_label=None,
     exclude_folders=(),
     disabled_kinds=(),
+    op_schema_registry=None,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -1500,6 +1501,9 @@ def run_pipeline(
     not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
+
+    op_schema_registry names the registry a UED's `graph_match.nodes` pattern
+    resolves against (see load_flat_input).
     """
     out_root = Path(out_root)
     results = {}
@@ -1512,6 +1516,7 @@ def run_pipeline(
         log=log,
         exclude_folders=exclude_folders,
         disabled_kinds=disabled_kinds,
+        op_schema_registry=op_schema_registry,
     )
 
     if inter_root is None:

@@ -1,0 +1,38 @@
+{
+  "description": "'?' on an operand whose variable another node produces.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "302d2ae1-5332-5fc7-ba70-1d76724749c9",
+    "name": "ued_fixture:optional_produced_variable",
+    "metadata": "b030baa6-b56a-5e8f-ad51-7d30fd6c99e9",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "conv",
+          "op": "convolution_fwd",
+          "operands": {
+            "x": "$x",
+            "w": "$w"
+          },
+          "results": {
+            "y": "$conv_out"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "add",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$bias",
+            "in_1": "$conv_out?"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

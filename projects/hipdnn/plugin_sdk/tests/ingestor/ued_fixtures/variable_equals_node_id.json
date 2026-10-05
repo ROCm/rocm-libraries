@@ -1,0 +1,25 @@
+{
+  "description": "A variable has the same name as a node id.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "aba0c103-5f63-560f-937a-81b307c21e4e",
+    "name": "ued_fixture:variable_equals_node_id",
+    "metadata": "d51964a9-a3d4-5554-b106-15cfdf6ccd5e",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$pointwise"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

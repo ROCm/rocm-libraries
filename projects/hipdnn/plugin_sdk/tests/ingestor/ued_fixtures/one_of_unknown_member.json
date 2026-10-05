@@ -1,0 +1,30 @@
+{
+  "description": "An opcode-set member absent from the registry.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "d2414210-ab36-589d-bd41-3032231a1563",
+    "name": "ued_fixture:one_of_unknown_member",
+    "metadata": "52f98a76-ff51-515e-870e-6d2e852b27b6",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": {
+            "one_of": [
+              "pointwise",
+              "pointwise_relu"
+            ]
+          },
+          "operands": {
+            "in_0": "$a"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

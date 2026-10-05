@@ -1,0 +1,26 @@
+{
+  "description": "A node id is a reserved root.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "b15a4d2e-4452-580c-a9e3-af9edd2ef101",
+    "name": "ued_fixture:reserved_node_id",
+    "metadata": "da0a91c0-20a7-5aeb-9f0e-e3f94ec5fd4f",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "graph",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

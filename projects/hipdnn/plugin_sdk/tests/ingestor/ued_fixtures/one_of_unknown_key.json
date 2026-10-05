@@ -1,0 +1,31 @@
+{
+  "description": "An unknown non-extension key inside the op object.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "536170a1-20df-50ef-a676-e4c31e863dfb",
+    "name": "ued_fixture:one_of_unknown_key",
+    "metadata": "196057bb-4fe7-5426-a27b-29f23d2d46de",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "norm",
+          "op": {
+            "one_of": [
+              "layernorm",
+              "rms_norm"
+            ],
+            "mode": "fast"
+          },
+          "operands": {
+            "x": "$x"
+          },
+          "results": {
+            "y": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

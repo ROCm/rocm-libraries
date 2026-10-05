@@ -1,0 +1,25 @@
+{
+  "description": "An opcode absent from the registry.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "bd2a58a9-997c-5f60-bcc9-178bbc9bed25",
+    "name": "ued_fixture:unknown_opcode",
+    "metadata": "a2623304-ef3e-5621-8601-ff1614aefb6e",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "add",
+          "op": "pointwise_add",
+          "operands": {
+            "in_0": "$a"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

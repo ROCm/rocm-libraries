@@ -1,0 +1,25 @@
+{
+  "description": "An operand name the op does not declare.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "e24c7ef5-29d6-5f0a-8237-b862a2295cf3",
+    "name": "ued_fixture:unknown_edge_name",
+    "metadata": "35ff9ed6-1558-510d-a8bb-cbcd87d24ac8",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "A": "$input_a"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

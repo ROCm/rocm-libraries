@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -199,7 +200,7 @@ const char* severityName(hipdnnSeverity_t severity)
 }
 
 /// Every native symbol name one DescriptorSet references, across all five hook kinds:
-/// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
+/// the engine's native `graph_match` symbol, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
 /// `dispatches[].dispatchSymbol`, and `heuristic->payload` for a native heuristic.
 /// Harvested from pass 1's unresolved-symbol sets, before any stub is registered.
@@ -217,9 +218,9 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
     HarvestedSymbols harvested;
     for(const auto& set : sets)
     {
-        if(!set.engine.graphMatchNativeSymbol.empty())
+        if(const auto* native = std::get_if<NativeGraphMatch>(&set.engine.graphMatch))
         {
-            harvested.graphMatch.insert(set.engine.graphMatchNativeSymbol);
+            harvested.graphMatch.insert(native->symbol);
         }
         for(const auto& matcher : set.matchers)
         {

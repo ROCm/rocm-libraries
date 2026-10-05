@@ -1,0 +1,25 @@
+{
+  "description": "A variable is a reserved root.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "9ab49777-7299-51a6-8f1b-c6bff9e0f2af",
+    "name": "ued_fixture:reserved_variable",
+    "metadata": "6cf27432-c867-5a22-88b2-22282797c591",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$kernel"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

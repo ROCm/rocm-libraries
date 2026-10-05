@@ -77,7 +77,7 @@ TEST(TestIngestorArchGate, PrunesAPackWhoseArchExcludesTheDevice)
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx950"})},
                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                               "test.graph");
+                               NativeGraphMatch{"test.graph"});
 
     const TestGraph graph(makeGraphId(0x71));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
@@ -98,7 +98,7 @@ TEST(TestIngestorArchGate, PrunesBeforeRunningAnyMatcher)
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx950"})},
                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                               "test.graph");
+                               NativeGraphMatch{"test.graph"});
 
     const TestGraph graph(makeGraphId(0x72));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
@@ -120,7 +120,7 @@ TEST(TestIngestorArchGate, AdmitsAPackWhoseArchIncludesTheDevice)
         makeTestDispatches(),
         {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx90a", "gfx942"})},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
 
     const TestGraph graph(makeGraphId(0x73));
     const auto properties = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);
@@ -142,7 +142,7 @@ TEST(TestIngestorArchGate, GatesPerDeviceRatherThanPerGraph)
                                makeTestDispatches(),
                                {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx942"})},
                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                               "test.graph");
+                               NativeGraphMatch{"test.graph"});
 
     const TestGraph graph(makeGraphId(0x74));
     const auto supported = propertiesFor(DEVICE_ARCH_WITH_SUFFIX);

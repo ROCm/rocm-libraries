@@ -13,6 +13,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <istream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -34,7 +35,10 @@
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
@@ -76,16 +80,12 @@
  * completed metadata tuples collide on the catalog key.
  *
  * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Six deliberate divergences, pending an amendment:
+ * their own follow-ups land. Five deliberate divergences, pending an amendment:
  *
  *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
  *    file whose name and body disagree has no correct reading.
  *  - RFC 0020 §4.2: `version` required on every type, not just the UED -- a type with no
  *    version can't be gated by §11.1 at all.
- *  - RFC 0020 §4.2 lists no `graph_match`: an object naming the graph-topology pattern
- *    this engine matches, with one inner key today, `native`, a symbol resolved through
- *    GraphMatchRegistry. Its amendment lands with the finalized declarative pattern this
- *    key is the escape hatch for.
  *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
  *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
  *    built against that arch. The other five types stay keyed by id alone.
@@ -107,11 +107,20 @@
  * spelling of its C++ field, and an unrecognized key fails the file naming the path unless
  * it announces itself as extension data (see requireKnownKeys). The KDP's
  * `kernelDescriptors` key is camelCase, the RFCs' own inconsistency, kept as-is rather
- * than silently "fixed".
+ * than silently "fixed". A key repeated within one JSON object, at any depth, fails the
+ * file (see parseDescriptorDocument), except in a KDP: its single-pass scan keeps the last
+ * occurrence, as a DOM parse does (see PackScan).
  *
- * Only fields Descriptors.hpp models are parsed; the RFCs describe more (declarative
- * `nodes`/`criteria`, `features_signature`) that arrive with follow-up RFCs. This loader
- * mirrors the structs exactly, so a new field is a change in both places and nowhere else.
+ * A UED's `graph_match` carries exactly one of its two RFC 0020 arms. `native` is held as
+ * the symbol and resolved through GraphMatchRegistry when the set is validated. `nodes` is
+ * parsed and compiled against the op-schema registry here, while the file is read, so a
+ * pattern failing an RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format
+ * error and registers no engine.
+ *
+ * Only fields Descriptors.hpp models are parsed; the RFCs describe more (a declarative
+ * `criteria` beside `nodes`, `features_signature`) that arrive with follow-up RFCs. This
+ * loader mirrors the structs exactly, so a new field is a change in both places and
+ * nowhere else.
  *
  * Nothing here throws to its caller: a malformed file, unresolved cross-reference, or
  * unregistered native symbol is logged at ERROR naming the file, id and name, and
@@ -168,6 +177,28 @@ struct DescriptorCatalog
     KernelMap kernels;
 };
 
+/// Every top-level key a UED may carry besides extension keys: RFC 0020 §4.2's members
+/// plus `sdk_version` (see parseEngineDescriptor()). The UED JSON Schema's `properties`
+/// spell the same set.
+inline constexpr std::array<std::string_view, 10> UED_KEYS{"version",
+                                                           "id",
+                                                           "name",
+                                                           "sdk_version",
+                                                           "heuristic",
+                                                           "metadata",
+                                                           "knobs",
+                                                           "behavior_notes",
+                                                           "numerical_notes",
+                                                           "graph_match"};
+
+/// The UED keys a file must carry; every other member of UED_KEYS is optional.
+inline constexpr std::array<std::string_view, 4> UED_REQUIRED_KEYS{
+    "version", "id", "name", "metadata"};
+
+/// The two arms of a UED's `graph_match`, of which an object carries exactly one: the
+/// declarative pattern (see GraphPattern.hpp) or a GraphMatchRegistry symbol.
+inline constexpr std::array<std::string_view, 2> GRAPH_MATCH_KEYS{"nodes", "native"};
+
 namespace detail
 {
 
@@ -209,57 +240,11 @@ struct FileType
     void (*insert)(DescriptorCatalog&, const DescriptorFile&);
 };
 
-/// Every parse violation leaves through here, so the caller catches one type. The message
-/// carries the file path only because `where` is the path: the caller logs it too, and the
-/// duplication is worth an exception that is readable on its own.
-[[noreturn]] inline void fail(const std::string& message)
-{
-    throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE, message);
-}
-
 inline void requireObject(const nlohmann::json& value, const std::string& where)
 {
     if(!value.is_object())
     {
         fail(where + " must be a JSON object");
-    }
-}
-
-/// Extension data has to look like extension data: a key starting `x-` or `_`, plus
-/// `provenance`, the one unprefixed block. The packager keeps it inline only on a KDP
-/// header (a packed UKD's lives in the provenance sidecar), but unpacked and authored
-/// trees carry it on any descriptor. Those warn and are ignored, so a descriptor can
-/// carry tracking fields the loader has no use for.
-///
-/// Anything else the struct does not spell fails the file, because the alternative is
-/// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
-/// the engine loads and ranks by the fallback heuristic for the rest of its life. A KDP
-/// spelling `arh` is arch-independent and dispatches its kernels on every GPU. The
-/// default log level is `off` (LogLevel.hpp), so a warning about either reaches nobody.
-/// A producer that wants a key of its own prefixes it -- a one-line change there, against
-/// a descriptor tree that otherwise cannot be trusted to mean what it spells.
-inline bool isExtensionKey(std::string_view key)
-{
-    return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";
-}
-
-inline void requireKnownKeys(const nlohmann::json& object,
-                             std::initializer_list<std::string_view> allowed,
-                             const std::string& where)
-{
-    for(const auto& item : object.items())
-    {
-        if(std::find(allowed.begin(), allowed.end(), item.key()) != allowed.end())
-        {
-            continue;
-        }
-        if(!isExtensionKey(item.key()))
-        {
-            fail("unknown key '" + item.key() + "' in " + where
-                 + "; extension keys must start with 'x-' or '_'");
-        }
-        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: extension key '" << item.key() << "' in "
-                                                                    << where << "; ignoring it");
     }
 }
 
@@ -733,24 +718,46 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
     return values;
 }
 
+/// A UED's `graph_match` object: exactly one arm, `nodes` compiled here against the
+/// op-schema registry, `native` held as its symbol until the set is validated.
+/// @param where Locates the object, for the structural errors.
+/// @param engine Names the UED, for the pattern errors: RFC 0020 §15 asks a pattern
+///        error to name the UED and the node.
+inline GraphMatch parseGraphMatch(const nlohmann::json& object,
+                                  const std::string& where,
+                                  const std::string& engine)
+{
+    requireObject(object, where);
+    requireKnownKeys(object, GRAPH_MATCH_KEYS, where);
+    const auto nodes = object.find("nodes");
+    const bool hasNodes = nodes != object.end();
+    const bool hasNative = object.find("native") != object.end();
+    if(hasNodes && hasNative)
+    {
+        fail(where + " carries both 'nodes' and 'native'; name exactly one");
+    }
+    if(!hasNodes && !hasNative)
+    {
+        fail(where + " carries neither 'nodes' nor 'native'; name exactly one");
+    }
+    if(hasNative)
+    {
+        return NativeGraphMatch{requireString(object, "native", where)};
+    }
+    return compileGraphPattern(parseGraphPattern(*nodes, engine), engine);
+}
+
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)
 {
     // `sdk_version` deviates from RFC 0020 §4.2, whose field table and schema don't list
     // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
     // under an engine reads tokens that engine's binding produced, so it belongs on the
     // engine instead. Accepted here pending the RFC amendment that moves the field.
-    requireKnownKeys(root,
-                     {"version",
-                      "id",
-                      "name",
-                      "sdk_version",
-                      "heuristic",
-                      "metadata",
-                      "knobs",
-                      "behavior_notes",
-                      "numerical_notes",
-                      "graph_match"},
-                     where);
+    requireKnownKeys(root, UED_KEYS, where);
+    for(const auto key : UED_REQUIRED_KEYS)
+    {
+        static_cast<void>(requireKey(root, key, where));
+    }
 
     EngineDescriptor engine;
     engine.id = requireId(root, "id", where);
@@ -798,14 +805,13 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         }
     }
 
-    // Without graph_match, UMDs decide applicability and no graph tokens are bound.
-    // Only native graph matching is supported.
+    // Absent, the engine binds nothing and its packs' UMDs alone decide applicability.
+    // Parsed last, so a pattern error can name the engine it belongs to.
     if(const auto it = root.find("graph_match"); it != root.end())
     {
-        const std::string graphMatchWhere = where + " graph_match";
-        requireObject(*it, graphMatchWhere);
-        requireKnownKeys(*it, {"native"}, graphMatchWhere);
-        engine.graphMatchNativeSymbol = requireString(*it, "native", graphMatchWhere);
+        const auto described
+            = describeDescriptor("engine", engine.name, engine.id) + " in " + where;
+        engine.graphMatch = parseGraphMatch(*it, where + " graph_match", described);
     }
     return engine;
 }
@@ -1883,6 +1889,51 @@ inline void settleCatalog(DescriptorCatalog& catalog, const std::filesystem::pat
     settle(catalog.kernels);
 }
 
+/// Parses one descriptor file's text.
+///
+/// Comments only, no trailing commas: RFC 0020 §4.3's authored form strips `//` and
+/// `/* */` before validation, narrower than what "JSONC" commonly implies (VS Code,
+/// tsconfig) -- a trailing comma is still a hard nlohmann parse_error.101. Only the parser
+/// ever sees the comments -- `insertCatalogEntry` compares the parsed documents, so a
+/// comment cannot make two copies of one descriptor look like a collision.
+///
+/// A key repeated within one object fails the parse, naming the key and @p where.
+/// nlohmann keeps the last occurrence without a word, so `{"native": "a", "native": "b"}`
+/// would load as `b` while a reviewer reads `a`.
+inline nlohmann::json parseDescriptorDocument(std::istream& input, const std::string& where)
+{
+    // One key set per open object, innermost last. Arrays open no set: a key always
+    // belongs to the nearest enclosing object.
+    std::vector<std::unordered_set<std::string>> openObjects;
+    const nlohmann::json::parser_callback_t rejectDuplicateKeys
+        = [&openObjects,
+           &where](int /*depth*/, nlohmann::json::parse_event_t event, nlohmann::json& parsed) {
+              switch(event)
+              {
+              case nlohmann::json::parse_event_t::object_start:
+                  openObjects.emplace_back();
+                  break;
+              case nlohmann::json::parse_event_t::object_end:
+                  openObjects.pop_back();
+                  break;
+              case nlohmann::json::parse_event_t::key:
+                  if(const auto& key = parsed.get_ref<const std::string&>();
+                     !openObjects.back().insert(key).second)
+                  {
+                      fail("duplicate key '" + key + "' in " + where);
+                  }
+                  break;
+              default:
+                  break;
+              }
+              return true;
+          };
+    return nlohmann::json::parse(input,
+                                 rejectDuplicateKeys,
+                                 /*allow_exceptions=*/true,
+                                 /*ignore_comments=*/true);
+}
+
 /// Parses one root's files into @p catalog, in the order they were collected.
 inline void
     loadDescriptorFiles(const std::vector<std::pair<std::filesystem::path, const FileType*>>& files,
@@ -1926,10 +1977,7 @@ inline void
             }
             else
             {
-                document = nlohmann::json::parse(file,
-                                                 nullptr,
-                                                 /*allow_exceptions=*/true,
-                                                 /*ignore_comments=*/true);
+                document = parseDescriptorDocument(file, path.string());
             }
         }
         catch(const std::exception& parseError)
@@ -2412,13 +2460,13 @@ inline std::vector<ValidatedSet<THandle>>
                 resolvable = false;
             }
         }
-        if(!set.engine.graphMatchNativeSymbol.empty()
-           && !GraphMatchRegistry::isRegistered(set.engine.graphMatchNativeSymbol))
+        if(const auto* native = std::get_if<NativeGraphMatch>(&set.engine.graphMatch);
+           native != nullptr && !GraphMatchRegistry::isRegistered(native->symbol))
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name
-                                    << "' names unregistered graph_match symbol '"
-                                    << set.engine.graphMatchNativeSymbol << "'; dropping it");
+                                    << "' names unregistered graph_match symbol '" << native->symbol
+                                    << "'; dropping it");
             resolvable = false;
         }
         for(const auto& dispatch : set.dispatches)
@@ -2486,7 +2534,7 @@ inline std::vector<ValidatedSet<THandle>>
             // Built to prove the set validates -- Container::copyEngineIds is static and
             // would otherwise advertise an id for a set that fails to construct -- and
             // returned with the set, so an engine constructed from it is not built twice.
-            built = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
+            built = makeStateManager<THandle>(set, set.engine.graphMatch);
         }
         catch(const std::exception& error)
         {

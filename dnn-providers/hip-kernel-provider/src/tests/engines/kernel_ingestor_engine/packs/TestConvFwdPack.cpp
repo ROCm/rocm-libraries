@@ -8,18 +8,27 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -109,16 +118,24 @@ TEST(TestConvFwdGraphMatcher, RejectsSingletonStrideRelaxationEvenWhenCanonicall
 
 TEST(TestConvFwdGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
 {
+    // A conv over one-element tensors: the only shape a scalar operand can take.
+    const auto unitShape = [](auto& graph) {
+        for(auto& tensor : graph.tensors)
+        {
+            tensor->dims = {1, 1, 1, 1};
+            tensor->strides = {1, 1, 1, 1};
+        }
+    };
+    // Every state below mutates this baseline; were it refused, each refusal would be
+    // vacuous.
+    EXPECT_TRUE(matches(GraphFixture(transformGraph(buildConvFwdGraph(), unitShape)).context()));
+
     for(size_t operand = 0; operand < 3; ++operand)
     {
         for(int state = 0; state < 4; ++state)
         {
             const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [=](auto& graph) {
-                for(auto& tensor : graph.tensors)
-                {
-                    tensor->dims = {1, 1, 1, 1};
-                    tensor->strides = {1, 1, 1, 1};
-                }
+                unitShape(graph);
                 auto& tensor = *graph.tensors[operand];
                 tensor.virtual_ = state == 0;
                 tensor.is_runtime_pass_by_value = state == 1 || state == 3;
@@ -156,7 +173,11 @@ TEST(TestConvFwdGraphMatcher, RejectsMalformedAndUnrepresentableTensorShapes)
                 tensor.dims[0] = std::numeric_limits<int64_t>::max();
                 break;
             case 5:
+                // On x and y together, so the batch sizes still agree and the strides
+                // (which never depend on the outermost extent) stay row-major: the
+                // extent not fitting the kernel's int arguments is the only refusal.
                 tensor.dims[0] = static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
+                graph.tensors[2]->dims[0] = tensor.dims[0];
                 break;
             default:
                 ADD_FAILURE() << "Unhandled tensor shape fixture state " << state;
@@ -183,7 +204,13 @@ TEST(TestConvFwdBinding, PublishesUidZeroAndNodeComputeTypeIndependentlyOfGraphD
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x.uid"), 0);
     EXPECT_EQ(std::get<std::string>(bound->at("conv.compute_data_type")), "DOUBLE");
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "x.dims[2]"), 3);
-    const GraphFixture other(buildConvFwdGraph(data_objects::DataType::HALF));
+    // Same node and uids, other dtype: the dtype the kernel matcher compares is the
+    // binding's, while the node it reads for geometry and roles still agrees.
+    const GraphFixture other(
+        transformGraph(buildConvFwdGraph(data_objects::DataType::HALF), [](auto& graph) {
+            graph.tensors[0]->uid = 0;
+            graph.nodes[0]->attributes.AsConvolutionFwdAttributes()->x_tensor_uid = 0;
+        }));
     EXPECT_TRUE(
         kernelMatcher(CONV_FWD)(other.context(), *bound, makeKernel(64, "FLOAT", "ConvFwd")));
     EXPECT_FALSE(
@@ -382,6 +409,165 @@ TEST(TestConvFwdKernelMatcher, AcceptsAHalfKernelForAHalfGraph)
 }
 
 // ---------------------------------------------------------------------------
+// Declarative graph_match arm
+// ---------------------------------------------------------------------------
+//
+// A UED may replace this engine's native graph_match with a `graph_match.nodes` pattern
+// and keep the native criterion and dispatch. The pattern checks topology alone, so the
+// kernel matcher -- the pack's only criterion -- is what keeps a graph the kernel cannot
+// serve from reaching it.
+
+/// The pattern such a UED carries. Its node id is the native match's attribute root,
+/// so both arms publish the same `conv.*` keys. @p swapXAndW binds `$x` to the node's
+/// `w` edge and `$w` to its `x` edge: a pattern-authoring mistake the registry cannot
+/// see, since both are required operands of the same op.
+std::shared_ptr<const hipdnn_plugin_sdk::ingestor::CompiledGraphPattern> convPattern(bool swapXAndW
+                                                                                     = false)
+{
+    const auto* xEdge = swapXAndW ? "w" : "x";
+    const auto* wEdge = swapXAndW ? "x" : "w";
+    const auto nodes = nlohmann::json::array({{{"kind", "op"},
+                                               {"id", "conv"},
+                                               {"op", "convolution_fwd"},
+                                               {"operands", {{xEdge, "$x"}, {wEdge, "$w"}}},
+                                               {"results", {{"y", "$y"}}}}});
+    return hipdnn_plugin_sdk::ingestor::compileGraphPattern(
+        hipdnn_plugin_sdk::ingestor::parseGraphPattern(nodes, "conv test pattern"),
+        "conv test pattern");
+}
+
+std::optional<BoundTokens> matchesPattern(const MatchContext& context, bool swapXAndW = false)
+{
+    return hipdnn_plugin_sdk::ingestor::matchGraphPattern(*convPattern(swapXAndW), context);
+}
+
+std::set<std::string> tokenNames(const BoundTokens& bound)
+{
+    std::set<std::string> names;
+    for(const auto& token : bound)
+    {
+        names.insert(token.first);
+    }
+    return names;
+}
+
+/// The registry-driven publication and the native one agree token for token, so the
+/// criterion and dispatch written against the native binding read the same values
+/// under either arm. The node's compute type differs from its tensors' dtype so a
+/// publication reading the wrong one shows up as a value mismatch.
+TEST(TestConvFwdDeclarativeMatch, PublishesTheNativeBindingTokenForToken)
+{
+    const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [](auto& graph) {
+        graph.nodes[0]->compute_data_type = data_objects::DataType::DOUBLE;
+    }));
+    const auto native = matchesGraph(CONV_FWD, fixture.context());
+    const auto declarative = matchesPattern(fixture.context());
+    ASSERT_TRUE(native.has_value());
+    ASSERT_TRUE(declarative.has_value());
+
+    ASSERT_EQ(tokenNames(*declarative), tokenNames(*native));
+    for(const auto& [name, value] : *native)
+    {
+        EXPECT_TRUE(declarative->at(name) == value) << name;
+    }
+}
+
+/// A binding the pattern produces and the native match never does: either the native
+/// match refuses the graph, or it binds the roles differently. Builder is a plain
+/// function pointer, not std::function: FlatBufferBuilder is move-only.
+struct DeclarativeRefusalCase
+{
+    std::string name;
+    flatbuffers::FlatBufferBuilder (*buildGraph)();
+    /// Bind the pattern's `$x`/`$w` to the node's `w`/`x` edges.
+    bool swapXAndW;
+};
+
+class TestConvFwdDeclarativeRefusal : public ::testing::TestWithParam<DeclarativeRefusalCase>
+{
+};
+
+TEST(TestConvFwdDeclarativeMatch, KernelMatcherAdmitsAServableDeclarativeBinding)
+{
+    const GraphFixture fixture(buildConvFwdGraph());
+    const auto bound = matchesPattern(fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_TRUE(
+        kernelMatcher(CONV_FWD)(fixture.context(), *bound, makeKernel(64, "FLOAT", "ConvFwd")));
+}
+
+TEST_P(TestConvFwdDeclarativeRefusal, KernelMatcherDeclinesWhatOnlyThePatternAdmits)
+{
+    const GraphFixture fixture(GetParam().buildGraph());
+    const auto bound = matchesPattern(fixture.context(), GetParam().swapXAndW);
+    ASSERT_TRUE(bound.has_value());
+    const auto native = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(!native.has_value() || *native != *bound);
+
+    EXPECT_FALSE(
+        kernelMatcher(CONV_FWD)(fixture.context(), *bound, makeKernel(64, "FLOAT", "ConvFwd")));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestConvFwdDeclarativeRefusal,
+    ::testing::ValuesIn(std::vector<DeclarativeRefusalCase>{
+        {"StrideTwo",
+         // Shapes stay consistent with unit stride, so only the node's stride -- which the
+         // binding does not carry -- tells the kernel matcher this conv is unservable.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{2, 2});
+         },
+         /*swapXAndW=*/false},
+        {"Rank3Input",
+         // The binding has no x.dims[3]; the kernel reads four extents.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3},
+                                      /*wDims=*/std::vector<int64_t>{1, 1, 2, 2},
+                                      /*yDims=*/std::vector<int64_t>{1, 1, 2, 2});
+         },
+         /*swapXAndW=*/false},
+        {"OutputSmallerThanTheKernelWrites",
+         // total = n*k*p*q comes from x and w; a smaller y is an out-of-bounds write.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3, 3},
+                                      /*wDims=*/std::nullopt,
+                                      /*yDims=*/std::vector<int64_t>{1, 1, 1, 1});
+         },
+         /*swapXAndW=*/false},
+        {"OperandRolesSwapped",
+         // n == k, h == r and width == s, so x and w exchanged pass every shape check;
+         // only the node's own x/w uids show the pattern bound them the wrong way round.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 2, 2},
+                                      /*wDims=*/std::vector<int64_t>{1, 1, 2, 2});
+         },
+         /*swapXAndW=*/true},
+    }),
+    [](const ::testing::TestParamInfo<DeclarativeRefusalCase>& info) { return info.param.name; });
+
+// ---------------------------------------------------------------------------
 // Score
 // ---------------------------------------------------------------------------
 
@@ -443,7 +629,7 @@ TEST(TestConvFwdPack, HasAGraphMatchAndOneKernelMatcher)
     // A single-pack engine has nothing to discriminate between, so it carries no
     // graph-scoped criterion at all: the engine's graph_match both admits the node type
     // and fully validates the shape.
-    EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
+    EXPECT_FALSE(std::holds_alternative<std::monostate>(set.engine.graphMatch));
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
@@ -517,6 +703,35 @@ TEST(TestConvFwdDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
     EXPECT_THROW(
         handler.prepare(fixture.context(), BoundTokens{}, makeKernel(64, "FLOAT", "ConvFwd")),
         hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+/// A binding missing an extent the launch geometry reads is refused with a plugin error
+/// naming the token, not read as an empty optional. A declarative binding of a rank-3 x
+/// carries x.dims[0..2] only.
+TEST(TestConvFwdDispatch, RefusesToPrepareABindingMissingAnExtent)
+{
+    const GraphFixture fixture(buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                                 data_objects::ConvMode::CROSS_CORRELATION,
+                                                 /*stride=*/std::vector<int64_t>{1, 1},
+                                                 /*dilation=*/std::vector<int64_t>{1, 1},
+                                                 /*prePadding=*/std::vector<int64_t>{0, 0},
+                                                 /*postPadding=*/std::vector<int64_t>{0, 0},
+                                                 /*xDims=*/std::vector<int64_t>{1, 1, 3},
+                                                 /*wDims=*/std::vector<int64_t>{1, 1, 2, 2},
+                                                 /*yDims=*/std::vector<int64_t>{1, 1, 2, 2}));
+    const auto bound = matchesPattern(fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& handler = dispatchHandler(CONV_FWD);
+
+    try
+    {
+        handler.prepare(fixture.context(), *bound, makeKernel(64, "FLOAT", "ConvFwd"));
+        ADD_FAILURE() << "prepare() accepted a binding with no x.dims[3]";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("x.dims[3]"), std::string::npos) << error.what();
+    }
 }
 
 /// elementTypeFor() throws on a dtype its `if` branches don't name, reached only inside
@@ -682,7 +897,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition
 /// Measured as a delta rather than against 1, so a module some earlier case left resident
 /// does not decide the outcome. That holds only while this is the one case in the binary
 /// that loads a conv module: discovery reads descriptor JSON and never loads code, and
-/// the other two conv dispatch cases refuse before reaching the loader. A case added
+/// every other conv dispatch case refuses before reaching the loader. A case added
 /// later that genuinely loads THIS (archive, toc_key, arch) would make the assertion
 /// depend on suite order -- reset the cache in that case rather than widening this one.
 TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)

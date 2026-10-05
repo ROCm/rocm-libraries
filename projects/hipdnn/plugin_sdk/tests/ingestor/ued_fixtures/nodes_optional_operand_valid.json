@@ -1,0 +1,26 @@
+{
+  "description": "'?' on an operand the registry declares optional and no node produces.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "8b415836-421a-5f8d-a7f5-02a36da7e4eb",
+    "name": "ued_fixture:nodes_optional_operand_valid",
+    "metadata": "b7c91f04-44c9-5370-a403-36a46526094a",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b?"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

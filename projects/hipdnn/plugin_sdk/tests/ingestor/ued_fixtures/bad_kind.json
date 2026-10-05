@@ -1,0 +1,26 @@
+{
+  "description": "A node kind other than 'op'.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "7af45e3b-fd0a-5600-b4c7-0203811b8e29",
+    "name": "ued_fixture:bad_kind",
+    "metadata": "db4bf8b5-b2de-51fe-b117-b4332f916a0a",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "tensor",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

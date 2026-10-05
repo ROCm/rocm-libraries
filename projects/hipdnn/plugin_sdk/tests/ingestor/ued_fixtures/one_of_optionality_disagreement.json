@@ -1,0 +1,27 @@
+{
+  "description": "Opcode-set members disagree on a bound operand's optionality: 'mean' is required by batchnorm_inference and optional in batchnorm_bwd.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "4498ce46-3bed-5147-987a-1474dfae6e30",
+    "name": "ued_fixture:one_of_optionality_disagreement",
+    "metadata": "4fe339ac-ecfb-5b1f-91dc-e1bfeeb5826f",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "bn",
+          "op": {
+            "one_of": [
+              "batchnorm_inference",
+              "batchnorm_bwd"
+            ]
+          },
+          "operands": {
+            "mean": "$mean"
+          }
+        }
+      ]
+    }
+  }
+}

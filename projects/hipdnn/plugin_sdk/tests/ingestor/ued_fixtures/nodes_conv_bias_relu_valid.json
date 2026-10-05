@@ -1,0 +1,49 @@
+{
+  "description": "Convolution feeding two chained pointwise nodes; intermediates connect through shared variables.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "cdbc244f-da2f-5853-9172-cf508ecb335c",
+    "name": "ued_fixture:nodes_conv_bias_relu_valid",
+    "metadata": "c8fbf7c2-4624-57e9-88ae-a5bc20c6e360",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "conv",
+          "op": "convolution_fwd",
+          "operands": {
+            "x": "$x",
+            "w": "$w"
+          },
+          "results": {
+            "y": "$conv_out"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "add",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$conv_out",
+            "in_1": "$bias"
+          },
+          "results": {
+            "out_0": "$bias_out"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "relu",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$bias_out"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

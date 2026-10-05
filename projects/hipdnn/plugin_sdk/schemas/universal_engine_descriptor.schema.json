@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ued.json",
+  "title": "hipDNN UED",
+  "description": "Universal Engine Descriptor (RFC 0020 section 4.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2). Keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "name", "metadata"],
+  "patternProperties": {
+    "^(x-|_)": {},
+    "^provenance$": {}
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "addedInVersion": "1.0"
+    },
+    "id": {
+      "description": "This descriptor's own UUID. Unique across loaded UEDs except for content-identical duplicates (semantic; see RFC 0020 section 13.2.1).",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$",
+      "addedInVersion": "1.0"
+    },
+    "sdk_version": {
+      "description": "hipDNN graph schema version this pattern was authored against, as MAJOR.MINOR.PATCH; defaults to the engine plugin API baseline when absent.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "addedInVersion": "1.0"
+    },
+    "heuristic": {
+      "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
+    },
+    "metadata": {
+      "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 13.2).",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
+    },
+    "graph_match": {
+      "description": "Stage one: exactly one arm. 'nodes' is the declarative pattern (RFC 0020 section 4.3); 'native' is the escape-hatch symbol (section 4.5) and MUST be registered in the provider's graph-match registry (semantic; see section 13.2).",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(x-|_)": {},
+        "^provenance$": {}
+      },
+      "oneOf": [
+        { "required": ["nodes"] },
+        { "required": ["native"] }
+      ],
+      "properties": {
+        "native": {
+          "type": "string",
+          "minLength": 1,
+          "addedInVersion": "1.0"
+        },
+        "nodes": {
+          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry, and a node binds at most 64 edges (semantic; see RFC 0020 section 13.2).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "id", "op"],
+            "patternProperties": {
+              "^(x-|_)": {},
+              "^provenance$": {}
+            },
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["op"],
+                "addedInVersion": "1.0"
+              },
+              "id": {
+                "description": "Attributes namespace root; unique within 'nodes', not 'graph', 'kernel' or 'device', and not a pattern variable name (semantic).",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "addedInVersion": "1.0"
+              },
+              "op": {
+                "oneOf": [
+                  { "type": "string", "minLength": 1 },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["one_of"],
+                    "patternProperties": {
+                      "^(x-|_)": {},
+                      "^provenance$": {}
+                    },
+                    "properties": {
+                      "one_of": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1 },
+                        "addedInVersion": "1.0"
+                      }
+                    }
+                  }
+                ],
+                "addedInVersion": "1.0"
+              },
+              "operands": {
+                "description": "Operand name the op declares -> pattern variable. '?' marks an operand the registry declares optional (semantic).",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*\\??$"
+                },
+                "addedInVersion": "1.0"
+              },
+              "results": {
+                "description": "Result name the op declares -> pattern variable. A result is always produced, so it takes no '?'.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "addedInVersion": "1.0"
+              }
+            }
+          },
+          "addedInVersion": "1.0"
+        }
+      },
+      "addedInVersion": "1.0"
+    },
+    "knobs": {
+      "description": "Each entry MUST be a field name declared by the referenced KMD (semantic; see RFC 0020 section 13.2).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
+    },
+    "behavior_notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
+    },
+    "numerical_notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
+    }
+  }
+}

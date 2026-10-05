@@ -1,0 +1,27 @@
+{
+  "description": "graph_match carries both 'nodes' and 'native'.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "e12782d9-fd3b-5bf3-bcb6-1cf8dd77e9d2",
+    "name": "ued_fixture:both_arms",
+    "metadata": "531d9a91-ae3c-5457-8d08-f579b5593744",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ],
+      "native": "hipkernel.pointwise.graph_match"
+    }
+  }
+}

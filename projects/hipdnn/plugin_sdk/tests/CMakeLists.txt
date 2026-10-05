@@ -48,6 +48,10 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGraphPattern.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestCompiledGraphPattern.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGraphPatternMatcher.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestUedFixtureParity.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
 )
 
@@ -79,6 +83,33 @@ endif()
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# TestUedFixtureParity reads the UED fixture corpus and the published UED schema from
+# share/hipdnn_plugin_sdk beside the binary's bin/ directory, the layout an install produces,
+# so the build tree is staged the same way.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_ued_data_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk")
+    set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
+    file(GLOB _ued_fixtures CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures/*.json")
+    add_custom_command(
+        OUTPUT "${_ued_data_dir}/test_fixtures/ued.stamp"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ued_data_dir}/test_fixtures/ued"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_data_dir}/test_fixtures/ued"
+                "${_ued_data_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E copy ${_ued_fixtures} "${_ued_data_dir}/test_fixtures/ued"
+        COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_data_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_ued_data_dir}/test_fixtures/ued.stamp"
+        DEPENDS ${_ued_fixtures} "${_ued_schema}"
+        COMMENT "Staging the UED fixture corpus and schema for hipdnn_plugin_sdk_tests"
+        VERBATIM
+    )
+    add_custom_target(stage_hipdnn_plugin_sdk_ued_fixtures
+        DEPENDS "${_ued_data_dir}/test_fixtures/ued.stamp"
+        COMMENT "UED fixture corpus and schema for hipdnn_plugin_sdk_tests")
+    add_dependencies(hipdnn_plugin_sdk_tests stage_hipdnn_plugin_sdk_ued_fixtures)
+    install(FILES ${_ued_fixtures}
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures/ued)
+endif()
 
 # Cross-process coverage: one process writes a winner record, a SECOND process reads it
 # back. Two ctest invocations of the same binary, sequenced with

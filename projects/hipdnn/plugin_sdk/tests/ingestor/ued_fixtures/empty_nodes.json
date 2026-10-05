@@ -1,0 +1,13 @@
+{
+  "description": "'nodes' is an empty array.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "0e863a2f-6c74-5a71-9bd9-8092da7aa9a8",
+    "name": "ued_fixture:empty_nodes",
+    "metadata": "6a2eaa6a-8984-51b1-b8b1-c69289604f51",
+    "graph_match": {
+      "nodes": []
+    }
+  }
+}

@@ -91,6 +91,16 @@ install(
     COMPONENT Development
 )
 
+# The UED JSON Schema describes descriptors only the kernel ingestor reads, so it ships
+# with the ingestor headers.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/schemas/universal_engine_descriptor.schema.json"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/schemas
+        COMPONENT Development
+    )
+endif()
+
 install(EXPORT hipdnn_plugin_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk
         FILE hipdnn_plugin_sdkTargets.cmake COMPONENT Development
 )

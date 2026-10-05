@@ -47,8 +47,8 @@ Concretely, this RFC delivers:
 - The **`nodes` structural pattern**, normatively: the node-object members, the opcode and
   optional-operand forms, how nodes connect through shared variables, and the well-formedness
   rules a load rejects on (§ 4.3). RFC 0017 § 4 shows the block by example and defers its format
-  here. It is the declarative arm of `graph_match`; the **`native` escape hatch** beside it, which
-  is what ships today, is § 4.5.
+  here. It is the declarative arm of `graph_match`; the **`native` escape hatch** beside it, for a
+  match the declarative arm cannot express, is § 4.5.
 - The **graph model the pattern is matched against** and the **op-schema registry** generated from
   FlatBuffers annotations that makes a UID-centric graph readable by name (§ 5, Appendix B).
 - The **symbol table matching publishes**: the five namespaces, the auto-binding formula, and the
@@ -458,10 +458,10 @@ Throughout this section `nodes` means the `nodes` key of `graph_match`. A UED ca
 one** `nodes` block, so every pack naming the engine matches the same graph shape and differs only
 in what its criteria constrain (§ 6). A family spanning two topologies is two engines (§ 17 Q1).
 
-**This arm is specified, not yet implemented.** The escape hatch of § 4.5 is what ships today; a
-UED naming `nodes` is rejected by the current loader as an unknown key. Everything below is the
-contract the declarative implementation must meet, and the reason `native` is scoped as a hatch
-rather than the format's steady state.
+**This arm is implemented** in the kernel ingestor, behind `HIPDNN_ENABLE_KERNEL_INGESTOR`: the
+loader parses `nodes`, checks it (§ 4.3.2), and compiles it against the generated op-schema
+registry (§ 4.3.3, Appendix B) when the UED is read, and the compiled pattern decides and binds
+each graph (§ 7). The escape hatch of § 4.5 remains for a match this arm cannot express.
 
 #### 4.3.1 Grammar
 
@@ -518,24 +518,73 @@ carried entirely by `$conv_out` and `$bias_out` appearing twice each:
 ```jsonc
 "nodes": [
   {"kind": "op", "id": "conv", "op": "convolution_fwd",
-   "operands": {"X": "$x", "W": "$w"},              "results": {"Y": "$conv_out"}},
-  {"kind": "op", "id": "bias", "op": "pointwise_add",
-   "operands": {"A": "$conv_out", "B": "$bias"},    "results": {"Y": "$bias_out"}},
-  {"kind": "op", "id": "act",  "op": "pointwise_relu",
-   "operands": {"A": "$bias_out"},                  "results": {"Y": "$y"}}
+   "operands": {"x": "$x", "w": "$w"},              "results": {"y": "$conv_out"}},
+  {"kind": "op", "id": "bias", "op": "pointwise",
+   "operands": {"in_0": "$conv_out", "in_1": "$b"}, "results": {"out_0": "$bias_out"}},
+  {"kind": "op", "id": "act",  "op": "pointwise",
+   "operands": {"in_0": "$bias_out"},               "results": {"out_0": "$y"}}
 ]
 ```
+
+Both trailing nodes are `pointwise`: the registry has one opcode per attribute table, and a
+pointwise node's mode is its `operation` attribute (Appendix B.3). The pattern fixes the shape;
+the packs serving the engine fix the modes, with `{"==": ["$bias.operation", "ADD"]}` and
+`{"==": ["$act.operation", "RELU_FWD"]}` in their criteria.
 
 A variable appearing as a result of one node and an operand of another is an **intermediate**;
 whether it is legal to fuse across is not the pattern's to say, and a criterion asks with
 `$conv_out.virtual` ([RFC 0018 § 3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)). The
 pattern binds a shape; the criteria decide whether that shape is servable.
 
-**Match semantics are exact, not subgraph-containment.** The pattern matches the ops it names and
-publishes what they bind; it does not by itself bound the rest of the graph. A pack that means
-"this graph and nothing else" pins it on the criteria side with `$graph.node_count` (§ 6.1). This
-split is deliberate: node count is a *constraint*, varies between packs on one engine, and so
-belongs with the criteria rather than being baked into a pattern all those packs share.
+**Match semantics are full coverage.** A graph matches only when the pattern accounts for all of
+it:
+
+- **Node counts are equal.** The graph has exactly as many nodes as the pattern, and the pattern's
+  nodes map one-to-one onto them, each onto a graph node whose op is one of its opcodes.
+- **Unnamed optional edges are absent.** An optional operand or result the pattern does not name
+  must be absent from the graph node, or the graph does not match. An unnamed required edge is
+  matched without being bound.
+- **Pattern inputs have no producer.** A variable no pattern node produces is a graph input, so its
+  tensor has no producer in the graph. A variable a pattern node produces is produced, in the
+  graph, by the node that pattern node maps to. A tensor an op writes through a UID list, such as a
+  custom op's outputs, has a producer like any other, though no pattern edge can bind the list
+  (Appendix B.3).
+- **Distinct variables may alias.** Two variables may bind the same tensor, as in a pointwise op
+  whose two operands are one tensor (`"in_0": "$a", "in_1": "$b"` matches with `$a` and `$b` both
+  bound to it).
+- **The first assignment wins.** The search visits pattern nodes producers first (ties in authored
+  order) and graph nodes in graph order, and binds the first complete assignment it finds, so a
+  graph always binds the same way.
+- **The search is bounded.** The matcher tries at most 65,536 candidate assignments, each one
+  pattern node placed on one graph node, per graph. A search that exhausts the budget declines the
+  graph even if a complete assignment exists. That false negative is logged as a warning naming the
+  UED, and is cached like any other decline (§ 7), so the same graph and device do not search
+  again. A search that never backtracks needs at most N(N+1)/2 assignments for an N-node pattern,
+  so only a graph with many interchangeable nodes, whose search grows factorially with their
+  number, reaches the budget.
+
+`$graph.node_count` is still published (§ 6.1). Under full coverage it always equals the pattern's
+node count on a match, so a criterion need not pin it.
+
+Two single-op patterns under these rules:
+
+```jsonc
+// Binary pointwise. Matches ADD, MUL, ... alike; a pack picks modes with "$pw.operation".
+// A unary graph (no in_1) declines; "$b?" would accept it too. A ternary graph (in_2
+// present) declines, since the pattern does not name in_2.
+"nodes": [
+  {"kind": "op", "id": "pw", "op": "pointwise",
+   "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}
+]
+
+// Forward convolution. Publishes $x, $w, $y and the node's scalars: $conv.conv_mode and
+// $conv.compute_data_type. The padding, stride, and dilation vectors are not scalars and
+// are not published.
+"nodes": [
+  {"kind": "op", "id": "conv", "op": "convolution_fwd",
+   "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$y"}}
+]
+```
 
 #### 4.3.2 Well-formedness (structural)
 
@@ -550,11 +599,21 @@ load rejection, never a warning:
 - **A pattern variable is bound at most once.** The same `$name` may be *read* by several nodes —
   that is how connectivity is expressed — but it is **bound** by exactly one edge: either one
   node's result, or, for a graph input, one node's operand. A variable appearing as the result of
-  two nodes, or as an operand of two nodes with no producing result among them, is refused.
+  two nodes, or as two operands with no producing result among them, is refused, even when both
+  operands are on one node. A node reading one graph input twice names two variables, which may
+  alias.
 - **A variable is not a reserved root**, and does not collide with a node `id`.
 - **`?` appears only on an operand binding**, never on a result and never mid-identifier.
+- **A `?` variable is not produced by the pattern.** `?` says the graph may omit the tensor, but a
+  variable some node's result binds is always produced (a result takes no `?`), so a `?` read of it
+  is contradictory and is refused.
 - **Edge names are unique within their `operands` or `results` object**, which JSON object
   semantics already imply but a lenient parser may not enforce.
+- **Unknown keys are refused, except extension keys.** A node object and an `op` object accept
+  only their members and extension keys (`x-`- or `_`-prefixed, or `provenance`), which are
+  warned about and ignored as in every descriptor object the loader reads. `operands` and
+  `results` take no extension keys: every key there is an edge name, resolved against the
+  registry (§ 4.3.3).
 
 #### 4.3.3 Registry resolution (semantic)
 
@@ -566,6 +625,7 @@ at pattern compile (§ 12):
 - **Every edge name is declared by the op**, as an operand for an `operands` entry and as a result
   for a `results` entry. A name the registry does not declare for that op is refused; this is the
   check that catches an operand renamed out from under a pattern by a schema change (Appendix B.6).
+  An edge list (§ 5) is not an edge name, so a pattern naming one is refused the same way.
 - **`?` matches the registry's optionality.** A `?` on an operand the registry declares required is
   refused, since the pattern would be claiming a graph the op cannot produce. A required binding on
   an operand the registry declares optional is *permitted* — it is the pattern narrowing itself to
@@ -585,7 +645,7 @@ presents every descriptor. Comments are stripped before validation (§ 4.2, § 1
 
 `graph_match.native` is a symbol naming a function the provider ships, resolved through the
 provider's graph-match registry. It is the **escape hatch** for a match the declarative arm cannot
-yet state, and it is what ships today. Its signature:
+yet state. Its signature:
 
 ```cpp
 std::optional<BoundTokens> (*)(const MatchContext&);
@@ -695,18 +755,22 @@ of § 6.
 FlatBuffers attribute names the op, and field-level attributes on each op's attribute table declare
 the binding contract next to the field they govern. `umd_opcode` on the attribute table gives the
 op's descriptor-facing opcode (`SdpaAttributes (umd_opcode: "sdpa_fwd")`); a pattern node's `op`
-names it, and the registry keys on it (falling back to the table type name when the attribute is
-absent), so the schema is the single source of truth for the opcode rather than an ad-hoc string.
+names it, and the registry keys on it. Every table in the `NodeAttributes` union must carry one, and
+the generator fails the build on a table without it, so the schema is the single source of truth
+for the opcode rather than an ad-hoc string.
 `umd_input_tensor` / `umd_output_tensor` mark a UID field and `umd_name` names it, so SDPA's Q
 operand is `q_tensor_uid: long (umd_input_tensor, umd_name: "q")` and its O result is `o_tensor_uid:
-long (umd_output_tensor, umd_name: "o")`. Optionality is not re-annotated: a UID field's `= null`
-default already encodes it (`attn_mask_tensor_uid: long = null`), and the `NodeAttributes` union
-already maps each opcode to its table, so every unannotated *scalar* field is a scalar attribute by
-elimination (unannotated non-scalar fields: vectors, sub-tables, are not bindable scalars and are
-skipped). A build step emits the binary reflection schema (`graph.bfbs`, which transitively covers
-every attribute table; custom attributes surface only through reflection, not the generated headers)
-and a generator reads each field's attributes to emit the registry, so it stays in lockstep with the
-graph definitions rather than being hand-maintained ([Appendix
+long (umd_output_tensor, umd_name: "o")`. The same flag on a `[long]` UID vector, such as a custom
+op's `input_tensor_uids`, makes it an **edge list**: its UIDs are the node's operands or results,
+but no pattern edge binds it, so it takes no `umd_name`. Optionality is not re-annotated: a UID
+field's `= null` default already encodes it (`attn_mask_tensor_uid: long = null`), and the
+`NodeAttributes` union already maps each opcode to its table, so every unannotated *scalar* field
+is a scalar attribute by elimination (other unannotated non-scalar fields, such as vectors and
+sub-tables, are not bindable scalars and are skipped). A build step emits the binary reflection
+schema (`graph.bfbs`, which transitively covers every attribute table; custom attributes surface
+only through reflection, not the generated headers) and a generator reads each field's attributes
+to emit the registry, so it stays in lockstep with the graph definitions rather than being
+hand-maintained ([Appendix
 B](#appendix-b-op-schema-registry-generation) specifies the annotation contract, the
 field-classification rules, and the generation pipeline). Names are never inferred from the
 `_tensor_uid` name suffix, which would misclassify non-UID fields such as
@@ -733,7 +797,9 @@ the pattern's ([RFC 0018 § 2](0018_UniversalMatchDescriptor.md#2-the-symbol-tab
 sorted, acyclic, fully connected, and has unique tensor UIDs. The matcher builds its own
 UID-to-producer and UID-to-consumers index once per graph to walk edges and reconstruct
 connectivity, since no adjacency query is provided; fusion legality reads each intermediate's
-`virtual` flag.
+`virtual` flag. The index counts a result list's UIDs as that node's results (Appendix B.3). The
+matcher does not trust the guarantees it indexes: a graph repeating a tensor UID, producing one
+UID twice, or carrying a node type the registry does not describe is declined, never matched.
 
 ![The matcher reads a UID-centric graph via an op-schema registry that reconstructs
 edges and auto-binds symbols](../images/umd_binding_model.svg)
@@ -800,13 +866,14 @@ the interpreter fails closed on anything undeclared:
   (below). Whether the graph supplied an optional operand at all is a question asked with the
   `present` / `not_present` operators, not a field read off the tensor (§ 6.1).
 - **Graph** — structural facts and graph-level flags of the matched graph: `$graph.node_count`, which
-  pins an exact match, and `$graph.is_override_shape_enabled`, the graph's own opt-in to execute-time
+  a declarative match fixes at the pattern's node count (§ 4.3.1), and
+  `$graph.is_override_shape_enabled`, the graph's own opt-in to execute-time
   override shapes. That flag is the graph's state and is distinct from a matcher's
   `allow_override_shape`, which is the matcher's opt-in to accepting such a graph at all
   ([RFC 0018 § A.1](0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
 - **Attributes** — a matched node's scalars, named by the node's pattern `id`: an
   `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
-  `$conv.dilation`. An optional attribute is asked about the same way, with those same operators.
+  `$conv.conv_mode`. An optional attribute is asked about the same way, with those same operators.
   The namespace spans two schema tables, which a reader never has to distinguish: the op's own
   attribute table (the union arm `NodeAttributes` selects), **and the `Node` table's own scalars**,
   of which `compute_data_type` is the one that is not `cache_ignore`. A node's compute precision is
@@ -885,6 +952,18 @@ uint         = digit , { digit } ;
 - What a **read of an absent** optional operand or attribute yields, and how the criteria language
   propagates it, are the reader's rules
   ([RFC 0018 § A.2](0018_UniversalMatchDescriptor.md#a2-variable-references-and-resolution)).
+- **A published `Float` is finite.** A float attribute the matched node carries with a NaN or
+  infinite value declines the graph, as does a non-finite stored scalar on a bound tensor
+  (`value_f32`). The decline holds whether or not any criterion reads the field: every published
+  symbol must carry a comparable value, and a NaN would answer every comparison false while an
+  infinity would pass every bound. A graph that spells "unbounded" as an infinite attribute (an
+  infinite `relu_upper_clip`, say) therefore matches no declarative engine. An optional float
+  attribute the node does not carry is absent, not a decline.
+- **Which edge a variable names is part of the contract.** The pattern author's choice of variable
+  for each edge is what a pack's criteria and dispatch read as that tensor's role; two operands of
+  the same shape bound the wrong way round publish a binding no field check can tell apart from the
+  right one. A criterion that can see the matched node (a native one, through `MatchContext`)
+  should verify the roles it relies on by comparing the bound uids with the node's own edge uids.
 
 **The two spellings must widen together.** The native arm (§ 4.5) reaches the same five namespaces
 through positional operands rather than `$`-names: a stage takes `MatchContext` (the device and
@@ -1077,7 +1156,8 @@ things:
   never neither.
 - **the `nodes` block is well-formed**, when that is the arm: the § 4.3.2 rules — non-empty, `kind`
   is `"op"`, node ids unique and non-reserved, each pattern variable bound exactly once, `?` only
-  on an operand. These need no other descriptor, so they belong here; the rules that need the
+  on an operand and never on a variable a node produces. These need no other descriptor, so they
+  belong here; the rules that need the
   op-schema registry are § 4.3.3 and run in § 13.2.
 - **`native` is a non-empty string**, when that is the arm. Whether the symbol exists is semantic
   and runs in § 13.2.
@@ -1343,7 +1423,8 @@ fuzzing, this RFC adds UED-specific coverage.
   however many packs then read the binding.
 - **`nodes` structural well-formedness** (§ 4.3.2): empty `nodes`; a `kind` other than `"op"`; a
   duplicate node `id`; a node `id` or pattern variable colliding with `graph`/`kernel`/`device`; a
-  variable bound by two nodes' results; a `?` on a result binding; a binding that is not `$ident`.
+  variable bound by two nodes' results; a `?` on a result binding; a `?` on a variable some node
+  produces; a binding that is not `$ident`.
   Each is a load rejection naming the node.
 - **Pattern registry resolution** (§ 4.3.3, § 12): an unknown `op`; an operand name the op does not
   declare; a result name the op does not declare; a `?` on an operand the registry declares
@@ -1544,15 +1625,17 @@ never inferred from field-name conventions, so the binding contract for an opera
 
 ### B.1 Attribute declarations
 
-Four custom attributes are declared once in the graph schema. FlatBuffers requires an `attribute`
+Four custom attributes are declared in the graph schema, and redeclared in each attribute-table
+schema that uses them, since `flatc` scopes an attribute declaration to the file declaring it rather
+than inheriting it through `include`. FlatBuffers requires an `attribute`
 declaration before an attribute may be used, and declared attributes — on a table or on a field — are
 retained in the binary reflection schema (`.bfbs`), which is what the generator reads.
 
 ```fbs
-attribute "umd_opcode";         // table: the op's UMD-facing opcode (e.g. "sdpa_fwd")
-attribute "umd_input_tensor";   // field flag: this field is an input (operand) tensor UID
-attribute "umd_output_tensor";  // field flag: this field is an output (result) tensor UID
-attribute "umd_name";           // field string: the name the UMD binds it by (e.g. "q", "o")
+attribute "umd_opcode";         // table: the op's UMD-facing opcode (e.g. "sdpa_fwd"); required
+attribute "umd_input_tensor";   // field flag: an input (operand) tensor UID, or a vector of them
+attribute "umd_output_tensor";  // field flag: an output (result) tensor UID, or a vector of them
+attribute "umd_name";           // field string: the name the UMD binds a scalar UID by (e.g. "q")
 ```
 
 `umd_opcode` is a **table-level** attribute (applied in parentheses after the table name); the other
@@ -1560,21 +1643,23 @@ three are field-level. No separate operand/result type attribute is needed: an o
 binds a `Tensor` — a tensor UID is the only edge kind in a UID-centric graph
 (§ 5) — and every scalar attribute is precisely an
 unannotated scalar field (B.3). The `long` UID field type and the `umd_input_tensor`/`umd_output_tensor` flag
-together already fix what the binding is.
+together already fix what the binding is. A `[long]` UID vector with a flag is an **edge list** (B.3):
+its UIDs are the node's operands or results, but it is never bound by name, so it takes no `umd_name`.
 
 ### B.2 Annotated schema
 
-Each op's attribute table annotates its UID fields next to the field they govern. Optionality is **not**
+Each op's attribute table annotates its UID fields next to the field they govern, beside the
+`cache_uid` annotation the cache key already reads. Optionality is **not**
 re-annotated: a UID field's `= null` default (an optional field) already encodes it, so the generator
 derives required-vs-optional from the field's presence semantics rather than a fourth attribute.
 
 ```fbs
 table SdpaAttributes (umd_opcode: "sdpa_fwd") {              // table-level opcode shorthand
-  q_tensor_uid:long (umd_input_tensor, umd_name: "q");          // required input
-  k_tensor_uid:long (umd_input_tensor, umd_name: "k");
-  v_tensor_uid:long (umd_input_tensor, umd_name: "v");
-  o_tensor_uid:long (umd_output_tensor, umd_name: "o");         // required output
-  attn_mask_tensor_uid:long = null (umd_input_tensor, umd_name: "attn_mask");  // optional input
+  q_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "q");   // required input
+  k_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "k");
+  v_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "v");
+  o_tensor_uid:long (cache_uid, umd_output_tensor, umd_name: "o");  // required output
+  attn_mask_tensor_uid:long = null (cache_uid, umd_input_tensor, umd_name: "attn_mask");  // optional input
   // ... other optional UID operands, likewise annotated ...
   dropout_probability:float = null;                        // unannotated -> scalar attribute
   alibi_mask:bool = false;                                 // unannotated -> scalar attribute
@@ -1585,25 +1670,59 @@ table SdpaAttributes (umd_opcode: "sdpa_fwd") {              // table-level opco
 ### B.3 Field classification (normative)
 
 For every table reachable from the `NodeAttributes` union (which already maps each opcode to its
-attribute table), the generator reads the table's `umd_opcode` (the entry's opcode key; when absent it
-falls back to the table type name) and classifies each field by these rules; a violation **fails the
-build** rather than emitting a wrong registry:
+attribute table), the generator reads the table's `umd_opcode` (the entry's opcode key; **required**
+on every union member, since an opcode silently derived from the table name would become
+UMD-visible under a name no one chose) and classifies each field by these rules; a violation
+**fails the build** rather than emitting a wrong registry:
 
 | Field carries | Classified as | Requirements |
 |---|---|---|
-| `umd_input_tensor` + `umd_name` | input (operand) edge for that name | field type MUST be an integer UID (`long`); `umd_name` MUST be non-empty |
-| `umd_output_tensor` + `umd_name` | output (result) edge for that name | field type MUST be an integer UID (`long`); `umd_name` MUST be non-empty |
-| neither flag, a **scalar** field | scalar attribute, named by the field name | — |
-| neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a UMD scalar) | — |
+| `umd_input_tensor` + `umd_name` | input (operand) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `umd_name` MUST be a non-empty identifier |
+| `umd_output_tensor` + `umd_name` | output (result) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `umd_name` MUST be a non-empty identifier |
+| `umd_input_tensor` on a vector | input (operand) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `umd_name` |
+| `umd_output_tensor` on a vector | output (result) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `umd_name` |
+| neither flag, a **scalar** field | scalar attribute, named by the field name | MUST NOT carry `cache_uid` |
+| neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a UMD scalar) | a vector MUST NOT carry `cache_uid` |
 
+- **Edge lists are carried, never bound.** A variable-length tensor reference, such as
+  `CustomOpAttributes.input_tensor_uids` or `BatchnormAttributes.peer_stats_tensor_uid`, has no
+  fixed arity, so no pattern edge can name one of its elements. Skipping it would hide real edges:
+  a tensor a custom op produces would look producer-less, and a pattern could bind it as a graph
+  input. The registry therefore lists it under the op's operand or result edge lists. The matcher
+  counts a result list's UIDs as that node's results in the per-graph producer index (§ 5),
+  exactly like a scalar result, so the graph-input rule and the two-producer decline see them.
+  Operand lists are carried in the registry but never bound, and the matcher needs no index of
+  them: its consumer index only narrows the search from a bound variable to the nodes a pattern
+  operand could read it through, and every pattern operand is a scalar edge. A pattern edge naming
+  an edge-list field is the ordinary unknown-edge resolution error (§ 4.3.3).
 - **Optionality** is derived, not annotated: a field with a `= null` default (an optional UID or an
   optional scalar) is optional; it supplies the `?`-binding of § 4.3 and is what the
   `present` / `not_present` operators of § 6.1 report on.
-- **Build errors (fail closed):** `umd_input_tensor` and `umd_output_tensor` on the same field; `umd_name` without
-  either flag; `umd_input_tensor`/`umd_output_tensor` on a non-integer field; a duplicate `umd_name` within one op;
-  an input/output tensor whose name collides with a reserved token
-  (§ 6.1); or a duplicate `umd_opcode` across
-  ops.
+- **One opcode per attribute table.** `umd_opcode` sits on the table, so each `NodeAttributes`
+  member is exactly one opcode. A table that serves several modes is still one opcode and exposes
+  its mode as an enum attribute: `PointwiseAttributes` is `pointwise`, and its mode is
+  `$<node_id>.operation` (`"ADD"`, `"RELU_FWD"`, …). Two consequences follow. The root-opcode
+  index of § 7 keys on the table's opcode, so every pointwise pattern shares the `pointwise` key
+  and a graph rooted at any pointwise mode consults all of them. And a wrong mode is a **criterion
+  decline**, reported against the pack's criterion, not a pattern decline: the pattern matched the
+  shape, and a criterion such as `{"==": ["$act.operation", "RELU_FWD"]}` rejected it.
+- **Edge names follow the field.** By convention `umd_name` is the field name without its
+  `_tensor_uid` suffix (`q_tensor_uid` is `"q"`, `in_0_tensor_uid` is `"in_0"`). This is an
+  authoring convention checked in review, not a rule the generator infers (see below): the flag and
+  `umd_name` are always written out.
+- **Build errors (fail closed):** a `NodeAttributes` member without `umd_opcode`;
+  `umd_input_tensor` and `umd_output_tensor` on the same field; `umd_name` without either flag; a
+  scalar flag without a non-empty `umd_name`; `umd_input_tensor`/`umd_output_tensor` on anything
+  but a scalar `long` or a `[long]` vector; a scalar integer field carrying `cache_uid` but neither
+  flag, since a tensor reference must be an edge and would otherwise publish as an `Int`
+  attribute; a vector carrying `cache_uid` but neither flag, since a tensor-reference vector must
+  be an edge list and would otherwise be skipped; `umd_name` on an edge list; a duplicate
+  `umd_name` within one op; a duplicate attribute name within one op, including the `Node`-table
+  merge below; an input/output tensor whose name collides with a reserved token (§ 6.1); a
+  `umd_opcode` or `umd_name` that is not an identifier; a duplicate `umd_opcode` across ops;
+  `umd_opcode` on a table outside the `NodeAttributes` union; any `umd_*` annotation on a `Node`
+  table field; an unknown `umd_*` annotation; or an unsigned 64-bit scalar attribute, which an
+  `Int` cannot represent.
 - **Scalar attribute value kind.** A scalar attribute carries its value kind for compile-time type
   checking ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)): integer fields bind as `Int`,
   float/double as `Float`, `bool` as `Bool`, and an **enum-typed** field as `Dtype`, carrying the
@@ -1655,8 +1774,11 @@ build** rather than emitting a wrong registry:
    registry emitted into the schema-owning SDK, so it needs no dependency on the provider): a table
    keyed by the `umd_opcode` shorthand, each entry also carrying its attribute-table name and the
    integer `NodeAttributes` value, and listing its input and output tensors (name, optionality, and
-   the typed accessor for the UID field) and its scalar attributes (name, optionality, value kind, and
-   typed accessor).
+   the typed accessor for the UID field), its input and output edge lists (field name and the typed
+   accessor for the UID vector), and its scalar attributes (name, optionality, value kind, and
+   typed accessor). The same run emits the registry as JSON (`op_schema_registry.json`, installed with
+   the SDK) without the accessors, so build-time tools such as the packager resolve patterns against
+   the identical table.
 
 Reflection is used **only at build time**; the generated registry holds typed accessors, so the runtime
 match path reads UID and attribute fields via `attributesAs<T>()`
@@ -1668,7 +1790,7 @@ The emitted entry for one opcode is, conceptually:
 
 ```jsonc
 // generated; illustrative shape, not a wire format
-"sdpa_fwd": {                          // key: the table's umd_opcode (fallback: table name)
+"sdpa_fwd": {                          // key: the table's umd_opcode
   "attributes_type": "SdpaAttributes", // NodeAttributes union member; matched via Node::attributes_type()
   "operands": [
     {"name": "q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},
@@ -1677,6 +1799,8 @@ The emitted entry for one opcode is, conceptually:
     {"name": "attn_mask", "uid": "&SdpaAttributes::attn_mask_tensor_uid", "optional": true}
   ],
   "results":  [{"name": "o", "uid": "&SdpaAttributes::o_tensor_uid", "optional": false}],
+  "operand_lists": [],                 // e.g. custom_op: [{"name": "input_tensor_uids", ...}]
+  "result_lists":  [],
   "attributes": [
     {"name": "dropout_probability", "get": "&SdpaAttributes::dropout_probability", "optional": true},
     {"name": "alibi_mask",          "get": "&SdpaAttributes::alibi_mask",          "optional": false}
@@ -1687,7 +1811,7 @@ The emitted entry for one opcode is, conceptually:
 At compile (§ 7) the matcher resolves each pattern
 name against this entry. At match time, for a node of that opcode it reads each name's UID via the typed
 accessor, resolves the UID against the per-graph UID→producer/consumer index
-(§ 5) to bind the tensor, and auto-binds the tensor's fields
+(§ 5), whose producers include every op's result-list UIDs (B.3), to bind the tensor, and auto-binds the tensor's fields
 and the node's scalar attributes into the five namespaces
 (§ 6.1). An optional operand absent from the
 graph is reported by `not_present` and is read only through a guarded reference or `value_or_default`.

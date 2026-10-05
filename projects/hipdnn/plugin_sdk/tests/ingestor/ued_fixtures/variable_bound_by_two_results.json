@@ -1,0 +1,36 @@
+{
+  "description": "Two results bind the same variable.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "da551654-cb4c-5314-97ed-a9b7dd1c0a74",
+    "name": "ued_fixture:variable_bound_by_two_results",
+    "metadata": "1b396951-c52c-5147-a673-90300c779592",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "first",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$a"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "second",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$b"
+          },
+          "results": {
+            "out_0": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

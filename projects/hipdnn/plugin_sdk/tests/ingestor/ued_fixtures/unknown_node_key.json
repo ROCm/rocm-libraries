@@ -1,0 +1,29 @@
+{
+  "description": "An unknown non-extension key inside a node object.",
+  "valid": false,
+  "ued": {
+    "version": "1.0",
+    "id": "c59db536-09aa-5161-9cb3-a07527c1b287",
+    "name": "ued_fixture:unknown_node_key",
+    "metadata": "03a1069d-375b-555d-83a9-65472b69ea28",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          },
+          "inputs": {
+            "in_0": "$input_a"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -42,6 +42,8 @@
  * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
  * one element, uniform dtype -- evaluated once per graph; each pack adds only an
  * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
+ * The operation check also re-reads the binding's operand facts (token lookups, not
+ * graph reads), because a declarative `graph_match` can replace the shared matcher.
  * Symbol names are restated here rather than shared via a header, since a descriptor
  * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
  * names, so a mismatched string is caught without becoming a compile error.
@@ -128,6 +130,32 @@ bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
         = tryGetBoundValue<bool>(bound, tensorField(root, "is_runtime_pass_by_value"));
     return isVirtual != nullptr && !*isVirtual && runtime != nullptr && !*runtime
            && tryGetBoundValue<double>(bound, tensorField(root, "value_f32")) == nullptr;
+}
+
+/**
+ * @brief Every fact the dispatch relies on, read from the binding alone: one node, and
+ *        three supported operands of one dtype.
+ *
+ * Read from tokens rather than the graph so it holds whichever `graph_match` arm bound
+ * them -- a declarative pattern can pair with this pack's dispatch, and its binding has
+ * passed none of the native graph match's checks.
+ */
+bool isServableBinding(const BoundTokens& bound)
+{
+    if(tryGetBoundInt(bound, "graph.node_count") != 1 || !isSupportedOperand(bound, INPUT_A_TOKEN)
+       || !isSupportedOperand(bound, INPUT_B_TOKEN) || !isSupportedOperand(bound, OUTPUT_TOKEN))
+    {
+        return false;
+    }
+    // Uniform dtype across operands; mixed precision is a different kernel.
+    const auto* dtype
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_A_TOKEN, DTYPE_FIELD));
+    const auto* inputBDtype
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_B_TOKEN, DTYPE_FIELD));
+    const auto* outputDtype
+        = tryGetBoundValue<std::string>(bound, tensorField(OUTPUT_TOKEN, DTYPE_FIELD));
+    return dtype != nullptr && inputBDtype != nullptr && outputDtype != nullptr
+           && *dtype == *inputBDtype && *dtype == *outputDtype;
 }
 
 bool publishPointwiseNode(BoundTokens& bound,
@@ -221,19 +249,8 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
        || !publishTensor(bound, INPUT_B_TOKEN, inputB)
        || !publishTensor(bound, OUTPUT_TOKEN, output)
        || !publishPointwiseNode(
-           bound, attributes, context.graph.getNodeWrapper(0).computeDataType()))
-    {
-        return std::nullopt;
-    }
-    if(!isSupportedOperand(bound, INPUT_A_TOKEN) || !isSupportedOperand(bound, INPUT_B_TOKEN)
-       || !isSupportedOperand(bound, OUTPUT_TOKEN))
-    {
-        return std::nullopt;
-    }
-    if(*tryGetBoundValue<std::string>(bound, "input_a.dtype")
-           != *tryGetBoundValue<std::string>(bound, "input_b.dtype")
-       || *tryGetBoundValue<std::string>(bound, "input_a.dtype")
-              != *tryGetBoundValue<std::string>(bound, "output.dtype"))
+           bound, attributes, context.graph.getNodeWrapper(0).computeDataType())
+       || !isServableBinding(bound))
     {
         return std::nullopt;
     }
@@ -245,11 +262,17 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
  *
  * Listing this second matcher is the whole cost of a pack, and two packs claiming the
  * same operation would be the authoring mistake, not two packs sharing the graph check.
+ * Every pack lists it, so it also re-checks the binding the dispatch relies on: a
+ * declarative `graph_match` admits graphs the native one refuses. Operand roles are not
+ * re-checked: the binding does not record which edge fed which root, and this criterion
+ * reads the binding rather than the graph, so a pattern binding `input_a` to `in_1`
+ * (a reversed SUB) is the pattern author's error to avoid.
  */
 bool pointwiseOperationMatches(const BoundTokens& bound, data_objects::PointwiseMode operation)
 {
     const auto* published = tryGetBoundValue<std::string>(bound, "pointwise.operation");
-    return published != nullptr && *published == data_objects::EnumNamePointwiseMode(operation);
+    return published != nullptr && *published == data_objects::EnumNamePointwiseMode(operation)
+           && isServableBinding(bound);
 }
 
 bool pointwiseAddMatches(const MatchContext& /*context*/, const BoundTokens& bound)
@@ -272,7 +295,8 @@ bool pointwiseKernelMatches(const MatchContext& /*context*/,
                             const BoundTokens& bound,
                             const KernelDefinition& kernel)
 {
-    const auto* dataType = tryGetBoundValue<std::string>(bound, "input_a.dtype");
+    const auto* dataType
+        = tryGetBoundValue<std::string>(bound, tensorField(INPUT_A_TOKEN, DTYPE_FIELD));
     return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType;
 }
 
