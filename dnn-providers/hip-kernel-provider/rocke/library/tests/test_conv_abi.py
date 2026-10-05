@@ -1327,6 +1327,38 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
     assert re.search(r"[1-9]\d* failed", lines[-1])
 
 
+def _fake_compile_worker(payload):
+    if payload[-1] == "boom":
+        import os
+
+        os._exit(1)
+    return payload[-1], b"hsaco", "k", None
+
+
+def test_isolated_rerun_fits_a_low_open_file_limit(monkeypatch):
+    """Hundreds of suspects rerun within a 256-fd limit; only the culprit fails."""
+    import multiprocessing
+
+    resource = pytest.importorskip("resource")
+    if multiprocessing.get_start_method() != "fork":
+        pytest.skip("the fake worker is injected by monkeypatch + fork")
+    from benchmarks.common import kernel_sweep as ks
+
+    monkeypatch.setattr(ks, "_compile_worker", _fake_compile_worker)
+    keys = [f"k{i}" for i in range(300)]
+    keys[137] = "boom"
+    suspects = [("compile", (None, None, None, None, k)) for k in keys]
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(256, hard), hard))
+    try:
+        results = {p[-1]: r for _, p, r in ks._run_isolated(suspects, jobs=128)}
+    finally:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+    assert len(results) == 300
+    assert results["boom"][3] == ks._WORKER_DIED
+    assert all(r[3] is None for k, r in results.items() if k != "boom")
+
+
 @pytest.mark.parametrize("two_stage", [False, True])
 def test_wgrad_split_degree_is_not_compiled_in(two_stage):
     """Every split_k > 1 builds the same wgrad kernel, name included.

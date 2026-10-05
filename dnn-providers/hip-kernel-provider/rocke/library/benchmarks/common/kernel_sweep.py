@@ -1080,37 +1080,70 @@ _MAX_POOL_RESTARTS = 20
 _WORKER_DIED = "worker process died (out of memory, or a crash in the compiler)"
 
 
-def _run_isolated(suspects, jobs: int):
-    """Run each ``(kind, payload)`` in its own single-worker pool.
+# Each single-worker pool holds a handful of pipes; the slot count is capped so
+# the reruns fit the process's open-file limit (often 1024 in containers).
+_FDS_PER_POOL = 16
+_MAX_ISOLATED_SLOTS = 16
 
-    Yields ``(kind, payload, result)`` with the worker's usual result tuple; a
-    job whose worker dies again gets that tuple with :data:`_WORKER_DIED` as
-    its error, so it is reported like any other failure instead of taking the
-    run down. At most ``jobs`` of these pools are alive at a time.
+
+def _isolated_slots(jobs: int) -> int:
+    try:
+        import resource  # POSIX only
+
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        if soft == resource.RLIM_INFINITY:
+            soft = 1 << 16
+    except (ImportError, OSError, ValueError):
+        soft = 1024
+    by_fds = max(1, (soft // 2) // _FDS_PER_POOL)
+    return max(1, min(jobs, _MAX_ISOLATED_SLOTS, by_fds))
+
+
+def _died_result(kind: str, payload):
+    if kind == "emit":
+        return (payload[1], None, None, _WORKER_DIED)
+    return (payload[-1], None, None, _WORKER_DIED)
+
+
+def _run_isolated(suspects, jobs: int):
+    """Run each ``(kind, payload)`` with nothing else in its worker.
+
+    A few single-worker pools ("slots") take the suspects one at a time, so a
+    worker that dies takes down exactly one job. That job gets the worker's
+    usual result tuple with :data:`_WORKER_DIED` as its error -- reported like
+    any other failure instead of ending the run -- and only its slot gets a
+    fresh pool. Yields ``(kind, payload, result)``.
     """
     pending = list(suspects)
-    while pending:
-        batch, pending = pending[:jobs], pending[jobs:]
-        pools = [ProcessPoolExecutor(max_workers=1) for _ in batch]
-        try:
-            futs = [
-                pool.submit(
-                    _emit_worker if kind == "emit" else _compile_worker, payload
-                )
-                for pool, (kind, payload) in zip(pools, batch)
-            ]
-            for (kind, payload), fut in zip(batch, futs):
+    pending.reverse()
+    slots = [ProcessPoolExecutor(max_workers=1) for _ in range(_isolated_slots(jobs))]
+    running: Dict = {}  # future -> (slot index, kind, payload)
+
+    def submit(i: int) -> None:
+        kind, payload = pending.pop()
+        fn = _emit_worker if kind == "emit" else _compile_worker
+        running[slots[i].submit(fn, payload)] = (i, kind, payload)
+
+    try:
+        for i in range(len(slots)):
+            if pending:
+                submit(i)
+        while running:
+            done, _ = wait(list(running), return_when=FIRST_COMPLETED)
+            for fut in done:
+                i, kind, payload = running.pop(fut)
                 try:
                     result = fut.result()
                 except BrokenProcessPool:
-                    if kind == "emit":
-                        result = (payload[1], None, None, _WORKER_DIED)
-                    else:
-                        result = (payload[-1], None, None, _WORKER_DIED)
+                    result = _died_result(kind, payload)
+                    slots[i].shutdown(wait=True)
+                    slots[i] = ProcessPoolExecutor(max_workers=1)
                 yield kind, payload, result
-        finally:
-            for pool in pools:
-                pool.shutdown(wait=True)
+                if pending:
+                    submit(i)
+    finally:
+        for pool in slots:
+            pool.shutdown(wait=True)
 
 
 def _pool_map(fn, payloads, jobs: int, on_result) -> None:

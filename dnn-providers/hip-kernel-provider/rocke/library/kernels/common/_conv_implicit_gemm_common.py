@@ -986,7 +986,8 @@ def magic_divmod(
     if isinstance(dim, int) and dim == 1:
         return val, b.const_i32(0)
     quot = do_magic_division_dynamic(b, val, as_value(mult), as_value(shift))
-    prod = (mul_u24 if u24 else IRBuilder.mul)(b, quot, as_value(dim))
+    dim_v = as_value(dim)
+    prod = mul_u24(b, quot, dim_v) if u24 else b.mul(quot, dim_v)
     return quot, b.sub(val, prod)
 
 
