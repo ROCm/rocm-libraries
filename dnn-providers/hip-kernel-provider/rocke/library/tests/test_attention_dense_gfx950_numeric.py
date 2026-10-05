@@ -1663,6 +1663,56 @@ class TestDenseLseNumeric:
                 **metadata,
             )
 
+    @pytest.mark.parametrize(
+        "spec_id",
+        ["gfx950_dense_grid", "gfx950_dense_persist", "gfx950_dense_persist_widedma"],
+    )
+    def test_dispatched_lse(self, spec_id):
+        """Request -> dispatch -> bind -> launch fills a caller-owned LSE buffer."""
+        from dispatch.attention import (
+            AttentionRequest,
+            attention_execution_candidates,
+            dispatch_attention,
+        )
+
+        candidate = next(
+            c for c in attention_execution_candidates() if c.spec_id == spec_id
+        )
+        result = dispatch_attention(
+            AttentionRequest(
+                batch=2,
+                nhead_q=8,
+                nhead_k=2,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
+                arch="gfx950",
+                mask_type=1,
+                dtype="bf16",
+                algorithm=candidate.algorithm,
+                spec_id=spec_id,
+                emit_lse=True,
+            )
+        )
+        scale = 0.5
+        torch.manual_seed(23)
+        q = torch.randn(2, 512, 8, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(2, 512, 2, 128, device=q.device, dtype=q.dtype)
+        v = torch.randn_like(k)
+        out = torch.empty_like(q)
+        lse = torch.full(
+            (2, 8, 512, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        tensors = {"q": q, "k": k, "v": v, "out": out}
+        with pytest.raises(ValueError):
+            result.bind_torch(tensors, scale=scale).launch()
+        result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
+        torch.cuda.synchronize()
+        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+        assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+
     def test_lse_runtime_shape_reuse(self):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE

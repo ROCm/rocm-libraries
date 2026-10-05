@@ -235,9 +235,12 @@ each KV length must be a positive `block_n` multiple and at most spec `seqlen_kv
 Zero-Q sequences write no rows. These offset-content checks may synchronize;
 LSE buffer checks use metadata only.
 
-LSE is available only through this direct runner with an explicit spec. This
-does not add LSE to the prefill CLI, dispatcher, hipDNN, unified attention, or
-split-KV decode. The gfx942 dense kernel has the same opt-in.
+Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
+pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
+then launches the LSE kernel. Only the dense candidates declare the `lse` feature, so
+an unpinned (`auto`) LSE request is refused rather than routed to a kernel without
+the output. The prefill CLI, hipDNN, unified attention, and split-KV decode do not
+write LSE. The gfx942 dense kernel has the same opt-in.
 
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):

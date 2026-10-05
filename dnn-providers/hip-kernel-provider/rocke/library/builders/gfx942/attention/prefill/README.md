@@ -118,8 +118,9 @@ run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=128*
 Values are natural-log FP32. A row with no allowed key (only possible with a sliding
 window shorter than the distance to the last key) writes exact-zero output and
 `LSE=-inf`. With the flag off the emitted kernel is unchanged. The LSE buffer must not
-overlap any input or the output; supplying it with the flag off is an error. LSE is
-available only through this direct runner, not the dispatcher or hipDNN.
+overlap any input or the output; supplying it with the flag off is an error. The
+dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
+with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.
 
 ## Why a separate kernel (not an arch branch in the gfx950 file)
 
