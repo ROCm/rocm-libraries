@@ -397,6 +397,83 @@ namespace
                   "  solution 0 (library index 9, kernel Cijk_MT32x32)");
     }
 
+    // scaleA (per row), scaleB (per column), scaleC and scaleD must all be folded into the
+    // check: a D built with every scale passes, and a D that used one wrong scaleB entry fails
+    // and is located in that column.
+    TEST(FastCheck_pre_checkin, every_scale_is_applied_and_a_wrong_one_is_located)
+    {
+        HostProblem        hp = default_problem(false, true);
+        std::vector<float> sa(size_t(hp.M)), sb(size_t(hp.N));
+        const float        sc = 3, sd = 2;
+        for(int64_t i = 0; i < hp.M; i++)
+            sa[size_t(i)] = float(1 + i % 4);
+        for(int64_t j = 0; j < hp.N; j++)
+            sb[size_t(j)] = float(1 + j % 5);
+        auto build = [&](int64_t bad_col) {
+            for(int64_t s = 0; s < hp.batch; s++)
+                for(int64_t j = 0; j < hp.N; j++)
+                    for(int64_t i = 0; i < hp.M; i++)
+                    {
+                        double acc = 0;
+                        for(int64_t k = 0; k < hp.K; k++)
+                            acc += hp.a(s, i, k) * hp.b(s, k, j);
+                        double b_scale = sb[size_t(j)] + (j == bad_col ? 1 : 0);
+                        hp.d(s, i, j)  = float(
+                            sd
+                            * (hp.alpha * hp.scale[size_t(i)] * sa[size_t(i)] * b_scale * acc
+                               + hp.beta * sc * hp.C[size_t(s * hp.stride_c() + j * hp.ldc + i)]
+                               + hp.bias[size_t(s * hp.M + i)]));
+                    }
+        };
+        FastCheckProblem p = hp.problem();
+        p.scale_a          = sa.data();
+        p.scale_a_vector   = true;
+        p.scale_b          = sb.data();
+        p.scale_b_vector   = true;
+        p.scale_c          = sc;
+        p.scale_d          = sd;
+
+        build(-1);
+        auto res = fast_check_gemm(p);
+        EXPECT_TRUE(res.passed) << res.message;
+
+        build(3);
+        res = fast_check_gemm(p);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("col 3:"), std::string::npos) << res.message;
+        EXPECT_EQ(res.message.find("col 2:"), std::string::npos) << res.message;
+    }
+
+    // A bias gradient must equal the exact row sums of op(A) (BGRADA) or column sums of op(B)
+    // (BGRADB), and one wrong entry must be reported by index.
+    TEST(FastCheck_pre_checkin, bias_gradient_is_the_exact_sum_over_k)
+    {
+        for(bool trans : {false, true})
+        {
+            HostProblem        hp = default_problem(trans, !trans);
+            FastCheckProblem   p  = hp.problem();
+            std::vector<float> ga(size_t(hp.M), 0), gb(size_t(hp.N), 0);
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                for(int64_t i = 0; i < hp.M; i++)
+                    ga[size_t(i)] += float(hp.a(0, i, k));
+                for(int64_t j = 0; j < hp.N; j++)
+                    gb[size_t(j)] += float(hp.b(0, k, j));
+            }
+            EXPECT_TRUE(fast_check_bias_gradient(p, 'a', ga.data(), HIP_R_32F).passed);
+            EXPECT_TRUE(fast_check_bias_gradient(p, 'b', gb.data(), HIP_R_32F).passed);
+
+            ga[5] += 1;
+            gb[7] -= 1;
+            auto ra = fast_check_bias_gradient(p, 'a', ga.data(), HIP_R_32F);
+            auto rb = fast_check_bias_gradient(p, 'b', gb.data(), HIP_R_32F);
+            EXPECT_FALSE(ra.passed);
+            EXPECT_NE(ra.message.find("element 5:"), std::string::npos) << ra.message;
+            EXPECT_FALSE(rb.passed);
+            EXPECT_NE(rb.message.find("element 7:"), std::string::npos) << rb.message;
+        }
+    }
+
     // The bound must be the largest sum over K of |a| times the largest |b| in that row of B, and
     // a configuration must be refused once the bound reaches the range the compute type holds
     // exactly (2^11 for f16), and accepted below it.
@@ -834,6 +911,166 @@ namespace
         hipblaslt_bf8_fnuz nan_e5m2(0.f);
         nan_e5m2.__x = 0x80;
         EXPECT_EQ(negate(nan_e5m2).__x, 0x80);
+    }
+
+    // D must equal scale_d * act(E / scale_e) for relu and clamp; one wrong element of D is
+    // reported, and amax is the largest |act| over the region.
+    TEST(FastCheckDevice_pre_checkin, activation_is_checked_through_e)
+    {
+        DeviceMatrix       d, e;
+        const float        scale_d = 2, scale_e = 3;
+        std::vector<float> he(DeviceMatrix::total, 99.f), hd(DeviceMatrix::total, 99.f);
+        for(FastCheckActivation act : {FastCheckActivation::relu, FastCheckActivation::clamp})
+        {
+            double top = 0;
+            for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
+            {
+                if(!DeviceMatrix::in_region(idx))
+                    continue;
+                float pre = float(int(idx % 23) - 11);
+                float a   = act == FastCheckActivation::relu ? std::max(pre, 0.f)
+                                                             : std::max(-4.f, std::min(pre, 6.f));
+                he[idx]   = pre * scale_e;
+                hd[idx]   = a * scale_d;
+                top       = std::max(top, double(std::fabs(a)));
+            }
+            e.write(he);
+            d.write(hd);
+            double amax = -1;
+            auto   res  = fast_check_activation_device(d.matrix(),
+                                                    e.matrix(),
+                                                    DeviceMatrix::batch,
+                                                    scale_d,
+                                                    scale_e,
+                                                    act,
+                                                    -4,
+                                                    6,
+                                                    0,
+                                                    &amax);
+            EXPECT_TRUE(res.passed) << res.message;
+            EXPECT_EQ(amax, top);
+
+            // Offset 39 is batch 1, row 1, col 1.
+            ASSERT_TRUE(DeviceMatrix::in_region(39));
+            d.set(39, hd[39] + 1);
+            res = fast_check_activation_device(d.matrix(),
+                                               e.matrix(),
+                                               DeviceMatrix::batch,
+                                               scale_d,
+                                               scale_e,
+                                               act,
+                                               -4,
+                                               6,
+                                               0,
+                                               nullptr);
+            ASSERT_FALSE(res.passed);
+            EXPECT_NE(res.message.find("1 elements of D"), std::string::npos) << res.message;
+            EXPECT_NE(res.message.find("batch 1, row 1, col 1"), std::string::npos) << res.message;
+        }
+    }
+
+    // amaxD without an activation is the largest |D| over |scale_d|. A value outside the range the
+    // type stores exactly may have been rounded, and a scale of 0 erases the values, so neither
+    // amaxD nor the activation can be checked from it, and both say so rather than report a wrong
+    // value.
+    TEST(FastCheckDevice_pre_checkin, amax_and_activation_need_exact_values)
+    {
+        DeviceMatrix       d, e;
+        std::vector<float> he(DeviceMatrix::total, 99.f), hd(DeviceMatrix::total, 99.f);
+        for(size_t idx = 0; idx < DeviceMatrix::total; idx++)
+            if(DeviceMatrix::in_region(idx))
+            {
+                he[idx] = float(int(idx % 7) - 3);
+                hd[idx] = std::max(he[idx], 0.f);
+            }
+        e.write(he);
+        d.write(hd);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 2, 0), 1.5);
+        EXPECT_EQ(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, -2, 0), 1.5);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 0, 0)));
+        double amax = -1;
+        auto   res  = fast_check_activation_device(d.matrix(),
+                                                e.matrix(),
+                                                DeviceMatrix::batch,
+                                                1,
+                                                1,
+                                                FastCheckActivation::relu,
+                                                0,
+                                                0,
+                                                0,
+                                                &amax);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(amax, 3);
+
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           0,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("scaled by 0"), std::string::npos) << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+
+        // f32 stores integers exactly below 2^24.
+        e.set(39, 16777216.f);
+        d.set(39, 16777216.f);
+        EXPECT_TRUE(std::isnan(fast_check_amax_device(e.matrix(), DeviceMatrix::batch, 1, 0)));
+        res = fast_check_activation_device(d.matrix(),
+                                           e.matrix(),
+                                           DeviceMatrix::batch,
+                                           1,
+                                           1,
+                                           FastCheckActivation::relu,
+                                           0,
+                                           0,
+                                           0,
+                                           &amax);
+        ASSERT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("1 elements of E are outside the range its type stores exactly"),
+                  std::string::npos)
+            << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+    }
+
+    // Scales must be integers for the modular sums; a fractional one is refused with its name.
+    TEST(FastCheck_pre_checkin, non_integer_scales_are_refused)
+    {
+        auto refused = [](const FastCheckProblem& p, const char* reason) {
+            auto res = fast_check_gemm(p);
+            EXPECT_FALSE(res.passed) << reason;
+            EXPECT_NE(res.message.find(reason), std::string::npos) << res.message;
+        };
+        HostProblem      hp = default_problem();
+        FastCheckProblem p  = hp.problem();
+        p.scale_c           = 1.5;
+        refused(p, "integer scaleC and scaleD");
+
+        std::vector<float> sa(size_t(hp.M), 2.f), sb(size_t(hp.N), 2.f);
+        sa[5]            = 2.5f;
+        p                = hp.problem();
+        p.scale_a        = sa.data();
+        p.scale_a_vector = true;
+        refused(p, "integer scaleA entries");
+
+        sb[3]            = 0.5f;
+        p                = hp.problem();
+        p.scale_b        = sb.data();
+        p.scale_b_vector = true;
+        refused(p, "integer scaleB entries");
+
+        const float v = 5;
+        EXPECT_EQ(fast_check_load(&v, HIP_R_32F, 0), 5.0);
+
+        // Factors that each fit but whose product reaches 2^61 are refused, not overflowed.
+        p         = hp.problem();
+        p.beta    = 0x1p40;
+        p.scale_c = 0x1p30;
+        refused(p, "combine to values below 2^61");
     }
 
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding
