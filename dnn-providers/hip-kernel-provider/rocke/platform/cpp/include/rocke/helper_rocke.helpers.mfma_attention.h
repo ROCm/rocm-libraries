@@ -255,6 +255,8 @@ typedef struct rocke_mfma_attn_params
     int wmma_v_head_size; /* 0 => V/O width equals head_size; wave32 only */
     bool wmma_use_window_right; /* false (zero-init) => off; wave32 only */
     int wmma_window_right; /* when enabled, keep k <= q + ctx + window_right */
+    rocke_value_t* lse; /* optional FP32 global ptr: natural-log softmax stat per row; wave32 only */
+    rocke_value_t* lse_offset; /* element index of this tile's first query row (required with lse) */
 } rocke_mfma_attn_params_t;
 
 /* ---------------------------------------------- mfma_attention_fwd_inner_body *

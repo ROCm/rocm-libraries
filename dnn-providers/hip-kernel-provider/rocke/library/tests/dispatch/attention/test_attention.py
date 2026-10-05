@@ -42,6 +42,7 @@ EXPECTED_FEATURES = {
         "alibi",
         "qq_bias",
         "window_right",
+        "lse",
         "layout_dense",
         "layout_ragged",
         "layout_paged",

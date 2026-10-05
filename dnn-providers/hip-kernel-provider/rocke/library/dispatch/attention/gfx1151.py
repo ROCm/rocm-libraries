@@ -36,7 +36,9 @@ from .common import (
 # v2: ``rocke_wmma_fmha_fwd_spec_t`` gained kv_dtype, transposed_qk, block_n,
 # num_waves, scheduler_strategy and value_tile_size, and the grid's z axis became
 # ``batch * value_tiles``. Callers compiled against the v1 header must be rebuilt.
-ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v2"
+# v3: ``rocke_wmma_fmha_fwd_spec_t`` gained store_lse, and the specialized kernel
+# ABI appends an FP32 ``lse`` pointer (plus ``stride_lse_head`` for packed layouts).
+ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v3"
 
 # Compute units of the reference gfx1151 part. The output-column tiling gate was
 # tuned at this size, so it is the fallback when no count is given or visible.
@@ -93,6 +95,7 @@ _WMMA_FWD_CAP = Capability(
             "alibi",
             "qq_bias",
             "window_right",
+            "lse",
             "layout_dense",
             "layout_ragged",
             "layout_paged",
@@ -227,6 +230,7 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         use_sinks=bool(req.use_sinks),
         use_alibi=bool(req.use_alibi),
         use_qq_bias=bool(req.use_qq_bias),
+        store_lse=bool(req.return_lse),
         layout=layout,
         page_block_size=int(req.kv_block_size) if layout == "paged" else 0,
         kv_dtype="fp8e4m3" if bool(req.use_fp8) else "",

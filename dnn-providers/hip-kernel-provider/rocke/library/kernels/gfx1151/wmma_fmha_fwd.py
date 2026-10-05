@@ -126,6 +126,10 @@ class WmmaFmhaFwdSpec:
     # k <= q + context + window_right, and k > q + context - sliding_window when
     # a left width is set. -1 => off; 0 with a left width equals causal+window.
     window_right: int = -1
+    # Also write the per-row natural-log softmax statistic (LSE, which includes
+    # an attention sink when enabled) to an FP32 ``lse`` buffer: ``[B, H, Sq]``
+    # for dense, ``[H, total_q]`` (``stride_lse_head``) for packed layouts.
+    store_lse: bool = False
 
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
@@ -294,6 +298,7 @@ class WmmaFmhaFwdSpec:
             ),
             f"dv{self.value_tile_size}" if self.value_tile_size else "",
             f"vh{self.v_head_size}" if self.v_head_size else "",
+            "lse" if self.store_lse else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -448,6 +453,12 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     if spec.kv_dtype:
         params["k_scale"] = b.param("k_scale", F32)
         params["v_scale"] = b.param("v_scale", F32)
+    if spec.store_lse:
+        params["lse"] = b.param(
+            "lse", PtrType(F32, "global"), noalias=True, writeonly=True, align=4
+        )
+        if spec.layout != "dense":
+            params["stride_lse_head"] = b.param("stride_lse_head", I32)
     return params
 
 
@@ -678,6 +689,14 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         causal_skip=spec.causal_tile_skip,
         right=spec.window_right,
     )
+    lse_ptr = lse_offset = None
+    if spec.store_lse:
+        lse_ptr = p["lse"]
+        if spec.layout == "dense":
+            lse_rows = b.add(b.mul(batch, b.const_i32(qh)), head)
+            lse_offset = b.add(b.mul(lse_rows, seqlen_q), q_row0)
+        else:
+            lse_offset = b.add(b.mul(head, p["stride_lse_head"]), q_global)
     k_row, v_row = (None, None)
     if spec.layout == "paged":
         k_row, v_row = _paged_rows(b, spec, p, batch, kv_head)
@@ -714,6 +733,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
             arch=arch,
             causal_ctx_offset=context if spec.causal_bottom_right else None,
             mask_neg_inf=masked,
+            lse=lse_ptr,
+            lse_offset=lse_offset,
         )
         b.ret()
         return b.kernel
@@ -756,6 +777,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         wmma_value_offset=value_offset,
         wmma_v_head_size=spec.v_head_size,
         wmma_window_right=spec.window_right,
+        wmma_lse=lse_ptr,
+        wmma_lse_offset=lse_offset,
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,

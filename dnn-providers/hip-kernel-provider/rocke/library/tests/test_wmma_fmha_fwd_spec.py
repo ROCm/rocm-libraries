@@ -331,6 +331,36 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         self.assertNotEqual(both, ir(replace(base, window_right=16)))
         self.assertEqual(ir(base), ir(replace(base, window_right=-1)))
 
+    def test_store_lse_naming_params_and_default_is_unchanged(self):
+        from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        def ir(spec):
+            return lower_kernel_to_llvm(
+                build_wmma_fmha_fwd(spec, "gfx1151"), arch="gfx1151"
+            )
+
+        def params(spec):
+            return [p.name for p in build_wmma_fmha_fwd(spec, "gfx1151").params]
+
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode="none")
+        self.assertFalse(base.store_lse)
+        with_lse = replace(base, store_lse=True)
+        self.assertTrue(with_lse.kernel_name().endswith("_lse"))
+        self.assertNotIn("lse", base.kernel_name())
+        self.assertEqual(params(with_lse), params(base) + ["lse"])
+        for layout, extra in (("ragged", ["cu_seqlens_q", "cu_seqlens_k"]),):
+            packed = replace(base, layout=layout, query_tail=True, kv_tail=True)
+            self.assertEqual(
+                params(replace(packed, store_lse=True)),
+                params(packed) + ["lse", "stride_lse_head"],
+            )
+        self.assertNotEqual(ir(base), ir(with_lse))
+        self.assertEqual(ir(base), ir(replace(base, store_lse=False)))
+        # The statistic also covers a sink (extra denominator mass).
+        sunk = replace(base, use_sinks=True)
+        self.assertNotEqual(ir(replace(sunk, store_lse=True)), ir(with_lse))
+
 
 if __name__ == "__main__":
     unittest.main()

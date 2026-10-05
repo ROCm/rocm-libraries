@@ -145,6 +145,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.causal_tile_skip = false;
     s.v_head_size = 0;
     s.window_right = -1;
+    s.store_lse = false;
     return s;
 }
 
@@ -162,7 +163,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     const char* mask;
     char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32],
         value_tile[32], v_head[32], right_window[40];
-    const char* parts[17];
+    const char* parts[20];
     const char* dtype = wmma_dtype(spec);
 
     if(spec == NULL || out == NULL || dtype == NULL || !wmma_valid_layout(spec)
@@ -241,6 +242,8 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         snprintf(v_head, sizeof(v_head), "vh%d", spec->v_head_size);
         parts[num_parts++] = v_head;
     }
+    if(spec->store_lse)
+        parts[num_parts++] = "lse";
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias", "cskip"};
     const int flag_on[] = {spec->query_tail || packed,
                            spec->kv_tail || packed,
@@ -573,6 +576,19 @@ static void wmma_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd
         (void)rocke_b_param(b, "k_scale", rocke_f32(), NULL);
         (void)rocke_b_param(b, "v_scale", rocke_f32(), NULL);
     }
+    if(spec->store_lse)
+    {
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        (void)rocke_b_param(b, "lse", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+        if(strcmp(spec->layout, "dense") != 0)
+            (void)rocke_b_param(b, "stride_lse_head", rocke_i32(), NULL);
+    }
 }
 
 struct wmma_score_context
@@ -863,6 +879,24 @@ static rocke_status_t
         if(lower != NULL)
             p.k_tile_start = rocke_b_div(b, lower, c16);
         p.k_tile_stop = rocke_b_div(b, rocke_b_add(b, upper, last), c16);
+    }
+    if(spec->store_lse)
+    {
+        p.lse = rocke_b_get_param(b, "lse");
+        if(!packed)
+        {
+            rocke_value_t* lse_qh = rocke_b_const_i32(b, qh);
+            rocke_value_t* lse_batch_rows = rocke_b_mul(b, batch, lse_qh);
+            rocke_value_t* lse_rows = rocke_b_add(b, lse_batch_rows, head);
+            rocke_value_t* lse_base = rocke_b_mul(b, lse_rows, seqlen_q);
+            p.lse_offset = rocke_b_add(b, lse_base, q_row0);
+        }
+        else
+        {
+            rocke_value_t* lse_base
+                = rocke_b_mul(b, head, rocke_b_get_param(b, "stride_lse_head"));
+            p.lse_offset = rocke_b_add(b, lse_base, p.q_tile_base);
+        }
     }
     wmma_paged_row_context paged_k{}, paged_v{};
     if(strcmp(spec->layout, "paged") == 0)

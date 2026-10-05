@@ -88,6 +88,8 @@ def wmma_swapqk_fwd_inner_body(
     causal_ctx_offset: Value | None = None,
     mask_neg_inf: Value | None = None,
     arch: str = "gfx1151",
+    lse: Value | None = None,
+    lse_offset: Value | None = None,
 ) -> None:
     """Emit one transposed-QK WMMA FMHA-forward wave body.
 
@@ -417,7 +419,21 @@ def wmma_swapqk_fwd_inner_body(
 
         b.scf_yield(m_new, l_new, *new_acc_vals)
 
-    _m_f, l_f, accs_f = unpack(kloop.results)
+    m_f, l_f, accs_f = unpack(kloop.results)
+
+    # ---- Optional LSE (natural log), one query row per lane%16 on lanes <16;
+    # ``lse_offset`` is the CTA's first query row. ----
+    if lse is not None:
+        ln2 = b.const_f32(0.6931471805599453)
+        lse_neg_inf = b.const_f32(float("-inf"))
+        log2_l = b.log2(l_f)
+        m_plus = b.fadd(m_f, log2_l)
+        lse_nat = b.fmul(m_plus, ln2)
+        lse_empty = b.fcmp("oeq", l_f, zero_f)
+        lse_val = b.select(lse_empty, lse_neg_inf, lse_nat)
+        lse_idx = b.add(lse_offset, b.add(wave_row, col))
+        with b.scf_if(lane_lt16):
+            b.global_store(lse, lse_idx, lse_val, align=4)
 
     # ---- Epilogue: O^T[d, query] -> O[query, d], rescaled by 1/l. ----
     zmask = b.fcmp("oeq", l_f, zero_f)

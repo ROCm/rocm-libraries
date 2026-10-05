@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 131 configurations
- * by argv[1] (0..130), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 138 configurations
+ * by argv[1] (0..137), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,42 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 131 && idx < 138)
+    {
+        /* layout, page, head_size, causal, tails, sinks, transposed_qk, block_n, waves, tile */
+        struct lse_case
+        {
+            const char* layout;
+            int page, head, causal, tails, sinks, swap, block_n, waves, tile;
+        };
+        static const struct lse_case cases[7] = {
+            {"dense", 0, 64, 1, 1, 1, 0, 32, 1, 0},
+            {"dense", 0, 128, 0, 0, 0, 0, 32, 1, 0},
+            {"ragged", 0, 64, 1, 1, 1, 0, 32, 1, 0},
+            {"paged", 16, 64, 1, 1, 0, 0, 32, 1, 0},
+            {"dense", 0, 64, 0, 0, 0, 1, 32, 1, 0},
+            {"dense", 0, 128, 1, 0, 0, 1, 64, 2, 0},
+            {"dense", 0, 256, 0, 0, 0, 0, 32, 1, 64},
+        };
+        const struct lse_case* c = &cases[idx - 131];
+        spec->head_size = c->head;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->mask_mode = c->causal ? ROCKE_FMHA_MASK_CAUSAL : ROCKE_FMHA_MASK_NONE;
+        spec->causal_bottom_right = c->tails != 0;
+        spec->query_tail = c->tails != 0;
+        spec->kv_tail = c->tails != 0;
+        spec->v_lds_stage = c->tails != 0;
+        spec->use_sinks = c->sinks != 0;
+        spec->layout = c->layout;
+        spec->page_block_size = c->page;
+        spec->transposed_qk = c->swap != 0;
+        spec->block_n = c->block_n;
+        spec->num_waves = c->waves;
+        spec->value_tile_size = c->tile;
+        spec->store_lse = true;
+        return 0;
+    }
     if(idx >= 127 && idx < 131)
     {
         /* head_size, sliding_window, window_right, bottom_right */
@@ -258,7 +294,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..130>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..137>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

@@ -4,7 +4,7 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 131 sampled configurations by argv[1] (0..130), builds it
+# Selects one of 138 sampled configurations by argv[1] (0..137), builds it
 # via build_wmma_fmha_fwd(arch='gfx1151') and prints
 # lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
@@ -32,7 +32,40 @@ _WINDOW_RIGHT_CASES = (
 )
 
 
+_LSE_CASES = (
+    # layout, page, head_size, mask, tails (bottom-right + tails + V LDS), sinks, transposed_qk,
+    # block_n, waves, value_tile
+    ("dense", 0, 64, "causal", True, True, False, 32, 1, 0),
+    ("dense", 0, 128, "none", False, False, False, 32, 1, 0),
+    ("ragged", 0, 64, "causal", True, True, False, 32, 1, 0),
+    ("paged", 16, 64, "causal", True, False, False, 32, 1, 0),
+    ("dense", 0, 64, "none", False, False, True, 32, 1, 0),
+    ("dense", 0, 128, "causal", False, False, True, 64, 2, 0),
+    ("dense", 0, 256, "none", False, False, False, 32, 1, 64),
+)
+
+
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
+    if 131 <= idx < 131 + len(_LSE_CASES):
+        layout, page, head, mask, tails, sinks, swap, block_n, waves, tile = _LSE_CASES[idx - 131]
+        return WmmaFmhaFwdSpec(
+            head_size=head,
+            num_query_heads=8,
+            num_kv_heads=2,
+            mask_mode=mask,
+            causal_bottom_right=tails,
+            query_tail=tails,
+            kv_tail=tails,
+            v_lds_stage=tails,
+            use_sinks=sinks,
+            layout=layout,
+            page_block_size=page,
+            transposed_qk=swap,
+            block_n=block_n,
+            num_waves=waves,
+            value_tile_size=tile,
+            store_lse=True,
+        )
     if 127 <= idx < 131:
         head, left, right, bottom_right = _WINDOW_RIGHT_CASES[idx - 127]
         return WmmaFmhaFwdSpec(
@@ -263,7 +296,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..130>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..137>\n",
         arch="gfx1151",
     )
 

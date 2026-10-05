@@ -444,6 +444,32 @@ class TestMetadataSafety(unittest.TestCase):
             _gfx1151_validate_and_collect(request, spec, tensors)
             self.assertEqual(_gfx1151_dense_needs_per_batch(request, tensors), expected)
 
+    def test_lse_tensor_is_required_and_validated(self):
+        from dispatch.attention.bindings import _gfx1151_validate_and_collect
+
+        request = _dense_request(return_lse=True)
+        spec = _dense_spec(store_lse=True)
+        q = _fake_tensor((2, 32, 4, 64))
+        k = _fake_tensor((2, 32, 2, 64))
+        base = {"q": q, "k": k, "v": k, "out": q}
+        with self.assertRaisesRegex(ValueError, r"requires tensors\['lse'\]"):
+            _gfx1151_validate_and_collect(request, spec, base)
+        good = _fake_tensor((2, 4, 32), dtype="float32")
+        values = _gfx1151_validate_and_collect(request, spec, {**base, "lse": good})
+        self.assertIs(values["lse"], good)
+        self.assertNotIn("stride_lse_head", values)
+        bad = (
+            _fake_tensor((2, 4, 32), dtype="float16"),
+            _fake_tensor((2, 32, 4), dtype="float32"),
+            _fake_tensor((2, 4, 32), dtype="float32", strides=(4 * 32 + 8, 32, 1)),
+        )
+        for lse in bad:
+            with (
+                self.subTest(shape=lse.shape, dtype=lse.dtype),
+                self.assertRaises(ValueError),
+            ):
+                _gfx1151_validate_and_collect(request, spec, {**base, "lse": lse})
+
     def test_overlapping_dense_out_batch_stride_is_rejected(self):
         q = _fake_tensor((2, 32, 4, 64))
         k = _fake_tensor((2, 32, 2, 64))
@@ -1050,3 +1076,300 @@ def test_dispatch_dense_packed_qkv_views(batch):
     actual = _run_dense_views(request, pq, pk, pv, scale=scale)
     expected = _windowed_reference(q, k, v, scale=scale, ctx=0, left=0, right=-1)
     np.testing.assert_allclose(actual, expected, rtol=0, atol=2e-2, equal_nan=False)
+
+
+# ---------------------------------------------------------------------
+# Softmax statistics (LSE): natural-log log-sum-exp per (batch, head, query).
+# ---------------------------------------------------------------------
+
+
+def _launch_np(request, arrays, outputs, *, scale):
+    """Upload each named host array, launch through the public binder, and
+    return the downloaded arrays named in ``outputs``."""
+    from benchmarks.gfx1151.attention.benchmark_sdpa import _host_bytes
+    from rocke.runtime.launcher import release_retained_for_stream
+    from rocke.runtime.torch_interop import resolve_stream
+
+    stream = resolve_stream(0)
+    rt = Runtime()
+    ptrs = {}
+    try:
+        tensors = {}
+        for name, a in arrays.items():
+            a = np.ascontiguousarray(a)
+            arrays[name] = a
+            ptrs[name] = rt.alloc(max(a.nbytes, 1))
+            rt.memcpy_h2d(ptrs[name], _host_bytes(a), a.nbytes)
+            tensors[name] = _DeviceTensor(
+                _ptr=ptrs[name],
+                _shape=tuple(a.shape),
+                _strides=tuple(s // a.itemsize for s in a.strides),
+                _dtype=str(a.dtype),
+            )
+        binding = dispatch_attention(request).bind_torch(
+            tensors, softmax_scale=scale, stream=stream, fence=False
+        )
+        binding.launch()
+        rt.stream_sync(stream)
+        release_retained_for_stream(stream)
+        for name in outputs:
+            rt.memcpy_d2h(_host_bytes(arrays[name]), ptrs[name], arrays[name].nbytes)
+        return {name: arrays[name].copy() for name in outputs}
+    finally:
+        rt.sync()
+        release_retained_for_stream(stream)
+        for ptr in ptrs.values():
+            rt.free(ptr)
+
+
+def _lse_reference(q, k, scale, *, ctx, left, right, sinks=None):
+    """FP64 natural-log LSE ``[B, Hq, Sq]`` for ``[B, S, H, D]`` inputs; ``-inf``
+    for rows with no visible key and no sink."""
+    _, sq, hq, _ = q.shape
+    sk, hkv = k.shape[1], k.shape[2]
+    q64, k64 = q.astype(np.float64), k.astype(np.float64)
+    k64 = np.repeat(k64, hq // hkv, axis=2)
+    qi = np.arange(sq).reshape(sq, 1)
+    ki = np.arange(sk).reshape(1, sk)
+    keep = np.ones((sq, sk), dtype=bool)
+    if right >= 0:
+        keep &= ki <= qi + ctx + right
+    if left > 0:
+        keep &= ki > qi + ctx - left
+    scores = np.einsum("bqhd,bkhd->bhqk", q64 * scale, k64)
+    scores = np.where(keep.reshape(1, 1, sq, sk), scores, -np.inf)
+    if sinks is not None:
+        sink = np.broadcast_to(
+            sinks.astype(np.float64).reshape(1, hq, 1, 1), scores.shape[:3] + (1,)
+        )
+        scores = np.concatenate([scores, sink], axis=-1)
+    row_max = scores.max(axis=-1, keepdims=True)
+    safe_max = np.where(np.isfinite(row_max), row_max, 0.0)
+    denom = np.exp(scores - safe_max).sum(axis=-1)
+    with np.errstate(divide="ignore"):
+        lse = np.log(denom) + safe_max[..., 0]
+    return lse.astype(np.float32)
+
+
+def _assert_lse_close(actual, expected):
+    assert actual.shape == expected.shape
+    np.testing.assert_array_equal(np.isneginf(actual), np.isneginf(expected))
+    finite = np.isfinite(expected)
+    assert np.isfinite(actual[finite]).all()
+    np.testing.assert_allclose(actual[finite], expected[finite], rtol=0, atol=1e-3)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize(
+    "mask,sq,sk,left,right,use_sinks",
+    [
+        (AttentionMaskType.NO_MASK, 33, 47, 0, -1, False),
+        (AttentionMaskType.TOP_LEFT_CAUSAL, 40, 40, 0, -1, True),
+        (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 17, 49, 0, -1, False),
+        (AttentionMaskType.SLIDING_WINDOW, 33, 41, 24, 8, True),
+        # Bottom-right causal with sk < sq: the first sq - sk rows see no key.
+        (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 48, 20, 0, -1, False),
+        (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 48, 20, 0, -1, True),
+    ],
+)
+def test_dispatch_dense_lse(mask, sq, sk, left, right, use_sinks):
+    batch, hq, hkv, dim = 2, 4, 2, 64
+    q, k, v = _random_qkv(301, batch, sq, sk, hq, hkv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    sinks = (
+        np.random.default_rng(302).standard_normal(hq).astype(np.float16)
+        if use_sinks
+        else None
+    )
+    request = _dense_direct_request(
+        batch,
+        sq,
+        sk,
+        hq,
+        hkv,
+        dim,
+        dim,
+        mask_type=mask,
+        sliding_window=left,
+        window_right=right,
+        use_sinks=use_sinks,
+        return_lse=True,
+    )
+    arrays = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "out": np.full((batch, sq, hq, dim), np.nan, dtype=q.dtype),
+        "lse": np.full((batch, hq, sq), np.nan, dtype=np.float32),
+    }
+    if use_sinks:
+        arrays["sinks"] = sinks
+    got = _launch_np(request, arrays, ("lse",), scale=scale)["lse"]
+    ctx = sk - sq if mask == AttentionMaskType.BOTTOM_RIGHT_CAUSAL else 0
+    if mask in (
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        right = 0
+    expected = _lse_reference(q, k, scale, ctx=ctx, left=left, right=right, sinks=sinks)
+    _assert_lse_close(got, expected)
+    if not use_sinks and mask == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sk < sq:
+        assert np.isneginf(got[:, :, : sq - sk]).all()
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+def test_dispatch_dense_lse_does_not_change_output():
+    batch, sq, sk, hq, hkv, dim = 2, 37, 53, 4, 2, 64
+    q, k, v = _random_qkv(303, batch, sq, sk, hq, hkv, dim, dim)
+    scale = 1.0 / np.sqrt(dim)
+    base = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim)
+    with_lse = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+
+    def arrays(with_stats):
+        a = {
+            "q": q,
+            "k": k,
+            "v": v,
+            "out": np.full((batch, sq, hq, dim), np.nan, dtype=q.dtype),
+        }
+        if with_stats:
+            a["lse"] = np.full((batch, hq, sq), np.nan, dtype=np.float32)
+        return a
+
+    out_base = _launch_np(base, arrays(False), ("out",), scale=scale)["out"]
+    out_lse = _launch_np(with_lse, arrays(True), ("out",), scale=scale)["out"]
+    np.testing.assert_array_equal(out_base, out_lse)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+def test_dispatch_dense_lse_gapped_batch_stride_is_served_per_batch():
+    """K/V with a batch-stride gap force per-batch launches; ``lse`` must be
+    sliced per batch too."""
+    batch, sq, sk, hq, hkv, dim, pad = 3, 32, 48, 4, 2, 64, 5
+    q, k, v = _random_qkv(304, batch, sq, sk, hq, hkv, dim, dim)
+    k_store = np.zeros((batch, sk + pad, hkv, dim), dtype=k.dtype)
+    v_store = np.zeros_like(k_store)
+    k_store[:, :sk], v_store[:, :sk] = k, v
+    scale = 1.0 / np.sqrt(dim)
+    request = _dense_direct_request(batch, sq, sk, hq, hkv, dim, dim, return_lse=True)
+    lse = np.full((batch, hq, sq), np.nan, dtype=np.float32)
+    out = np.full((batch, sq, hq, dim), np.nan, dtype=q.dtype)
+    got = _launch_views_lse(
+        request, q, k_store[:, :sk], v_store[:, :sk], out, lse, scale=scale
+    )
+    expected = _lse_reference(q, k, scale, ctx=0, left=0, right=-1)
+    _assert_lse_close(got, expected)
+
+
+def _launch_views_lse(request, q, k, v, out, lse, *, scale):
+    """Launch over numpy views of larger backing arrays and return ``lse``."""
+    from benchmarks.gfx1151.attention.benchmark_sdpa import _host_bytes
+    from rocke.runtime.launcher import release_retained_for_stream
+    from rocke.runtime.torch_interop import resolve_stream
+
+    stream = resolve_stream(0)
+    rt = Runtime()
+    uploaded = {}
+    try:
+
+        def device_view(a):
+            root = a.base if a.base is not None else a
+            if id(root) not in uploaded:
+                ptr = rt.alloc(root.nbytes)
+                rt.memcpy_h2d(ptr, _host_bytes(root), root.nbytes)
+                uploaded[id(root)] = ptr
+            offset = (
+                a.__array_interface__["data"][0] - root.__array_interface__["data"][0]
+            )
+            return _DeviceTensor(
+                _ptr=uploaded[id(root)] + offset,
+                _shape=tuple(a.shape),
+                _strides=tuple(st // a.itemsize for st in a.strides),
+                _dtype=str(a.dtype),
+            )
+
+        tensors = {
+            name: device_view(a)
+            for name, a in (("q", q), ("k", k), ("v", v), ("out", out), ("lse", lse))
+        }
+        binding = dispatch_attention(request).bind_torch(
+            tensors, softmax_scale=scale, stream=stream, fence=False
+        )
+        binding.launch()
+        rt.stream_sync(stream)
+        release_retained_for_stream(stream)
+        rt.memcpy_d2h(_host_bytes(lse), uploaded[id(lse)], lse.nbytes)
+        return lse.copy()
+    finally:
+        rt.sync()
+        release_retained_for_stream(stream)
+        for ptr in uploaded.values():
+            rt.free(ptr)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize("use_sinks", [False, True])
+def test_dispatch_ragged_lse_gqa(use_sinks):
+    """Packed ragged GQA: ``lse`` is ``[Hq, total_q]``. Empty-query sequences
+    own no rows; with bottom-right alignment and ``Sk < Sq`` the leading rows
+    of a sequence see no key and store ``-inf`` (without sinks)."""
+    hq, hkv, dim = 4, 2, 64
+    q_lengths = (0, 17, 1, 3, 25)
+    k_lengths = (9, 17, 5, 2, 40)
+    total_q, total_k = sum(q_lengths), sum(k_lengths)
+    rng = np.random.default_rng(305)
+    q = rng.standard_normal((total_q, hq, dim)).astype(np.float16)
+    k = rng.standard_normal((total_k, hkv, dim)).astype(np.float16)
+    v = rng.standard_normal((total_k, hkv, dim)).astype(np.float16)
+    sinks = rng.standard_normal(hq).astype(np.float16) if use_sinks else None
+    cu_q = np.concatenate([[0], np.cumsum(q_lengths)]).astype(np.int32)
+    cu_k = np.concatenate([[0], np.cumsum(k_lengths)]).astype(np.int32)
+    scale = 1.0 / np.sqrt(dim)
+    request = AttentionRequest(
+        batch=len(q_lengths),
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=max(q_lengths),
+        seqlen_k=max(k_lengths),
+        hdim_q=dim,
+        hdim_v=dim,
+        arch="gfx1151",
+        dtype="fp16",
+        layout="ragged",
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        use_sinks=use_sinks,
+        return_lse=True,
+    )
+    arrays = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "out": np.full((total_q, hq, dim), np.nan, dtype=q.dtype),
+        "lse": np.full((hq, total_q), np.nan, dtype=np.float32),
+        "cu_seqlens_q": cu_q,
+        "cu_seqlens_k": cu_k,
+    }
+    if use_sinks:
+        arrays["sinks"] = sinks
+    got = _launch_np(request, arrays, ("lse",), scale=scale)["lse"]
+    expected = np.empty((hq, total_q), dtype=np.float32)
+    for i in range(len(q_lengths)):
+        qs, qe, ks, ke = cu_q[i], cu_q[i + 1], cu_k[i], cu_k[i + 1]
+        if qe == qs:
+            continue
+        expected[:, qs:qe] = _lse_reference(
+            q[None, qs:qe],
+            k[None, ks:ke],
+            scale,
+            ctx=int(ke - ks) - int(qe - qs),
+            left=0,
+            right=0,
+            sinks=sinks,
+        )[0]
+    _assert_lse_close(got, expected)
+    if not use_sinks:
+        assert np.isneginf(got).any()

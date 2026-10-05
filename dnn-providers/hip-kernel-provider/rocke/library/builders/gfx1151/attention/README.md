@@ -186,8 +186,18 @@ Layout metadata follows the enabled score arguments in the ABI. Ragged adds
 `cu_seqlens_q`, `cu_seqlens_k`. Paged adds `cu_seqlens_q`, `seqused_k`,
 `block_table`, `block_table_stride`, `stride_k_block`, `stride_v_block`.
 All strides are in their pointer's element units; page strides are separate
-from token/head strides. K/V head elements remain contiguous. No host
+from the token/head strides. K/V head elements remain contiguous. No host
 densification or input/output padding is required.
+
+### Softmax statistics (LSE)
+
+`store_lse=True` writes the per-row natural-log log-sum-exp of the scaled,
+masked, biased scores to an FP32 `lse` buffer, appended after the layout
+metadata and FP8 scales (the name gains an `lse` part). Dense layouts index
+`[B, H, Sq]` contiguously; packed layouts (`ragged`, `paged`) index
+`[H, total_q]` and add an I32 `stride_lse_head` argument. Attention sinks add
+their mass to the denominator and so are included. A row with no visible key
+stores `-inf`. The output tensor is unchanged. Requires a wave32 target.
 
 The native spec and pybind conversion mirror these fields. Existing dense
 configurations retain their ABI and emitted code. Numeric regressions cover
@@ -259,7 +269,7 @@ tail bounds, both V-staging choices, and the score features above.
   part) instead of a fixed query-group limit.
 
 Adding spec fields changes the C struct layout; the ABI string is
-`rocke-attention-gfx1151/v2`. Rebuild native callers and zero-initialise with
+`rocke-attention-gfx1151/v3`. Rebuild native callers and zero-initialise with
 `rocke_wmma_fmha_fwd_spec_default()`.
 
 ### Public library selection and launch

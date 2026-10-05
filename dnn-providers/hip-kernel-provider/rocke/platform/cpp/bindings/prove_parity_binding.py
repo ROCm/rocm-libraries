@@ -873,6 +873,35 @@ def cfgs_gfx1151_wmma_fmha_fwd():
                 (64, 0, 32, True),
             )
         ]
+        + [
+            dict(
+                head_size=head,
+                num_query_heads=8,
+                num_kv_heads=2,
+                mask_mode=mask,
+                causal_bottom_right=tails,
+                query_tail=tails,
+                kv_tail=tails,
+                v_lds_stage=tails,
+                use_sinks=sinks,
+                layout=layout,
+                page_block_size=page,
+                transposed_qk=swap,
+                block_n=block_n,
+                num_waves=waves,
+                value_tile_size=tile,
+                store_lse=True,
+            )
+            for (layout, page, head, mask, tails, sinks, swap, block_n, waves, tile) in (
+                ("dense", 0, 64, "causal", True, True, False, 32, 1, 0),
+                ("dense", 0, 128, "none", False, False, False, 32, 1, 0),
+                ("ragged", 0, 64, "causal", True, True, False, 32, 1, 0),
+                ("paged", 16, 64, "causal", True, False, False, 32, 1, 0),
+                ("dense", 0, 64, "none", False, False, True, 32, 1, 0),
+                ("dense", 0, 128, "causal", False, False, True, 64, 2, 0),
+                ("dense", 0, 256, "none", False, False, False, 32, 1, 64),
+            )
+        ]
     )
 
 

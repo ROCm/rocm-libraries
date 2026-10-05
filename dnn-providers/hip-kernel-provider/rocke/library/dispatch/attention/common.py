@@ -137,6 +137,10 @@ class AttentionRequest(OperatorRequest):
     # Requires mask_type NO_MASK (top-left aligned) or BOTTOM_RIGHT_CAUSAL
     # (bottom-right aligned); a candidate must declare the "window_right" feature.
     window_right: int = -1
+    # Also return the natural-log softmax statistics (log-sum-exp, including an
+    # attention sink when enabled) as an FP32 ``lse`` tensor; a candidate must
+    # declare the "lse" feature.
+    return_lse: bool = False
     # --- standalone attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the best qualified persistent prefill path for large Sq:
@@ -208,6 +212,8 @@ class AttentionRequest(OperatorRequest):
             active.add("qq_bias")
         if int(self.window_right) >= 0:
             active.add("window_right")
+        if bool(self.return_lse):
+            active.add("lse")
         layout = self.layout.strip().lower() if isinstance(self.layout, str) else ""
         if layout not in ("auto", ""):
             active.add(f"layout_{layout}")

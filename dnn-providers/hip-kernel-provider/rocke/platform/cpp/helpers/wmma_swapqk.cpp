@@ -695,6 +695,25 @@ rocke_status_t rocke_wmma_swapqk_fwd_inner_body(rocke_ir_builder_t* b,
     for(int d = 0; d < n_dk; ++d)
         accs_f[d] = (kloop.op != NULL) ? kloop.op->results[2 + d] : NULL;
 
+    /* ---- Optional LSE (natural log): (m + log2 l) * ln2; -inf for empty rows. ---- */
+    if(p->lse != NULL)
+    {
+        rocke_value_t* m_f = (kloop.op != NULL) ? kloop.op->results[0] : NULL;
+        rocke_value_t* ln2 = rocke_b_const_f32(b, 0.6931471805599453);
+        rocke_value_t* lse_neg_inf = rocke_b_const_f32(b, -INFINITY);
+        rocke_value_t* log2_l = rocke_b_log2(b, l_f);
+        rocke_value_t* m_plus = rocke_b_fadd(b, m_f, log2_l);
+        rocke_value_t* lse_nat = rocke_b_fmul(b, m_plus, ln2);
+        rocke_value_t* lse_empty = rocke_b_fcmp(b, "oeq", l_f, zero_f);
+        rocke_value_t* lse_val = rocke_b_select(b, lse_empty, lse_neg_inf, lse_nat);
+        rocke_value_t* lse_rows = rocke_b_add(b, wave_row, col);
+        rocke_value_t* lse_idx = rocke_b_add(b, p->lse_offset, lse_rows);
+        rocke_if_t lse_gate = rocke_b_scf_if(b, lane_lt16);
+        rocke_b_region_enter(b, lse_gate.then_region);
+        rocke_b_global_store(b, p->lse, lse_idx, lse_val, 4);
+        rocke_b_region_leave(b);
+    }
+
     /* ---- Epilogue: O^T[d, query] -> O[query, d], rescaled by 1/l. ---- */
     rocke_value_t* zmask = rocke_b_fcmp(b, "oeq", l_f, zero_f);
     rocke_value_t* l_rcp = rocke_b_rcp(b, l_f);

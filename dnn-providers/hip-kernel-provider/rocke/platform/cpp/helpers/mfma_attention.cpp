@@ -381,6 +381,11 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             b, ROCKE_ERR_VALUE, "a right local-window bound requires a wave32 target");
         return ROCKE_ERR_VALUE;
     }
+    if(p->lse != NULL || p->lse_offset != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA LSE output requires a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
     if(p->k_scale != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "explicit K dequant scale requires a wave32 target");
@@ -1233,14 +1238,52 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_b_region_leave(b);
 
     rocke_value_t* ls_final[ROCKE_ATTN_MAX_LANE];
+    rocke_value_t* m_final[ROCKE_ATTN_MAX_LANE];
     rocke_value_t* accs_final[ROCKE_ATTN_MAX_ATOMS];
     for(int r = 0; r < c_frag; ++r)
     {
+        m_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r] : NULL;
         ls_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r + 1] : NULL;
     }
     for(int d = 0; d < n_dv; ++d)
     {
         accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * c_frag + d] : NULL;
+    }
+
+    /* ---- Optional LSE (natural log): (m + log2 l) * ln2; -inf for empty rows. ---- */
+    if(p->lse != NULL)
+    {
+        rocke_value_t* ln2 = rocke_b_const_f32(b, 0.6931471805599453);
+        rocke_value_t* lse_neg_inf = rocke_b_const_f32(b, -INFINITY);
+        rocke_value_t* lse_c0 = rocke_b_const_i32(b, 0);
+        for(int r = 0; r < c_frag; ++r)
+        {
+            rocke_value_t* row_rel = NULL;
+            rocke_value_t* col_n = NULL;
+            rocke_layout_map_coord(c_map, b, lane, r, &row_rel, &col_n);
+            rocke_value_t* l_r = ls_final[r];
+            rocke_value_t* log2_l = rocke_b_log2(b, l_r);
+            rocke_value_t* m_plus = rocke_b_fadd(b, m_final[r], log2_l);
+            rocke_value_t* lse_nat = rocke_b_fmul(b, m_plus, ln2);
+            rocke_value_t* lse_empty = rocke_b_fcmp(b, "oeq", l_r, zero_f);
+            rocke_value_t* lse_val = rocke_b_select(b, lse_empty, lse_neg_inf, lse_nat);
+            rocke_value_t* lse_idx = rocke_b_add(b, p->lse_offset, row_rel);
+            rocke_value_t* lse_col0 = rocke_b_cmp_eq(b, col_n, lse_c0);
+            rocke_if_t col_gate = rocke_b_scf_if(b, lse_col0);
+            rocke_b_region_enter(b, col_gate.then_region);
+            if(p->wmma_seqlen_q == NULL)
+                rocke_b_global_store(b, p->lse, lse_idx, lse_val, 4);
+            else
+            {
+                rocke_value_t* q_rows = rocke_b_add(b, q_local_base, row_rel);
+                rocke_value_t* lse_keep = rocke_b_cmp_lt(b, q_rows, p->wmma_seqlen_q);
+                rocke_if_t keep_gate = rocke_b_scf_if(b, lse_keep);
+                rocke_b_region_enter(b, keep_gate.then_region);
+                rocke_b_global_store(b, p->lse, lse_idx, lse_val, 4);
+                rocke_b_region_leave(b);
+            }
+            rocke_b_region_leave(b);
+        }
     }
 
     /* ---- Epilogue ---- */

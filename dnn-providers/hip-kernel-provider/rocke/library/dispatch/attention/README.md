@@ -122,7 +122,9 @@ The request describes layout (`dense`, `ragged`, or `paged`) and score features
 `window_right`) before selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
 FP16/BF16 Q/O and head dimensions that are multiples of 16 up to 256 (Q/K and
 V/O widths may differ) are supported. `window_right >= 0` adds a right window
-for `NO_MASK`, `SLIDING_WINDOW` and `BOTTOM_RIGHT_CAUSAL` requests. Explicit layout
+for `NO_MASK`, `SLIDING_WINDOW` and `BOTTOM_RIGHT_CAUSAL` requests.
+`return_lse=True` adds the `lse` feature and requires an FP32 `lse` tensor at launch:
+`[B, Hq, Sq]` for dense, `[Hq, total_q]` for packed layouts; fully masked rows store `-inf`. Explicit layout
 or feature requirements reject candidates that do not declare them; `layout="auto"`
 retains legacy layout conventions and resolves to dense on gfx1151.
 

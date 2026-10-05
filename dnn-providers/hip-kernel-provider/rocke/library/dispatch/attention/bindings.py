@@ -844,6 +844,35 @@ def _gfx1151_validate_and_collect(
             raise ValueError(f"sinks must have shape [{spec.num_query_heads}]")
         _check_last_dim_contiguous(sinks, "sinks")
         values["sink_ptr"] = sinks
+    if spec.store_lse:
+        lse = tensors.get("lse")
+        if lse is None:
+            raise ValueError("spec.store_lse requires tensors['lse']")
+        if "float32" not in str(getattr(lse, "dtype", "")).lower():
+            raise ValueError("lse dtype must be float32")
+        lse_shape = _shape(lse, "lse")
+        if layout == "dense":
+            expected = (int(request.batch), spec.num_query_heads, int(request.seqlen_q))
+            if lse_shape != expected:
+                raise ValueError(f"lse must have shape {list(expected)}, got {lse_shape}")
+            strides = (
+                spec.num_query_heads * int(request.seqlen_q),
+                int(request.seqlen_q),
+                1,
+            )
+            for axis, (extent, want) in enumerate(zip(lse_shape, strides)):
+                if extent > 1 and int(lse.stride(axis)) != want:
+                    raise ValueError("lse must be contiguous [B, H, Sq]")
+        else:
+            expected = (spec.num_query_heads, int(_shape(q, "q")[0]))
+            if lse_shape != expected:
+                raise ValueError(f"lse must have shape {list(expected)}, got {lse_shape}")
+            _check_last_dim_contiguous(lse, "lse")
+            if expected[0] > 1 and int(lse.stride(0)) < expected[1]:
+                raise ValueError("lse head stride must not overlap")
+            values["stride_lse_head"] = _fits_i32(lse.stride(0), "stride_lse_head")
+        _check_max_element_offset_i32(lse, "lse")
+        values["lse"] = lse
     if spec.use_alibi:
         alibi = tensors.get("alibi_slopes")
         if alibi is None:
@@ -883,7 +912,9 @@ def bind_gfx1151_attention_torch(
     ``q``/``k``/``v``/``out`` (required), plus layout metadata
     (``cu_seqlens_q``, ``cu_seqlens_k``, ``seqused_k``, ``block_table``) and
     optional score inputs (``sinks``, ``alibi_slopes``, ``qq_bias``) as
-    declared by ``spec``. Runtime scalar kwargs: ``softmax_scale`` (default
+    declared by ``spec``. When ``spec.store_lse`` is set, ``lse`` is a required
+    FP32 output: ``[B, H, Sq]`` (dense) or ``[H, total_q]`` (packed), holding the
+    natural-log softmax statistic (``-inf`` for a fully masked row). Runtime scalar kwargs: ``softmax_scale`` (default
     ``1/sqrt(D)``), ``softcap`` (required, positive, when ``spec.use_softcap``),
     ``k_scale``/``v_scale`` (required FP32 dequant scales when
     ``spec.kv_dtype`` is set), ``stream`` (HIP stream handle; ``0``/omitted
@@ -967,6 +998,8 @@ def bind_gfx1151_attention_torch(
             batch_values = dict(values)
             for key, name in (("Q", "q"), ("K", "k"), ("V", "v"), ("O", "out")):
                 batch_values[key] = tensors[name][b : b + 1]
+            if spec.store_lse:
+                batch_values["lse"] = tensors["lse"][b : b + 1]
             launcher(
                 batch_values,
                 config=LaunchConfig(

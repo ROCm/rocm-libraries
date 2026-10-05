@@ -153,6 +153,17 @@ class TestGfx1151AttentionSelection(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 dispatch_attention(_request(**fields))
 
+    def test_return_lse_selects_a_store_lse_kernel_only_on_gfx1151(self):
+        for layout in ("dense", "ragged"):
+            with self.subTest(layout=layout):
+                plain = dispatch_attention(_request(layout=layout)).spec
+                lse = dispatch_attention(_request(layout=layout, return_lse=True)).spec
+                self.assertFalse(plain.store_lse)
+                self.assertTrue(lse.store_lse)
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch), self.assertRaises(ValueError):
+                dispatch_attention(_request(arch=arch, return_lse=True))
+
     def test_output_column_tiling_scales_with_the_compute_unit_count(self):
         def tile(num_cus, nhead_q):
             return dispatch_attention(

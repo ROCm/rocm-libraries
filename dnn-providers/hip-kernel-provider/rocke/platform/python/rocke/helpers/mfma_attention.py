@@ -296,6 +296,8 @@ def mfma_attention_fwd_inner_body(
     wmma_value_offset: Optional[Value] = None,
     wmma_v_head_size: int = 0,
     wmma_window_right: int = -1,
+    wmma_lse: Optional[Value] = None,
+    wmma_lse_offset: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -327,6 +329,9 @@ def mfma_attention_fwd_inner_body(
     ``wmma_window_right`` (default -1 = off) keeps only keys at most this many
     positions right of the (context-shifted) query, composing with
     ``sliding_window`` as the left bound for a two-sided local mask; wave32 only.
+    ``wmma_lse`` (FP32 global pointer) and ``wmma_lse_offset`` (element index of
+    this tile's first query row) request the natural-log softmax statistic per
+    query row (``-inf`` for fully masked rows); wave32 only.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -523,6 +528,8 @@ def mfma_attention_fwd_inner_body(
             value_offset=wmma_value_offset,
             v_head_size=wmma_v_head_size,
             window_right=wmma_window_right,
+            lse=wmma_lse,
+            lse_offset=wmma_lse_offset,
         )
         return
     if wmma_seqlen_q is not None or wmma_kv_tail:
@@ -533,6 +540,8 @@ def mfma_attention_fwd_inner_body(
         raise ValueError("a distinct WMMA V head size requires a wave32 target")
     if wmma_window_right >= 0:
         raise ValueError("a right local-window bound requires a wave32 target")
+    if wmma_lse is not None or wmma_lse_offset is not None:
+        raise ValueError("WMMA LSE output requires a wave32 target")
     if k_scale is not None:
         raise ValueError("explicit K dequant scale requires a wave32 target")
 
@@ -1035,6 +1044,8 @@ def _wmma_attention_fwd_inner_body(
     value_offset: Optional[Value] = None,
     v_head_size: int = 0,
     window_right: int = -1,
+    lse: Optional[Value] = None,
+    lse_offset: Optional[Value] = None,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1443,6 +1454,30 @@ def _wmma_attention_fwd_inner_body(
     final = kloop.results
     ls_final = [final[2 * r + 1] for r in range(c_frag)]
     accs_final = list(final[2 * c_frag :])
+
+    # ---- Optional LSE (natural log): (m + log2 l) * ln2; -inf for empty rows.
+    # The 16 lanes sharing a row hold the same m/l, so column-0 lanes store. ----
+    if lse is not None:
+        ln2 = b.const_f32(0.6931471805599453)
+        lse_neg_inf = b.const_f32(float("-inf"))
+        lse_c0 = b.const_i32(0)
+        for r in range(c_frag):
+            row_rel, col_n = c_map.coord(b, lane, r)
+            l_r = ls_final[r]
+            log2_l = b.log2(l_r)
+            m_plus = b.fadd(final[2 * r], log2_l)
+            lse_nat = b.fmul(m_plus, ln2)
+            lse_empty = b.fcmp("oeq", l_r, zero_f)
+            lse_val = b.select(lse_empty, lse_neg_inf, lse_nat)
+            lse_idx = b.add(lse_offset, row_rel)
+            lse_col0 = b.cmp_eq(col_n, lse_c0)
+            with b.scf_if(lse_col0):
+                if query_length is None:
+                    b.global_store(lse, lse_idx, lse_val, align=4)
+                else:
+                    lse_keep = b.cmp_lt(b.add(q_local_base, row_rel), query_length)
+                    with b.scf_if(lse_keep):
+                        b.global_store(lse, lse_idx, lse_val, align=4)
 
     # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
     for d in range(n_dv):
