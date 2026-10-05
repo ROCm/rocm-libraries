@@ -1791,7 +1791,7 @@ float HalfToFloat(std::uint16_t h)
 // A loaded config-embedding table: encoded-param vector (raw bytes) -> fp32 embedding.
 struct ConfigEmbeddingTable
 {
-    bool present = false;
+    bool present          = false;
     std::uint32_t key_dim = 0;
     std::uint32_t emb_dim = 0;
     std::unordered_map<std::string, std::vector<float>> rows;
@@ -1917,9 +1917,10 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
         MIOPEN_THROW(miopenStatusInternalError,
                      "Empty candidates provided to kernel config encoder");
 
-    // Note: the precomputed-table fast path now lives in CandidateSelectionModel::EncodeKernelConfigs
-    // (keyed on the raw candidates, before feature engineering); by the time we reach here the batch
-    // already missed the table, so run the fdeep config encoder.
+    // Note: the precomputed-table fast path now lives in
+    // CandidateSelectionModel::EncodeKernelConfigs (keyed on the raw candidates, before feature
+    // engineering); by the time we reach here the batch already missed the table, so run the fdeep
+    // config encoder.
     std::string key = arch + "_" + solver + "_kernel_config_encoder";
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();

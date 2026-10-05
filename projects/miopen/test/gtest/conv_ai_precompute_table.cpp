@@ -25,10 +25,10 @@
  *******************************************************************************/
 
 // CPU wiring/regression test for the precomputed config-tower embedding tables (SILOTIGER-1145):
-// confirm each shipped gfx950 {solver}_kernel_config_embeddings.bin has the expected format and that
-// TryEncodeKernelConfigsFromTable returns valid 64-d embeddings for known configs. The deep fp16-vs-
-// fp32 ranking parity is validated offline against real FillValidKernels; this guards the ship/
-// install/load/lookup path in CI without a GPU.
+// confirm each shipped gfx950 {solver}_kernel_config_embeddings.bin has the expected format and
+// that TryEncodeKernelConfigsFromTable returns valid 64-d embeddings for known configs. The deep
+// fp16-vs- fp32 ranking parity is validated offline against real FillValidKernels; this guards the
+// ship/ install/load/lookup path in CI without a GPU.
 
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
@@ -85,11 +85,11 @@ std::string TablePath(const std::string& arch, const std::string& solver)
 
 } // namespace
 
-class CPU_ConfigEmbeddingTable : public ::testing::TestWithParam<TableCase>
+class CPU_ConfigEmbeddingTable_NONE : public ::testing::TestWithParam<TableCase>
 {
 };
 
-TEST_P(CPU_ConfigEmbeddingTable, ShipsLoadsAndHits)
+TEST_P(CPU_ConfigEmbeddingTable_NONE, ShipsLoadsAndHits)
 {
     const auto& tc         = GetParam();
     const std::string arch = tc.arch;
@@ -97,7 +97,8 @@ TEST_P(CPU_ConfigEmbeddingTable, ShipsLoadsAndHits)
     if(!miopen::fs::exists(path))
         GTEST_SKIP() << "table not installed: " << path;
 
-    // Format header: "MICE" | u32 version=1 | key_dim | emb_dim=64 | rows | key_dtype=0 | emb_dtype=1
+    // Format header: "MICE" | u32 version=1 | key_dim | emb_dim=64 | rows | key_dtype=0 |
+    // emb_dtype=1
     {
         std::ifstream is(path, std::ios::binary);
         char magic[4] = {};
@@ -140,6 +141,6 @@ TEST_P(CPU_ConfigEmbeddingTable, ShipsLoadsAndHits)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, CPU_ConfigEmbeddingTable, ::testing::ValuesIn(Cases()));
+INSTANTIATE_TEST_SUITE_P(Full, CPU_ConfigEmbeddingTable_NONE, ::testing::ValuesIn(Cases()));
 
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
