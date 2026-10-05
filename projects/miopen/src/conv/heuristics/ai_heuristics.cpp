@@ -1741,52 +1741,14 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
 // The config tower is a pure function of (arch, solver, kernel-config): its output does not
 // depend on the convolution problem. The set of kernel configs a solver can emit is finite, so
 // all config-tower embeddings can be computed once, offline, and shipped as a lookup table
-// ({arch}_{solver}_kernel_config_embeddings.bin). At runtime we hash each encoded candidate
-// vector and read back the stored 64-d embedding -- bit-for-bit what the fdeep config encoder
-// would have produced -- without loading or running the neural model. When the table covers
-// every candidate this lets us drop the ~450 KB-per-solver _kernel_config_encoder.tn.model
-// from the shipped artifacts entirely.
+// ({arch}_{solver}_kernel_config_embeddings.bin). At runtime we look each encoded candidate vector
+// up by its exact fp32 bytes and read back the stored fp32 embedding -- the value the fdeep config
+// encoder produces for that candidate, stored without quantization loss -- without loading or
+// running the neural model. When the table covers every candidate this lets us drop the
+// ~450 KB-per-solver _kernel_config_encoder.tn.model from the shipped artifacts entirely.
 //
 // Returns nullopt on any miss (table absent, or a candidate not in the table) so the caller
 // transparently falls back to the fdeep path; this keeps the change backward compatible.
-
-// IEEE-754 binary16 -> binary32. Mirrors FloatToHalf in the table generator.
-float HalfToFloat(std::uint16_t h)
-{
-    const std::uint32_t sign = static_cast<std::uint32_t>(h & 0x8000u) << 16;
-    const std::uint32_t exp  = (h >> 10) & 0x1Fu;
-    const std::uint32_t mant = h & 0x3FFu;
-    std::uint32_t x;
-    if(exp == 0)
-    {
-        if(mant == 0)
-            x = sign; // +/- zero
-        else
-        {
-            // subnormal: normalize
-            std::uint32_t e = 0;
-            std::uint32_t m = mant;
-            while((m & 0x400u) == 0)
-            {
-                m <<= 1;
-                ++e;
-            }
-            m &= 0x3FFu;
-            x = sign | ((127 - 15 - e) << 23) | (m << 13);
-        }
-    }
-    else if(exp == 0x1F)
-    {
-        x = sign | 0x7F800000u | (mant << 13); // Inf / NaN
-    }
-    else
-    {
-        x = sign | ((exp - 15 + 127) << 23) | (mant << 13);
-    }
-    float f;
-    std::memcpy(&f, &x, sizeof(f));
-    return f;
-}
 
 // A loaded config-embedding table: encoded-param vector (raw bytes) -> fp32 embedding.
 struct ConfigEmbeddingTable
@@ -1834,33 +1796,38 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         get(num_rows);
         get(key_dtype);
         get(emb_dtype);
-        // Only the format this build understands: fp32 keys, fp16 embeddings.
-        if(is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 1 && key_dtype == 0 &&
-           emb_dtype == 1 && key_dim > 0 && emb_dim > 0)
+        // Only the format this build understands: fp32 keys and fp32 embeddings. Validate the
+        // header against the actual file size before trusting num_rows, so a corrupt count cannot
+        // drive a huge reserve/allocation.
+        const std::uint64_t row_bytes = static_cast<std::uint64_t>(key_dim) * sizeof(float) +
+                                        static_cast<std::uint64_t>(emb_dim) * sizeof(float);
+        is.seekg(0, std::ios::end);
+        const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
+        is.seekg(28, std::ios::beg);
+        const bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 1 &&
+                               key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
+                               file_size == 28 + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        if(header_ok)
         {
             table.key_dim = key_dim;
             table.emb_dim = emb_dim;
             table.rows.reserve(num_rows);
             std::vector<float> key(key_dim);
-            std::vector<std::uint16_t> halfs(emb_dim);
-            bool ok = true;
-            for(std::uint32_t r = 0; r < num_rows && ok; ++r)
+            std::vector<float> emb(emb_dim);
+            std::uint32_t read_rows = 0;
+            for(; read_rows < num_rows; ++read_rows)
             {
                 is.read(reinterpret_cast<char*>(key.data()),
                         static_cast<std::streamsize>(key_dim * sizeof(float)));
-                is.read(reinterpret_cast<char*>(halfs.data()),
-                        static_cast<std::streamsize>(emb_dim * sizeof(std::uint16_t)));
+                is.read(reinterpret_cast<char*>(emb.data()),
+                        static_cast<std::streamsize>(emb_dim * sizeof(float)));
                 if(!is.good())
-                {
-                    ok = false;
                     break;
-                }
-                std::vector<float> emb(emb_dim);
-                for(std::uint32_t d = 0; d < emb_dim; ++d)
-                    emb[d] = HalfToFloat(halfs[d]);
-                table.rows.emplace(EmbeddingKey(key), std::move(emb));
+                if(!table.rows.emplace(EmbeddingKey(key), emb).second)
+                    MIOPEN_LOG_W("Duplicate key in config embedding table "
+                                 << path << "; keeping first row");
             }
-            table.present = ok && table.rows.size() == num_rows;
+            table.present = (read_rows == num_rows);
             if(!table.present)
             {
                 MIOPEN_LOG_W("Config embedding table at " << path << " is truncated/corrupt; "
@@ -1883,6 +1850,11 @@ TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_c
                                 const std::string& solver)
 {
     if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
+        return std::nullopt;
+
+    // Fall through on an empty batch so EncodeKernelConfigs keeps its existing (throwing)
+    // empty-input behaviour instead of returning an engaged optional of an empty vector.
+    if(encoded_candidates.empty())
         return std::nullopt;
 
     const auto& table = GetConfigEmbeddingTable(arch, solver);

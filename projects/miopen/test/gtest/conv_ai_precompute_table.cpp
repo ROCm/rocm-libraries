@@ -27,8 +27,8 @@
 // CPU wiring/regression test for the precomputed config-tower embedding tables (SILOTIGER-1145):
 // confirm each shipped gfx950 {solver}_kernel_config_embeddings.bin has the expected format and
 // that TryEncodeKernelConfigsFromTable returns valid 64-d embeddings for known configs. The deep
-// fp16-vs- fp32 ranking parity is validated offline against real FillValidKernels; this guards the
-// ship/ install/load/lookup path in CI without a GPU.
+// fp32-stored embeddings -> ranking parity is validated offline against real FillValidKernels; this
+// guards the ship/ install/load/lookup path in CI without a GPU.
 
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
@@ -98,7 +98,7 @@ TEST_P(CPU_ConfigEmbeddingTable_NONE, ShipsLoadsAndHits)
         GTEST_SKIP() << "table not installed: " << path;
 
     // Format header: "MICE" | u32 version=1 | key_dim | emb_dim=64 | rows | key_dtype=0 |
-    // emb_dtype=1
+    // emb_dtype=0
     {
         std::ifstream is(path, std::ios::binary);
         char magic[4] = {};
@@ -116,7 +116,7 @@ TEST_P(CPU_ConfigEmbeddingTable_NONE, ShipsLoadsAndHits)
         EXPECT_EQ(ver, 1u);
         EXPECT_EQ(emb_dim, 64u);
         EXPECT_EQ(kdt, 0u); // fp32 keys
-        EXPECT_EQ(edt, 1u); // fp16 embeddings
+        EXPECT_EQ(edt, 0u); // fp32 embeddings
         EXPECT_GT(rows, 0u);
     }
 
