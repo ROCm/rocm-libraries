@@ -20,11 +20,11 @@ import re
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
 
+from conftest import _restem_uuid_ids
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
@@ -48,29 +48,6 @@ from pack_helpers import (
     _run,
     _silent,
 )
-
-
-def _restem_uuid_ids(folder, token):
-    """Give every UUID id under `folder` a distinct, deterministic value.
-
-    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
-    uuid5 keeps repeat packs byte-identical.
-    """
-    ids = set()
-    for path in sorted(folder.rglob("*.json")):
-        did = json.loads(path.read_text(encoding="utf-8")).get("id")
-        try:
-            uuid.UUID(str(did))
-        except (ValueError, AttributeError, TypeError):
-            continue
-        ids.add(did)
-    for path in sorted(folder.rglob("*.json")):
-        text = path.read_text(encoding="utf-8")
-        for did in sorted(ids):
-            text = text.replace(
-                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
-            )
-        path.write_text(text, encoding="utf-8")
 
 
 def _rename_ids(folder, stem, new_stem):

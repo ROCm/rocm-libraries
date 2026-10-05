@@ -16,6 +16,7 @@ import shutil
 
 import pytest
 
+from conftest import _restem_uuid_ids
 from hkp_pack import pipeline, toolchain
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
@@ -73,6 +74,7 @@ def _rename_ids(folder, stem, new_stem):
             encoding="utf-8",
         )
         src.unlink()
+    _restem_uuid_ids(folder, new_stem)
 
 
 def _hsaco_source(file=CO_NAME, symbol="HsacoFixtureAdd"):

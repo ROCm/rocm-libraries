@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -101,3 +103,26 @@ def rocke_fixture(fixtures_dir):
     disabled-folder tests hand it to a build without rocKE, and tests/rocke/ packs
     it."""
     return fixtures_dir / "rocke"
+
+
+def _restem_uuid_ids(folder, token):
+    """Give every UUID id under `folder` a distinct, deterministic value.
+
+    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
+    uuid5 keeps repeat packs byte-identical.
+    """
+    ids = set()
+    for path in sorted(folder.rglob("*.json")):
+        did = json.loads(path.read_text(encoding="utf-8")).get("id")
+        try:
+            uuid.UUID(str(did))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        ids.add(did)
+    for path in sorted(folder.rglob("*.json")):
+        text = path.read_text(encoding="utf-8")
+        for did in sorted(ids):
+            text = text.replace(
+                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
+            )
+        path.write_text(text, encoding="utf-8")
