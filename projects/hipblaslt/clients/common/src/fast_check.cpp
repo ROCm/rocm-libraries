@@ -1588,3 +1588,75 @@ hipError_t fast_check_copy_region_to_host(void*                  host,
     }
     return hipStreamSynchronize(stream);
 }
+
+void FastCheckSolutionLog::record(
+    size_t solution, int library_index, const std::string& kernel, int iteration, bool passed)
+{
+    auto it = std::find_if(
+        entries.begin(), entries.end(), [&](const Entry& e) { return e.solution == solution; });
+    if(it == entries.end())
+    {
+        entries.push_back({solution, library_index, kernel, {}});
+        it = entries.end() - 1;
+    }
+    if(!kernel.empty())
+        it->kernel = kernel;
+    if(!passed)
+        it->failed_iterations.push_back(iteration);
+}
+
+size_t FastCheckSolutionLog::failed_solutions() const
+{
+    return std::count_if(entries.begin(), entries.end(), [](const Entry& e) {
+        return !e.failed_iterations.empty();
+    });
+}
+
+std::string FastCheckSolutionLog::summary(int iterations) const
+{
+    const size_t failed = failed_solutions();
+    if(failed == 0)
+        return {};
+    std::ostringstream s;
+    s << "fast_check: " << failed << " of " << entries.size() << " solutions failed";
+    if(iterations > 1)
+        s << " (" << iterations << " iterations each)";
+    s << ":";
+    for(const Entry& e : entries)
+    {
+        if(e.failed_iterations.empty())
+            continue;
+        s << "\n  solution " << e.solution << " (library index " << e.library_index << ", kernel "
+          << e.kernel << ")";
+        if(iterations > 1)
+        {
+            s << ": iteration" << (e.failed_iterations.size() > 1 ? "s " : " ");
+            for(size_t i = 0; i < e.failed_iterations.size(); i++)
+                s << (i ? ", " : "") << e.failed_iterations[i];
+        }
+    }
+    return s.str();
+}
+
+hipError_t fast_check_corrupt_element_device(
+    const FastCheckMatrix& m, int64_t batch, int64_t row, int64_t col, hipStream_t stream)
+{
+    const size_t es = element_size(m.type);
+    if(es == 0)
+        return hipErrorInvalidValue;
+    char* p = static_cast<char*>(const_cast<void*>(m.data))
+              + (size_t(batch) * size_t(m.stride) + size_t(col) * size_t(m.ld) + size_t(row)) * es;
+    uint64_t   current = 0;
+    hipError_t err     = hipMemcpyAsync(&current, p, es, hipMemcpyDeviceToHost, stream);
+    if(err == hipSuccess)
+        err = hipStreamSynchronize(stream);
+    if(err != hipSuccess)
+        return err;
+    const uint64_t mask     = es >= 8 ? ~uint64_t(0) : (uint64_t(1) << (8 * es)) - 1;
+    const uint64_t sentinel = fast_check_sentinel_bits(m.type) & mask;
+    uint64_t replacement = (current & mask) != sentinel ? sentinel : fast_check_poison_bits(m.type);
+    err                  = hipMemcpyAsync(p, &replacement, es, hipMemcpyHostToDevice, stream);
+    if(err == hipSuccess)
+        err = hipStreamSynchronize(stream);
+    return err;
+}

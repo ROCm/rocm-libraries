@@ -650,6 +650,9 @@ Arguments:
   - fast_check: c_int8
   - placement: c_char*16
   - placement_offset: c_size_t
+  - fast_check_repeat: c_int32
+  - fast_check_inject: c_int32
+  - requires_streamk: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -761,6 +764,9 @@ Defaults:
   fast_check: 0
   placement: ''
   placement_offset: 0
+  fast_check_repeat: 1
+  fast_check_inject: -1
+  requires_streamk: 0
   timing: 0
   iters: 10
   cold_iters: 2

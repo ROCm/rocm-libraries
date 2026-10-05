@@ -134,6 +134,46 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  problem,
 // The probe vector entry for the given seed and index, in [1, kFastCheckModulus).
 uint64_t fast_check_probe(uint64_t seed, uint64_t index);
 
+// Pass/fail for each solution and iteration of a test, so the end of the test can say which
+// solutions failed and on which iterations. Each defect class lives in a few of the hundreds of
+// shipped solutions, and intermittent defects fail only some iterations, so both are recorded.
+class FastCheckSolutionLog
+{
+public:
+    // Records one launch and check. solution is the position in the test's list, library_index
+    // the solution's index in the library, and kernel its kernel name, which may be left empty
+    // on passing iterations; the last non-empty name is kept.
+    void record(
+        size_t solution, int library_index, const std::string& kernel, int iteration, bool passed);
+
+    size_t solutions() const
+    {
+        return entries.size();
+    }
+    size_t failed_solutions() const;
+
+    // One line per failing solution, naming the solution, its library index and kernel, and the
+    // iterations that failed. Empty when every solution passed.
+    std::string summary(int iterations) const;
+
+private:
+    struct Entry
+    {
+        size_t           solution;
+        int              library_index;
+        std::string      kernel;
+        std::vector<int> failed_iterations;
+    };
+    std::vector<Entry> entries;
+};
+
+// Changes element (row, col) of the given batch of a device matrix to a different value: the
+// sentinel when the element does not already hold it, and the poison value otherwise. Used by
+// the fast_check_inject self-test to prove that a corrupted result is reported on the iteration
+// that produced it.
+hipError_t fast_check_corrupt_element_device(
+    const FastCheckMatrix& m, int64_t batch, int64_t row, int64_t col, hipStream_t stream);
+
 // One device buffer a GEMM reads or writes, for the placement record in failure messages.
 struct FastCheckBuffer
 {

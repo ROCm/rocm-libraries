@@ -1131,6 +1131,32 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     return {};
 }
 
+// Returns why this process cannot select Stream-K solutions, or an empty string when it can.
+// TensileLite reads TENSILE_SOLUTION_SELECTION_METHOD once per process (Debug::Instance). A case's
+// tensile_solution_selection_method sets the variable per handle, after that read, so a case that
+// needs the Stream-K solutions needs the variable set when the process starts; this is that value.
+// On gfx950 the Stream-K library is the only one, and the variable has no effect.
+inline const bool kStreamKSelectedAtStartup = [] {
+    const char* method = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
+    return method && !strcmp(method, "2");
+}();
+
+inline std::string streamk_unavailable_reason()
+{
+    int device = 0;
+    if(hipGetDevice(&device) == hipSuccess)
+    {
+        hipDeviceProp_t props;
+        if(hipGetDeviceProperties(&props, device) == hipSuccess
+           && !strncmp(props.gcnArchName, "gfx950", 6))
+            return {};
+    }
+    if(kStreamKSelectedAtStartup)
+        return {};
+    return "this case covers Stream-K solutions, which the library offers only when the process "
+           "starts with TENSILE_SOLUTION_SELECTION_METHOD=2";
+}
+
 // Skips the test when buffer placement is unavailable on this platform, and fails it when the
 // placement request is invalid.
 #ifdef GOOGLE_TEST
@@ -2417,6 +2443,42 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
 #ifdef GOOGLE_TEST
             FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    if(arg.fast_check_repeat != 1 || arg.fast_check_inject != -1)
+    {
+        std::string why;
+        if(!arg.fast_check)
+            why = "fast_check_repeat and fast_check_inject require fast_check";
+        else if(arg.fast_check_repeat < 1)
+            why = "fast_check_repeat must be at least 1";
+        else if(arg.fast_check_inject < -1)
+            why = "fast_check_inject must be -1 (no injection) or an iteration number";
+        else if(arg.fast_check_inject >= arg.fast_check_repeat)
+            why = "fast_check_inject must name an iteration below fast_check_repeat";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    if(arg.requires_streamk)
+    {
+        std::string why = streamk_unavailable_reason();
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
 #else
             hipblaslt_cerr << why << std::endl;
             return;
@@ -5594,11 +5656,19 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     if(!arg.timing)
     {
-        for(size_t sol = 0; sol < heuristicResult.size(); sol++)
+        // fast_check launches and checks each solution fast_check_repeat times, solution by
+        // solution, so a defect that fails only some launches is reported with its iteration.
+        const int            fcIterations = arg.fast_check ? std::max(1, arg.fast_check_repeat) : 1;
+        const bool           fcInjecting  = arg.fast_check && arg.fast_check_inject >= 0;
+        FastCheckSolutionLog fcLog;
+        for(size_t run = 0; run < heuristicResult.size() * fcIterations; run++)
         {
+            const size_t sol  = run / fcIterations;
+            const int    iter = int(run % fcIterations);
 #ifdef GOOGLE_TEST
             SCOPED_TRACE(solution_description(
-                handle, heuristicResult[sol].algo, sol, heuristicResult.size(), false));
+                             handle, heuristicResult[sol].algo, sol, heuristicResult.size(), false)
+                         + (fcIterations > 1 ? ", iteration " + std::to_string(iter) : ""));
 #endif
             if(placedWorkspace)
             {
@@ -5612,6 +5682,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(
                         fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
             }
+            // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
+            // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
+            // too early, for example). Zero rather than poison: kernels may rely on their flags
+            // starting at zero.
+            if(arg.fast_check && workspacePtr && workspace_size)
+                CHECK_HIP_ERROR(hipMemsetAsync(workspacePtr, 0, workspace_size, stream));
             if((arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
                && arg.c_equal_d)
             {
@@ -5805,6 +5881,42 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.fast_check)
             {
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+                // The self-test corrupts one element of the last batch of D after the launch,
+                // so only this iteration's result is wrong.
+                const int64_t injRow = M[0] / 2, injCol = N[0] / 2, injBatch = num_batches[0] - 1;
+                if(iter == arg.fast_check_inject)
+                    CHECK_HIP_ERROR(fast_check_corrupt_element_device(
+                        {(*dDp)[0].buf(), To, M[0], N[0], ldd[0], stride_d[0]},
+                        injBatch,
+                        injRow,
+                        injCol,
+                        stream));
+
+                // Failures are reported as they are found, except in the self-test, which
+                // collects them and checks that they fall on the corrupted iteration.
+                bool        iterPassed = true;
+                std::string iterReport;
+                auto        reportFailure = [&](const std::string& what, const std::string& text) {
+                    iterPassed = false;
+                    const std::string report
+                        = what + ", "
+                          + solution_description(
+                              handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                          + (fcIterations > 1 ? ", iteration " + std::to_string(iter) + " of "
+                                                    + std::to_string(fcIterations)
+                                                     : "")
+                          + ":\n" + text;
+                    iterReport += report;
+                    if(fcInjecting)
+                        return;
+#ifdef GOOGLE_TEST
+                    ADD_FAILURE() << report;
+#else
+                    hipblaslt_cerr << report << std::endl;
+#endif
+                };
+
                 for(int i = 0; i < gemm_count; i++)
                 {
                     FastCheckMatrix d_dev{(*dDp)[i].buf(), To, M[i], N[i], ldd[i], stride_d[i]};
@@ -5837,7 +5949,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         fp.bias_stride = arg.bias_stride > 0 ? arg.bias_stride : 0;
                     }
                     fp.seed = fast_check_seed(arg);
-                    if(sol == 0)
+                    if(run == 0)
                         fcExpected[i] = fast_check_expected(fp);
                     FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
                     if(!scan.passed || !res.passed)
@@ -5855,20 +5967,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                             buffers.push_back({"scaleAlpha_vector",
                                                dScaleAlphaVec[i].buf(),
                                                size_scaleAlphaVec[i] * realDataTypeSize(Talpha)});
-                        const std::string report
-                            = "fast_check, "
-                              + solution_description(handle,
-                                                     heuristicResult[sol].algo,
-                                                     sol,
-                                                     heuristicResult.size(),
-                                                     true)
-                              + ":\n" + scan.message + res.message
-                              + fast_check_describe_buffers(buffers);
-#ifdef GOOGLE_TEST
-                        ADD_FAILURE() << report;
-#else
-                        hipblaslt_cerr << report << std::endl;
-#endif
+                        reportFailure("fast_check",
+                                      scan.message + res.message
+                                          + fast_check_describe_buffers(buffers));
                     }
                 }
 
@@ -5898,24 +5999,58 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     FastCheckResult poison = placed->verify_poison(arg.placement, stream);
                     if(!poison.passed)
-                    {
-                        const std::string report
-                            = "fast_check placement, "
-                              + solution_description(handle,
-                                                     heuristicResult[sol].algo,
-                                                     sol,
-                                                     heuristicResult.size(),
-                                                     true)
-                              + ":\n" + poison.message;
-#ifdef GOOGLE_TEST
-                        ADD_FAILURE() << report;
-#else
-                        hipblaslt_cerr << report << std::endl;
-#endif
-                    }
+                        reportFailure("fast_check placement", poison.message);
                     CHECK_HIP_ERROR(placed->fill_poison(stream));
                 }
+
+                fcLog.record(sol,
+                             hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo),
+                             iterPassed ? std::string()
+                                        : hipblaslt_ext::getKernelNameFromAlgo(
+                                              handle, heuristicResult[sol].algo),
+                             iter,
+                             iterPassed);
+
+                if(fcInjecting)
+                {
+                    // The corrupted iteration must fail and name the corrupted element; every
+                    // other iteration must pass.
+                    const std::string where = "batch " + std::to_string(injBatch) + ", row "
+                                              + std::to_string(injRow) + ", col "
+                                              + std::to_string(injCol);
+                    std::string selfTestError;
+                    if(iter == arg.fast_check_inject && iterPassed)
+                        selfTestError = "fast_check_inject: the corrupted iteration "
+                                        + std::to_string(iter) + " passed";
+                    else if(iter == arg.fast_check_inject
+                            && iterReport.find(where) == std::string::npos)
+                        selfTestError = "fast_check_inject: the report for iteration "
+                                        + std::to_string(iter) + " does not name " + where + ":\n"
+                                        + iterReport;
+                    else if(iter != arg.fast_check_inject && !iterPassed)
+                        selfTestError = "fast_check_inject: iteration " + std::to_string(iter)
+                                        + " was not corrupted but failed:\n" + iterReport;
+                    if(!selfTestError.empty())
+                    {
+#ifdef GOOGLE_TEST
+                        ADD_FAILURE() << selfTestError;
+#else
+                        hipblaslt_cerr << selfTestError << std::endl;
+#endif
+                    }
+                }
             }
+        }
+
+        // Which solutions failed, and on which iterations, in one place at the end.
+        const std::string fcSummary = fcInjecting ? std::string() : fcLog.summary(fcIterations);
+        if(!fcSummary.empty())
+        {
+#ifdef GOOGLE_TEST
+            ADD_FAILURE() << fcSummary;
+#else
+            hipblaslt_cerr << fcSummary << std::endl;
+#endif
         }
     }
     else
