@@ -348,6 +348,10 @@ static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
         return {NaiveWarmup::Status::Completed, warmup_elapsed};
     }
 
+    // Hand the stop event over rather than destroying it: it is already recorded
+    // after this evaluation's last kernel, so it is exactly the point at which the
+    // stream becomes reusable, and testing it beats polling the stream.
+    slot.done = StreamTracker::EventPtr{std::move(ev_stop)};
     tracker.abandon(slot);
     return {NaiveWarmup::Status::TimedOut, 0.0f};
 }
