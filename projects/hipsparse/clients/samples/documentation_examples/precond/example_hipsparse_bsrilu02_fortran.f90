@@ -21,6 +21,7 @@
 ! [doc example start]
 program example_hipsparse_bsrilu02
     use iso_c_binding
+    use hipsparse
     implicit none
 
     ! HIP
@@ -56,131 +57,6 @@ program example_hipsparse_bsrilu02
 
     integer, parameter :: hipMemcpyHostToDevice = 1
     integer, parameter :: hipMemcpyDeviceToHost = 2
-
-    ! hipSPARSE
-    interface
-        function hipsparseCreate(handle) &
-                bind(c, name = 'hipsparseCreate')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreate
-            type(c_ptr) :: handle
-        end function hipsparseCreate
-
-        function hipsparseDestroy(handle) &
-                bind(c, name = 'hipsparseDestroy')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroy
-            type(c_ptr), value :: handle
-        end function hipsparseDestroy
-
-        function hipsparseCreateMatDescr(descr) &
-                bind(c, name = 'hipsparseCreateMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateMatDescr
-            type(c_ptr) :: descr
-        end function hipsparseCreateMatDescr
-
-        function hipsparseDestroyMatDescr(descr) &
-                bind(c, name = 'hipsparseDestroyMatDescr')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyMatDescr
-            type(c_ptr), value :: descr
-        end function hipsparseDestroyMatDescr
-
-        function hipsparseCreateBsrilu02Info(info) &
-                bind(c, name = 'hipsparseCreateBsrilu02Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseCreateBsrilu02Info
-            type(c_ptr) :: info
-        end function hipsparseCreateBsrilu02Info
-
-        function hipsparseDestroyBsrilu02Info(info) &
-                bind(c, name = 'hipsparseDestroyBsrilu02Info')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseDestroyBsrilu02Info
-            type(c_ptr), value :: info
-        end function hipsparseDestroyBsrilu02Info
-
-        function hipsparseSbsrilu02_bufferSize(handle, dirA, mb, nnzb, descrA, bsrSortedValA, &
-                                               bsrSortedRowPtrA, bsrSortedColIndA, blockDim, &
-                                               info, pBufferSizeInBytes) &
-                bind(c, name = 'hipsparseSbsrilu02_bufferSize')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsrilu02_bufferSize
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), intent(in), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            type(c_ptr), value :: pBufferSizeInBytes
-        end function hipsparseSbsrilu02_bufferSize
-
-        function hipsparseSbsrilu02_analysis(handle, dirA, mb, nnzb, descrA, bsrSortedValA, &
-                                             bsrSortedRowPtrA, bsrSortedColIndA, blockDim, &
-                                             info, policy, pBuffer) &
-                bind(c, name = 'hipsparseSbsrilu02_analysis')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsrilu02_analysis
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), intent(in), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseSbsrilu02_analysis
-
-        function hipsparseSbsrilu02(handle, dirA, mb, nnzb, descrA, bsrSortedValA, bsrSortedRowPtrA, &
-                                    bsrSortedColIndA, blockDim, info, policy, pBuffer) &
-                bind(c, name = 'hipsparseSbsrilu02')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseSbsrilu02
-            type(c_ptr), value :: handle
-            integer(c_int), value :: dirA
-            integer(c_int), value :: mb
-            integer(c_int), value :: nnzb
-            type(c_ptr), value :: descrA
-            type(c_ptr), value :: bsrSortedValA
-            type(c_ptr), intent(in), value :: bsrSortedRowPtrA
-            type(c_ptr), intent(in), value :: bsrSortedColIndA
-            integer(c_int), value :: blockDim
-            type(c_ptr), value :: info
-            integer(c_int), value :: policy
-            type(c_ptr), value :: pBuffer
-        end function hipsparseSbsrilu02
-
-        function hipsparseXbsrilu02_zeroPivot(handle, info, position) &
-                bind(c, name = 'hipsparseXbsrilu02_zeroPivot')
-            use iso_c_binding
-            implicit none
-            integer(c_int) :: hipsparseXbsrilu02_zeroPivot
-            type(c_ptr), value :: handle
-            type(c_ptr), value :: info
-            type(c_ptr), value :: position
-        end function hipsparseXbsrilu02_zeroPivot
-    end interface
-
-    integer, parameter :: HIPSPARSE_DIRECTION_COLUMN = 1
-    integer, parameter :: HIPSPARSE_SOLVE_POLICY_USE_LEVEL = 1
 
     ! Variables
     type(c_ptr) :: handle
@@ -250,7 +126,7 @@ program example_hipsparse_bsrilu02
                                          dbsrColInd, &
                                          bs, &
                                          info, &
-                                         c_loc(bufferSize))
+                                         bufferSize)
     if (stat /= 0) stop
 
     ! Allocate temporary buffer

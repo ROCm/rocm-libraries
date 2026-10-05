@@ -122,13 +122,15 @@ program example_fortran_bsrilu0
     integer(c_int) :: dir
     integer(c_int) :: stat
     integer(c_int), target :: pivot
-    integer(c_size_t), target :: buffer_size
+    ! hipsparseDbsrilu02_bufferSize reports the size through an int*, so this is
+    ! an int and is widened at the hipMalloc call below.
+    integer(c_int) :: buffer_size
 
     type(c_ptr) :: handle
     type(c_ptr) :: descr
     type(c_ptr) :: info
 
-    integer :: version
+    integer(c_int) :: version
 
     character(len=12) :: rev
 
@@ -201,12 +203,12 @@ program example_fortran_bsrilu0
                                                        d_bsr_col_ind, &
                                                        block_dim, &
                                                        info, &
-                                                       c_loc(buffer_size)))
+                                                       buffer_size))
 
 !   Allocate temporary buffer
     write(*,fmt='(A,I0,A)') 'Allocating ', buffer_size / 1024, 'kB temporary storage buffer'
 
-    call HIP_CHECK(hipMalloc(temp_buffer, buffer_size))
+    call HIP_CHECK(hipMalloc(temp_buffer, int(buffer_size, c_size_t)))
 
 !   Perform analysis step
     call HIPSPARSE_CHECK(hipsparseDbsrilu02_analysis(handle, &

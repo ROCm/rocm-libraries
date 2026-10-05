@@ -484,3 +484,35 @@ the function blocks the CPU until the GPU has copied the result back to the host
 When :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_DEVICE`,
 the function returns after the asynchronous launch.
 Similar to the vector and matrix results, the scalar result is only available when the kernel has completed execution.
+
+hipSPARSE Fortran bindings
+==========================
+
+hipSPARSE ships its own Fortran bindings, generated from the hipSPARSE C headers and
+exposed as a single self-contained module. A consumer writes ``use hipsparse`` and links
+``roc::hipsparse_fortran``; the package is found with ``find_package(hipsparse-fortran)``.
+
+On Linux with the ROCm backend the bindings are built whenever a Fortran compiler is
+available. They are off by default on Windows, which has no ROCm Fortran compiler, and on
+the CUDA backend, where the module references entry points that a cuSPARSE-backed
+hipSPARSE does not provide. They are controlled by:
+
+* ``BUILD_FORTRAN_BINDINGS`` (default ``ON`` on Linux with the ROCm backend, ``OFF``
+  otherwise): the bindings themselves.
+* ``BUILD_FORTRAN_CLIENTS`` (default ``ON``): the binding tests. In an in-tree build this is
+  forced off unless the hipSPARSE clients or tests are also being built. The Fortran samples
+  follow ``HIPSPARSE_ENABLE_FORTRAN`` instead.
+* ``FORTRAN_ARRAY_INTERFACES`` (default ``assumed-shape``): which array-argument overloads
+  the module exposes. One of ``none``, ``assumed-shape``, or ``assumed-rank``.
+
+The first two are one cache entry shared across the monorepo. To single hipSPARSE out, set
+``HIPSPARSE_BUILD_FORTRAN_BINDINGS`` or ``HIPSPARSE_BUILD_FORTRAN_CLIENTS`` instead.
+
+A ``.mod`` file is specific to the compiler that wrote it, so the archive and the module
+files install per compiler, under ``lib/fortran/<compiler>`` and
+``include/fortran/<compiler>`` (for example ``amdflang`` or ``gfortran``). The generated
+``hipsparse.F90`` is installed under ``share/hipsparse/fortran`` so the bindings can be
+rebuilt with another compiler.
+
+The Fortran tabs of the examples in the :doc:`API reference <../reference/reference>` are
+built from ``clients/samples/documentation_examples`` and use this module.
