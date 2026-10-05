@@ -8,6 +8,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
+* [Conv] Enabled CK depthwise backward-data FP16/BF16 convolution on wave32 GPUs,
+  including gfx1250, using per-architecture kernel geometry while retaining wave64 instances.
 
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.

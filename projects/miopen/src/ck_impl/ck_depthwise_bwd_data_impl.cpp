@@ -45,9 +45,24 @@ using WeiType                     = ck::half_t;
 using AccType                     = float;
 using OutType                     = ck::half_t;
 constexpr ck::index_t NDimSpatial = 2;
-constexpr ck::index_t BlockSize   = 64;
-constexpr bool RequirePadding     = false;
-constexpr bool FlipFilter         = true; // rot180 weights => dgrad via fwd kernel
+#ifndef MIOPEN_CK_DEPTHWISE_WAVE_SIZE
+// Match the forward factory's wave64 fallback; CMake sets this per target GPU.
+#define MIOPEN_CK_DEPTHWISE_WAVE_SIZE 64
+#endif
+
+#if MIOPEN_CK_DEPTHWISE_WAVE_SIZE == 32
+constexpr ck::index_t BlockSize  = 32;
+constexpr ck::index_t SubTileH28 = 3;
+constexpr ck::index_t SubTileW28 = 12;
+constexpr ck::index_t SubTileW56 = 16;
+#else
+constexpr ck::index_t BlockSize  = 64;
+constexpr ck::index_t SubTileH28 = 4;
+constexpr ck::index_t SubTileW28 = 4;
+constexpr ck::index_t SubTileW56 = 8;
+#endif
+constexpr bool RequirePadding = false;
+constexpr bool FlipFilter     = true; // rot180 weights => dgrad via fwd kernel
 
 // 7x7 stride-1 pad-3 depthwise instances (FlipFilter=true) covering the convnext
 // depthwise spatial stages (56/28/14/7). Same tuning as the forward 7x7 set.
@@ -84,22 +99,24 @@ using DwBwd = ck::tensor_operation::device::DeviceGroupedConvFwd<
     RequirePadding,
     FlipFilter>;
 
+// Match the forward wave32 geometry: larger subtiles keep the 28x28 and 56x56
+// tiles within 32 lanes. Wave64 retains the original instance shapes and IDs.
 template <typename DType>
 using DeviceConvBwdDataFactoryT = std::tuple<
     // 7x7 stride-1 pad-3 (convnext)
     DwBwd<DType, 7, 3, 7, 32, 4, 4, 1, 1>,
     DwBwd<DType, 7, 3, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 7, 3, 28, 32, 4, 4, 4, 4>,
-    DwBwd<DType, 7, 3, 56, 8, 7, 8, 8, 8>,
+    DwBwd<DType, 7, 3, 28, 32, SubTileH28, SubTileW28, 4, 4>,
+    DwBwd<DType, 7, 3, 56, 8, 7, SubTileW56, 8, 8>,
     // 3x3 stride-1 pad-1 (efficientnet/mobilenet)
     DwBwd<DType, 3, 1, 7, 32, 4, 4, 1, 1>,
     DwBwd<DType, 3, 1, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 3, 1, 28, 32, 4, 4, 4, 4>,
-    DwBwd<DType, 3, 1, 56, 8, 7, 8, 8, 8>,
+    DwBwd<DType, 3, 1, 28, 32, SubTileH28, SubTileW28, 4, 4>,
+    DwBwd<DType, 3, 1, 56, 8, 7, SubTileW56, 8, 8>,
     // 5x5 stride-1 pad-2 (efficientnet/mobilenet)
     DwBwd<DType, 5, 2, 7, 32, 4, 4, 1, 1>,
     DwBwd<DType, 5, 2, 14, 32, 4, 4, 2, 2>,
-    DwBwd<DType, 5, 2, 28, 32, 4, 4, 4, 4>>;
+    DwBwd<DType, 5, 2, 28, 32, SubTileH28, SubTileW28, 4, 4>>;
 using DeviceConvBwdDataFactory     = DeviceConvBwdDataFactoryT<ck::half_t>;
 using DeviceConvBwdDataFactoryBf16 = DeviceConvBwdDataFactoryT<ck::bhalf_t>;
 

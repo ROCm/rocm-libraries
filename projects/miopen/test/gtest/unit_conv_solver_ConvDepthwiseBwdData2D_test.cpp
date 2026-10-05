@@ -59,9 +59,10 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 
 auto GetTestParams()
 {
-// Reuses the forward CK depthwise kernel: needs 64-lane wavefronts + the CK dynamic library.
+// Reuses the forward CK depthwise kernel with per-architecture wave32/wave64 instances.
 #if MIOPEN_BACKEND_HIP
-    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X | Gpu::gfx125X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
