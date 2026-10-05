@@ -195,7 +195,3 @@ else( )
     NAMESPACE roc::
   )
 endif( )
-
-# Force installation of .f90 module files
-rocm_install(FILES "hipblas_module.f90"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblas")
