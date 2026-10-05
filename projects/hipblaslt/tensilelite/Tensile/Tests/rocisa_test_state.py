@@ -20,9 +20,11 @@ def preserve_rocisa_kernel_state():
     previous_kernel = ri.getKernel()
     previous_vgpr_idx = dict(ri.getVgprIdx())
     previous_vgpr_msb = ri.getVgprMsb()
+    previous_force_scaled_wmma = ri.getForceScaledWMMA()
     try:
         yield
     finally:
+        ri.setForceScaledWMMA(previous_force_scaled_wmma)
         previous_isa = getattr(previous_kernel, "isa", None)
         if previous_isa is None:
             # The StinkyTofu adaptor represents "never pinned" with isa=None.

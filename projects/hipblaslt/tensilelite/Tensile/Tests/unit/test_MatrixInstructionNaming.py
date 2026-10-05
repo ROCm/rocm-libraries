@@ -112,7 +112,15 @@ def test_names_the_supported_instruction(mi4, dtype, expected):
         # The f4 shapes behind the datamover characterization tests. Without
         # capabilities the f4 tile threshold reads 0 and this becomes
         # v_wmma_scale_f32_16x16x128_f4, which gfx1250 only has at 32x16.
-        ([16, 16, 128, 1], "float4", 0, "v_wmma_scale_f32_16x16x128_f8f6f4"),
+        #
+        # Base gfx1250 (forceScaledWMMA off, the default this naming path runs
+        # under) names the plain v_wmma_f32_16x16x128_f8f6f4; the scaled form is
+        # forced only for the gfx1250-strict / v0 steppings (see
+        # test_f4_names_scaled_form_when_forced below). Both spellings are
+        # assembler-supported, so the validator accepts either.
+        ([16, 16, 128, 1], "float4", 0, "v_wmma_f32_16x16x128_f8f6f4"),
+        # mxBlock=32 is emitted as MXMFMAInstruction, whose scaled encoding is
+        # not gated on the forceScaledWMMA toggle.
         ([16, 16, 128, 1], "float4", 32, "v_wmma_scale_f32_16x16x128_f8f6f4"),
     ],
 )
@@ -127,6 +135,24 @@ def test_names_the_shapes_a_capability_less_process_got_wrong(mi4, dtype, mxBloc
 
     problemType = {"MXBlockA": mxBlock, "MXBlockB": mxBlock} if mxBlock else {}
     assert unsupported(solutionFor(dtype, problemType=problemType), mi4) is None
+
+
+def test_f4_names_scaled_form_when_forced():
+    """gfx1250-strict / v0 force the scaled low-precision WMMA mnemonic.
+
+    KernelWriter calls ``rocIsa.setForceScaledWMMA(True)`` for those steppings,
+    while base gfx1250 leaves it False (the ``float4``/``mxBlock=0`` case above).
+    Pinning both toggle states keeps the base-vs-strict mnemonic split from
+    regressing back to always-scaled.
+    """
+    ti = rocisa.rocIsa.getInstance()
+    ti.setForceScaledWMMA(True)
+    try:
+        got = mnemonic([16, 16, 128, 1], "float4", mxBlock=0)
+    finally:
+        ti.setForceScaledWMMA(False)  # don't leak the toggle into later tests
+    assert got == "v_wmma_scale_f32_16x16x128_f8f6f4"
+    assert rocisa.isMnemonicSupportedByStinkyTofu(got, GFX1250)
 
 
 def test_wmma_spells_int8_as_iu8():
