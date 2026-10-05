@@ -47,7 +47,8 @@
 | C++ Compiler | C++17 compatible | AMD Clang, or MSVC on Windows (plugins using device code may require C++20 and AMD Clang)|
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
-| clang-tidy | 20.x | Static analysis tool |
+| clang-tidy | 20.x | Static analysis tool for host C++ |
+| clang-tidy (ROCm) | 23.x | Static analysis tool for the embedded HIP kernels; taken from `${ROCM_PATH}/llvm/bin`, not the system path |
 | LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
@@ -490,6 +491,13 @@ cmake --preset release -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/an
 
 Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
 
+Two clang-tidy binaries are used, and they are discovered independently:
+
+* **Host C++** uses the clang-tidy on the system path, pinned by `EXPECTED_CLANG_TIDY_VERSION` (20) and found through the two mechanisms described below.
+* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION` (23). Only `${ROCM_PATH}/llvm/bin` and `/opt/rocm/llvm/bin` are searched, so the system clang-tidy can never be picked up by mistake. These kernels are compiled at runtime by hipRTC, and only a clang-tidy matched to that ROCm install can be relied on to parse the hipRTC pre-include header the check feeds it. Not finding it is not an error: the kernel tidy target simply is not created.
+
+Both binaries share `projects/hipdnn/.clang-tidy`. Where their check sets differ, the config lists every name and `clang_tidy_check_override_args()` in `cmake/ClangTidy.cmake` subtracts, through a `-checks=` argument, whatever the binary in hand must not be given. A check is never deleted from the config to accommodate one binary, as that would silently drop coverage for the other. A version mismatch on either binary disables it (with a warning) unless `ALLOW_TOOL_VERSION_MISMATCH`, `ALLOW_CLANG_TIDY_VERSION_MISMATCH` or `ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH` is `ON`; the pinning matters because those per-version check deltas are keyed off the major version.
+
 #### Version Suffix
 
 Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-20` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.
@@ -889,7 +897,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
-* clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see the WIN32 block in `cmake/ClangTidy.cmake`. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
+* clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see `clang_tidy_check_override_args()` in `cmake/ClangTidy.cmake`, which is also where per-clang-tidy-version check deltas live. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
 
 ## Troubleshooting
 

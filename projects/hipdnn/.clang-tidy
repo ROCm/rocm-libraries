@@ -41,6 +41,16 @@
 #   -modernize-use-scoped-lock
 #   -readability-use-concise-preprocessor-directives
 #   -readability-math-missing-parentheses
+#
+# Two clang-tidy binaries share this file: the LLVM 20 one from the image
+# (host C++) and the newer ROCm one under ${ROCM_PATH}/llvm/bin (embedded HIP
+# kernels; see dnn-providers/hip-kernel-provider/src/cmake/KernelTidy.cmake).
+# Where their check sets differ, list BOTH names here and let the CMake
+# override table in cmake/ClangTidy.cmake turn off whichever one the binary in
+# hand must not see. An enabled check name that a binary does not know is
+# ignored silently, so listing both is safe; only `--verify-config` complains.
+# Do NOT resolve such a difference by deleting a check from this file, as that
+# silently drops coverage for the other binary.
 Checks: >
   -*,
   bugprone-argument-comment,
@@ -187,6 +197,7 @@ Checks: >
   modernize-use-transparent-functors,
   modernize-use-uncaught-exceptions,
   performance-avoid-endl,
+  performance-faster-string-find,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
   performance-inefficient-algorithm,
@@ -199,6 +210,7 @@ Checks: >
   performance-noexcept-destructor,
   performance-noexcept-move-constructor,
   performance-noexcept-swap,
+  performance-prefer-single-char-overloads,
   performance-trivially-destructible,
   performance-type-promotion-in-math-fn,
   performance-unnecessary-copy-initialization,

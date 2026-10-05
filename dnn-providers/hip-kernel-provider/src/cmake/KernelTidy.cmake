@@ -151,11 +151,23 @@ function(add_kernel_tidy_target)
     # setClangTidyVars() owns the HIP flags (the ROCm include directory in particular), so
     # take them from there rather than working them out again here.
     setclangtidyvars()
-    if(NOT CLANG_TIDY_EXE)
+
+    # The kernels are device code built at runtime by hipRTC, so they are checked with the
+    # clang-tidy from the ROCm toolchain rather than the image's: the hipRTC pre-include
+    # header below comes from the same ROCm install, and only a matching clang-tidy can be
+    # relied on to parse it. CLANG_TIDY_EXE deliberately is not reused here -- it is the
+    # host C++ one, an older LLVM.
+    findandcheckrocmclangtidy()
+    if(NOT ROCM_CLANG_TIDY_EXE)
         message(WARNING
-                "clang-tidy not found. The '${KERNEL_TIDY_NAME}' target will not be available.")
+                "ROCm clang-tidy not found. The '${KERNEL_TIDY_NAME}' target will not be available.")
         return()
     endif()
+
+    # The two binaries share .clang-tidy, so subtract whatever this one must not be given.
+    clang_tidy_check_override_args(_kernel_tidy_check_args
+                                   "${ROCM_CLANG_TIDY_EXE_MAJOR_VERSION}")
+
     get_filename_component(KERNEL_TIDY_PRELUDE "${KERNEL_TIDY_PRELUDE}" ABSOLUTE)
     set(_tidy_config "${PROJECT_SOURCE_DIR}/.clang-tidy")
 
@@ -200,8 +212,8 @@ function(add_kernel_tidy_target)
         add_custom_command(
             OUTPUT ${_stamp}
             COMMAND
-                    /opt/rocm/llvm/bin/clang-tidy
-                    -config-file=${_tidy_config} --quiet
+                    ${ROCM_CLANG_TIDY_EXE}
+                    -config-file=${_tidy_config} ${_kernel_tidy_check_args} --quiet
                     --exclude-header-filter=hiprtc_runtime.h 
                     ${_kernel_file} 
                     -- ${_kernel_tidy_compiler_flags}

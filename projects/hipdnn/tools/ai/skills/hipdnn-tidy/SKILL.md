@@ -34,8 +34,12 @@ work to what changed.
    under-match.
 
 Diagnostics and exit code match a full run: the configuration comes from
-`projects/hipdnn/.clang-tidy` (211 checks, `WarningsAsErrors: '*'`), so any
-finding exits non-zero.
+`projects/hipdnn/.clang-tidy` (210 checks, `WarningsAsErrors: '*'`), so any
+finding exits non-zero. The config is shared with the ROCm clang-tidy used for
+the embedded HIP kernels and so lists a few check names that only one of the two
+LLVM versions knows; clang-tidy ignores names it does not recognise, and the
+build subtracts the wrong-for-this-version ones via `-checks=` (see
+`clang_tidy_check_override_args()` in `cmake/ClangTidy.cmake`).
 
 ## Inputs
 

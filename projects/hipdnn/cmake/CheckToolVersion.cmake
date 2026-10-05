@@ -8,6 +8,13 @@ endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
+# The embedded HIP kernels are compiled at runtime by hipRTC, so they are checked with the
+# clang-tidy that ships with ROCm rather than the image's. That binary tracks ROCm and is
+# therefore a different, newer LLVM than EXPECTED_CLANG_TIDY_VERSION above; the two are
+# version-checked independently on purpose.
+if(NOT EXPECTED_ROCM_CLANG_TIDY_VERSION)
+    set(EXPECTED_ROCM_CLANG_TIDY_VERSION "23")
+endif()
 if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
 endif()
@@ -21,6 +28,7 @@ option(ALLOW_TOOL_VERSION_MISMATCH
 if(ALLOW_TOOL_VERSION_MISMATCH)
     set(ALLOW_CLANG_FORMAT_VERSION_MISMATCH ON)
     set(ALLOW_CLANG_TIDY_VERSION_MISMATCH ON)
+    set(ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH ON)
     set(ALLOW_LLVM_VERSION_MISMATCH ON)
 endif()
 
@@ -157,6 +165,14 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
             ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
             "Found ${TOOL_NAME} version {VERSION} at {PATH}"
         )
+        # Record the detected major version alongside the tool path. Callers that have to
+        # adapt their arguments to the binary actually in hand (clang_tidy_check_override_args()
+        # in ClangTidy.cmake) need it, and the cache is the only place they can read it from:
+        # discovery happens once, in whichever scope first includes this module, while those
+        # callers run in arbitrary directory scopes afterwards.
+        set(${OUTPUT_VAR}_MAJOR_VERSION "${${TOOL_NAME}_MAJOR_VERSION}"
+            CACHE INTERNAL "Detected major version of the tool found in ${OUTPUT_VAR}"
+        )
         # checkToolVersion() already warned on mismatch
         if(NOT ${TOOL_NAME}_VERSION_MATCHED AND NOT _CHECK_TOOL_VERSION_ALLOW_MISMATCH)
             message(WARNING "${TOOL_NAME} disabled due to version mismatch "
@@ -164,6 +180,7 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
                 "a fresh cmake configure to set ${OUTPUT_VAR} to the needed version."
             )
             unset(${OUTPUT_VAR} CACHE)
+            unset(${OUTPUT_VAR}_MAJOR_VERSION CACHE)
             return()
         endif()
     endif()
@@ -215,6 +232,66 @@ function(findAndCheckClangTidy)
     if(RUN_CLANG_TIDY_EXE)
         set(RUN_CLANG_TIDY_EXE ${RUN_CLANG_TIDY_EXE} PARENT_SCOPE)
     endif()
+endfunction()
+
+# Finds and checks the clang-tidy that ships with ROCm.
+#
+# Deliberately not routed through findAndCheckTool(): that searches the system paths first,
+# which is exactly how the image's clang-tidy would be picked up instead. The ROCm toolchain
+# is the point here, so only its bin directories are searched.
+#
+# Sets ROCM_CLANG_TIDY_EXE and ROCM_CLANG_TIDY_EXE_MAJOR_VERSION in the parent scope, both
+# empty when the tool is unusable. Not finding it is never fatal: only the embedded-kernel
+# tidy target needs it, and that target skips itself when it is absent.
+function(findAndCheckRocmClangTidy)
+    set(_rocm_llvm_bin_dirs "")
+    if(DEFINED ROCM_PATH)
+        list(APPEND _rocm_llvm_bin_dirs "${ROCM_PATH}/llvm/bin" "${ROCM_PATH}/lib/llvm/bin")
+    endif()
+    list(APPEND _rocm_llvm_bin_dirs /opt/rocm/llvm/bin /opt/rocm/lib/llvm/bin)
+
+    find_program(
+        ROCM_CLANG_TIDY_EXE
+        NAMES clang-tidy-${EXPECTED_ROCM_CLANG_TIDY_VERSION} clang-tidy
+        PATHS ${_rocm_llvm_bin_dirs} NO_DEFAULT_PATH
+        DOC "clang-tidy from the ROCm LLVM toolchain, used for embedded HIP kernels"
+    )
+
+    if(NOT ROCM_CLANG_TIDY_EXE)
+        string(REPLACE ";" "\n  " _formatted_dirs "${_rocm_llvm_bin_dirs}")
+        message(STATUS "ROCm clang-tidy not found in:\n  ${_formatted_dirs}")
+        set(ROCM_CLANG_TIDY_EXE "" PARENT_SCOPE)
+        set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "" PARENT_SCOPE)
+        return()
+    endif()
+
+    checktoolversion(
+        ${ROCM_CLANG_TIDY_EXE} "clang-tidy" ${EXPECTED_ROCM_CLANG_TIDY_VERSION}
+        "version ([0-9]+)\\." "Found ROCm clang-tidy version {VERSION} at {PATH}"
+    )
+    set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "${clang-tidy_MAJOR_VERSION}"
+        CACHE INTERNAL "Detected major version of ROCM_CLANG_TIDY_EXE"
+    )
+
+    # checkToolVersion() already warned on mismatch. A mismatch is not just cosmetic here:
+    # clang_tidy_check_override_args() keys the per-version check deltas off the major
+    # version, so an unexpected one means the deltas have not been reviewed for it.
+    if(NOT clang-tidy_VERSION_MATCHED AND NOT ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH)
+        message(WARNING
+            "ROCm clang-tidy disabled due to version mismatch (expected "
+            "${EXPECTED_ROCM_CLANG_TIDY_VERSION}). Set EXPECTED_ROCM_CLANG_TIDY_VERSION to "
+            "the version you have, after reviewing the check deltas in ClangTidy.cmake, or "
+            "set ALLOW_ROCM_CLANG_TIDY_VERSION_MISMATCH=ON to use it as-is."
+        )
+        unset(ROCM_CLANG_TIDY_EXE CACHE)
+        unset(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION CACHE)
+        set(ROCM_CLANG_TIDY_EXE "" PARENT_SCOPE)
+        set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION "" PARENT_SCOPE)
+        return()
+    endif()
+
+    set(ROCM_CLANG_TIDY_EXE ${ROCM_CLANG_TIDY_EXE} PARENT_SCOPE)
+    set(ROCM_CLANG_TIDY_EXE_MAJOR_VERSION ${ROCM_CLANG_TIDY_EXE_MAJOR_VERSION} PARENT_SCOPE)
 endfunction()
 
 # Finds and checks LLVM tools
