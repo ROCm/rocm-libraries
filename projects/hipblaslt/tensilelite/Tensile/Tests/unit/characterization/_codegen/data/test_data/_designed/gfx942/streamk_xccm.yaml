@@ -10,13 +10,13 @@
 # Coverage targets:
 #   Lines 78-79:  XCCMappingOn non-power-of-2 branch
 #                 Condition: (divisor & (divisor - 1)) != 0
-#                 StreamKXCCMapping=3 => 3 & 2 = 2 != 0 => triggers lines 78-79
+#                 PersistentXCCMapping=3 => 3 & 2 = 2 != 0 => triggers lines 78-79
 #                 which allocate extra temp SGPRs via checkOutAligned(2, 2, "sTmp")
 #   Lines 59-109: XCCMappingOn.__call__ full body (skGrid VReadfirstlane disabled
 #                 on gfx942 since isStreamKConstantsToVgprEnabled=False there)
 #
-# gfx942 supports StreamKXCCMapping ∈ {0, 2, 3, 4, 5, 6, 7, 8}.
-# StreamKXCCMapping=3 is non-power-of-2 (valid values exclude 1).
+# gfx942 supports PersistentXCCMapping ∈ {0, 2, 3, 4, 5, 6, 7, 8}.
+# PersistentXCCMapping=3 is non-power-of-2 (valid values exclude 1).
 # StreamK=[3] with StreamKAtomic=[0] is the minimal sweep.
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -29,7 +29,7 @@ GlobalParameters:
 BenchmarkProblems:
   ########################################
   # SGEMM NT, Batched, XCCMapping=3
-  # StreamKXCCMapping=3 (non-power-of-2) exercises lines 78-79 in XCCMappingOn.__call__
+  # PersistentXCCMapping=3 (non-power-of-2) exercises lines 78-79 in XCCMappingOn.__call__
   # which allocates extra temp SGPRs (checkOutAligned(2, 2, "sTmp")) for the
   # scalarStaticDivideAndRemainder calls with non-power-of-2 divisors.
   ########################################
@@ -52,9 +52,10 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
-        - StreamKXCCMapping: [3]
+        - PersistentXCCMapping: [3]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]

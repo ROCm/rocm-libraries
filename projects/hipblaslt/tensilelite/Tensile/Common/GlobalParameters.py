@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from .. import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -198,20 +198,21 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
-# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
-# Each list entry causes ClientProblemFactory to replay every base
-# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
-# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
-# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
-# deterministically exercise both SK5 sub-paths in a single sweep run;
-# AUTO is supported as well, but in a sweep it leaves the per-launch
-# sub-path up to the runtime heuristic, so [0, 1] is preferred when
-# the YAML's job is sub-path coverage. AUTO is most useful when
-# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
-# to run the heuristic end-to-end on a real problem. Ignored at the
-# host for non-SK5 solutions. Default keeps behavior unchanged for
-# existing tests.
+# Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
+# does not select a compiled tile-processing or work-assignment family.
+# Each list entry replays every base problem through the benchmark client.
+# HybridAssignmentPolicy accepts Default / DynamicWorkQueue / Auto, preserving
+# the existing 0 / 1 / 2 encodings. Default normally uses static assignment but
+# may invoke the heuristic when sm_count_target is positive; it is not an
+# unconditional static request. DynamicWorkQueue selects the per-XCD queue,
+# and Auto asks the runtime heuristic to choose the effective assignment.
+# For deterministic static/dynamic branch coverage, use the explicit runtime
+# debug override TENSILE_PERSISTENT_HYBRID_FORCE_MODE=0 / 1.
+# StreamKHybridMode is the deprecated numeric input alias; existing values and
+# behavior remain supported. These controls are ignored for other compiled
+# WorkAssignment values.
 globalParameters["StreamKHybridMode"] = [0]
+globalParameters["HybridAssignmentPolicy"] = ["Default"]
 # Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
@@ -442,6 +443,9 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
+    # Missing prebuilt metadata keeps layout 0; the generator selects the
+    # current scheduling layout after resolving the execution policy.
+    "PersistentLoopArgsVersion": 0,
     "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
@@ -595,11 +599,11 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt": [0]},
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
-    {"StreamK": [0]},
-    {"StreamKForceDPOnly": [0]},
+    {"TileProcessingStrategy": ["None"]},
+    {"WorkAssignment": ["StaticGrid"]},
     {"StreamKAtomic": [0]},
-    {"StreamKWorkStealing": [0]},
-    {"StreamKXCCMapping": [0]},
+    {"WorkQueueStealing": [0]},
+    {"PersistentXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
@@ -658,7 +662,6 @@ for paramDict in defaultBenchmarkCommonParameters:
     for key, value in paramDict.items():
         defaultSolution[key] = value[0]
 # other non-benchmark options for solutions
-
 
 
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
@@ -850,6 +853,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
@@ -878,6 +882,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     global globalParameters
 
+    from ..ExecutionPolicy import normalize_hybrid_assignment_policy
+    config = normalize_hybrid_assignment_policy(config)
     validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version

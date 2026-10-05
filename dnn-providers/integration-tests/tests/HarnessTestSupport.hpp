@@ -190,6 +190,15 @@ inline void captureReferenceErrors(::testing::NiceMock<MockVerificationReporter>
             [&out](const std::string&, const std::string& reason) { out.push_back(reason); });
 }
 
+/// Collects the verifier the harness reports for each test body.
+inline void captureVerifiers(::testing::NiceMock<MockVerificationReporter>& reporter,
+                             std::vector<Verifier>& out)
+{
+    using ::testing::_;
+    ON_CALL(reporter, recordVerifier(_, _))
+        .WillByDefault([&out](const std::string&, Verifier verifier) { out.push_back(verifier); });
+}
+
 inline bool anyFailed(const ::testing::TestPartResultArray& results)
 {
     for(int i = 0; i < results.size(); ++i)
