@@ -25,7 +25,7 @@
 
 """Characterization tests for the validators in
 ``Tensile.Common.ValidParameters``: ``checkParametersAreValid`` (the central
-parameter validator) and the two space-filling sub-validators
+parameter validator) and the sub-validators ``checkAssertSizeMapIsValid`` /
 ``checkSpaceFillAlgoIsValid`` / ``checkSpaceFillAlgoWGMIsValid``.
 
 All Tier A: pure functions over plain dicts/lists. Accept paths return ``None``
@@ -40,6 +40,35 @@ import pytest
 import Tensile.Common.ValidParameters as VP
 
 pytestmark = pytest.mark.unit
+
+
+# ===========================================================================
+# checkAssertSizeMapIsValid — accept + every reject branch
+# ===========================================================================
+
+def test_assert_size_map_valid_returns_none():
+    assert VP.checkAssertSizeMapIsValid("AssertSizeEqual", {}) is None
+    assert VP.checkAssertSizeMapIsValid("AssertSizeEqual", {0: 1}) is None
+    assert VP.checkAssertSizeMapIsValid("AssertSizeEqual", {0: 1, 1: 4}) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1,              # not a dict
+        "abc",          # str, not a dict
+        {"0": 1},       # string key
+        {True: 1},      # bool key (type(True) is not int)
+        {-1: 1},        # negative index
+        {0: 1.5},       # float size
+        {0: "1"},       # string size
+    ],
+    ids=["int", "str", "str_key", "bool_key", "neg_index", "float_size", "str_size"],
+)
+def test_assert_size_map_invalid_raises(value, snapshot):
+    with pytest.raises(Exception) as excinfo:
+        VP.checkAssertSizeMapIsValid("AssertSizeEqual", value)
+    assert str(excinfo.value) == snapshot
 
 
 # ===========================================================================
@@ -152,8 +181,30 @@ def test_check_params_value_not_in_long_list_raises(snapshot):
 
 
 # ===========================================================================
-# checkParametersAreValid — sub-validator dispatch (the two elif arms)
+# checkParametersAreValid — sub-validator dispatch (the three elif arms)
 # ===========================================================================
+
+def test_check_params_dispatch_assert_size_equal_valid():
+    # name == "AssertSizeEqual" with the -1 sentinel bypasses the value-list
+    # check and dispatches to checkAssertSizeMapIsValid (valid -> None).
+    assert VP.checkParametersAreValid(("AssertSizeEqual", [{}]), {"AssertSizeEqual": -1}) is None
+    assert VP.checkParametersAreValid(("AssertSizeEqual", [{0: 1}]), {"AssertSizeEqual": -1}) is None
+
+
+def test_check_params_dispatch_assert_size_equal_invalid_propagates(snapshot):
+    with pytest.raises(Exception) as excinfo:
+        VP.checkParametersAreValid(("AssertSizeEqual", [1]), {"AssertSizeEqual": -1})
+    assert str(excinfo.value) == snapshot
+
+
+def test_check_params_dispatch_covers_every_dim_map_parameter():
+    # Pins the registry, not one name: a dict-valued Assert* added without a
+    # dispatch arm would take the value-list path and accept anything.
+    for name in VP.ASSERT_DIM_MAP_PARAMETERS:
+        assert VP.checkParametersAreValid((name, [{0: 1}]), {name: -1}) is None
+        with pytest.raises(Exception, match="Must be a dict"):
+            VP.checkParametersAreValid((name, [1]), {name: -1})
+
 
 def test_check_params_dispatch_space_filling_algo_valid():
     # name == "SpaceFillingAlgo" with the -1 sentinel bypasses the value-list

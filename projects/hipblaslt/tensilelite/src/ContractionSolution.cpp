@@ -159,6 +159,7 @@ namespace TensileLite
         case CustomGridSize::PersistentWithBatch: return "PersistentWithBatch";
         case CustomGridSize::PersistentNoBatch: return "PersistentNoBatch";
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
+        case CustomGridSize::ComputeUnits:     return "ComputeUnits";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -181,6 +182,7 @@ namespace TensileLite
             {"PersistentWithBatch", CustomGridSize::PersistentWithBatch},
             {"PersistentNoBatch", CustomGridSize::PersistentNoBatch},
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
+            {"ComputeUnits",     CustomGridSize::ComputeUnits},
         };
 
         auto it = lookup.find(str);
@@ -2930,6 +2932,9 @@ namespace TensileLite
                 case CustomGridSize::StreamKNoBatch:
                     dim = launch.grid;
                     break;
+                case CustomGridSize::ComputeUnits:
+                    dim = static_cast<size_t>(std::max(1, pAMDGPU->computeUnitCount));
+                    break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
                     break;
@@ -3194,6 +3199,11 @@ namespace TensileLite
                         rv.args.append("beta", 0.0f, problem.betaType());
                     else
                         rv.args.append("beta", inputs.beta, problem.betaType());
+                    break;
+                case CustomArgSemantic::ComputeUnits:
+                    rv.args.appendCustomType("ComputeUnits",
+                                             std::max(1, pAMDGPU->computeUnitCount),
+                                             arg.type);
                     break;
                 case CustomArgSemantic::SplitK:
                 {

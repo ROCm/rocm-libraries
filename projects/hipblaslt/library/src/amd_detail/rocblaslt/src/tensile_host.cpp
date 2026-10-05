@@ -4648,6 +4648,15 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
     std::cerr << msg.str();
 }
 
+// Handwritten custom kernels take plain A/B/C/D addresses, so they cannot run a
+// general-batched (pointer-array) problem.
+inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm const& problem,
+                                          TensileLite::ContractionSolution const&    solution)
+{
+    return problem.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+           && !solution.customKernel.name.empty() && !solution.customKernel.generated;
+}
+
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -4666,6 +4675,27 @@ inline auto getSolutions(
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+
+    // Library logic can rank a custom kernel ahead of the kernels it replaces. For
+    // a pointer-array problem drop it and widen the search, so the caller still
+    // gets up to requestedAlgoCount solutions that can run it.
+    for(int request = requestedAlgoCount;;)
+    {
+        size_t const found = solutions.size();
+        solutions.erase(std::remove_if(solutions.begin(),
+                                       solutions.end(),
+                                       [&](auto const& solution) {
+                                           return isCustomKernelForPointerArray(tensile_prob,
+                                                                                *solution);
+                                       }),
+                        solutions.end());
+        size_t const dropped = found - solutions.size();
+        if(dropped == 0 || solutions.size() >= static_cast<size_t>(requestedAlgoCount)
+           || found < static_cast<size_t>(request))
+            break;
+        request += static_cast<int>(dropped);
+        solutions = library->findTopSolutions(tensile_prob, *hardware, request);
+    }
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
@@ -4859,12 +4889,10 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     int duplicated_counts = 0;
     for(auto solution : orderedSolutions)
     {
-        // Custom kernels don't support general batched mode (pointer arrays)
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
-            if(prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
-               && !solution->customKernel.name.empty() && !solution->customKernel.generated)
+            if(isCustomKernelForPointerArray(prob, *solution))
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
@@ -5080,6 +5108,12 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 << " (solution missing from library map; check Tensile packaging or version "
                    "skew)";
             log_error(__func__, msg.str());
+            return rocblaslt_status_invalid_value;
+        }
+
+        if(isCustomKernelForPointerArray(tensile_prob, *solution))
+        {
+            log_error(__func__, "custom kernels do not support batch_mode=POINTER_ARRAY");
             return rocblaslt_status_invalid_value;
         }
 

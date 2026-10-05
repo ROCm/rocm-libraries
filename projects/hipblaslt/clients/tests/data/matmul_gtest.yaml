@@ -104,6 +104,42 @@ Tests:
   matrix_size:
     - { M:  128,  N:  128,  K:  0  }
 
+# Skinny GEMMs that library logic routes to the rocBLAS wvSpltK custom kernels on
+# gfx942/gfx950: padded leading dimensions they must honor, and general-batched
+# (pointer-array) problems they cannot run, which must fall back to other kernels.
+- name: matmul_skinny_f16_nn
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: N
+  transB: N
+  matrix_size:
+    - { M: 1, N: 1024, K: 1024, lda: 1, ldb: 1024, ldc: 1, ldd: 1 }
+    - { M: 1, N: 1024, K: 1024, lda: 1, ldb: 1032, ldc: 1, ldd: 1 }
+    - { M: 2, N: 1024, K: 1024, lda: 2, ldb: 1032, ldc: 2, ldd: 2 }
+    - { M: 3, N: 1024, K: 1024, lda: 3, ldb: 1032, ldc: 3, ldd: 3 }
+    - { M: 4, N: 1024, K: 1024, lda: 8, ldb: 1032, ldc: 8, ldd: 8 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+
+- name: matmul_skinny_bf16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 2, K: 1024, lda: 1032, ldb: 1040, ldc: 1048, ldd: 1056 }
+    - { M: 1024, N: 3, K: 1024, lda: 1024, ldb: 1032, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 4, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

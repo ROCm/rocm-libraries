@@ -23,11 +23,14 @@
 ################################################################################
 
 import os
+import re
 from textwrap import dedent, indent
 
 import pytest
+import yaml
 
 import Tensile
+from Tensile.resources import custom_kernel_text
 import Tensile.TensileLogic.HandleCustomKernel as hck_mod
 from Tensile.AddCustomConfig import (
     _fmt_yaml_args,
@@ -38,8 +41,12 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ProblemPredicate
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
+from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from Tensile.Common.ValidParameters import (
+    ASSERT_DIM_MAP_PARAMETERS,
+    checkParametersAreValid,
+    validParameters,
+)
 from Tensile.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
@@ -220,6 +227,8 @@ def test_valid_parameters_accept_size_multiple_256():
     checkParametersAreValid(("AssertFree0ElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertFree1ElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertSummationElementMultiple", [256]), validParameters)
+    checkParametersAreValid(("AssertSizeEqual", [{}, {0: 1}, {0: 1, 1: 4}]), validParameters)
+    checkParametersAreValid(("AssertSizeGreaterThan", [{}, {1: 8}]), validParameters)
 
 
 def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
@@ -253,6 +262,33 @@ def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
         getCustomKernelConfig("bad_predicate", {}, str(tmp_path))
 
 
+def test_get_custom_kernel_config_preserves_assert_size_equal(tmp_path):
+    write_kernel(tmp_path / "size_equal.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertSizeEqual: {0: 1}
+        """)
+
+    config = getCustomKernelConfig("size_equal", {}, str(tmp_path))
+
+    assert config["AssertSizeEqual"] == {0: 1}
+
+
+def test_get_custom_kernel_config_rejects_bad_assert_size_equal(tmp_path):
+    write_kernel(tmp_path / "bad_size_equal.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertSizeEqual: 1
+        """)
+
+    with pytest.raises(Exception, match="AssertSizeEqual"):
+        getCustomKernelConfig("bad_size_equal", {}, str(tmp_path))
+
+
 def test_problem_predicate_emits_size_multiple_for_assert_free0():
     pred = ProblemPredicate.FromOriginalKeyPair(("AssertFree0ElementMultiple", 256))
 
@@ -272,6 +308,61 @@ def test_problem_predicate_emits_size_multiple_for_assert_free1():
 def test_problem_predicate_drops_value_one():
     """value==1 means "no constraint" and must not produce a runtime predicate."""
     assert ProblemPredicate.FromOriginalKeyPair(("AssertFree0ElementMultiple", 1)) is None
+
+
+def test_problem_predicate_emits_size_equal_for_assert_size_equal():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: 1}))
+
+    assert pred is not None
+    assert pred.tag == "SizeEqual"
+    assert pred.index == 0
+    assert pred.value == 1
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: -1})) is None
+
+
+def test_problem_predicate_ands_multi_dim_assert_size_equal():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: 1, 1: 4}))
+
+    assert pred is not None
+    assert pred.tag == "And"
+    dims = {(p.index, p.value) for p in pred.value}
+    assert dims == {(0, 1), (1, 4)}
+    assert all(p.tag == "SizeEqual" for p in pred.value)
+
+
+def test_problem_predicate_rejects_non_dict_assert_size_equal():
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", 1))
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", 1))
+
+
+def test_assert_dim_map_registries_agree():
+    """A key validated as an {index: value} map must also emit a predicate, or a
+    custom.config would accept it and then silently drop the constraint."""
+    assert set(ASSERT_DIM_MAP_PARAMETERS) == set(ASSERT_DIM_MAP_PREDICATES)
+    assert set(ASSERT_DIM_MAP_PARAMETERS) <= set(validParameters)
+
+
+def test_problem_predicate_emits_size_greater_than():
+    """N > 8 guards the tail fixup, which underflows below one wave tile."""
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", {1: 8}))
+
+    assert pred is not None
+    assert pred.tag == "SizeGreaterThan"
+    assert pred.index == 1
+    assert pred.value == 8
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", {})) is None
+
+
+def test_valid_parameters_reject_assert_size_equal_bad_map():
+    with pytest.raises(Exception, match="Index must be int"):
+        checkParametersAreValid(("AssertSizeEqual", [{"0": 1}]), validParameters)
+    with pytest.raises(Exception, match="Index must be >= 0"):
+        checkParametersAreValid(("AssertSizeEqual", [{-1: 1}]), validParameters)
+    with pytest.raises(Exception, match="Size must be int"):
+        checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
 
 
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
@@ -297,6 +388,27 @@ def test_parse_tensile_yaml_copies_single_valued_predicate(tmp_path):
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
 
     assert config["AssertFree0ElementMultiple"] == 256
+
+
+def test_parse_tensile_yaml_copies_assert_size_equal(tmp_path):
+    yaml_path = tmp_path / "size_equal.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: predicated_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - AssertSizeEqual: [{0: 1}]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+
+    assert config["AssertSizeEqual"] == {0: 1}
 
 
 def test_parse_tensile_yaml_rejects_multi_valued_predicate(tmp_path):
@@ -335,6 +447,9 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
         },
         "AssertFree0ElementMultiple": 256,
         "AssertFree1ElementMultiple": 256,
+        "AssertSizeEqual": {0: 1},
+        "AssertSizeGreaterThan": {1: 8},
+        "StaggerU": 0,
         "WavefrontSize": 64,
     }
 
@@ -343,12 +458,19 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     mi_idx = rendered.index("MatrixInstruction:")
     f0_idx = rendered.index("AssertFree0ElementMultiple:")
     f1_idx = rendered.index("AssertFree1ElementMultiple:")
+    size_idx = rendered.index("AssertSizeEqual:")
+    stagger_idx = rendered.index("StaggerU:")
     wf_idx = rendered.index("WavefrontSize:")
 
     assert mi_idx < f0_idx < wf_idx
     assert mi_idx < f1_idx < wf_idx
+    assert mi_idx < size_idx < wf_idx
+    assert mi_idx < stagger_idx < wf_idx
     assert "AssertFree0ElementMultiple: 256" in rendered
     assert "AssertFree1ElementMultiple: 256" in rendered
+    assert "AssertSizeEqual: { 0: 1 }" in rendered
+    assert "AssertSizeGreaterThan: { 1: 8 }" in rendered
+    assert "StaggerU: 0" in rendered
 
 
 # --------------------------------------------------------------------------- #
@@ -396,7 +518,7 @@ def test_fmt_yaml_args_empty_single_multiple():
 def test_build_config_provenance_only():
     out = build_custom_config_yaml("aiter", None, repository="http://x", version="2.0")
     assert "Origin: aiter" in out
-    assert "Repository: http://x" in out
+    assert 'Repository: "http://x"' in out
     assert "Version: 2.0" in out
     assert "SupportsBias: false" in out
     assert "KernArgsVersion: 0" in out
@@ -602,6 +724,11 @@ def test_metadata_arg_default_uint32():
     assert _metadataArgToCustomArg(_meta_arg("alpha", 4)) == {
         "type": "uint32", "semantic": "Alpha"
     }
+
+
+def test_metadata_arg_cucount_is_compute_units():
+    assert _metadataArgToCustomArg(_meta_arg("cuCount", 4))["semantic"] == "ComputeUnits"
+    assert _metadataArgToCustomArg(_meta_arg("ComputeUnits", 4))["semantic"] == "ComputeUnits"
 
 
 def test_metadata_arg_activation_index():
@@ -1030,3 +1157,267 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
         """))
     config = _parse_tensile_yaml(str(p), "real_kernel")
     assert "CustomKernel" in config
+
+
+@pytest.mark.parametrize(
+    "name,rows,maxK",
+    [("wvSpltK_f16_nn_m1", 1, None), ("wvSpltK_f16_nn_m2", 2, 16385)],
+)
+def test_wvspltk_shipped_family_predicates(name, rows, maxK):
+    """m1 and m2 pin their own M, and m2 also bounds K: it reads A only from
+    LDS, which holds M*K <= 32768 halves. B's leading dimension is a kernarg,
+    because library logic routes every NN problem with this M to them."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    assert config["AssertSizeEqual"] == {0: rows, 2: 1}
+    assert config["AssertSizeGreaterThan"] == {1: 8}
+    if maxK is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == {3: maxK}
+        assert (maxK - 1) * rows == 32768
+
+    # A, C and D are indexed with no stride argument: unit stride, and a leading
+    # dimension equal to the M this kernel pins.
+    for key in ("AssertStrideAEqual", "AssertStrideCEqual", "AssertStrideDEqual"):
+        assert config[key] == {0: 1, 1: rows}, key
+    assert config["AssertStrideBEqual"] == {0: 1}
+    assert "StrideB0" in [a["semantic"] for a in config["CustomKernel"]["args"]]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "wvSpltK_f16_nn_m1",
+        "wvSpltK_f16_nn_m2",
+        "wvSpltK_f16_nn_m4",
+        "wvSpltK_bf16_tn_m1",
+        "wvSpltK_bf16_tn_m2",
+        "wvSpltK_bf16_tn_m4",
+    ],
+)
+def test_wvspltk_code_object_version_matches_library_build(name):
+    """Library logic references these kernels, so TensileCreateLibrary links each
+    into one code object with Tensile's kernels, which hipBLASLt assembles at its
+    default code object v4. ld.lld rejects mixed ABI versions, and the directive
+    in the .s overrides the assembler's -mcode-object-version."""
+    text = custom_kernel_text(name)
+    assert re.search(r"^\s*\.amdhsa_code_object_version\s+4\s*$", text, re.M)
+
+
+_UNIT_STRIDE_KEYS = (
+    "AssertStrideAEqual",
+    "AssertStrideBEqual",
+    "AssertStrideCEqual",
+    "AssertStrideDEqual",
+)
+
+
+def test_wvspltk_f16_nn_m4_serves_every_m_up_to_four():
+    """m4 reads M and the leading dimensions as kernargs, so it serves M <= 4 and
+    only unit strides are predicated. K is bounded for the full tile: A is read
+    only from LDS, which holds M*K <= 32768 halves."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m4", ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig("wvSpltK_f16_nn_m4", {}, ck_root)
+    assert config["AssertSizeEqual"] == {2: 1}
+    assert config["AssertSizeLessThan"] == {0: 5, 3: 8193}
+    assert (config["AssertSizeLessThan"][0] - 1) * (config["AssertSizeLessThan"][3] - 1) == 32768
+    # M > 0: the kernel indexes the last real row of A as M - 1.
+    assert config["AssertSizeGreaterThan"] == {0: 0, 1: 8}
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    assert [a["semantic"] for a in config["CustomKernel"]["args"]] == [
+        "SizeSum",
+        "SizeFree1",
+        "AddressB",
+        "AddressA",
+        "ComputeUnits",
+        "SizeFree0",
+        "StrideB0",
+        "StrideA0",
+        "AddressC",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "StrideC0",
+        "StrideD0",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name,sizeEqual,sizeLessThan,sizeGreaterThan",
+    [
+        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}, {0: 8, 1: 0}),
+    ],
+)
+def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreaterThan):
+    """TN with a skinny n, the layout torch.mm(x, w.t()) reaches hipBLASLt with.
+    m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
+    host does not quick-return n == 0). The leading dimensions are kernargs, and
+    tokens past the LDS stage are read from global memory, so K has no bound."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    pt = config["ProblemType"]
+    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == ("b", "b", "s")
+    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
+    assert config["AssertSizeEqual"] == sizeEqual
+    if sizeLessThan is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == sizeLessThan
+    # m > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == sizeGreaterThan
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    assert [a["semantic"] for a in ck["args"]] == [
+        "SizeSum",
+        "SizeFree0",
+        "AddressA",
+        "AddressB",
+        "ComputeUnits",
+        "SizeFree1",
+        "StrideA0",
+        "StrideB0",
+        "AddressC",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "StrideC0",
+        "StrideD0",
+    ]
+
+
+_LOGIC_ROOT = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *([".."] * 4),
+        "library",
+        "src",
+        "amd_detail",
+        "rocblaslt",
+        "src",
+        "Tensile",
+        "Logic",
+        "asm_full",
+    )
+)
+
+_WVSPLTK_NN_RANGES = {
+    "wvSpltK_f16_nn_m1": [1, 1, 9, -1, 1, 1, 8, -1],
+    "wvSpltK_f16_nn_m2": [2, 2, 9, -1, 1, 1, 8, 4096],
+    "wvSpltK_f16_nn_m4": [3, 4, 9, -1, 1, 1, 8, 4096],
+}
+
+
+@pytest.mark.parametrize(
+    "rel,plainRel,ranges",
+    [
+        (
+            "aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
+            "aquavanjaram/gfx942/Equality/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml",
+            _WVSPLTK_NN_RANGES,
+        ),
+        ("gfx950/gfx950/Range/gfx950_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml", None, _WVSPLTK_NN_RANGES),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+            "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+            {
+                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, 4096],
+                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, 4096],
+                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, 4096],
+            },
+        ),
+    ],
+)
+def test_wvspltk_range_logic(rel, plainRel, ranges):
+    """hipBLASLt reaches the wvSpltK kernels through these Range files. A custom
+    kernel takes the logic file's problem type, and these kernels support no bias,
+    activation or scale vector, so the type must be plain GEMM. Where plain-GEMM
+    logic ships, the file must match its header and type to share its placeholder.
+    Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max], -1
+    unbounded, and each must sit inside its kernel's predicates."""
+    path = os.path.join(_LOGIC_ROOT, rel)
+    if not os.path.exists(path):
+        pytest.skip(f"tuning logic tree not present: {rel}")
+    with open(path) as f:
+        doc = yaml.safe_load(f)
+    assert doc["LibraryType"] == "Range"
+    pt = doc["ProblemType"]
+    assert pt.get("ActivationType", "none") == "none"
+    assert pt.get("UseScaleAB", "") == ""
+    for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
+        assert not pt.get(key), key
+
+    if plainRel is not None:
+        with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
+            plain = yaml.safe_load(f)
+        if isinstance(plain, list):  # legacy positional schema
+            plainHeader, plainPt = dict(zip(("ScheduleName", "ArchitectureName", "DeviceNames"), plain[1:4])), plain[4]
+        else:
+            plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
+            plainPt = plain["ProblemType"]
+        assert {k: doc[k] for k in plainHeader} == plainHeader
+        assert pt == plainPt
+
+    names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
+    assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
+
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    for name, key in ranges.items():
+        config = getCustomKernelConfig(name, {}, ck_root)
+        for dim in range(4):
+            lo, hi = key[2 * dim], key[2 * dim + 1]
+            if dim in config.get("AssertSizeEqual", {}):
+                assert lo == hi == config["AssertSizeEqual"][dim], (name, dim)
+            if dim in config.get("AssertSizeGreaterThan", {}):
+                assert lo > config["AssertSizeGreaterThan"][dim], (name, dim)
+            if dim in config.get("AssertSizeLessThan", {}):
+                assert -1 < hi < config["AssertSizeLessThan"][dim], (name, dim)
+        assert key[6] >= config["AssertSummationElementMultiple"], name
+
+
+def test_wvspltk_f16_nn_m1_shipped_config():
+    """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata("wvSpltK_f16_nn_m1", ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig("wvSpltK_f16_nn_m1", {}, ck_root)
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    # M == 1 and batch == 1; the kernel takes no batch strides.
+    assert config["AssertSizeEqual"] == {0: 1, 2: 1}
+    # N > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == {1: 8}
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    # C is read (beta term) and D is written, so out-of-place calls are correct.
+    assert [a["semantic"] for a in ck["args"]] == [
+        "SizeSum",
+        "SizeFree1",
+        "AddressB",
+        "AddressA",
+        "AddressC",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "ComputeUnits",
+        "StrideB0",
+    ]

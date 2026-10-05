@@ -53,6 +53,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "alpha":                  "Alpha",
     "beta":                   "Beta",
     "betapad":                "Beta",
+    "cuCount":                "ComputeUnits",
+    "ComputeUnits":           "ComputeUnits",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
     "AddressScaleC":          "AddressScaleC",
