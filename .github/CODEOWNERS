@@ -238,6 +238,7 @@
 /projects/rocblas/**/.readthedocs.yaml              @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/docs/                             @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/library/include/                  @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/fortran/                          @ROCm/rocm-fortran-maintainers @ROCm/rocblas-reviewers
 
 /projects/rocfft/**/*.md                            @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
 /projects/rocfft/**/*.rst                           @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
