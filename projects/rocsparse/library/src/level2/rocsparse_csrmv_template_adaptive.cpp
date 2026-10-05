@@ -27,6 +27,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -340,6 +341,29 @@ namespace rocsparse
     }
 }
 
+namespace rocsparse
+{
+    // The adaptive kernels run exactly one row block per workgroup with no
+    // grid-stride loop, and a long row split over several row blocks is finished
+    // by workgroups spin-waiting on wg_flags. Clamping the grid would skip row
+    // blocks, and grid-striding could deadlock on a row block owned by a
+    // workgroup that is not resident yet, so a row-block count that one dispatch
+    // cannot hold is rejected instead.
+    static rocsparse_status
+        csrmv_adaptive_check_row_blocks(rocsparse_handle handle, int64_t nblocks, uint32_t wg_size)
+    {
+        if(rocsparse::get_grid_size_x(handle, nblocks, wg_size) < nblocks)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the matrix has too many row blocks for the csrmv adaptive algorithm to launch "
+                "in a single dispatch; use another algorithm instead, e.g. "
+                "rocsparse_spmv_alg_csr_rowsplit or rocsparse_spmv_alg_csr_lrb");
+        }
+        return rocsparse_status_success;
+    }
+}
+
 template <typename I, typename J, typename A>
 rocsparse_status
     rocsparse::csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
@@ -407,6 +431,17 @@ rocsparse_status
         if(descr->type == rocsparse_matrix_type_symmetric)
         {
             csrmv_info->max_rows = maxRowsInABlock(row_blocks.data(), csrmv_info->adaptive.size);
+        }
+
+        const uint32_t launch_wg
+            = (descr->type == rocsparse_matrix_type_symmetric) ? WG_SIZE : gen_wg;
+        const rocsparse_status grid_status = rocsparse::csrmv_adaptive_check_row_blocks(
+            handle, static_cast<int64_t>(csrmv_info->adaptive.size) - 1, launch_wg);
+        if(grid_status != rocsparse_status_success)
+        {
+            delete csrmv_info;
+            p_csrmv_info[0] = nullptr;
+            RETURN_IF_ROCSPARSE_ERROR(grid_status);
         }
 
         // Allocate memory on device to hold csrmv info, if required
@@ -722,8 +757,11 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // to build wg_ids in analysis, which is derived the same way from m/nnz).
         const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
-        // Run different csrmv kernels
-        dim3 csrmvn_blocks((info->adaptive.size) - 1);
+        // Run different csrmv kernels, one workgroup per row block.
+        const int64_t csrmvn_grid_x = static_cast<int64_t>(info->adaptive.size) - 1;
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_adaptive_check_row_blocks(handle, csrmvn_grid_x, gen_wg));
+        dim3 csrmvn_blocks(csrmvn_grid_x);
         dim3 csrmvn_threads(gen_wg);
 #define ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(GEN_WG)                      \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
@@ -795,9 +833,14 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     }
     else if(descr->type == rocsparse_matrix_type_symmetric)
     {
+        // Checked before y is scaled so a rejected call leaves y untouched.
+        const int64_t csrmvn_grid_x = static_cast<int64_t>(info->adaptive.size) - 1;
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmv_adaptive_check_row_blocks(handle, csrmvn_grid_x, WG_SIZE));
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m, beta_device_host, y));
 
-        dim3 csrmvn_blocks(info->adaptive.size - 1);
+        dim3 csrmvn_blocks(csrmvn_grid_x);
         dim3 csrmvn_threads(WG_SIZE);
 
         I max_rows = static_cast<I>(info->max_rows);

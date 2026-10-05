@@ -302,10 +302,12 @@ namespace rocsparse
         }
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrmmnn_general_block_reduce<1024>),
-                                           dim3(n, get_grid_size_y<J>(handle, batch_count_C)),
+                                           dim3(rocsparse::get_grid_size_x(handle, n, 1024),
+                                                get_grid_size_y<J>(handle, batch_count_C)),
                                            dim3(1024),
                                            0,
                                            handle->stream,
+                                           n,
                                            nblocks,
                                            batch_count_C,
                                            row_block_red,
