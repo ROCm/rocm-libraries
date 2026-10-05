@@ -149,7 +149,8 @@ set(DEFAULT_GPUS
 )
 
 if(BUILD_ADDRESS_SANITIZER)
-  add_compile_options(-fsanitize=address)
+  # Kept off Fortran; fortran/ skips its tests under ASan, so links no Fortran.
+  add_compile_options($<$<COMPILE_LANGUAGE:C,CXX,HIP>:-fsanitize=address>)
   add_link_options(-fsanitize=address)
   add_link_options(-shared-libasan)
   SET(DEFAULT_GPUS
@@ -230,6 +231,7 @@ endif()
 
 add_subdirectory( library )
 
+# Must stay ahead of add_subdirectory( fortran ), which reads the client switches.
 include( clients/cmake/build-options.cmake )
 
 # Build clients of the library
@@ -243,6 +245,19 @@ endif( )
 if( BUILD_CLIENTS_RIDER )
   set( BUILD_CLIENTS_BENCH ${BUILD_CLIENTS_RIDER} )
 endif()
+
+# fortran/ registers its tests under any of these three switches; the other
+# enable_testing() calls here (internal tests, BUILD_CLIENTS_TESTS) miss the
+# samples-only and bench-only builds, which would leave ctest with no tests.
+if( BUILD_CLIENTS_SAMPLES
+    OR BUILD_CLIENTS_TESTS
+    OR BUILD_CLIENTS_BENCH )
+  enable_testing()
+endif()
+
+# Fortran bindings; self-guarding, reports ROCFFT_HAVE_FORTRAN_BINDINGS. After
+# library/, or its find_package( rocfft ) fallback finds an INSTALLED rocFFT.
+add_subdirectory( fortran )
 
 if( BUILD_CLIENTS_SAMPLES
     OR BUILD_CLIENTS_TESTS
