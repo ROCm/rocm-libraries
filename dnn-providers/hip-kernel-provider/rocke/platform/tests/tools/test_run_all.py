@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The standard runner must supply native fixture coverage to both pytest passes."""
+"""The standard runner must supply native fixture coverage to both pytest passes.
+
+Each test drives ``main()`` against a fake ``subprocess.run`` and isolates the
+native pytest/ctest plumbing by opting out of every other step, so a new
+default-on step needs its ``--no-...`` flag added to the argv lists below.
+"""
 
 import importlib.util
 import json
@@ -53,6 +58,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -112,6 +118,7 @@ def test_ctest_readiness_and_failure_propagation(
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -140,6 +147,7 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "run_all.py",
             "--no-guard",
             "--no-gate",
+            "--no-ir-validity",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -195,7 +203,14 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
     monkeypatch.setattr(
         runner.sys,
         "argv",
-        ["run_all.py", "--no-guard", "--no-gate", "--build-root", str(tmp_path)],
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--build-root",
+            str(tmp_path),
+        ],
     )
     assert runner.main() == 1
     assert all(command[0] != runner.sys.executable for command in calls)

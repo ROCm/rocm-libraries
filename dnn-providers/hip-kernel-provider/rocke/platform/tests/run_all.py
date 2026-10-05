@@ -11,7 +11,19 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
+#       [--config CONFIG]
+#
+# The two filters are deliberately separate. `--only` selects *families* for the
+# byte-identity gate; `--only-ir` selects *case ids* for the emitted-IR validity
+# gate, and a case id is `family/arch/variant`, so the two vocabularies overlap
+# without being the same. Forwarding one substring to both was a real trap: a
+# word can be a legal family while matching no corpus case, and the two tools
+# read an empty selection oppositely -- run_diff runs zero families and reports
+# green, check_ir_validity calls it FATAL -- so a partial run could go red for a
+# filter that was valid where the user aimed it. Filtering is also kept separate
+# from skipping: an unfiltered gate still runs in full; use `--no-gate` /
+# `--no-ir-validity` to opt out of one.
 
 from __future__ import annotations
 
@@ -215,6 +227,11 @@ def main() -> int:
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
     ap.add_argument(
+        "--no-ir-validity",
+        action="store_true",
+        help="skip the emitted-IR validity gate (compile+link every corpus case)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -222,7 +239,14 @@ def main() -> int:
     ap.add_argument(
         "--only",
         default="",
-        help="restrict byte-identity gate to families containing SUBSTR",
+        help="restrict byte-identity gate to families containing SUBSTR "
+        "(comma-separated); does not affect the emitted-IR validity gate",
+    )
+    ap.add_argument(
+        "--only-ir",
+        default="",
+        help="restrict emitted-IR validity gate to case ids containing SUBSTR "
+        "(comma-separated); a case id is family/arch/variant",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
@@ -248,6 +272,21 @@ def main() -> int:
         if args.only:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
+
+    if not args.no_ir_validity:
+        # Complements the gate above rather than duplicating it: byte-identity
+        # proves the two engines agree, this proves what they agree on is legal
+        # IR the AMDGPU toolchain accepts. Self-skips (green, loudly) on a host
+        # with no LLVM tools -- pass --strict there to make that a failure.
+        print("\n== emitted-IR validity gate ==")
+        ir_gate = [sys.executable, str(TOOLS / "check_ir_validity.py")]
+        # `--only-ir`, never `--only`: see the module header. An empty selection
+        # is FATAL in that tool and that stays correct here, because reaching it
+        # now means the user aimed a case-id filter at the case-id gate and hit
+        # nothing -- a typo, which is worth a red.
+        if args.only_ir:
+            ir_gate += ["--only", args.only_ir]
+        status |= subprocess.run(ir_gate).returncode
 
     if not args.no_pytest:
         try:
