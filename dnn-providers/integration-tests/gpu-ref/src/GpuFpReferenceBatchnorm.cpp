@@ -332,8 +332,11 @@ void GpuFpReferenceBatchnorm::launchBackward(const void* dyPtr,
     args.c = static_cast<long long>(c);
     args.hw = static_cast<long long>(hw);
 
-    launchKernel(
-        kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
+    detail::launchKernel(kernel.function(),
+                         {detail::checkedNarrowToUInt(c), 1, 1},
+                         {BLOCK_SIZE, 1, 1},
+                         &args,
+                         sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref
