@@ -132,7 +132,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         # call it here too; enable_testing() is idempotent.
         enable_testing()
         message(STATUS "tensilelite-tests: YAML-based test categorization")
-        file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+        file(MAKE_DIRECTORY "${TENSILELITE_OUTER_BINARY_DIR}/staging")
 
         # Install-time CTestTestfile for TheRock: relative paths so ctest can run from installed location.
         set(TENSILELITE_TESTS_CTEST_INSTALL_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -145,7 +145,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         apply_test_category_labels(
             tensilelite-tests
             "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-            "${PROJECT_BINARY_DIR}/staging"
+            "${TENSILELITE_OUTER_BINARY_DIR}/staging"
             "${TENSILELITE_TESTS_CTEST_INSTALL_FILE}"
             INSTALL_EXECUTABLE "./tensilelite-tests"
         )
