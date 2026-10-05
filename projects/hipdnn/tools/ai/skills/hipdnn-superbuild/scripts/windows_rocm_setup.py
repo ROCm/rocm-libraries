@@ -45,7 +45,7 @@ DEFAULT_GPU_TARGET = "gfx1151"
 # Pinned wheel version for S3 staging installs (--sha). Mirrors
 # wheel_build_setup.ps1; update both if the staging version string changes.
 WHEEL_VERSION = "7.12.0.dev0"
-NIGHTLY_INDEX_URL = "https://rocm.nightlies.amd.com/whl-multi-arch/"
+NIGHTLY_INDEX_URL = "https://nightly.repo.amd.com/rocm/whl-next/"
 S3_STAGING_BASE = "https://therock-dev-python.s3.amazonaws.com/v2-staging"
 
 # GPU targets with published wheels. Matches wheel_build_setup.ps1.

@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,13 +24,12 @@
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -54,6 +52,10 @@ namespace
 constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
 constexpr const char* CONV_ENGINE_NAME = "hipkernel:ConvFwd";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
+
+/// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so one
+/// epsilon is the whole budget.
+constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
 constexpr int64_t EXPECTED_WORKSPACE_BYTES = 1024;
@@ -105,8 +107,7 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
 
 /// N=1, C=2, H=4, W=4, K=3, R=3, S=3, unit stride/dilation, no padding, cross-correlation,
 /// NCHW/KCRS. y's dims/strides are left unset -- infer_properties_node() derives NKPQ
-/// from x, w and the attributes -- and keeps uid 3 to match executeAndVerify()'s
-/// hardcoded output uid.
+/// from x, w and the attributes. uids are assigned in input order, so y takes 3.
 std::shared_ptr<Graph> buildConvFwdGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -184,65 +185,6 @@ size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& rec
     }));
 }
 
-/// Captures plugin logs for one test and restores every piece of process-global state it
-/// touched. Both the global log level and the user callback registration outlive the
-/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
-/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
-/// not enough, because an early ASSERT return skips it.
-class ScopedPluginLogCapture
-{
-public:
-    explicit ScopedPluginLogCapture(void* userHandle)
-        : _userHandle(userHandle)
-    {
-        const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
-        EXPECT_EQ(levelRead.code, ErrorCode::OK) << levelRead.err_msg;
-
-        const auto registered = setCallback(HIPDNN_SEV_INFO);
-        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
-        _registered = registered.code == ErrorCode::OK;
-
-        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
-        EXPECT_EQ(levelSet.code, ErrorCode::OK) << levelSet.err_msg;
-    }
-
-    ~ScopedPluginLogCapture()
-    {
-        if(_registered)
-        {
-            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
-        }
-        static_cast<void>(hipdnn_frontend::setGlobalLogLevel(_previousLevel));
-    }
-
-    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture(ScopedPluginLogCapture&&) = delete;
-    ScopedPluginLogCapture& operator=(ScopedPluginLogCapture&&) = delete;
-
-    hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder() const
-    {
-        return _recorder;
-    }
-
-private:
-    hipdnn_frontend::Error setCallback(hipdnnSeverity_t minLevel) const
-    {
-        return hipdnn_frontend::setUserLogCallback(
-            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-            minLevel,
-            hipdnn_frontend::LogCallbackMode::SYNC,
-            _userHandle);
-    }
-
-    // Declared before the recorder so the recorder's own saved-level restore runs first.
-    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
-    void* _userHandle;
-    bool _registered = false;
-    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-};
-
 } // namespace
 
 class IntegrationGpuKernelIngestor
@@ -250,6 +192,46 @@ class IntegrationGpuKernelIngestor
                                                                                       ExecuteCase>
 {
 protected:
+    /// A cache root private to ONE test case, not merely to this binary.
+    ///
+    /// main() already scopes HIPDNN_CACHE_DIR away from the developer's ~/.cache/hipdnn,
+    /// which stops one RUN inheriting another's shards. It does not stop one CASE
+    /// inheriting another's: every case in this process shares that single root.
+    /// ExecutesCorrectlyWithBenchmarkingEnabled records a measured ranking for a
+    /// single-node FLOAT add, and ReportsAKnobWhoseValuesComeFromTheCatalog and
+    /// ReportsTheMaximumWorkspaceAcrossSurvivingKernels then read it back: a benchmarked
+    /// record replaces the heuristic order, so the knob default and the plan's workspace
+    /// both follow the measured winner instead of the catalog's own ranking.
+    ///
+    /// That made those two cases fail under --gtest_shuffle, and -- because the shard
+    /// outlives the process -- in default order too, on any machine where an earlier run
+    /// left one behind. It is also nondeterministic rather than merely order-dependent:
+    /// the two surviving FLOAT candidates differ by a few nanoseconds, so which one the
+    /// sweep records is a coin flip.
+    ///
+    /// Scope::TEST rather than the default: a deferring instance nested inside main()'s
+    /// would see HIPDNN_CACHE_DIR already set and quietly own nothing, isolating exactly
+    /// nothing. Destroyed with the fixture, so the redirect is undone and the scratch
+    /// tree removed on the failing path as well as the passing one.
+    hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
+        "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
+
+    /// Offsets the seed by UID so the binary operands differ: `a + b` and `a + a` agree
+    /// elementwise when both operands carry the same data, and this engine's catalog is
+    /// entirely elementwise binary ops.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
+        }
+    }
+
     static int64_t engineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
@@ -309,59 +291,6 @@ protected:
 
         result = graph.build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    }
-
-    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on GPU, verifies
-    /// against CpuReferenceGraphExecutor, and reseeds inputs (`seed`) so repeated calls
-    /// never compare stale buffers. `reductionLength` widens the tolerance for kernels
-    /// that accumulate -- GPU/CPU summation order differs, so more terms need more slack
-    /// than pointwise's bit-exact default at length 1.
-    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed, int reductionLength = 1)
-    {
-        GraphTensorBundle gpuBundle;
-        GraphTensorBundle cpuBundle;
-        graph.visit([&](const INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-            }
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
-                {
-                    gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                    cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                }
-            }
-        });
-        for(auto& [uid, tensor] : gpuBundle.tensors)
-        {
-            // Per-uid offset so operands are never byte-identical, or allClose() would
-            // pass on a+a as readily as a+b.
-            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
-            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-        }
-
-        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
-        auto result = graph.execute(_handle, deviceVariantPack, workspace);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-        auto [serializedGraph, serErr] = graph.to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
-
-        auto& gpuOut = gpuBundle.getTensor(3);
-        auto& cpuOut = cpuBundle.getTensor(3);
-        gpuOut.markDeviceModified();
-        // Scaled by reduction length: a K-term float sum has ~K*epsilon relative error,
-        // so an 18-term conv needs more slack than pointwise's 1-term bit-exactness.
-        const auto tolerance
-            = static_cast<float>(reductionLength) * std::numeric_limits<float>::epsilon();
-        EXPECT_TRUE(CpuFpReferenceValidation<float>(tolerance, tolerance).allClose(cpuOut, gpuOut));
     }
 };
 
@@ -481,14 +410,12 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
     auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph);
-
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
 
     for(int iteration = 0; iteration < testCase.iterations; ++iteration)
     {
-        executeAndVerify(*graph, workspace.get(), static_cast<unsigned int>(iteration));
+        verifyBuiltGraph(context, static_cast<unsigned int>(iteration));
     }
 }
 
@@ -515,13 +442,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
     buildAndCompileWithKnobs(*graph, engineId(), knobSettings);
 
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    // buildPlan() took the benchmarking branch rather than the single-plan one, and it
-    // had more than one candidate to choose between: a one-candidate sweep would prove
-    // nothing about selection.
+    // The benchmarking branch ran with more than one candidate.
     EXPECT_TRUE(recorder.hasLogContaining("will benchmark"))
         << "buildPlan() did not take the benchmarking branch. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
@@ -529,10 +450,11 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
         << "expected more than one candidate to benchmark. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    // The first execute() samples every candidate; the second reuses the cached winner.
-    // Both must produce the correct result, and executeAndVerify() re-randomizes and
-    // re-checks each time.
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    // The first execute() samples every candidate, the second reuses the cached winner;
+    // verifyBuiltGraph() re-randomizes and re-checks each time.
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
         << "the sampling sweep did not resolve a winner. Captured logs:\n"
@@ -543,7 +465,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
         << "expected exactly one selection sweep. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    executeAndVerify(*graph, workspace.get(), /*seed=*/1);
+    verifyBuiltGraph(context, /*seed=*/1);
 
     // The winner is resolved once for the plan's life: a second execute() must reuse it
     // rather than re-sample.
@@ -559,17 +481,15 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
 {
     auto graphA = buildPointwiseAddGraph();
     buildAndCompile(*graphA);
-    int64_t workspaceSizeA = 0;
-    ASSERT_EQ(graphA->get_workspace_size(workspaceSizeA).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspaceA(static_cast<size_t>(workspaceSizeA));
-    executeAndVerify(*graphA, workspaceA.get(), 0);
+    GraphVerificationContext contextA(*graphA);
+    registerValidatorsForOutputs(contextA, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(contextA, 0);
 
     auto graphB = buildPointwiseAddGraph();
     buildAndCompile(*graphB);
-    int64_t workspaceSizeB = 0;
-    ASSERT_EQ(graphB->get_workspace_size(workspaceSizeB).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspaceB(static_cast<size_t>(workspaceSizeB));
-    executeAndVerify(*graphB, workspaceB.get(), 1);
+    GraphVerificationContext contextB(*graphB);
+    registerValidatorsForOutputs(contextB, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(contextB, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -611,11 +531,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
     auto graph = buildPointwiseSubGraph();
     buildAndCompile(*graph, engineId());
 
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    executeAndVerify(*graph, workspace.get(), 0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, 0);
 }
 
 // Numeric, not just routing: a+b and a*b are both plausible for the same operands, so
@@ -624,22 +542,20 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
 {
     auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
-    int64_t addWorkspaceSize = 0;
-    ASSERT_EQ(addGraph->get_workspace_size(addWorkspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace addWorkspace(static_cast<size_t>(addWorkspaceSize));
-    executeAndVerify(*addGraph, addWorkspace.get(), 0);
+    GraphVerificationContext addContext(*addGraph);
+    registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(addContext, 0);
 
     // Same engine id: the pack is chosen by the operation matcher, not by the caller.
     auto mulGraph = buildPointwiseMulGraph();
     buildAndCompile(*mulGraph, engineId());
-    int64_t mulWorkspaceSize = 0;
-    ASSERT_EQ(mulGraph->get_workspace_size(mulWorkspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace mulWorkspace(static_cast<size_t>(mulWorkspaceSize));
-    executeAndVerify(*mulGraph, mulWorkspace.get(), 1);
+    GraphVerificationContext mulContext(*mulGraph);
+    registerValidatorsForOutputs(mulContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(mulContext, 1);
 
     // The engine's catalog is keyed per graph, so the add graph still answers after a
-    // second pack of the same engine has run and cached its own.
-    executeAndVerify(*addGraph, addWorkspace.get(), 2);
+    // second pack of the same engine cached its own.
+    verifyBuiltGraph(addContext, 2);
 }
 
 // Catalogs are cached under (graph, device) keys in the engine's state manager; running
@@ -649,20 +565,17 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
 {
     auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
-    int64_t addWorkspaceSize = 0;
-    ASSERT_EQ(addGraph->get_workspace_size(addWorkspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace addWorkspace(static_cast<size_t>(addWorkspaceSize));
-    executeAndVerify(*addGraph, addWorkspace.get(), 0);
+    GraphVerificationContext addContext(*addGraph);
+    registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(addContext, 0);
 
     auto subGraph = buildPointwiseSubGraph();
     buildAndCompile(*subGraph, engineId());
-    int64_t subWorkspaceSize = 0;
-    ASSERT_EQ(subGraph->get_workspace_size(subWorkspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace subWorkspace(static_cast<size_t>(subWorkspaceSize));
-    executeAndVerify(*subGraph, subWorkspace.get(), 1);
+    GraphVerificationContext subContext(*subGraph);
+    registerValidatorsForOutputs(subContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(subContext, 1);
 
-    // Confirms the add graph still answers correctly after the sub graph ran.
-    executeAndVerify(*addGraph, addWorkspace.get(), 2);
+    verifyBuiltGraph(addContext, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -676,13 +589,11 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
     auto graph = buildConvFwdGraph();
     buildAndCompile(*graph, convEngineId());
 
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    // C*R*S = 2*3*3: every output element is an 18-term sum, so it is held to an
-    // 18-term tolerance rather than the pointwise default of bit-exactness.
-    executeAndVerify(*graph, workspace.get(), 0, /*reductionLength=*/2 * 3 * 3);
+    // C*R*S = 2*3*3: every output element is an 18-term sum, and GPU and CPU accumulate
+    // in different orders, so the budget is 18 epsilons rather than the elementwise one.
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, /*epsilonMultiple=*/2 * 3 * 3);
+    verifyBuiltGraph(context, 0);
 }
 
 // The claim the graph-node-type split exists to make: the two engines don't overlap.

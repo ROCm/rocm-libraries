@@ -332,7 +332,8 @@ architectureMap = {
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201',
-  'gfx1250':'gfx1250'
+  'gfx1250':'gfx1250',
+  'gfx1250-strict':'gfx1250'
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
@@ -2115,7 +2116,7 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
 
     derivedAsmCaps["SupportedSource"] = True
 
-    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"]
+    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"] or compilerTarget("gfx1250") == "gfx1250-strict"
 
     # disable cache checking for < rocm 5.3
     if len(hipVersion) >= 2:
@@ -2220,10 +2221,26 @@ def gfxArch(name: str) -> Optional[IsaVersion]:
 
     return rv
 
+def configureCompilerTarget(architecture):
+    targets = architecture.replace("_", ";").split(";")
+    if "gfx1250-strict" in targets:
+        if any(a in targets for a in ("gfx1250", "all")):
+            raise ValueError("gfx1250-strict requires a separate generator invocation")
+        os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    else:
+        os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+
+
+def compilerTarget(name):
+    if name == "gfx1250" and os.environ.get("TENSILE_GFX1250_COMPILER_TARGET") == "gfx1250-strict":
+        return "gfx1250-strict"
+    return name
+
+
 def gfxName(arch):
     # convert last digit to hex because reasons
     name = str(arch[0]) + str(arch[1]) + ('%x' % arch[2])
-    return 'gfx' + ''.join(map(str,name))
+    return compilerTarget('gfx' + ''.join(map(str,name)))
 
 
 def detectIsaWindows(output):
@@ -2389,11 +2406,17 @@ def populateCapabilities(
 
 ################################################################################
 ################################################################################
-def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
+def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *, warnOnMissingIsa: bool = True ):
   """
   Assign Global Parameters
   Each global parameter has a default parameter, and the user
   can override them, overriding happens here
+
+  Args:
+    warnOnMissingIsa: When True, warn if no physical GPU ISA is detected. Set
+      False for library-generation builds (e.g. TensileCreateLibrary), where a
+      GPU-less host is expected and the detected ISA is only used for assembly
+      kernel benchmarking, not code generation.
   """
 
   global globalParameters
@@ -2470,7 +2493,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
 
   # read current gfx version
   returncode = detectGlobalCurrentISA()
-  if globalParameters["CurrentISA"] == (0,0,0):
+  if warnOnMissingIsa and globalParameters["CurrentISA"] == (0,0,0):
     printWarning(f"Did not detect SupportedISA: {globalParameters['SupportedISA']}; cannot benchmark assembly kernels."\
       "This warning can be safely ignored for TensileCreateLibrary builds.")
   if returncode:

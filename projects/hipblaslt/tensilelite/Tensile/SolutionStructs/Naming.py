@@ -23,8 +23,8 @@
 ################################################################################
 from functools import lru_cache
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Constants import MAX_FILENAME_LENGTH
+from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType
 
@@ -148,7 +148,16 @@ def getParameterValueAbbreviation(key, value):
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  if "CustomKernelName" in state and state["CustomKernelName"]:
+  ck = state.get("CustomKernel")
+  # CustomKernel.name on a generated kernel is the assembly identity.
+  # Solution names (ignoreInternalArgs=False) still append the runtime
+  # dispatch tokens below: WGM, WGMXCCG, SU, SUM, SUS, GSUC, GSUWGMRR.
+  # Handwritten kernels have no parameter encoding, so the stamped name
+  # is the whole name for both callers.
+  generated = isinstance(ck, dict) and bool(ck.get("generated", False))
+  if isinstance(ck, dict) and ck.get("name") and (not generated or ignoreInternalArgs):
+    return ck["name"]
+  if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
@@ -172,6 +181,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+  if state.get("TileProcessingStrategy", "None") != "StreamK":
+    requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
+  if state.get("TileProcessingStrategy", "None") == "None":
+    requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
+
 
   if ignoreInternalArgs:
     if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
@@ -209,18 +223,22 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
+  if state.get("TileProcessingStrategy") == "DataParallel":
+    components.append(f'PLAV{state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)}')
 
   # Skip SFA tag if using default wgm algo
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
-  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
-  if state.get("LDSSegmentInterleave") == 1:
-    requiredParametersTemp.add("LDSSegmentInterleave")
+  # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
+  # would rename all of them.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
 
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key not in state or key == "CustomKernel":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
@@ -246,7 +264,10 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernelName" in kernel and kernel["CustomKernelName"]:
+  ck = kernel.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    fileBase = ck["name"]
+  elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)

@@ -36,9 +36,43 @@ auto GetConvTestCases(miopenDataType_t datatype)
     auto type_w = datatype;
     auto type_y = (datatype == miopenInt8) ? miopenInt32 : datatype;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, type_x, type_w, type_y},
+        // clang-format on
+    };
+
+    // Point-output shapes (stride == filter, output spatially 1x1) take the single-GEMM path.
+    // FP32 is left out: at K=1280 its RMS error sits just under the 1.0*eps threshold that
+    // non-TF32 GPUs use, so the case is not reliable there.
+    if(datatype == miopenHalf)
+    {
+        // clang-format off
+        cases.emplace_back(TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, type_x, type_w, type_y});
+        cases.emplace_back(TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, type_x, type_w, type_y});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
+                                    {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
+                                    datatype, {{0, 0}, {14, 14}, {1, 1}}});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
+                                    {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
+                                    datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}});
+        // clang-format on
+    }
+
+    return cases;
+}
+
+// Point-output bf16, in 2D and 3D, exercising the single-GEMM path with a bf16 GEMM.
+auto GetConvTestCasesPointOutputBf16()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    constexpr auto datatype = miopenBFloat16;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype, datatype, datatype},
+        TestCase{{4, 3, 4, 4, 4}, {512, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype, datatype, datatype},
         // clang-format on
     };
 }
@@ -127,6 +161,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokePointOutput,
+                         GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16,
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesPointOutputBf16())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmFwdRestFwd_FP32,

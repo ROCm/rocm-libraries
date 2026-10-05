@@ -245,4 +245,86 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
 
+inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+                  hipdnn_test_sdk::utilities::GraphTensorBundle,
+                  std::unordered_map<int64_t, void*>>
+    buildPointwiseTernaryGraph(const std::vector<int64_t>& input0Dims,
+                               const std::vector<int64_t>& input1Dims,
+                               const std::vector<int64_t>& input2Dims,
+                               const std::vector<int64_t>& outputDims,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType input0DataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType input1DataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType input2DataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
+                               hipdnn_frontend::PointwiseMode operation,
+                               const hipdnn_data_sdk::utilities::TensorLayout& layout
+                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW,
+                               std::optional<float> reluLowerClip = std::nullopt)
+{
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("PointwiseTernaryTest");
+    graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(input0DataType))
+        .set_compute_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType))
+        .set_intermediate_data_type(
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(accumulatorDataType));
+
+    int64_t uid = 1;
+    const auto makeInput = [&](const std::string& name,
+                               const std::vector<int64_t>& dims,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        auto attributes = hipdnn_frontend::graph::makeTensorAttributes(
+            name,
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType),
+            dims,
+            hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder));
+        attributes.set_uid(uid++);
+        return std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(attributes));
+    };
+
+    auto input0TensorAttr = makeInput("Input0", input0Dims, input0DataType);
+    auto input1TensorAttr = makeInput("Input1", input1Dims, input1DataType);
+    auto input2TensorAttr = makeInput("Input2", input2Dims, input2DataType);
+
+    hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
+    pointwiseAttrs.set_name("PointwiseTernary");
+    pointwiseAttrs.set_mode(operation);
+    if(reluLowerClip.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip(reluLowerClip.value());
+    }
+    auto outputTensorAttr
+        = graph->pointwise(input0TensorAttr, input1TensorAttr, input2TensorAttr, pointwiseAttrs);
+
+    if(!outputTensorAttr->has_uid())
+    {
+        outputTensorAttr->set_uid(uid++);
+    }
+    outputTensorAttr->set_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(outputDataType));
+    outputTensorAttr->set_dim(outputDims);
+    outputTensorAttr->set_stride(
+        hipdnn_data_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_output(true);
+
+    auto validateResult = graph->validate();
+    if(validateResult.is_bad())
+    {
+        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
+    }
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    if(serErr.is_bad())
+    {
+        throw std::runtime_error("Graph serialization failed: " + serErr.get_message());
+    }
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    hipdnn_test_sdk::utilities::GraphTensorBundle tensorBundle(graphWrap.getTensorMap());
+    auto variantPack = tensorBundle.toHostVariantPack();
+
+    return std::make_tuple(graph, std::move(tensorBundle), variantPack);
+}
 }

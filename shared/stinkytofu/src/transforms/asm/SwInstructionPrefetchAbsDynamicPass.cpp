@@ -594,7 +594,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         const uint32_t hi = static_cast<uint32_t>(m_baseSgpr + 1);
         const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
         static const HwInstDesc labelMCID{
-            GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
         auto emitLabel = [&](const std::string& name) {
             StinkyInstruction* l = b.create(&labelMCID, siteAnchor);

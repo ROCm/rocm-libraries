@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -33,10 +34,15 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     constexpr int64_t K_DIM_N = 32;
     constexpr int64_t K_EXPERTS = 2;
 
+    const std::vector<int64_t> dweightDims = {K_EXPERTS, K_DIM_K, K_DIM_N};
+    // Packed column-major [K*N, 1, K] -- spelled out rather than derived, so the
+    // assertions below pin the layout the node is expected to infer for dweight.
+    const std::vector<int64_t> dweightStrides = {K_DIM_K * K_DIM_N, 1, K_DIM_K};
+
     Tensor<float> doutputTensor({K_BATCH, K_TOKENS, K_DIM_N});
     Tensor<float> tokenTensor({K_BATCH, K_TOKENS, K_DIM_K});
     Tensor<int32_t> firstTokenOffsetTensor({K_EXPERTS, 1, 1});
-    Tensor<float> dweightTensor({K_EXPERTS, K_DIM_K, K_DIM_N});
+    Tensor<float> dweightTensor(dweightDims, dweightStrides);
 
     doutputTensor.fillWithValue(1.0F);
     tokenTensor.fillWithValue(1.0F);
@@ -63,11 +69,12 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
     attributes.set_name("moe_grouped_matmul_bwd");
     auto dweight = graph->moe_grouped_matmul_bwd(doutput, token, firstTokenOffset, attributes);
     dweight->set_uid(4).set_output(true).set_name("dweight");
-    dweight->set_dim({K_EXPERTS, K_DIM_K, K_DIM_N});
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    EXPECT_EQ(dweight->get_dim(), (std::vector<int64_t>{K_EXPERTS, K_DIM_K, K_DIM_N}));
+    // dweight dims and strides were never set, so these assert on what the node inferred.
+    EXPECT_EQ(dweight->get_dim(), dweightDims);
+    EXPECT_EQ(dweight->get_stride(), dweightStrides);
 
     result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -92,6 +99,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwd, GraphDispatchesToProvider)
         {firstTokenOffset->get_uid(), firstTokenOffsetTensor.memory().deviceData()},
         {dweight->get_uid(), dweightTensor.memory().deviceData()},
     };
+    // Only the dispatch path is asserted here: no provider implements a MoE backward
+    // kernel yet, so dweightTensor holds nothing worth comparing. Numerical coverage
+    // lives with the CPU reference in hipdnn_test_sdk_tests.
     result = graph->execute(_handle, variantPack, workspace.get());
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }

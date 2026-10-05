@@ -22,11 +22,11 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 
-# Enum member order mirrors C++ CounterKind (CK_DS, CK_Buffer, CK_KM,
+# Enum member order mirrors C++ CounterKind (CK_DS, CK_Load, CK_KM,
 # CK_Tensor, CK_Async) so iteration order matches the reference dataflow.
 class CK(Enum):
     DS = "DS"
-    BUFFER = "Buffer"
+    LOAD = "Load"
     KM = "KM"
     TENSOR = "Tensor"
     ASYNC = "Async"
@@ -34,7 +34,7 @@ class CK(Enum):
 
 COUNTER_WAIT_OPS: Dict[CK, str] = {
     CK.DS: "s_wait_dscnt",
-    CK.BUFFER: "s_wait_loadcnt",
+    CK.LOAD: "s_wait_loadcnt",
     CK.KM: "s_wait_kmcnt",
     CK.TENSOR: "s_wait_tensorcnt",
     CK.ASYNC: "s_wait_asynccnt",
@@ -42,7 +42,7 @@ COUNTER_WAIT_OPS: Dict[CK, str] = {
 
 WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
     "s_wait_dscnt": (CK.DS, "dlcnt"),
-    "s_wait_loadcnt": (CK.BUFFER, "vlcnt"),
+    "s_wait_loadcnt": (CK.LOAD, "vlcnt"),
     "s_wait_kmcnt": (CK.KM, "kmcnt"),
     "s_wait_tensorcnt": (CK.TENSOR, "tlcnt"),
     "s_wait_asynccnt": (CK.ASYNC, "asynccnt"),
@@ -606,7 +606,7 @@ def _normalize_reg_class(name: str) -> str:
 
 # Counter classification mirrors WaitDataflow.cpp's defaultCounterPolicy:
 #   CK_DS     : ds_read / ds_write / ds_atomic            -> s_wait_dscnt
-#   CK_Buffer : vector buffer/global/flat load+store      -> s_wait_loadcnt
+#   CK_Load   : vector buffer/global/flat LOADS           -> s_wait_loadcnt
 #   CK_KM     : scalar SMEM loads (s_load / s_buffer_load)-> s_wait_kmcnt
 #   CK_Tensor : tensor_load_to_lds                        -> s_wait_tensorcnt
 def classify_counter(inst: Instruction) -> Optional[CK]:
@@ -615,12 +615,10 @@ def classify_counter(inst: Instruction) -> Optional[CK]:
         return CK.DS
     if _is_km_producer(op):
         return CK.KM
-    # Must precede the buffer check: global_store_async_from_lds_* shares the
-    # "global_store" prefix but lives on asynccnt, not loadcnt.
     if _is_async_producer(op):
         return CK.ASYNC
-    if _is_buffer_producer(op):
-        return CK.BUFFER
+    if _is_load_producer(op):
+        return CK.LOAD
     if op == "tensor_load_to_lds":
         return CK.TENSOR
     return None
@@ -641,15 +639,12 @@ def _is_km_producer(op: str) -> bool:
     return op.startswith("s_load") or op.startswith("s_buffer_load")
 
 
-def _is_buffer_producer(op: str) -> bool:
-    prefixes = (
-        "buffer_load",
-        "buffer_store",
-        "global_load",
-        "global_store",
-        "flat_load",
-        "flat_store",
-    )
+def _is_load_producer(op: str) -> bool:
+    # Loads only: vector STORES increment STOREcnt, a counter neither this tool
+    # nor the pass models. Counting them here would shift later loads' queue
+    # positions and overstate the required s_wait_loadcnt. Mirrors C++
+    # defaultCounterPolicy's CK_Load row.
+    prefixes = ("buffer_load", "global_load", "flat_load")
     return any(op.startswith(p) for p in prefixes)
 
 

@@ -35,6 +35,8 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
+#include "rocblas_utility.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*

@@ -220,7 +220,7 @@ class LocalRead(Component):
     """
     def _getLdsReadMemToken(self, writer, kernel, tP, ldsByteOffset=None, bothHalves=False):
         from rocisa.container import MemTokenData
-        useSplit = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+        useSplit = (kernel["TDMSplit"]
                     and ldsByteOffset is not None and not tP.get("isM", False))
         if useSplit:
             parity = writer.states.ldsReadTokenIdx
@@ -237,6 +237,9 @@ class LocalRead(Component):
             inBuf  = ldsByteOffset - tP["localReadSwapByteOffset"]
             half   = 1 if inBuf >= writer.tdmSplitLdsBoundary(kernel, tP) else 0
             tok    = writer.states.memTokenLdsSplit[parity][half]
+        elif writer.states.dcpTokenGate:
+            side = writer._dcpTokenSide(tP["tensorChar"])
+            tok = getattr(writer.states, "ldsReadTokenIdx%s" % side)
         else:
             tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok

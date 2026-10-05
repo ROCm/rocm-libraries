@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -780,6 +781,145 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
     ASSERT_EQ(definitions.size(), 1U);
     EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 64);
     EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
+}
+
+// The source-kind gate: KPACK indexes, the two kinds with no adapter are dropped, and a
+// drop costs only its own kernel.
+
+/// A hand-built pack reaches only this gate -- the loader's own is upstream of it -- so
+/// this is where a KPACK kernel built in memory proves it indexes like an embedded one.
+TEST(TestKernelIngestorStateManager, IndexesAKpackKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor kernel = makeKernel(testId(0x76), "kernel_kpack", 64, "FLOAT");
+    kernel.source = makeKpackSource();
+    pack.kernels = {kernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x76));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    const auto& source = definitions.front().source;
+    EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
+    EXPECT_EQ(source.tocKey, "test-toc-key");
+    EXPECT_EQ(source.symbol, "TestKernel");
+    EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    EXPECT_EQ(definitions.front().name, "kernel_kpack");
+}
+
+/// Admitting KPACK must not admit the two kinds nothing can dispatch. They are dropped
+/// rather than thrown on, so the evidence is their absence from the catalog plus an ERROR
+/// naming each.
+TEST(TestKernelIngestorStateManager, RejectsAnUnadaptedSourceKind)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor hsaco = makeKernel(testId(0x77), "kernel_hsaco", 64, "FLOAT");
+    hsaco.source.kind = KernelSourceKind::HSACO_FILE;
+    KernelDescriptor rocke = makeKernel(testId(0x78), "kernel_rocke", 256, "FLOAT");
+    rocke.source.kind = KernelSourceKind::ROCKE_BUILDER;
+    pack.kernels = {hsaco, rocke};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x77));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager.unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_rocke'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "declares a source kind this build has no "
+                                          "adapter for"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// Failure granularity is the kernel, not the pack: an artifact this build cannot load
+/// must not cost the siblings it ships beside.
+TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor unadapted = makeKernel(testId(0x79), "kernel_hsaco", 64, "FLOAT");
+    unadapted.source.kind = KernelSourceKind::HSACO_FILE;
+    pack.kernels = {unadapted, makeKernel(testId(0x7A), "kernel_sibling", 256, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x79));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().getIntMetadata(BLOCK_SIZE), 256);
+    EXPECT_EQ(definitions.front().name, "kernel_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// `source.library` is relative, so a definition is only usable together with the
+/// directory of the descriptor that declared it. The state manager carries the anchor
+/// through unchanged; the loader is what fills it.
+TEST(TestKernelIngestorStateManager, CarriesTheOriginDirectoryIntoTheDefinition)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+    const std::filesystem::path origin("/descriptors/gfx942");
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    KernelDescriptor kernel = makeKernel(testId(0x7B), "kernel_kpack", 64, "FLOAT");
+    kernel.source = makeKpackSource();
+    kernel.originDirectory = origin;
+    pack.kernels = {kernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x7B));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().originDirectory, origin);
 }
 
 struct StateManagerConstructionThrowCase

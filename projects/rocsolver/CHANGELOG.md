@@ -7,6 +7,33 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+
+* Support added for the gfx1250-strict architecture.
+
+### Changed
+### Removed
+### Optimized
+
+* Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
+
+### Resolved issues
+
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
+  matrix is scaled by a small number.
+
+### Known issues
+### Upcoming changes
+
+
+
+## rocSOLVER 3.37.0 for ROCm 10.1.0
+
+### Added
+
+* 2-stage reduction to tridiagonal in the Hermitian eigensolver (SYEVD/HEEVD) and generalized Hermitian eigensolver (SYGVD/HEGVD).
 * Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
     - CHOLQR (with batched and strided\_batched versions)
     - CHOLQR_64 (with batched and strided\_batched versions)
@@ -15,12 +42,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * 64-bit APIs for existing functions:
     - LARFT_64
 
-### Changed
-### Removed
 ### Optimized
-### Resolved issues
-### Known issues
-### Upcoming changes
+
+* Improved the performance of sygst/hegst.
 
 
 

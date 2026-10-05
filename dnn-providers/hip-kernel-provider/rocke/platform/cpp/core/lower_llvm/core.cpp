@@ -20,6 +20,7 @@
  * stub bodies remain in this file.
  */
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -402,7 +403,7 @@ static int ll_list_opt_rocm_roots(char out[][256], int max_roots)
         return 0;
     while((ent = readdir(dir)) != NULL && n < max_roots)
     {
-        int i, j;
+        int i;
         if(strncmp(ent->d_name, "rocm", 4) != 0)
             continue;
         /* Insertion sort, newest first. */
@@ -411,8 +412,11 @@ static int ll_list_opt_rocm_roots(char out[][256], int max_roots)
             if(ll_rocm_name_newer(ent->d_name, out[i]) > 0)
                 break;
         }
-        for(j = n; j > i; --j)
-            snprintf(out[j], 256, "%s", out[j - 1]);
+        /* Shift the tail up one slot. memmove rather than a per-row snprintf:
+         * the rows are distinct, but copying between two elements of the same
+         * array trips -Wrestrict, and a single move is what this means anyway. */
+        if(n > i)
+            memmove(out[i + 1], out[i], (size_t)(n - i) * 256);
         snprintf(out[i], 256, "%s", ent->d_name);
         ++n;
     }
@@ -932,7 +936,7 @@ void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
 }
 
 /* ====================================================================== */
-/* Type rendering (Python _llvm_type / _llvm_type_from_name)              */
+/* Type rendering (Python _llvm_type)                                     */
 /* ====================================================================== */
 
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
@@ -975,7 +979,7 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
-        if(strcmp(n, "i32") == 0)
+        if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0)
             return "i32";
         if(strcmp(n, "i64") == 0)
             return "i64";
@@ -1065,62 +1069,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                   op,
                   ty,
                   list);
-}
-
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
-{
-    if(!name)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for (null)");
-    }
-    if(strcmp(name, "i32") == 0)
-        return "i32";
-    if(strcmp(name, "i64") == 0)
-        return "i64";
-    if(strcmp(name, "i8") == 0)
-        return "i8";
-    if(strcmp(name, "f16") == 0)
-        return "half";
-    if(strcmp(name, "bf16") == 0)
-        return "bfloat";
-    if(strcmp(name, "f32") == 0)
-        return "float";
-    if(strcmp(name, "fp8e4m3") == 0)
-        return "i8";
-    if(strncmp(name, "vec<", 4) == 0)
-    {
-        /* vec<elemxN> -> "<N x llvm_elem>" */
-        const char* inner = name + 4;
-        const char* xpos = strchr(inner, 'x');
-        const char* end = strrchr(name, '>');
-        if(xpos && end && end > xpos)
-        {
-            char elem[32];
-            size_t elen = (size_t)(xpos - inner);
-            if(elen >= sizeof elem)
-            {
-                elen = sizeof elem - 1;
-            }
-            memcpy(elem, inner, elen);
-            elem[elen] = '\0';
-            int count = atoi(xpos + 1);
-            const char* lelem = "i32";
-            if(strcmp(elem, "f32") == 0)
-                lelem = "float";
-            else if(strcmp(elem, "f16") == 0)
-                lelem = "half";
-            else if(strcmp(elem, "bf16") == 0)
-                lelem = "bfloat";
-            else if(strcmp(elem, "i32") == 0)
-                lelem = "i32";
-            else
-            {
-                rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for vec elem %s", elem);
-            }
-            return rocke_arena_printf(&L->arena, "<%d x %s>", count, lelem);
-        }
-    }
-    rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for %s", name);
 }
 
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)
@@ -1626,7 +1574,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
-    else if(strcmp(n, "i32") == 0 || strcmp(n, "f32") == 0)
+    else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
     else if(strcmp(n, "i64") == 0)
         eb = 8;
@@ -1929,6 +1877,9 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
     rocke_opcode_t oc = op->opcode;
     rocke_ll_op_fn fn = NULL;
     if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)
@@ -2135,6 +2086,27 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
     return rocke_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
 
+static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_attr_value_t* v)
+{
+    if(!v || v->kind != ROCKE_ATTR_STR || !v->u.s)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
+    }
+    const char* strategy = v->u.s;
+    if(strcmp(strategy, "max-ilp") != 0 && strcmp(strategy, "max-memory-clause") != 0
+       && strcmp(strategy, "iterative-ilp") != 0 && strcmp(strategy, "iterative-minreg") != 0
+       && strcmp(strategy, "iterative-maxocc") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "unsupported scheduler_strategy '%s'; expected one of: "
+                      "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
+                      "max-memory-clause, or None",
+                      strategy);
+    }
+    return strategy;
+}
+
 /* ====================================================================== */
 /* finalize (Python finalize)                                             */
 /* ====================================================================== */
@@ -2276,6 +2248,14 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 
     if(L->kernel)
     {
+        const rocke_attr_value_t* scheduler
+            = rocke_attr_get(&L->kernel->attrs, "scheduler_strategy");
+        if(scheduler)
+        {
+            rocke_strbuf_appendf(out,
+                                 " \"amdgpu-sched-strategy\"=\"%s\"",
+                                 rocke_ll_scheduler_strategy(L, scheduler));
+        }
         /* waves_per_eu mirrors the Python lowerer: a bare int N emits "N,N",
          * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
          * -- emits "lo,hi". */

@@ -34,6 +34,7 @@ import pytest
 
 from Tensile.CustomYamlLoader import (
     DEFAULT_YAML_LOADER,
+    archMatch,
     parse_scalar,
     load_yaml_stream,
     load_yaml_sequence_item,
@@ -42,6 +43,35 @@ from Tensile.CustomYamlLoader import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    "spec",
+    ["gfx950", "gfx950:xnack-", "gfx950:sramecc+:xnack-", "gfx950[cu=64]", "gfx950[id=74a0]"],
+)
+def test_a_logic_file_matches_every_spelling_of_its_architecture(spec):
+    """TensileLogic filters with the spec exactly as CMake passed it.
+
+    Unlike TensileCreateLibrary it never runs splitArchsFromPredicates first, so
+    a bracketed predicate reaches archMatch intact and a build configured with
+    -DGPU_TARGETS=gfx950[cu=64] fails outright if it is not stripped here.
+    """
+    assert archMatch("gfx950", [spec])
+
+
+@pytest.mark.parametrize(
+    "arch,spec",
+    [
+        ("gfx1250", "gfx1250-strict"),
+        ("gfx1250-strict", "gfx1250"),
+        ("gfx1250", "gfx1250-strict[cu=64]"),
+    ],
+)
+def test_a_stepping_and_its_base_architecture_do_not_match(arch, spec):
+    """The suffix is part of the name, not a qualifier to be stripped: the two
+    share an ISA but not machine code, so claiming each other's logic would ship
+    solutions the silicon cannot run."""
+    assert not archMatch(arch, [spec])
 
 
 def _parse_scalar(text):

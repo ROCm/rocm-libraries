@@ -1,0 +1,39 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: physical registers become SSA values on the IR.
+#
+# Each reaching definition of a physical register gets its own value, so the two
+# definitions of v2 below are distinct values and the second read of v2 sees the
+# second definition. Registers read without a definition become function
+# live-ins, which are block arguments of the entry. Every value keeps the
+# physical register it came from as its PhysicalBinding, which is what legacy
+# replay and diagnostics rely on.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa
+#
+# v0 and v1 are read before they are written, so they are entry live-ins. They
+# are created in register order, independent of the order they are read.
+# CHECK-NEXT: ^entry(%1:v, %2:v):
+#
+# v2 = v0 + v1
+# CHECK-NEXT: %3:v = "st.v_add_f32"(%1:v, %2:v)
+#
+# v3 = v2 + v0 reads the value just defined, not the physical name.
+# CHECK-NEXT: %4:v = "st.v_add_f32"(%3:v, %1:v)
+#
+# v2 is redefined: a second, distinct value over the same physical register.
+# CHECK-NEXT: %5:v = "st.v_add_f32"(%4:v, %2:v)
+#
+# The last read of v2 resolves to the second definition, not the first.
+# CHECK-NEXT: %6:v = "st.v_add_f32"(%5:v, %5:v)
+#
+# ssaForm is a dump: nothing physical is left in the SSA operand positions.
+# CHECK-NOT: "st.v_add_f32"(v
+
+st.func @lift_asm_registers_to_ssa() {
+^entry:
+  v2 = "st.v_add_f32"(v0, v1)
+  v3 = "st.v_add_f32"(v2, v0)
+  v2 = "st.v_add_f32"(v3, v1)
+  v4 = "st.v_add_f32"(v2, v2)
+}

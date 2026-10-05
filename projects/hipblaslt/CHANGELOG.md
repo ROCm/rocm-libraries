@@ -2,6 +2,82 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.5.0 for ROCm 10.1.0
+
+### Added
+
+* `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
+* Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
+* Batch-offset support for General Batched GEMM on gfx1250.
+* gfx1250 v0 ASIC revision support, modeled as a separate `gfx1250v0` architecture identity (selectable via `--architecture=gfx1250v0`, `--gpu-targets gfx1250v0`, or `GlobalParameters.Architecture: gfx1250v0`) that shares ISA `{12,5,0}` and compiler target `gfx1250` but disables TDM multicast and the FP4 32x16 WMMA path, with a dedicated tuned GEMM library subtree selected at runtime by device `asicRevision`; use `install.sh --asic-revision <v0|v1>` or the `HIPBLASLT_ASIC_REVISION` CMake cache variable to build a specific revision, or leave it unset to build both.
+* `gbps-bandwidth` (`GbpsBW`) result key in `tensilelite-client` for logging approximate R/W bandwidth in GB/s during performance reporting.
+* Complex CGEMM/ZGEMM support for gfx1250.
+* `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
+* `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
+
+### Changed
+
+* Persistent launch controls now use `TENSILE_PERSISTENT_*` environment names, and Hybrid assignment uses `--hybrid_assignment_policy` in `hipblaslt-bench` and `HybridAssignmentPolicy` in TensileLite YAML. Legacy environment, CLI, and YAML aliases remain supported. Preferred environment names take precedence; conflicting old and new CLI or YAML values are rejected.
+* `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
+* `HIPBLASLT_TENSILE_LIBPATH` and `HIPBLASLT_EXT_OP_LIBRARY_PATH` are now ignored when the process runs in a secure execution context (set-uid/set-gid or other credential-changing exec), falling back to the default library location with a diagnostic; behavior is unchanged for non-privileged processes.
+* Enabled gfx1250 cluster-launch kernels for GEMM sizes whose work-group count is not a multiple of `ClusterDim` by padding the launch grid up to a `ClusterDim` multiple and early-exiting the padded work-groups, removing the `ClusterDimCheck` predicate that previously rejected these sizes.
+* Stream-K flags are now per-stream: a handle reserves an extra fixed 8 MiB at creation and serves at most 64 distinct streams for Stream-K matmuls (claimed on a stream's first use, held until the handle is destroyed); beyond that the matmul returns `HIPBLAS_STATUS_INTERNAL_ERROR`.
+* Stream-K workspace size reported by the heuristic APIs is now smaller, and the SK grid is bounded, so `TENSILE_STREAMK_GRID_MULTIPLIER` values past that bound no longer take effect.
+* Solution cache key now includes `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` and the StreamK tile scheduling mode, so the same problem can select a different kernel than before.
+* A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
+
+### Removed
+
+* Removed the OpenCL runtime backend from TensileLite: `RuntimeLanguage: OCL` (`--runtime-language OCL`), the `-p`/`--platform` option and `Platform` global parameter, and the `platform-idx` client option are no longer accepted, leaving only `HIP` and `HSA`.
+
+### Optimized
+
+* Improved gfx950 GEMM performance by updating Origami solution libraries with work-stealing support and additional tuned TF32 and MX kernels.
+* Improved split-K GEMM performance with a K-first work-group reordering (K-Coherent) approach that increases L2 cache reuse across K-slices.
+
+### Resolved issues
+
+* Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
+* Fixed output-amax accumulation omitting packed-store values and returning zero when C/D scaling is disabled. Invalid Stream-K or split-reduction combinations with output-amax are rejected during solution validation.
+* Fixed GEMM output scaling reading C/D scale values before their scalar memory loads completed.
+* Fixed C++ algorithm support checks rejecting integer and complex scalar types, and preserved complex conjugation when constructing or updating GEMM descriptors.
+* Fixed gfx1250 output-amax generation to use Wave32 masks, supported atomics, cross-workgroup memory ordering, and target-specific buffer descriptors.
+* Fixed incorrect results (`beta` applied twice) for `AdaptiveGemmGSUA` GEMMs that resolve to MultipleBuffer accumulation with a non-zero `beta`.
+* Fixed out-of-bounds tensor loads in the single-wave TDM kernel for edge (non-tile-aligned) `M`/`N` sizes on gfx1250, which could produce incorrect results.
+* Fixed a Stream-K flag-region overrun on dynamic-queue paths (`StreamK=4` and the SK4 sub-path of `StreamK=5`) where a grid scaled via `TENSILE_STREAMK_GRID_MULTIPLIER` could write past its own region.
+* Fixed a deadlock in the Stream-K remainder path when concurrent GEMMs ran on multiple streams sharing one handle, where the process hung with the GPU at 100% and no HIP error reported.
+* Fixed a race condition in StreamK (SK4/SK5) kernels where untokened mailbox `ds_store`/`ds_load` operations could overlap with LDS0 traffic, and incorrect results in SK5 hybrid StreamK caused by AND-masking the live `MagicShiftItersPerTile` register that corrupted the aliased `SKTiles` overlay.
+* Fixed intermittent nonfinite (`NaN`/`Inf`) values in `hipblasLtMatmul` output on gfx950 caused by the first MFMA instruction executing before pre-loop local-data-share reads completed, affecting kernels using custom main-loop scheduling with forced unroll subiterations.
+* Fixed a missing wait for VALU-to-global-atomic/store read-after-write dependencies under expert scheduling mode 2 on gfx1250, which could leave the StreamK dynamic work-queue counter dirty and produce nondeterministic incorrect results.
+* Restored the StinkyTofu ESM2 scheduling path for sparse SpMM problem types on gfx1250 after resolving the intermittent correctness failures that previously required disabling it.
+* Fixed a cross-wave read-after-write race in triple LDS buffering (`TDMPlusLdsBuf`) that could produce incorrect results; triple buffering now falls back to double buffering.
+* Fixed incorrect results for general-batched (pointer-array) GEMM on gfx1250 in the TDM path, where A/B batch pointers were not dereferenced before tile-offset arithmetic.
+* Fixed out-of-bounds GSU synchronizer pointer arithmetic for grouped GEMMs with more than 16 problems, which handed later problems a pointer past the end of the synchronizer allocation on gfx942 and gfx90a.
+* Fixed nondeterministic wrong results on gfx1250 caused by read-token races in the `TDMSplit` load path, which is now disabled (rejected during solution selection) until a complete fix lands.
+* Fixed out-of-bounds global memory reads in TDM iterate mode (`iterate_enable`) when a workgroup processed a partial tile.
+* Fixed incorrect kernel selection for very large `K` problems where Dot2 kernels were mistakenly parameterized as Stream-K kernels.
+* Fixed a `branch size exceeds simm16` build failure caused by replay hazard protection enlarging the loop body, by emitting a 32-bit branch sequence for the backward branch.
+* Fixed an SGPR budget overflow in gfx1250 StreamK GEMM kernels using wave-separated TDM stagger (for example `PrefetchGL2=1` with `StreamKForceDPOnly=0`) that caused affected kernels to write nothing and produce incorrect results for MX-FP8 and MX-FP4 problems.
+* Fixed an `hipErrorIllegalAddress` crash on gfx1201 (RDNA4) for GEMMs using DirectToVgpr transpose loads (`global_load_tr`) when the free dimension is not a multiple of the macro-tile, caused by an out-of-bounds read past the operand.
+* Fixed an intermittent `SIGBUS` crash in the `tensilelite-client` hardware-monitoring thread on gfx1151 caused by out-of-bounds indexing of `amdsmi_frequencies_t::frequency[]` when a clock domain is power-gated.
+* Fixed silent build failures when the assembler binary is missing or not executable; `rocisa` now raises a `RuntimeError` naming the assembler path instead of returning an empty capability map.
+* Fixed incorrect results for XFP32 (`F32XdlMathOp: X`) GEMM on gfx1250 where the transpose could overwrite local-read data before it landed, along with an SGPR double-checkout error affecting XFP32 emulation kernels.
+* Fixed a possible page fault or silent data corruption on gfx1250 caused by an xnack replay hazard in multi-dword SMEM loads (`SLoadB64`) where the destination and base address registers overlapped.
+* Fixed a hang and stale partial reads on gfx1250 in the StreamK dynamic and hybrid fixup paths caused by a missing acquire fence on the partial-tile flag read.
+* Corrected `PhysicalMaxVgprCU` for gfx1102 and gfx1103, where gfx1103 was reported with a 1536-VGPR per-SIMD file instead of 1024 and gfx1102 omitted the two-SIMDs-per-CU factor, both affecting occupancy and kernel selection.
+* Fixed a StreamK per-XCD work-queue counter that failed to reset between launches when the StreamK grid size was not a multiple of the XCD count, causing progressively slower execution on repeated GEMM launches (`WorkGroupMappingXCC == -1` and `StreamKXCCMapping` chiplet-remap paths).
+* Fixed out-of-bounds stores in subtile GEMM kernels on gfx950 and gfx1250 when the `M` dimension does not evenly fill the macro tile (for example `M=8` with a 32-row tile).
+* When a tuning file held several entries for one problem and the first could not be used, the later entries were never used either. The replay loop reused a single vector across entries and always read element `[0]`, so each later entry was checked against the first entry's solution instead of its own.
+* Solution index `0` in a tuning file was rejected outright, despite being a valid index that is present in the shipped logic.
+* A grouped GEMM heuristic query crashed when `HIPBLASLT_TUNING_OVERRIDE_FILE` held any entry, because the override lookup read the grouped problem as a single GEMM. Grouped GEMMs now use default selection.
+* `hipblaslt-bench` recorded grouped GEMM winners in `HIPBLASLT_TUNING_FILE`, where a single-group winner read back as a single GEMM of the same shape. Grouped runs no longer write to the file.
+* An XF32 problem on the C++ extension API could fall back to FP32 kernels. When a tuning file entry failed both the XF32 check and its FP32 fallback check, the problem was left in FP32 mode for the remaining entries and for default kernel selection.
+* `*returnAlgoCount` was read uninitialised when an override satisfied a single-algo request, and then used to scan one element past the end of the caller's array.
+* A tuning file that yielded no usable rows was re-read and re-parsed on every heuristic query instead of once.
+* A tuning file row cut short, for example when the disk fills while `hipblaslt-bench` appends it, could be replayed with a truncated `solution_index`. A row whose cells do not line up with its header is now ignored.
+* `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
+* The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
+
 ## hipBLASLt 1.4.1 for ROCm 7.14
 
 ### Added

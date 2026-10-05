@@ -22,18 +22,20 @@
 #
 ################################################################################
 
+from .ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, normalize_execution_policy
+
 from typing import Dict
 
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import internalParameters
-from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
-from Tensile.Toolchain.Component import Assembler
+from .Common import state, state_key_ordering, IsaInfo
+from .Common.Architectures import gfxToIsa
+from .Common.DataType import DataType
+from .Common.GlobalParameters import internalParameters
+from .SolutionStructs import Solution as OriginalSolution
+from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
@@ -72,7 +74,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -293,6 +295,8 @@ class ProblemType:
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
+        rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
@@ -425,6 +429,9 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
+            if self.fusedGemmA2A and self.batched:
+                predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
@@ -432,20 +439,6 @@ class ProblemType:
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
-
-def extractDimPredicate(cls, key, value, predicateName):
-    """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
-    """
-    predicates = []
-    for pos,val in value.items():
-        if val != -1:
-            predicates.append(cls(predicateName, index=pos, value=val))
-    if len(predicates) == 1:
-        return predicates[0]
-    elif len(predicates) > 1:
-        return cls.And(predicates)
 
 class TaskPredicate(Properties.Predicate):
     @classmethod
@@ -462,7 +455,7 @@ class TaskPredicate(Properties.Predicate):
         # LaunchLimits predicate checks that launch grid will not overflow hip API limits
         # TODO This predicate could also verify limits on some kernel arguments
         # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
-        if ('StreamK' not in state) or (state['StreamK'] == 0):
+        if not isPersistent(state):
             rv += [cls('LaunchLimits')]
 
         return rv
@@ -530,7 +523,7 @@ class ProblemPredicate(Properties.Predicate):
                 rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
 
         if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
-                 not (('StreamK' in state) and (state['StreamK'] > 0)):
+                 not isPersistent(state):
             valuepredicates = []
             valuepredicates.append(state["MacroTile0"])
             valuepredicates.append(state["MacroTile1"])
@@ -556,7 +549,7 @@ class ProblemPredicate(Properties.Predicate):
             if ('_GlobalAccumulation' not in state) or (state['_GlobalAccumulation'] != 'MultipleBuffer'):
                 rv += [cls("DeterministicMode", value = False)]
 
-        if ('StreamK' in state) and (state['StreamK'] > 0) and ('StreamKAtomic' in state) and (state['StreamKAtomic'] == 1):
+        if isStreamK(state) and ('StreamKAtomic' in state) and (state['StreamKAtomic'] == 1):
             # StreamKAtomic = 1 uses atomic for partial tiles
             rv += [cls("DeterministicMode", value = False)]
 
@@ -588,7 +581,7 @@ class ProblemPredicate(Properties.Predicate):
         if 'BufferStore' in state and state['BufferStore'] == True:
             rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
 
-        if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not state["StreamK"]:
+        if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
             value = MIN_K_FOR_GSU
             rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
 
@@ -601,6 +594,47 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        if state['ProblemType']['FusedGemmA2A']:
+            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+
+        if state.get('ReuseAcrossPersistent', 0):
+            # A lives in VGPRs for the whole persistent loop, so the kernel is only
+            # correct for problems where every tile a workgroup visits reads the
+            # same A, and where K is a whole number of resident k-tiles.
+            #   M == MacroTile0     - one M-tile only, and no masked store in M. A
+            #                         half-filled tile would take the edge path,
+            #                         which v0 does not budget registers for.
+            #   N % MacroTile1 == 0 - no edge tile in N either.
+            #
+            # K is a range, not a point. The loop shell owns every resident k-tile
+            # and leaves as soon as the counter runs out, so any K from the floor up
+            # to the count the kernel holds works and the k-tiles above it simply go
+            # unused. K must still land on a k-tile boundary, because a section's
+            # registers are picked by a codegen-time k-tile number.
+            #
+            # The floor is one k-tile, and the reason is the loop-entry guard: it
+            # skips the loop when the counter reaches zero, and the InitCIterWmma
+            # clone that zeroes C lives inside the loop, so at zero k-tiles C would
+            # never be initialised. One is enough even at PrefetchGlobalRead 2 --
+            # the pre-loop prefetch skips its second stage when the counter is 1
+            # (label_skipPGR2_1), so nothing is fetched past this K, and the single
+            # section computes and then leaves through its own early exit. The
+            # toPGR1 escape that carries this case in a non-RAP kernel is not needed
+            # here: it exists to hand the work to the NGLL drain, which RAP does not
+            # emit because its sections do the work themselves.
+            #
+            # SizeGreaterThan and SizeLessThan are strict, hence the -1 and +1.
+            kIdx = state['ProblemType']['NumIndicesC']
+            kTiles = state['_RAPNumResidentKTiles']
+            floorTiles = 1
+            rv += [cls('SizeEqual', index=0, value=state['MacroTile0'])]
+            rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
+            rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
+            rv += [cls('SizeGreaterThan', index=kIdx,
+                       value=floorTiles * state['DepthU'] - 1)]
+            rv += [cls('SizeLessThan', index=kIdx,
+                       value=kTiles * state['DepthU'] + 1)]
+
         return rv
 
     @classmethod
@@ -611,6 +645,33 @@ class ProblemPredicate(Properties.Predicate):
 
         predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
         return cls.And(predicates)
+
+class CustomKernel:
+    StateKeys = ['name',
+                 'args',
+                 'macrotile',
+                 'threads',
+                 'grid',
+                 'workspaceType',
+                 'workspaceSizePerElemC',
+                 'workspaceSizePerElemBias',
+                 'generated']
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        return cls(name=d['name'],
+                   args=d['args'],
+                   macrotile=d['macrotile'],
+                   threads=d['threads'],
+                   grid=d['grid'],
+                   workspaceType=d.get('workspaceType', 'None'),
+                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   generated=d.get('generated', False))
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
 
 class SizeMapping:
     StateKeys = ['waveNum',
@@ -631,8 +692,8 @@ class SizeMapping:
                  'workGroupMapping',
                  'packBatchDims',
                  'magicDivAlg',
-                 'streamK',
-                 'streamKForceDPOnly',
+                 'tileProcessingStrategy',
+                 'workAssignment',
                  'streamKAtomic',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
@@ -641,7 +702,6 @@ class SizeMapping:
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
-                 'CustomKernelName',
                  'workGroupMappingXCC',
                  'workGroupMappingXCCGroup',
                  'globalSplitUCoalesced',
@@ -652,6 +712,9 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'temporalHintA',
+                 'temporalHintB',
+                 'hasTemporalHint',
                  'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
                  'useSubtileImpl',
@@ -675,6 +738,9 @@ class SizeMapping:
 
     @classmethod
     def FromOriginalState(cls, d):
+        # This describes an existing artifact: preserve its argument version
+        # while translating selectors and inactive legacy options together.
+        d = normalize_execution_policy(d, regenerate=False)
         globalAccum = 0
         if d['_GlobalAccumulation'] == 'SingleBuffer':
             globalAccum = 1
@@ -725,8 +791,8 @@ class SizeMapping:
                    globalSplitU             = d['GlobalSplitU'],
                    staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
                    packBatchDims            = 0,
-                   streamK                  = d['StreamK'] if 'StreamK' in d else 0,
-                   streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
+                   tileProcessingStrategy   = d['TileProcessingStrategy'],
+                   workAssignment           = d['WorkAssignment'],
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
@@ -736,7 +802,6 @@ class SizeMapping:
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
-                   CustomKernelName         = d['CustomKernelName'],
                    workGroupMappingXCC      = d['WorkGroupMappingXCC'],
                    workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
                    globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
@@ -747,6 +812,9 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   temporalHintA            = d.get('TemporalHintA', 0),
+                   temporalHintB            = d.get('TemporalHintB', 0),
+                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
@@ -764,7 +832,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod
@@ -780,9 +848,11 @@ class SizeMapping:
 
 class InternalArgsSupport:
     StateKeys = ['version',
+                 'persistentLoopArgsVersion',
                  'gsu',
                  'wgm',
                  'staggerU',
+                 'perTileExtraIters',
                  'useUniversalArgs',
                  'useSFC'
                  ]
@@ -792,11 +862,14 @@ class InternalArgsSupport:
         # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
         # the explicit InternalSupportParams setting
         useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
-        return cls(version = d['InternalSupportParams']['KernArgsVersion'],
-                   gsu = d['InternalSupportParams']['SupportUserGSU'],
-                   wgm = d['InternalSupportParams']['SupportCustomWGM'],
-                   staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
-                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
+        isp = d['InternalSupportParams']
+        return cls(version = isp['KernArgsVersion'],
+                   persistentLoopArgsVersion = isp.get('PersistentLoopArgsVersion', 0),
+                   gsu = isp['SupportUserGSU'],
+                   wgm = isp['SupportCustomWGM'],
+                   staggerU = isp['SupportCustomStaggerU'],
+                   perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
 
     def __init__(self, **kwargs):
@@ -806,17 +879,18 @@ class InternalArgsSupport:
 class Solution:
     StateKeys = ['name',
                  'kernelName',
-                'problemType',
-                'hardwarePredicate',
-                'problemPredicate',
-                'taskPredicate',
-                'sizeMapping',
-                'internalArgsSupport',
-                'debugKernel',
-                'libraryLogicIndex',
-                'index',
-                'ideals',
-                'linearModel']
+                 'problemType',
+                 'hardwarePredicate',
+                 'problemPredicate',
+                 'taskPredicate',
+                 'sizeMapping',
+                 'customKernel',
+                 'internalArgsSupport',
+                 'debugKernel',
+                 'libraryLogicIndex',
+                 'index',
+                 'ideals',
+                 'linearModel']
     HiddenKeys = ['originalSolution']
 
     @classmethod
@@ -886,6 +960,10 @@ class Solution:
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
 
         rv.sizeMapping = SizeMapping.FromOriginalState(d)
+        if 'CustomKernel' in d:
+            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
+        else:
+            rv.customKernel = {}
 
         rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
 
@@ -934,6 +1012,7 @@ class Solution:
         self.problemPredicate = ProblemPredicate('TruePred')
         self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
+        self.customKernel = None
         self.debugKernel = False
         self.libraryLogicIndex = {}
         self.index = None

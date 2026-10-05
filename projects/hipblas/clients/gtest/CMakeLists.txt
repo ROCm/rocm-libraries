@@ -217,7 +217,8 @@ set_target_properties( hipblas-test PROPERTIES
     IMPORT_PREFIX ""
     IMPORT_SUFFIX ".lib"
     LINKER_LANGUAGE CXX
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging" )
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+    ENABLE_EXPORTS ON )
 
 set( HIPBLAS_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipblas_gtest.data")
 

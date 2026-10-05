@@ -21,6 +21,7 @@
 ################################################################################
 
 
+from ..ExecutionPolicy import isPersistent
 from rocisa.code import Module, Label, ValueSet
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
@@ -36,7 +37,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, \
     vectorUInt32CeilDivideAndRemainder
 
-from Tensile.Common import roundUp, log2, ceilDivide, clusterEnabled
+from ..Common import roundUp, log2, ceilDivide, clusterEnabled
 
 def scalarUInt24DivideAndRemainderPair(qReg, dReg, divReg, rReg, tmpVgprRes, wavewidth, doRemainder=True, doQuotient=True):
 
@@ -113,7 +114,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
 
     if clusterEnabled(kernel["ClusterDim"]):
         module.add(SBranch(label_skipWGMXCC.getLabelName()))
-    if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+    if(isPersistent(kernel) and kernel["WorkGroupMappingXCC"] == -1):
         SgprWGMXCC    = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprWGMXCC")
         SgprChunkSize = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprChunkSize", preventOverflow=False)
         SgprK         = writer.sgprPool.checkOut(1, tag="wgmXCC_SgprK", preventOverflow=False)
@@ -519,16 +520,16 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
         writer.sgprPool.checkIn(ts)
 
     # For non-streamK kernels we need to recompute the 1D global tile index
-    # For StreamK we store the global tile index when its computed in skIndexToWG(...) in StreamK.py
+    # For StreamK we store the global tile index when its computed in tileIndexToWorkGroup(...) in StreamK.py
     sgprIndex = "WorkGroup0"
-    if not kernel["StreamK"]:
+    if not isPersistent(kernel):
         sgprTmp = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprTmp")
         # Recompute the 1D ID from 2D IDs
         module.add(SMulI32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"), comment=""))
         module.add(SAddU32(dst=sgpr(sgprIndex), src0=sgpr("WorkGroup0"), src1=sgpr(sgprTmp), comment=""))
         writer.sgprPool.checkIn(sgprTmp)
     else:
-        module.add(SMovB32(dst=sgpr(sgprIndex), src=sgpr("StreamKTileID"), comment=""))
+        module.add(SMovB32(dst=sgpr(sgprIndex), src=sgpr("PersistentTileID"), comment=""))
 
     # Global number of WGs in M, N directions.
     # sgprNumTiles{M,N} may be overwritten so we store NumWorkGroups{0,1} values in them.
@@ -541,7 +542,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
     # reused as tmps sgprs. The values are restored at the end of this subroutine (SpaceFillingCurveWalk)
     # If sgprsToStore is set to empty array, no sgprs are stored in a vgpr.
     sgprsToStore = ["NumWorkGroups0", "NumWorkGroups1", "Alpha", "Beta",\
-                    "WorkGroup2", "StreamKLocalStart", "StreamKIterEnd", \
+                    "WorkGroup2", "StreamKLocalStart", "PersistentIterationEnd", \
                     "LoopCounterL", "OrigLoopCounterL", "SizesSum"]
     if len(sgprsToStore):
         vgprSgprPool = writer.vgprPool.checkOut(1, tag="SpaceFillingCurveWalk_vgprSgprPool")
@@ -1111,4 +1112,92 @@ def SpaceFillCurveSimpleImpl(writer, kernel, sgprIndex, sgprGridY, sgprGridX, sg
     writer.sgprPool.checkIn(sgprNumTilesN2)
     writer.sgprPool.checkIn(sgprLocalIndex)
 
+    return module
+
+def FusedA2AWgRemap(writer, kernel):
+    """Emit the segment-first workgroup remap: (wg0, wg1) -> (m, j).
+
+        A = AM_tiles,  t = wg0 + wg1*N0,  S = A*N1,  u = t-S,  L = N0-A
+        t <  S:  m, j = t % A,      t // A          (PUSH segment)
+        t >= S:  m, j = A + u % L,  u // L          (local segment)
+
+    Lifts the PUSH segment (M-tiles [0, A)) out of its per-token-tile bands into
+    one run at the front of the dispatch order.  Within each segment m stays the
+    fast axis, which preserves the band-internal locality the identity mapping
+    had and keeps the in-flight work-groups spread across all dst_ranks, so every
+    SDMA queue stays busy.
+
+    Bijective on [0,N0) x [0,N1), which is what leaves the counter grain and
+    FusedTotalWGs untouched.  Correctness therefore does not depend on the
+    hardware dispatching in t order -- only the benefit does.
+
+    Precondition: A <= N0, enforced host-side by the AM <= M check in
+    client/src/FusedA2AClient.cpp (with AM % MT0 == 0 and M % MT0 == 0 making
+    both quotients exact), so neither this nor the emitted assembly re-checks it.
+
+    Placed in graWorkGroup after DefaultWGM, ahead of every consumer of
+    WorkGroup0/1.  The three s_cselect_b32 must stay glued to the compare: a
+    stray SCC write in between selects from a dead condition, which is still a
+    bijection, so the numerics stay correct and only the dispatch order -- the
+    entire point -- is wrong.
+    """
+    module = Module("FusedA2AWgRemap")
+
+    from .Signature import fusedA2AKernArgLayout
+    layout = fusedA2AKernArgLayout()
+    fusedBase = writer.states.fusedA2AKernArgBase
+    log2mt0 = int(log2(kernel["MacroTile0"]))
+
+    module.addComment1("fused-A2A: lift the PUSH segment to the front of the dispatch order")
+
+    sA = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_A", preventOverflow=False)
+    sT = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_t", preventOverflow=False)
+    sS = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_S", preventOverflow=False)
+    sL = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_L", preventOverflow=False)
+    sU = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_u", preventOverflow=False)
+
+    # A = FusedAM >> log2(MT0) -- the same expression as the epilogue's PUSH gate
+    # (emitFusedA2AGate). Deriving it differently would split the grid at one
+    # boundary and classify PUSH/local at another.
+    module.add(writer.argLoader.loadKernArg(sA, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["FusedAM"]), dword=1))
+    module.add(SMulI32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"),
+                       comment="t = wg1*N0 ..."))
+    module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr("WorkGroup0"),
+                       comment="... + wg0 (linear dispatch index)"))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
+    module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
+                               comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
+    module.add(SMulI32(dst=sgpr(sS), src0=sgpr(sA), src1=sgpr("NumWorkGroups1"),
+                       comment="S = A*N1 (size of the PUSH segment)"))
+    module.add(SSubU32(dst=sgpr(sL), src0=sgpr("NumWorkGroups0"), src1=sgpr(sA),
+                       comment="L = N0-A (M-tiles in the local segment)"))
+    module.add(SSubU32(dst=sgpr(sU), src0=sgpr(sT), src1=sgpr(sS),
+                       comment="u = t-S (wraps when t<S; that value is discarded)"))
+
+    # The one SCC write the selects consume. Nothing may come between.
+    module.add(SCmpLtU32(src0=sgpr(sT), src1=sgpr(sS), comment="t < S? (PUSH segment)"))
+    module.add(SCSelectB32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sU),
+                           comment="dividend = t if PUSH else u"))
+    module.add(SCSelectB32(dst=sgpr(sL), src0=sgpr(sA), src1=sgpr(sL),
+                           comment="divisor = A if PUSH else L"))
+    module.add(SCSelectB32(dst=sgpr(sS), src0=0, src1=sgpr(sA),
+                           comment="base = 0 if PUSH else A"))
+
+    # j = dividend / divisor, m = dividend % divisor. One instance, shared.
+    tmpVgpr = writer.vgprPool.checkOutAligned(4, 2, "fusedA2AWgRemap_div")
+    module.add(scalarUInt24DivideAndRemainder(
+        qReg="WorkGroup1", dReg=sT, divReg=sL, rReg="WorkGroup0",
+        tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
+        wavewidth=kernel["WavefrontSize"], doRemainder=True))
+    writer.vgprPool.checkIn(tmpVgpr)
+
+    module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sS),
+                       comment="m += base (local segment starts at A)"))
+
+    writer.sgprPool.checkIn(sU)
+    writer.sgprPool.checkIn(sL)
+    writer.sgprPool.checkIn(sS)
+    writer.sgprPool.checkIn(sT)
+    writer.sgprPool.checkIn(sA)
     return module

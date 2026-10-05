@@ -11,7 +11,7 @@ masks therefore have to stay live across the refresh -- with one exception, whic
 is what the two cluster shapes here pin:
 
   * ``[4, 1]`` -- Ck = 1, so A has no peers and its mask is just the self bit.
-    Re-applying it is a no-op, so ``ClusterLoad.papDropsSelfOnlyMaskA`` frees the
+    Re-applying it is a no-op, so ``ClusterLoad.persistentDropsSelfOnlyMaskA`` frees the
     SGPR and skips the A attach, buying back a register against the 106-SGPR
     budget. B, a real broadcast, stays live.
   * ``[2, 2]`` -- Ck = 2, so A IS a real multicast: BOTH masks must stay live and
@@ -107,6 +107,16 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
         sgprs = _max_sgpr(src)
         assert 0 < sgprs <= _SGPR_BUDGET, (
             f"Kernel {base!r} uses {sgprs} SGPRs, exceeds the {_SGPR_BUDGET} budget"
+        )
+        # ClusterBarrier keeps WaveIdx live for the handshake; do not pack ArgType bit 8.
+        assert re.search(r"s_bitcmp1_b32 s\[sgprArgType\],\s*(?:8|0x8)\b", src) is None, (
+            f"Kernel {base!r} packed TDM parity into ArgType; ClusterBarrier must skip pack"
+        )
+        assert "s[sgprWaveIdx]" in src, (
+            f"Kernel {base!r} lost the ClusterBarrier WaveIdx handshake"
+        )
+        assert re.search(r"^\s*\.set\s+sgprWaveIdx\s*,\s*UNDEF\s*$", src, re.MULTILINE) is None, (
+            f"Kernel {base!r} undefined WaveIdx; ClusterBarrier must keep it live"
         )
 
 

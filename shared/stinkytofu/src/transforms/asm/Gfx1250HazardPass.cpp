@@ -82,20 +82,6 @@ bool isFlat(const StinkyInstruction& inst) {
     return isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst);
 }
 
-bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
-    for (const StinkyRegister& dest : inst.getDestRegs()) {
-        bool overlaps = false;
-        forEachRegUnit(dest, [&](RegKey key) { overlaps |= sources.contains(key); });
-        if (overlaps) return true;
-    }
-    return false;
-}
-
-void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
-    for (const StinkyRegister& src : inst.getSrcRegs())
-        forEachRegUnit(src, [&](RegKey key) { sources.insert(key); });
-}
-
 bool hasSelfDestSourceOverlap(const StinkyInstruction& inst) {
     RegKeySet sources;
     addSources(sources, inst);
@@ -171,10 +157,6 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
         return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;
-}
-
-void addSources(GroupState& state, const StinkyInstruction& inst) {
-    addSources(state.sources, inst);
 }
 
 // Rules 2 and 3 are repaired by cutting the replay group short, which costs
@@ -386,7 +368,7 @@ class Gfx1250HazardPass : public Pass {
         state.kind = kind;
         state.hasMemory = true;
         state.hasNonAtomic |= !atomic;
-        addSources(state, *inst);
+        addSources(state.sources, *inst);
     }
 
    public:

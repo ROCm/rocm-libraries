@@ -29,6 +29,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
@@ -62,8 +63,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

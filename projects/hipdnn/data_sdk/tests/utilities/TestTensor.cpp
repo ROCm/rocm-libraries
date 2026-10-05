@@ -11,6 +11,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -922,6 +923,139 @@ TYPED_TEST(TensorSentinel, StridedTensorFilled)
         else
         {
             EXPECT_EQ(value, std::numeric_limits<TypeParam>::max());
+        }
+    }
+}
+
+/// A stride PERMUTATION must be iterated in index order, not linearly.
+///
+/// Regression guard for visitsInIndexOrder. dims {2,3,4} with strides {12,1,3} makes
+/// axis 1 the fastest-varying in memory, and elementCount == elementSpace == 24, so
+/// isPacked() is true and the old gate took the linear path. Writes then landed on
+/// coordinates the stride-aware reads did not fetch them by, with no error anywhere.
+TEST(TestTensor, IteratesAPermutedStrideTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 1, 3};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+
+    EXPECT_TRUE(tensor.isPacked())
+        << "a permutation spans the same memory, so isPacked() must still be true here "
+           "-- if it is not, this test no longer covers the case it was written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::CompositeIndex>(tensor.begin().index()))
+        << "a stride permutation must be demoted to the stride-aware walk";
+
+    // Write a distinct value per position in iteration order, the way a random fill does.
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    // Read back by coordinate: the n-th value written must land on the n-th coordinate.
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected)
+                    << "value at (" << i0 << "," << i1 << "," << i2
+                    << ") does not match its position in iteration order. The iterator "
+                       "wrote linearly while the read honoured the declared strides.";
+                expected += 1.0F;
+            }
+        }
+    }
+}
+
+/// Row-major tensors must keep the linear fast path.
+///
+/// The gate is only correct if it does not demote every packed tensor to the slower
+/// walk. Both strategies produce the right values, so assert the chosen one too.
+TEST(TestTensor, IteratesARowMajorTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 4};
+    const std::vector<int64_t> strides{12, 4, 1};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked())
+        << "these strides are the packed row-major strides, so isPacked() must be true "
+           "here -- if it is not, this test no longer guards the fast path it was "
+           "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "packed row-major strides must keep the linear fast path";
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
+            {
+                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), expected);
+                expected += 1.0F;
+            }
+        }
+    }
+}
+
+/// An axis of extent 1 must not disqualify the fast path.
+///
+/// NHWC activations with 1x1 spatial extent carry dims {N,C,1,1} with strides
+/// {C,1,C,C}, because the H and W strides come from the layout rather than from the
+/// unit extents. Index 0 on such an axis contributes 0 whatever the stride says, so
+/// the tensor still visits memory in index order. Both index strategies satisfy that,
+/// so the value check alone cannot tell whether the exemption survives; assert the
+/// chosen strategy as well, the way TestTensorIterator does.
+TEST(TestTensor, IteratesAUnitExtentTensorInIndexOrder)
+{
+    const std::vector<int64_t> dims{2, 3, 1, 1};
+    const std::vector<int64_t> strides{3, 1, 3, 3};
+
+    // NOLINTNEXTLINE(misc-const-correctness) mutated through the iterator; begin() is not const
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    EXPECT_TRUE(tensor.isPacked())
+        << "the unused unit-axis strides do not extend the span, so isPacked() must be "
+           "true here -- if it is not, this test no longer covers the case it was "
+           "written for";
+
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::LinearIndex>(tensor.begin().index()))
+        << "unit-extent axes must not push a row-major tensor onto the strided walk";
+
+    float next = 1.0F;
+    for(auto valuePtr : tensor)
+    {
+        *static_cast<float*>(valuePtr) = next;
+        next += 1.0F;
+    }
+
+    float expected = 1.0F;
+    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
+    {
+        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
+        {
+            EXPECT_EQ(tensor.getHostValue(i0, i1, 0, 0), expected)
+                << "value at (" << i0 << "," << i1
+                << ",0,0) does not match its position in iteration order";
+            expected += 1.0F;
         }
     }
 }

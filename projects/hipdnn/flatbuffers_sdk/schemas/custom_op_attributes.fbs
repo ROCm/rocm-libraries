@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 /// Attributes for a custom (plugin-provided) operation.
@@ -8,7 +11,7 @@ table CustomOpAttributes {
     /// Unique identifier for the plugin operation, using dotted namespace
     /// notation: "<plugin>.<operation>" (e.g. "example.rope", "mylib.fused_add").
     custom_op_id: string;
-    input_tensor_uids: [long];
-    output_tensor_uids: [long];
+    input_tensor_uids: [long] (cache_uid);
+    output_tensor_uids: [long] (cache_uid);
     data: [ubyte];
 }

@@ -224,6 +224,9 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spsv_coo.hpp"
 #include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
+#ifdef ROCSPARSE_WITH_ELL_TRSV
+#include "testing_spsv_ell.hpp"
+#endif
 #include "testing_sptrsv.hpp"
 #include "testing_v2_spmv_bsr.hpp"
 #include "testing_v2_spmv_coo.hpp"
@@ -285,9 +288,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gtsv_interleaved_batch.hpp"
 #include "testing_gtsv_no_pivot.hpp"
 #include "testing_gtsv_no_pivot_strided_batch.hpp"
-#ifdef ROCSPARSE_WITH_ILDLT0
 #include "testing_spildlt0.hpp"
-#endif
 
 // Conversion
 #include "testing_bsr2csr.hpp"
@@ -534,6 +535,9 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IAXYT_X(coomv, testing_spmv_coo);
         DEFINE_CASE_T_FLOAT_ONLY(coosort);
         DEFINE_CASE_IT_X(coosv, testing_spsv_coo);
+#ifdef ROCSPARSE_WITH_ELL_TRSV
+        DEFINE_CASE_IT_X(ellsv, testing_spsv_ell);
+#endif
         DEFINE_CASE_IAXYT_X(coomv_aos, testing_spmv_coo_aos);
         DEFINE_CASE_IT_X(coosm, testing_spsm_coo);
         DEFINE_CASE_T_FLOAT_ONLY(coo2csr);
@@ -566,9 +570,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(cscsv, testing_spsv_csc);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
         DEFINE_CASE_IJT(spic0);
-#ifdef ROCSPARSE_WITH_ILDLT0
         DEFINE_CASE_IJT(spildlt0);
-#endif
         DEFINE_CASE_IJT(spilu0);
         DEFINE_CASE_IJT(sptrsv);
         DEFINE_CASE_T(csritsv);

@@ -24,20 +24,25 @@
 
 import rocisa
 
+import atexit
 import copy
 import functools
+import gc
 import glob
 import itertools
 import os
 import shutil
+import subprocess
+import sys
 import pickle
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import Collection, List, NamedTuple, Optional, Union
+from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile import SOURCE_PATH, LibraryIO
-from Tensile.Common import (
+from .. import LibraryIO
+from ..Common import (
     CHeader,
     DebugConfig,
     ensurePath,
@@ -48,42 +53,42 @@ from Tensile.Common import (
     print2,
     printWarning,
     printExit,
-    printWarning,
     state,
     tqdm,
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, tuningArchOf, withArchBuildAliases
+from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
+from ..Common.TimingInstrumentation import timing_context
+from ..SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
-from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.KernelWriterBase import (
+from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..KernelWriterAssembly import KernelWriterAssembly
+from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
 )
-from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
-from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import (
+from ..resources import copy_static_headers
+from ..SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
+from ..SolutionStructs import Solution
+from ..SolutionStructs.Solution import (
     raiseIfTypeMismatches,
     mergeTypeMismatchCollector,
     resetTypeMismatchCollector,
 )
-from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
-from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
-from Tensile.Toolchain.Validators import (
+from ..verify_stinky_comment_vs_elf_text import verify_stinky_paths
+from ..Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from ..Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
+from ..Toolchain.Validators import (
     ToolchainDefaults,
     validateToolchain,
 )
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Utilities.Decorators.Profile import profile
-from Tensile.Utilities.Decorators.Timing import timing
+from ..Toolchain.Component import Assembler
+from ..Utilities.Decorators.Profile import profile
+from ..Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
 
@@ -105,12 +110,86 @@ def libraryDir(outputPath: Union[str, Path], arch: str) -> Path:
     filename suffix. Layout matches the runtime probe in tensile_host.cpp which
     strips at the first colon before looking up the subdirectory.
     """
-    return libraryRoot(outputPath) / arch.split(":")[0]
+    return libraryRoot(outputPath) / baseArchName(arch)
 
 
 def _baseArchs(archs: Collection[str]) -> List[str]:
-    """Unique base archs (xnack/sramecc stripped), sorted for determinism."""
-    return sorted({a.split(":")[0] for a in archs})
+    """Unique base archs (predicates and qualifiers stripped), sorted for determinism."""
+    return sorted({baseArchName(a) for a in archs})
+
+
+# Set on the children of a fan-out. Only they share their scratch parent with a
+# run they must not disturb, so only they have to leave siblings alone; every
+# other run owns build_tmp outright and clears it as it always did.
+_GROUP_BUILD_ENV = "TENSILE_GROUP_BUILD"
+
+
+def buildTmpRoot(outputPath: Union[str, Path]) -> Path:
+    """The scratch parent every run writing into one output directory shares.
+
+    Derived from outputPath alone so cleanup can name it without going through
+    a run's own scratch path, which a malformed OutputPath could otherwise make
+    resolve to somewhere rmtree must never reach.
+    """
+    return Path(outputPath) / "build_tmp"
+
+
+def buildTmpDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
+    """This run's scratch directory under buildTmpRoot(outputPath).
+
+    Covering a stepping and the architecture it steps from takes two runs, since
+    the two spell one ISA and a run names its target by the ISA. Pointed at one
+    output directory, everything they write outside library/ collides: kernel
+    basenames come from the ISA, so both name their .s and .o identically while
+    the machine code inside differs.
+
+    Only a run asked for a stepping is named apart, so architecture sets that
+    predate steppings keep the directory they had. One suffix suffices: the two
+    never share a group, and steppings of different base architectures share no
+    ISA, so they arrive together in one group.
+
+    Only names the architecture table knows become path components. A spec is
+    otherwise free text -- gfxToIsa reads the leading gfx digits and ignores the
+    rest -- so "gfx1250/.." would smuggle a segment into a name handed to rmtree.
+    """
+    steppings = sorted(
+        {
+            baseArchName(a)
+            for a in archs
+            if baseArchName(a) in architectureMap and steppingArchOf(a) is not None
+        }
+    )
+    # A stem can be empty (Path("/").stem), and "<root>" / "" is <root> itself --
+    # a run would then take the shared parent as its own scratch directory.
+    stem = Path(outputPath).stem.upper() or "SCRATCH"
+    return buildTmpRoot(outputPath) / (f"{stem}-{steppings[0]}" if steppings else stem)
+
+
+def removeScratch(outputPath: Union[str, Path], buildTmpPath: Path) -> bool:
+    """Remove this run's scratch, taking no more than this run owns.
+
+    A fan-out child shares the scratch parent with a sibling still writing into
+    it and may only take its own subdirectory; the parent is left for whichever
+    of the two finishes last. Every other run owns the tree and clears it whole,
+    which also reclaims scratch an earlier build left under a different name.
+
+    The parent is named from outputPath rather than from buildTmpPath, so the
+    architecture list cannot move what gets removed.
+
+    Returns whether there was a scratch directory to remove, so a caller that
+    wants to report its absence can.
+    """
+    if not buildTmpPath.is_dir():
+        return False
+    if os.environ.get(_GROUP_BUILD_ENV):
+        shutil.rmtree(buildTmpPath)
+        try:
+            buildTmpRoot(outputPath).rmdir()
+        except OSError:
+            pass
+    else:
+        shutil.rmtree(buildTmpRoot(outputPath))
+    return True
 
 
 def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
@@ -144,6 +223,7 @@ class KernelCodeGenResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+    customKernelDef: Optional[dict] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -159,6 +239,29 @@ def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
     write+assemble so logs stay on one process.
     """
     return bool(globalParameters["CheckASMCodeSize"]) and isaToGfx(isa) == "gfx1250"
+
+
+def _alignAmdgcnTargetToStepping(sPath, isa, targetGfx: str) -> None:
+    """Make the ``.amdgcn_target`` directive match the assembler ``-mcpu``.
+
+    rocisa derives the directive from the ISA alone (``isaToGfx(isa)``), so for a
+    stepping that shares its base architecture's ISA -- e.g. ``gfx1250-strict``
+    spells ISA 12.5.0 like ``gfx1250`` -- it emits the base name. But the build
+    assembles that stepping with ``-mcpu=<stepping>`` (from ``archNamesByIsa``),
+    and the assembler rejects the base target id against the stepping subarch:
+        target id '...--gfx1250' specifies a processor that is not valid for
+        subarch 'amdgpu12.50s'
+    Rewrite the directive to the stepping name so the two agree. No-op for
+    ordinary architectures, where ``targetGfx == isaToGfx(isa)``.
+    """
+    derived = isaToGfx(isa)
+    if targetGfx == derived:
+        return
+    old = f'.amdgcn_target "amdgcn-amd-amdhsa--{derived}"'
+    new = f'.amdgcn_target "amdgcn-amd-amdhsa--{targetGfx}"'
+    text = Path(sPath).read_text()
+    if old in text:
+        Path(sPath).write_text(text.replace(old, new, 1))
 
 
 def _stinky_out(msg: str) -> None:
@@ -231,6 +334,7 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    customKernelDef = kernel._state.get("CustomKernel", None)
     cuocc = kernel["CUOccupancy"]
     if cuocc <= 0 and getVerbosity() >= 2:
         print2(
@@ -240,7 +344,8 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"]
+        pgr, kernel["MathClocksUnrolledLoop"], \
+        customKernelDef
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -308,6 +413,18 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            if result.customKernelDef is not None:
+                solution._state["CustomKernel"] = result.customKernelDef
+
+def _applyCustomKernelDefToSol(sol, result):
+    """Copy codegen-emitted CustomKernel definition from a KernelCodeGenResult to a
+    Contractions.Solution, updating both the originalSolution state and the
+    Contractions-level customKernel attribute."""
+    ckDef = getattr(result, 'customKernelDef', None)
+    if ckDef is not None:
+        sol.originalSolution._state["CustomKernel"] = ckDef
+        from ..Contractions import CustomKernel as CK
+        sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
@@ -333,6 +450,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                     sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                     sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                    _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
                     print(f"ERROR: KeyError in masterLibrary.solutions")
@@ -363,6 +481,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                         sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                         sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                        _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
                         print(f"ERROR: KeyError in lazyLibrary")
@@ -443,14 +562,22 @@ def writeSolutionsAndKernels(
 
     codeObjectFiles = []
 
+    archNames = archNamesByIsa(cmdlineArchs)
+
     with timing_context("python_kernel_setup"):
         outputPath = Path(outputPath)
-        # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
-        # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+        # Builders create <destRoot>/<arch>/ as they write, so this is not about
+        # racing them; it is so an architecture that emits nothing still leaves a
+        # subdirectory behind rather than a gap in the tree.
         destRoot = ensurePath(libraryRoot(outputPath))
         for base in _baseArchs(cmdlineArchs):
             ensurePath(libraryDir(outputPath, base))
-        buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
+        # Through buildTmpDir like every other scratch user, so the "one namer of
+        # the scratch directory" rule holds by construction. Tuning never fans
+        # out -- it rejects an ISA it cannot name rather than splitting -- so
+        # this path only ever sees one group, and the name it gets back is the
+        # one this directory always had unless a stepping was asked for.
+        buildTmpPath = ensurePath(buildTmpDir(outputPath, cmdlineArchs))
         assemblyTmpPath = ensurePath(
             buildTmpPath / "assembly"
         )  # Temp path for generated assembly files (.s)
@@ -499,8 +626,10 @@ def writeSolutionsAndKernels(
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
+        targetGfx = archNames.get(isa) or isaToGfx(isa)
+        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
         try:
-            asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+            asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
             printWarning(f"Failed to assemble {p}: {e}")
             return
@@ -550,6 +679,7 @@ def writeSolutionsAndKernels(
                 destRoot,
                 assemblyTmpPath,
                 compress,
+                archNames=archNames,
             )
 
         with timing_context("python_kernel_build_src_co"):
@@ -564,9 +694,7 @@ def writeSolutionsAndKernels(
             )
 
     if removeTemporaries and not generateSourcesAndExit:
-        buildTmp = outputPath / "build_tmp"
-        if buildTmp.exists() and buildTmp.is_dir():
-            shutil.rmtree(buildTmp)
+        removeScratch(outputPath, buildTmpPath)
 
     return codeObjectFiles, numKernels
 
@@ -582,21 +710,29 @@ def writeSolutionsAndKernelsTCL(
     cmdlineArchs: List[str],
     disableAsmComments: bool=False,
     compress: bool=True,
-    removeTemporaries: bool=True
+    removeTemporaries: bool=True,
 ):
+    archNames = archNamesByIsa(cmdlineArchs)
     outputPath = Path(outputPath)
-    # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
-    # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+    # Builders create <destRoot>/<arch>/ as they write, so this is not about
+    # racing them. The master and mapping writes later iterate the full requested
+    # list, so every architecture needs its subdirectory even if it emitted no
+    # kernels at all.
     destRoot = ensurePath(libraryRoot(outputPath))
     for base in _baseArchs(cmdlineArchs):
         ensurePath(libraryDir(outputPath, base))
-    buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
+    buildTmpPath = ensurePath(buildTmpDir(outputPath, cmdlineArchs))
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
     )  # Temp path for generated assembly files (.s)
     objectTmpPath = ensurePath(
         buildTmpPath / "code_object_tmp"
     )  # Temp path for HSA code object files (.hsaco)
+    # The source kernels compile against these, so they belong beside the
+    # Kernels.cpp written below rather than in the output root a concurrent run
+    # also writes. HelperKernelCache keys on their contents read from this same
+    # directory, so the three have to travel together.
+    copyStaticFiles(buildTmpPath)
 
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
@@ -617,7 +753,9 @@ def writeSolutionsAndKernelsTCL(
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(o_path))
+        targetGfx = archNames.get(isa) or isaToGfx(isa)
+        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx))
+        asmToolchain.assembler(targetGfx, wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
         if removeTemporaries:
@@ -663,17 +801,20 @@ def writeSolutionsAndKernelsTCL(
         destRoot,
         assemblyTmpPath,
         compress,
+        archNames=archNames,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
+    # The basename has to stay "Kernels": the emitted code object is named from
+    # it, and the runtime opens Kernels.so-000-<arch>.hsaco by that name.
+    writeHelpers(buildTmpPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    srcKernelFile = buildTmpPath / "Kernels.cpp"
 
     buildSourceCodeObjectFiles(
         srcToolchain.compiler,
         srcToolchain.bundler,
         destRoot,
         objectTmpPath,
-        outputPath,
+        buildTmpPath,
         srcKernelFile,
         cmdlineArchs,
     )
@@ -683,19 +824,7 @@ def writeSolutionsAndKernelsTCL(
 
 @timing
 def copyStaticFiles(outputPath):
-    libraryStaticFiles = [
-        "TensileTypes.h",
-        "tensile_bfloat16.h",
-        "tensile_float8_bfloat8.h",
-        "KernelHeader.h",
-        "ReductionTemplate.h",
-        "memory_gfx.h",
-    ]
-
-    for fileName in libraryStaticFiles:
-        shutil.copy(os.path.join(SOURCE_PATH, fileName), outputPath)
-
-    return libraryStaticFiles
+    return copy_static_headers(outputPath)
 
 
 @timing
@@ -750,7 +879,10 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
                     kho = list(itertools.compress(kho, buildMask))
                     if kho:
                         khos.extend(kho)
-    khos = list(set(khos))
+    # fromkeys, not set: these are written into Kernels.cpp in this order, and
+    # KernelWriterBase hashes its string form, so a set would order them by a
+    # salted string hash.
+    khos = list(dict.fromkeys(khos))
     sortByEnum = lambda x: ("Enum" in x.getKernelName(), khos.index(x))
     return sorted(khos, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
 
@@ -810,6 +942,49 @@ def renameFallbacksPerArch(masterLibraries) -> None:
         _renameFallbackPlaceholders(master.library, arch)
 
 
+@contextmanager
+def deferCyclicGC():
+    """Suspend cyclic garbage collection while a large object graph is loaded.
+
+    Note that this operates under the premise that the objects loaded during
+    the lifetime of the context manager are needed later in the program and
+    should not be freed when the context manager exits.
+
+    On entering the context manager, we "freeze" garbage collection, which
+    means that the garbage collector will consider all currently existing
+    objects as permanent residents. It will also improve memory sharing with
+    child processes in some situations, see
+    https://docs.python.org/3/library/gc.html#gc.freeze. Then, we disable
+    garbage collection.
+
+    The `finally` block is entered after the code wrapped by this context
+    manager has finished (or raised an exception).
+    We freeze the currently existing objects again and re-enable garbage
+    collection in case it was enabled before. This converts the objects that
+    got added in the meantime to permanent residents, and, thus, avoids them to
+    be analyzed by garbage collection now (remember that they shouldn't be
+    freed at this point, anyway).
+    We also register an exit hook, such that we "unfreeze" the "frozen" objects
+    on program exit and make them available to be garbage collected. This makes
+    leak checking tooling happy.
+    """
+    wasEnabled = gc.isenabled()
+    gc.freeze()
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.freeze()
+        if wasEnabled:
+            gc.enable()
+        # Frozen objects survive even the collection CPython runs during
+        # interpreter shutdown, so extension leak checkers -- nanobind, via
+        # rocisa -- report every surviving instance and spray "leaked N
+        # instances" over the build log. Unfreeze at exit: teardown is then
+        # clean, and a collection at that point costs nothing we care about.
+        atexit.register(gc.unfreeze)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -824,6 +999,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     splitGSU = False
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
+    archRenames = {tuningArchOf(a): compilerTargetOf(a) for a in archs if tuningArchOf(a) != compilerTargetOf(a)}
 
     fIter = zip(
         logicFiles,
@@ -833,6 +1009,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         itertools.repeat(printIndexAssignmentInfo),
         itertools.repeat(isaInfoMap),
         itertools.repeat(args["LazyLibraryLoading"]),
+        itertools.repeat(archRenames),
     )
 
     def libraryIter(lib: MasterSolutionLibrary):
@@ -871,38 +1048,34 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # replace the global collector with this clean aggregate so
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
-    parsedLibraries = ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
-    )
-    for library in parsedLibraries:
-        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
-        mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
+    skippedGemmA2AFusion = 0
+    # Every library pulled out of the generator below is retained for the rest
+    # of the run, which makes the cyclic collector the dominant cost of this
+    # phase (5x) if left running. See deferCyclicGC.
+    with deferCyclicGC():
+        parsedLibraries = ParallelMap2(
+            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+        )
+        for library in parsedLibraries:
+            _, architectureName, problemType, _, _, newLibrary, typeMismatches = library
+            if not _includeGemmA2AFusionProblemType(
+                problemType, args.get("EnableGemmA2AFusion", False)
+            ):
+                skippedGemmA2AFusion += 1
+                continue
+            mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
-        if architectureName == "":
-            continue
+            if architectureName == "":
+                continue
 
-        # A silicon stepping cannot label a library. This name keys masterLibraries,
-        # while the writes are keyed by the ISA-derived name, so a stepping-named
-        # file is dropped there without a word and the build reports success having
-        # written nothing for it. Honoring the name instead would be no better: the
-        # runtime resolves libraries by the architecture the driver reports, so
-        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
-        # records the architecture; the stepping is a build-time capability
-        # distinction, selected by --architecture.
-        if architectureName in ARCH_COMPILER_TARGET:
-            raise ValueError(
-                f"Library logic '{scheduleName}' declares ArchitectureName "
-                f"'{architectureName}', which names a silicon stepping rather than an "
-                f"architecture. Record it as "
-                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
-                f"at build time with --architecture={architectureName}."
-            )
+            if architectureName in masterLibraries:
+                nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
+            else:
+                masterLibraries[architectureName] = newLibrary
+                masterLibraries[architectureName].version = args["CodeObjectVersion"]
 
-        if architectureName in masterLibraries:
-            nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
-        else:
-            masterLibraries[architectureName] = newLibrary
-            masterLibraries[architectureName].version = args["CodeObjectVersion"]
+    if skippedGemmA2AFusion:
+        print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -983,9 +1156,149 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     return solutions, masterLibraries, codeObjectFilesIndex
 
 
+def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
+    """Return whether this build admits one library logic's GEMM+A2A solutions.
+
+    Only an explicit True excludes one: a missing key, or no problem type at all,
+    names a logic file that is not fused. Erring this way keeps a problem type that
+    cannot answer the question from emptying the library, which fails far more
+    quietly than building the solutions the gate meant to skip.
+    """
+    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
+
+
 ################################################################################
 # Tensile Create Library
 ################################################################################
+def _cpuCount() -> int:
+    if os.name == "nt":
+        # Matches CPUThreadCount: the Windows scheduler caps waitable handles.
+        return min(os.cpu_count() or 1, 61)
+    return len(os.sched_getaffinity(0))
+
+
+def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
+    """This run's requested parallelism, shared out among the groups.
+
+    The groups build concurrently, so passing the count through unchanged would
+    spend it per group rather than across them.
+
+    Shared in proportion to each group's architecture count, not evenly: a second
+    group exists because one stepping collided, leaving it holding one
+    architecture and the other holding the rest. An even split would run the
+    large group at half speed and idle half the machine once the small one ends.
+
+    ``requested`` is the parsed ``CpuThreads``, not a re-scan of argv, which
+    would have to enumerate the spellings argparse accepts (``-j=8``, any
+    unambiguous abbreviation of ``--jobs``) to avoid silently dropping them.
+    """
+    # 0 disables threading and has to survive the split intact; -1 is the
+    # documented "use every CPU" default.
+    if requested == 0:
+        return [0] * len(groups)
+    total = _cpuCount() if requested < 0 else min(_cpuCount(), requested)
+    archCount = sum(len(g) for g in groups) or 1
+    return [max(1, total * len(g) // archCount) for g in groups]
+
+
+def _argvForArchitectures(argv: List[str], specs: List[str], jobs: int) -> List[str]:
+    """This invocation's arguments, retargeted at specs.
+
+    Everything else is passed through untouched, so a group is built exactly as
+    the caller asked, only narrower.
+
+    The canonical spellings are dropped rather than left for the appended ones
+    to override, so the child's command line does not read as asking for two
+    architectures. argparse also accepts abbreviations (``--arch``) and ``-j=8``,
+    which this does not catch; those survive and are settled by last-wins, which
+    is correct because both options are plain ``store``.
+    """
+    kept = []
+    dropValue = False
+    for token in argv:
+        if dropValue:
+            dropValue = False
+        elif token in ("--architecture", "--jobs", "-j"):
+            dropValue = True
+        elif token.startswith("--architecture=") or token.startswith("--jobs="):
+            continue
+        elif token.startswith("-j") and token[2:].lstrip("-").isdigit():
+            continue
+        else:
+            kept.append(token)
+    kept.append("--architecture=" + ";".join(specs))
+    kept.append(f"--jobs={jobs}")
+    return kept
+
+
+def _childEnvironment() -> Dict[str, str]:
+    """This process's environment, with Tensile importable by the children.
+
+    Tensile/bin/TensileCreateLibrary puts the source root on sys.path when the
+    package is not installed. A child launched with -m inherits the environment
+    but not that sys.path edit, so it has to be passed as PYTHONPATH.
+    """
+    packageRoot = str(Path(__file__).resolve().parents[2])
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        packageRoot + os.pathsep + existing if existing else packageRoot
+    )
+    env[_GROUP_BUILD_ENV] = "1"
+    return env
+
+
+def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
+    """Builds each group in its own process, concurrently.
+
+    A run names its target by the ISA it parses out of the gfx name, so a
+    stepping and the architecture it steps from cannot share one; see
+    archNamesByIsa. Separate processes rather than a loop here because a run
+    settles arch-dependent state process-wide -- the capability map is keyed by
+    ISA and patched in place, and StinkyTofu's cost table is named by a global.
+
+    The output directory is shared: each run keeps its scratch to itself
+    (buildTmpDir) and their per-architecture outputs are named apart.
+    """
+    print1(
+        f"# Architectures requested need {len(groups)} builds to cover: "
+        + ", ".join("[" + ";".join(g) + "]" for g in groups)
+    )
+    argv = sys.argv[1:]
+    jobs = _jobsPerGroup(requestedJobs, groups)
+    env = _childEnvironment()
+    # Spawned inside the try so that a failure to start the second one still
+    # reaches the cleanup below: the first is already running, and a spawn can
+    # fail for reasons that have nothing to do with the build (fork under
+    # memory pressure).
+    procs = []
+    try:
+        for group, groupJobs in zip(groups, jobs):
+            procs.append((
+                group,
+                subprocess.Popen(
+                    [sys.executable, "-m", "Tensile.TensileCreateLibrary"]
+                    + _argvForArchitectures(argv, group, groupJobs),
+                    env=env,
+                ),
+            ))
+        failed = [group for group, proc in procs if proc.wait() != 0]
+    finally:
+        # An interrupted parent would otherwise leave these writing into the
+        # output directory after whatever killed it has given up on the build.
+        for _, proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+            # Reaped rather than just signalled, or the parent exits with the
+            # children still occupying process table entries.
+            proc.wait()
+    if failed:
+        printExit(
+            "Failed to build architectures: "
+            + ", ".join(";".join(g) for g in failed)
+        )
+
+
 @profile
 def run():
     start = timer()
@@ -1010,16 +1323,50 @@ def run():
         archs = arguments["Architecture"].split(";")
     else:
         archs = arguments["Architecture"].split("_")
+
+    # An alias is only built as its own fan-out child, which --gfx1250v0 spawns.
+    isGroupChild = bool(os.environ.get(_GROUP_BUILD_ENV))
+    aliases = [a for a in archs if baseArchName(a) in ARCH_BUILD_ALIASES]
+    if aliases and not (isGroupChild and arguments["BuildGfx1250v0"]):
+        printExit(
+            f"--architecture names {', '.join(aliases)}, which is a build alias, not an "
+            "architecture; request gfx1250 with --gfx1250v0 instead."
+        )
+
+    # Before the grouping, which has to split the alias from what it expands
+    # from. Not in a fan-out child: it was handed exactly the group to build.
+    if arguments["BuildGfx1250v0"] and not isGroupChild:
+        archs = withArchBuildAliases(expandAllArchitectures(archs))
+
+    # More than one group only when a stepping was asked for beside the
+    # architecture it steps from, which no single run can name. Everything else
+    # takes the one path below, unchanged.
+    groups = isaCollisionFreeGroups(archs)
+    if len(groups) > 1:
+        _buildGroupsSeparately(groups, arguments["CpuThreads"])
+        return
+
     archs = expandAllArchitectures(archs)
     archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
     applyArchCapOverrides(isaInfoMap, archs)
+
     assignGlobalParameters(arguments, isaInfoMap)
 
-    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
-    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archs) else ""
+    # StinkyTofu selects its cost table by name, and two steppings share one ISA,
+    # so the ISA-derived name would land on the base arch's table. Hand it the
+    # requested name instead, as tuned (gfx1250v0 builds as gfx1250-strict);
+    # "" means this build asked for none.
+    #
+    # One name, because the global is single-valued -- not because grouping says
+    # so. Collision-free grouping only keeps two architectures sharing an ISA
+    # apart, so steppings of two different base architectures would share a
+    # group. All steppings registered today share gfx1250's ISA, so that pair
+    # cannot arise; a stepping of another architecture has to revisit this.
+    steppings = [baseArchName(a) for a in archs if steppingArchOf(a)]
+    globalParameters["StinkyTofuArchName"] = tuningArchOf(steppings[0]) if steppings else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -1051,17 +1398,19 @@ def run():
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
 
     def validLogicFile(p: Path):
-        return p.suffix == logicExtFormat and (
-            "all" in archs or archMatch(load_logic_gfx_arch(p), archs)
-        )
+        if p.suffix != logicExtFormat:
+            return False
+        # archs came through expandAllArchitectures, which replaces "all" with
+        # the architectures it covers, so there is no keyword left to honour.
+        return archMatch(load_logic_gfx_arch(p), [tuningArchOf(a) for a in archs])
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
     print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = [
-        file for file in glob.iglob(globPattern, recursive=True)
-    ]
+    # Sorted: glob yields readdir order, which differs between checkouts and
+    # machines, and this order sets the solution indices written to the library.
+    logicFiles = sorted(glob.iglob(globPattern, recursive=True))
 
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
@@ -1071,7 +1420,7 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
-    print1("# Archs: " + ' ,'.join(archs))
+    print1("# Archs: " + ', '.join(archs))
     if requestedPredicateMap:
         print1("# Predicates:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in requestedPredicateMap.items()))
         numPrior = len(logicFiles)
@@ -1079,6 +1428,26 @@ def run():
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
+
+    aliases = [a for a in archs if a in ARCH_BUILD_ALIASES]
+    if aliases and not logicFiles:
+        printWarning(
+            f"No {', '.join(tuningArchOf(a) for a in aliases)} logic files matched under "
+            f"{arguments['LogicPath']}; skipping {', '.join(aliases)}."
+        )
+        return
+
+    if not logicFiles:
+        # Still exits 0 and still writes the subtree: a build that legitimately
+        # filters down to nothing is not this function's to reject. What this
+        # buys is a named cause, because the failure otherwise surfaces much
+        # later as the runtime failing to read TensileLibrary_lazy_<arch>.dat,
+        # and the only trace here is a zero that looks like every other zero.
+        printWarning(
+            f"No logic files matched {', '.join(archs)} under {arguments['LogicPath']}; "
+            "the library will have no master and no Mapping, and every matmul will "
+            "fail at runtime."
+        )
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
@@ -1095,7 +1464,10 @@ def run():
     kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
     kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, DebugConfig())
 
-    copyStaticFiles(outputPath)
+    # Resolved before the writer runs: archs is narrowed to the supported subset
+    # below, and dropping the stepping there would rename this run's scratch
+    # directory, leaving what the writer actually filled behind.
+    buildTmpPath = buildTmpDir(outputPath, archs)
 
     start_wsk = timer()
     numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
@@ -1106,10 +1478,7 @@ def run():
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
-        # Compiler targets, not the requested names: these drive --offload-arch for
-        # the HIP helper kernels and the library layout, and both must agree with
-        # the ISA-derived names used for the per-architecture writes below.
-        [gfxToCompilerTarget(a) for a in archs],
+        archs,
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],
@@ -1117,16 +1486,19 @@ def run():
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
 
-    archs = [ # is this really different than the other archs above?
-        isaToGfx(arch)
-        for arch in targetIsas
-        if isaInfoMap[arch].asmCaps["SupportedISA"]
-    ]
-    # Per-base subdirs are created here (idempotent if writeSolutionsAndKernels*
-    # already created them above). Each per-arch write below routes to its own
-    # libraryDir(outputPath, archName).
-    for base in _baseArchs(archs):
-        ensurePath(libraryDir(outputPath, base))
+    # The names that were requested, not names rebuilt from their ISAs: a
+    # stepping shares its base architecture's ISA, so rebuilding would hand back
+    # the base's name and every per-arch write below would address the wrong
+    # architecture. Qualifiers are dropped because the writes name directories
+    # and files, which carry the bare architecture; deduplicated for the same
+    # reason, so gfx942:xnack+ and gfx942:xnack- do not write gfx942 twice.
+    archs = list(
+        dict.fromkeys(
+            baseArchName(a)
+            for a in archs
+            if isaInfoMap[gfxToIsa(a)].asmCaps["SupportedISA"]
+        )
+    )
     splitGSU = False
 
     start_pki = timer()
@@ -1142,20 +1514,28 @@ def run():
             if kName not in solDict:
                 solDict["%s"%kName] = kernel
 
+    # The per-arch subdirectories these loops write into were created by
+    # writeSolutionsAndKernelsTCL above, from the same requested names; LibraryIO.write
+    # does not create them.
+    #
     # Split libraryMapping per arch and write one mapping file per arch into
     # that arch's per-base subdirectory. Every value ends in "_<arch>" because
     # tuned entries carry the arch natively and renameFallbacksPerArch
     # arch-suffixed every fallback entry before this point. Filtering on that
     # suffix keeps each arch's Mapping complete while letting builds produce
     # non-colliding mapping artifacts that survive overlay-style installs.
-    for archName in archs:
+    #
+    # Files are named by the library name and written under the requested one,
+    # which differ only for a build alias (library/gfx1250v0/*_gfx1250*).
+    outDirs = {compilerTargetOf(a): a for a in archs}
+    for archName, outDir in outDirs.items():
         archMapping = {
             idx: name
             for idx, name in libraryMapping.items()
             if name.endswith("_" + archName)
         }
         if archMapping:
-            archDir = libraryDir(outputPath, archName)
+            archDir = libraryDir(outputPath, outDir)
             archMappingFile = os.path.join(
                 archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
@@ -1163,8 +1543,8 @@ def run():
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
-        if archName in archs:
-            archDir = libraryDir(outputPath, archName)
+        if archName in outDirs:
+            archDir = libraryDir(outputPath, outDirs[archName])
             def writeMsl(name, lib, archDir=archDir):
                 filename = os.path.join(archDir, name)
                 lib.applyNaming(splitGSU)
@@ -1185,13 +1565,17 @@ def run():
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
 
     if not arguments["KeepBuildTmp"]:
-        buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
-        if buildTmp.exists() and buildTmp.is_dir():
-            shutil.rmtree(buildTmp)
-        buildTmp = Path(arguments["OutputPath"]) / "build_tmp"
-        if buildTmp.exists() and buildTmp.is_dir():
-            shutil.rmtree(buildTmp)
-        else:
+        # Left over from an older layout. With an OutputPath ending in "library"
+        # it resolves onto the shared parent of this run's scratch, where a
+        # concurrent group build may still be assembling into its own
+        # subdirectory, so it is skipped rather than emptied.
+        legacyBuildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
+        if (
+            legacyBuildTmp.is_dir()
+            and legacyBuildTmp.resolve() != buildTmpRoot(outputPath).resolve()
+        ):
+            shutil.rmtree(legacyBuildTmp)
+        if not removeScratch(outputPath, buildTmpPath):
             printWarning(f"Cannot remove build_tmp")
 
     print("# Tensile Library Writer DONE")

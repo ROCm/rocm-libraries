@@ -28,14 +28,51 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <stdexcept>
 
 namespace TensileLite
 {
     namespace Client
     {
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args)
+        {
+            std::vector<int> result{0};
+            if(args.count("streamk-hybrid-mode"))
+            {
+                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
+                for(auto value : raw)
+                    if(value < 0 || value > 2)
+                        throw std::invalid_argument("streamk-hybrid-mode must be 0, 1, or 2");
+                if(!raw.empty())
+                    result = std::move(raw);
+            }
+            if(args.count("hybrid-assignment-policy"))
+            {
+                std::vector<int> policy;
+                for(auto const& value : args["hybrid-assignment-policy"].as<std::vector<std::string>>())
+                {
+                    if(value == "Default")
+                        policy.push_back(0);
+                    else if(value == "DynamicWorkQueue")
+                        policy.push_back(1);
+                    else if(value == "Auto")
+                        policy.push_back(2);
+                    else
+                        throw std::invalid_argument("hybrid-assignment-policy must be Default, DynamicWorkQueue, or Auto");
+                }
+                if(args.count("streamk-hybrid-mode")
+                   && policy != result)
+                    throw std::invalid_argument("Conflicting hybrid-assignment-policy and streamk-hybrid-mode");
+                if(!policy.empty())
+                    result = std::move(policy);
+            }
+            return result;
+        }
+
         ClientProblemFactory::ClientProblemFactory(po::variables_map const& args)
             : m_problemSizes(args["problem-size"].as<std::vector<std::vector<size_t>>>())
             , m_stridedBatched(args["strided-batched"].as<bool>())
+            , m_batchMode(args["batch-mode"].as<int>())
             , m_groupedGemm(args["grouped-gemm"].as<bool>())
             , m_sparse(args["sparse"].as<int>())
             , m_highPrecisionAccumulate(args["high-precision-accumulate"].as<bool>())
@@ -60,6 +97,7 @@ namespace TensileLite
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
+            , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
             , m_metadataLayout(args["metadata-layout"].as<int>())
             , m_aOps(args["a-ops"].as<TensorOps>())
             , m_bOps(args["b-ops"].as<TensorOps>())
@@ -67,6 +105,22 @@ namespace TensileLite
             , m_dOps(args["d-ops"].as<TensorOps>())
         {
             using std::static_pointer_cast;
+
+            if(m_batchMode < 0
+               || m_batchMode
+                      >= static_cast<int>(ContractionProblemGemm::BATCHMODE::BATCHMODE_COUNT))
+                throw std::invalid_argument("batch-mode must be 0 (strided) or 1 (pointer array)");
+
+            bool const pointerArrayBatch
+                = m_batchMode
+                  == static_cast<int>(ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+            if(pointerArrayBatch && !m_stridedBatched)
+                throw std::invalid_argument(
+                    "batch-mode=1 requires a universal strided-batched problem");
+            if(pointerArrayBatch && m_groupedGemm)
+                throw std::invalid_argument("batch-mode=1 does not support grouped GEMM");
+            if(pointerArrayBatch && m_sparse)
+                throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
 
             if(m_mxBlockA || m_mxBlockB)
             {
@@ -198,12 +252,7 @@ namespace TensileLite
             if(args.count("activation-enum-args"))
                 m_activationEnumArg
                     = args["activation-enum-args"].as<std::vector<ActivationType>>();
-            if(args.count("streamk-hybrid-mode"))
-            {
-                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
-                if(!raw.empty())
-                    m_streamKHybridMode = std::move(raw);
-            }
+            m_streamKHybridMode = resolveHybridAssignmentPolicies(args);
             if(args.count("use-bias"))
                 m_useBias = args["use-bias"].as<int>();
             if(args.count("bias-source"))
@@ -390,6 +439,8 @@ namespace TensileLite
                                 rv.back().setBetaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                                 rv.back().setStridedBatched(m_stridedBatched);
+                                rv.back().setBatchMode(
+                                    static_cast<ContractionProblemGemm::BATCHMODE>(m_batchMode));
                                 rv.back().setHighPrecisionAccumulate(m_highPrecisionAccumulate);
                                 rv.back().setUseGradient(m_useGradient);
                                 rv.back().setUseBias(m_useBias);
@@ -404,6 +455,7 @@ namespace TensileLite
                                 rv.back().setWorkspaceSize(m_maxWorkspaceSize);
                                 rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                 rv.back().setSwizzleTensorB(m_swizzleTensorB);
+                                rv.back().setFusedGemmA2A(m_fusedGemmA2A);
                                 if(k < m_biasTypeArgs.size())
                                 {
                                     auto length

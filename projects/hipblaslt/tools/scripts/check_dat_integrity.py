@@ -20,9 +20,14 @@ except ImportError:
 
 _MSGPACK_ERRORS = (msgpack.exceptions.UnpackException,) if msgpack is not None else ()
 
-_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
+# The arch token admits a hyphen so a silicon stepping such as gfx1250-strict is
+# matched rather than skipped: an unmatched file leaves its subtree with no
+# masters and no Mappings, and _scanSubtrees then drops the subtree from the scan
+# entirely instead of reporting it.
+_ARCH_TOKEN = r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"
+_MASTER_RE = re.compile(rf"^TensileLibrary_lazy_(?P<arch>{_ARCH_TOKEN})\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
-    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
+    rf"^TensileLiteLibrary_lazy_(?P<arch>{_ARCH_TOKEN})_Mapping\.dat(?:\.zlib)?$"
 )
 
 
@@ -30,21 +35,27 @@ class _MappingLoadError(Exception):
     pass
 
 
-def _archDir(libDir: Path, arch: str) -> Path:
-    return libDir / arch.split(":")[0]
-
-
-def _scanArchs(libDir: Path):
-    masters, mappings = set(), set()
-    for sub in libDir.iterdir():
+def _scanSubtrees(libDir: Path):
+    """Every gfx* subtree, with the arch tokens its masters and Mappings carry.
+    Keyed on the directory, not the token: library/gfx1250/ and library/gfx1250-strict/
+    each hold a complete, independent set of files, so merging by token would
+    check one subtree twice and the other not at all. Old packages named a
+    stepping's files for the architecture it shares an ISA with, so the token
+    inside a subtree is not guaranteed to equal the subtree's name.
+    """
+    subtrees = {}
+    for sub in sorted(libDir.iterdir()):
         if not sub.is_dir() or not sub.name.startswith("gfx"):
             continue
+        masters, mappings = set(), set()
         for f in sub.iterdir():
             if m := _MASTER_RE.match(f.name):
                 masters.add(m.group("arch"))
             elif m := _MAPPING_RE.match(f.name):
                 mappings.add(m.group("arch"))
-    return masters, mappings
+        if masters or mappings:
+            subtrees[sub] = (masters, mappings)
+    return subtrees
 
 
 def _strictDecompress(data: bytes) -> bytes:
@@ -67,8 +78,8 @@ def _strictDecompress(data: bytes) -> bytes:
     return raw
 
 
-def _loadMapping(libDir: Path, arch: str):
-    base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
+def _loadMapping(archDir: Path, arch: str, where: str):
+    base = archDir / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".zlib")
     src = gz_path if gz_path.is_file() else base
     try:
@@ -79,53 +90,44 @@ def _loadMapping(libDir: Path, arch: str):
             return msgpack.unpack(f, raw=False, strict_map_key=False)
     except (OSError, ValueError, zlib.error, *_MSGPACK_ERRORS) as exc:
         raise _MappingLoadError(
-            f"arch={arch}: failed to read/decode Mapping ({src.name}): {exc}"
+            f"{where}: failed to read/decode Mapping ({src.name}): {exc}"
         ) from exc
 
 
-def validate(libDir: Path) -> List[str]:
-    libDir = Path(libDir).resolve()
-    if not libDir.is_dir():
-        return [f"library dir does not exist or is not a directory: {libDir}"]
-    if msgpack is None:
-        return ["msgpack is required to read Tensile .dat files but is not installed"]
-
+def _validateSubtree(archDir: Path, masters, mappings) -> List[str]:
+    """Check one subtree against itself. Shards are resolved inside this
+    directory, which is what the runtime does once it has selected it."""
     violations: List[str] = []
-    masters, mappings = _scanArchs(libDir)
+    where = archDir.name
     archs = masters & mappings
 
-    if not archs:
-        return [
-            f"{libDir} contains no matched (master, Mapping) pair; runtime "
-            "cannot resolve lazy lookups"
-        ]
     for a in sorted(masters - archs):
-        violations.append(f"master without a per-arch Mapping: {a}")
+        violations.append(f"{where}: master without a per-arch Mapping: {a}")
     for a in sorted(mappings - archs):
-        violations.append(f"per-arch Mapping without a master: {a}")
+        violations.append(f"{where}: per-arch Mapping without a master: {a}")
 
-    fallback_dat_files = list(libDir.glob("*/*_fallback_*.dat")) + list(
-        libDir.glob("*/*_fallback_*.dat.zlib")
+    fallback_dat_files = list(archDir.glob("*_fallback_*.dat")) + list(
+        archDir.glob("*_fallback_*.dat.zlib")
     )
     for arch in sorted(archs):
         try:
-            mapping = _loadMapping(libDir, arch)
+            mapping = _loadMapping(archDir, arch, where)
         except _MappingLoadError as exc:
             violations.append(str(exc))
             continue
-        archDir = _archDir(libDir, arch)
 
         for idx, kernelName in mapping.items():
             if not (archDir / f"{kernelName}.dat").is_file() and not (
                 archDir / f"{kernelName}.dat.zlib"
             ).is_file():
                 violations.append(
-                    f"arch={arch}: Mapping[{idx}] -> {kernelName}.dat(.zlib) is not on disk"
+                    f"{where}: arch={arch}: Mapping[{idx}] -> {kernelName}.dat(.zlib) "
+                    "is not on disk"
                 )
             if not kernelName.endswith("_" + arch):
                 violations.append(
-                    f"arch={arch}: Mapping[{idx}] -> {kernelName} is not arch-scoped "
-                    "(kpack overlay collision risk)"
+                    f"{where}: arch={arch}: Mapping[{idx}] -> {kernelName} is not "
+                    "arch-scoped (kpack overlay collision risk)"
                 )
 
         arch_has_fallback_files = any(
@@ -138,10 +140,30 @@ def validate(libDir: Path) -> List[str]:
         )
         if arch_has_fallback_files and not mapping_has_fallback:
             violations.append(
-                f"arch={arch}: per-arch Mapping is missing fallback entries "
+                f"{where}: arch={arch}: per-arch Mapping is missing fallback entries "
                 "(runtime may report 'NO solution found!' for fallback-only dtypes)"
             )
 
+    return violations
+
+
+def validate(libDir: Path) -> List[str]:
+    libDir = Path(libDir).resolve()
+    if not libDir.is_dir():
+        return [f"library dir does not exist or is not a directory: {libDir}"]
+    if msgpack is None:
+        return ["msgpack is required to read Tensile .dat files but is not installed"]
+
+    subtrees = _scanSubtrees(libDir)
+    if not any(masters & mappings for masters, mappings in subtrees.values()):
+        return [
+            f"{libDir} contains no matched (master, Mapping) pair; runtime "
+            "cannot resolve lazy lookups"
+        ]
+
+    violations: List[str] = []
+    for archDir, (masters, mappings) in subtrees.items():
+        violations.extend(_validateSubtree(archDir, masters, mappings))
     return violations
 
 

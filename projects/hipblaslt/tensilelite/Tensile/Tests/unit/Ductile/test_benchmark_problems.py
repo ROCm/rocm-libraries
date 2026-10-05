@@ -13,6 +13,7 @@ import types
 import pytest
 
 import Tensile.BenchmarkProblems as BP
+from Tensile.Common import IsaVersion
 
 pytestmark = pytest.mark.unit
 
@@ -104,7 +105,8 @@ class TestBuildAndValidateSolution:
     def test_wavefront_minus1_resolved_to_32_when_has_wave32(self, monkeypatch):
         captured = {}
 
-        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map):
+        # sourceSwap is the trailing optional arg of the real signature.
+        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map, sourceSwap=False):
             captured["wavefront"] = wavefront
             return {}
 
@@ -119,7 +121,8 @@ class TestBuildAndValidateSolution:
     def test_wavefront_minus1_resolved_to_64_when_no_wave32(self, monkeypatch):
         captured = {}
 
-        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map):
+        # sourceSwap is the trailing optional arg of the real signature.
+        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map, sourceSwap=False):
             captured["wavefront"] = wavefront
             return {}
 
@@ -400,7 +403,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
 
     monkeypatch.setattr(BP, "BenchmarkProcess", _FakeBP)
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: fake_backend)
-    monkeypatch.setattr(BP, "_computeCacheKey", lambda _step: "abc123")
+    monkeypatch.setattr(BP, "_computeCacheKey", lambda *_a: "abc123")
     monkeypatch.setattr(BP, "_resetCacheDir", lambda _d: None)
     monkeypatch.setattr(BP, "runClient", lambda *_a, **_kw: 0)
     monkeypatch.setattr(BP, "writeBenchmarkFiles", lambda *_a, **_kw: (["k.co"], "lib.yaml"))
@@ -431,7 +434,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=False,
         solutionPoolIndex={},
@@ -475,7 +478,7 @@ def test_main_ignores_solution_pool_for_backend_without_support(monkeypatch, tmp
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=True,
         solutionPoolFiles=["pool.yaml"],
@@ -499,7 +502,7 @@ def test_main_with_none_config_returns_early(monkeypatch):
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=True,
         solutionPoolFiles=None,
@@ -528,7 +531,7 @@ def test_main_invalid_backend_type_exits(monkeypatch, tmp_path):
             debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
             deviceId=0,
             gfxName="gfx942",
-            isaInfoMap={"gfx942": {}},
+            isaInfoMap={IsaVersion(9, 4, 2): {}},
             probSolMap={},
             buildOnly=True,
             solutionPoolFiles=None,
@@ -557,7 +560,7 @@ def test_main_backend_config_none_is_normalized(monkeypatch, tmp_path):
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=True,
         solutionPoolFiles=None,
@@ -586,7 +589,7 @@ def test_main_backend_config_invalid_type_exits(monkeypatch, tmp_path):
             debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
             deviceId=0,
             gfxName="gfx942",
-            isaInfoMap={"gfx942": {}},
+            isaInfoMap={IsaVersion(9, 4, 2): {}},
             probSolMap={},
             buildOnly=True,
             solutionPoolFiles=None,
@@ -621,7 +624,7 @@ def test_main_loads_solution_pool_when_backend_supports_it(monkeypatch, tmp_path
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=True,
         solutionPoolFiles=["pool.yaml"],
@@ -651,7 +654,7 @@ def test_benchmark_problem_type_cached_runner_build_only_path(monkeypatch, tmp_p
 
     monkeypatch.setattr(BP, "BenchmarkProcess", _FakeBP)
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: fake_backend)
-    monkeypatch.setattr(BP, "_computeCacheKey", lambda _step: "abc123")
+    monkeypatch.setattr(BP, "_computeCacheKey", lambda *_a: "abc123")
     monkeypatch.setattr(BP, "_loadCacheIfMatches", lambda *_a, **_kw: {"CodeObjectFiles": ["k.co"], "LibraryFile": "lib.yaml"})
     monkeypatch.setattr(BP, "runClient", lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("runClient should not run in buildOnly")))
     monkeypatch.setattr(BP, "writeClientConfigIni", lambda *_a, **_kw: None)
@@ -681,7 +684,7 @@ def test_benchmark_problem_type_cached_runner_build_only_path(monkeypatch, tmp_p
         debugConfig=types.SimpleNamespace(splitGSU=False, printSolutionRejectionReason=False, printIndexAssignmentInfo=False),
         deviceId=0,
         gfxName="gfx942",
-        isaInfoMap={"gfx942": {}},
+        isaInfoMap={IsaVersion(9, 4, 2): {}},
         probSolMap={},
         buildOnly=False,
         solutionPoolIndex={},

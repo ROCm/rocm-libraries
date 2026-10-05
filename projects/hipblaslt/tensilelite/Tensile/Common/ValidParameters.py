@@ -27,6 +27,7 @@ from functools import lru_cache
 from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
+from .LdsPaddingLimits import ldsBlockValues, ldsPadValues
 from .Types import IsaVersion
 
 ################################################################################
@@ -145,6 +146,7 @@ validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 
                            1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
                            3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
                            5376, 5632, 6144, 6656, 7168, 7680, 8192]
+validLdsPad = [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
 
 @lru_cache
 def makeValidWorkGroups():
@@ -347,6 +349,10 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    # PrefetchGlobalReadA/B = -1: auto max-LDS pair. Both keys must be set or
+    # both omitted; Components/DecouplePGR.py holds the accepted combinations.
+    "PrefetchGlobalReadA": [-1] + list(range(16 + 1)),
+    "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
@@ -354,7 +360,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
+    # Currently we do not support StaggerU (forced off), general batch, 6-bit float,
+    # or Stream-K other than DP-first (StreamK==3). GSU is supported; with a
+    # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
+    # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -396,13 +405,15 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
-    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
-    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # gfx1250 LDS segment interleave: puts an operand's two components in different 64KiB LDS segments
+    # so the two read ports (one per SIMD pair) read different segments, avoiding a segment conflict
+    # (both ports reading one segment at once).
     #
     # Applies only to gfx1250 wave-separated TDM kernels, and requires:
-    #   - TDMInst=3, MIWaveGroup [2,2], UnrollMajorLDS
+    #   - TDMInst=3, UnrollMajorLDS, MIWaveGroup [2,2], [4,1], [1,4]
     #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
-    #   - VWA = WaveTileA (TDMSplit optional), or WaveTileA/2 (requires TDMSplit)
+    #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
+    #     the WaveTile/2 case needs TDMSplit
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
@@ -412,11 +423,20 @@ validParameters = { # we need to make sure this matches develop
     #            boundary (needs PrefetchGlobalRead=2).
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
-    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
+    # Persistent loop: keep the whole K extent of an operand (and its MX
+    # scales) resident in VGPRs across persistent iterations, so every tile after
+    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
+    # traffic. Only valid when every tile a workgroup visits shares that operand,
+    # which the emitted size predicates enforce.
+    #   0 = off (default)
+    #   1 = A resident
+    #   2 = B resident -- planned, not implemented yet
+    "ReuseAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -426,7 +446,9 @@ validParameters = { # we need to make sure this matches develop
     # 1: use atomic operation to accumulate on one buffer
     # 2: each GSU group write to each own buffer and accumulate by another kernel
     # 3: each GSU group write to each own buffer and accumulate by same kernel
-    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel"],
+    # 4: no buffer at all - every GSU group atomically accumulates into D in the
+    #    dest precision, so neither a staging buffer nor a conversion kernel exists
+    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel", "AtomicDest"],
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
@@ -630,7 +652,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -638,7 +660,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -776,7 +798,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
     "MaxOccupancy": list(
-        range(1, 40 + 1)
+        range(1, 64 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
     "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
@@ -871,44 +893,21 @@ validParameters = { # we need to make sure this matches develop
     # In order to remove the copying from Acc vgpr to Arch vgpr, only use Arch vgprs for v_mfma_xxx.
     # Only support for kernel whose totalVgpr counts less than 256 and gcn that has control bit ACC_CD.
     "MIArchVgpr": [False, True],
-    # StreamK (SK) kernels divide work evenly among CUs by splitting along MT and K dimensions.
-    # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
-    # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
-    # 0 : Standard data-parallel kernel
-    # 3 : Two-Tile StreamK with DP before SK tiles
-    # 4 : Dynamic StreamK using per-XCD work queues
-    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
-    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
-    # StreamK kernels can adjust the number of CUs being used.
-    # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
-    # StreamK grid is controlled by setting these enviornment variables:
-    # TENSILE_STREAMK_FIXED_GRID lets you override the default grid size with a specific number
-    #   0 = override disabled (default)
-    # TENSILE_STREAMK_FULL_TILES sets the number of full tiles to be included in stream-k work
-    #   -1 = use prediction model for best performance (not yet implemented)
-    #   0 = only remainder tiles run in stream-k
-    #   1+ = remainder + 1 (or more) full grids of tiles run in stream-k (default=1)
-    # TENSILE_STREAMK_DYNAMIC_GRID selects dynamic grid mode, which automatically limits the number of CUs used:
-    #   0 = Off, always use all CUs.
-    #   1 = Only reduce CUs for small problems to number of output tiles when num_tiles < CU count.
-    #   2 = Also reduce CUs used for large sizes to improve data-parallel portion and reduce power.
-    #   3 = Analytically predict the best grid-size by weighing the cost of the fix-up step and the cost of processing MACs (default).
-    #       Note: dynamic grid coefficients currently apply to gfx942 variants
-    #   4 = StreamK algorithm will behave as data parallel (Launch WGs = #CUs)
-    #   5 = StreamK Algorithm will use Origami's "select_best_grid_size" function
-    # TENSILE_STREAMK_DYNAMIC_WGM Enables Origami's analytical model-based WGM selection
-    # TENSILE_STREAMK_MAX_CUS allows the user to manually set maximum number of CUs used, which could free up some CUs for
-    #   other operations to run in parallel with gemm.
-    # TENSILE_STREAMK_GRID_MULTIPLIER lets you set how many workgroups are created per CU being used.
-    #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
-    # The priority of these environment variables is defined as follows:
-    # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
+    # Persistent tile processing and work assignment are independent selectors.
+    # None disables persistence and ignores assignment. DataParallel supports StaticGrid;
+    # StreamK supports StaticGrid, DynamicWorkQueue and Hybrid.
+    # Shared host grid controls retain their numeric behavior. New environment
+    # spellings win when both old and new names are explicitly set:
+    # TENSILE_PERSISTENT_FIXED_GRID, TENSILE_PERSISTENT_DYNAMIC_GRID,
+    # TENSILE_PERSISTENT_MAX_CUS, TENSILE_PERSISTENT_GRID_MULTIPLIER,
+    # TENSILE_PERSISTENT_DYNAMIC_WGM (legacy TENSILE_STREAMK_* aliases).
+    # Grid-policy selection is independent of device work-queue assignment.
+    "TileProcessingStrategy": ["None", "DataParallel", "StreamK"],
+    "WorkAssignment": ["StaticGrid", "DynamicWorkQueue", "Hybrid"],
+    # Legacy input aliases are removed before solution derivation.
     "StreamK": [0, 3, 4, 5],
-    # Force StreamK=3 to run all output tiles through the persistent DP path.
-    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
-    # to skip the SK region, and keeps the normal StreamK grid selection policy.
-    # The invariant is no partial output tile fixup and no SK-region processing.
-    # Valid only with DP-first, non-atomic StreamK mode 3.
+    # Legacy regeneration alias: StreamK=3 + StreamKForceDPOnly=1 maps to
+    # DataParallel/StaticGrid before defaults, naming and code generation.
     "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
@@ -918,14 +917,16 @@ validParameters = { # we need to make sure this matches develop
     # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
     # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
     # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
-    # Valid only for StreamK in (4, 5).
+    # Valid only for StreamK with DynamicWorkQueue or Hybrid.
     #  0: off
     #  1: on
+    "WorkQueueStealing": [0, 1],
     "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
+    "PersistentXCCMapping": [0] + list(range(2, 9)),
     "StreamKXCCMapping": [0] + list(range(2, 9)),
     # Enables using a Tree-reduction for the fixup step of StreamK algorithm
     # 0: use linear reduction
@@ -1009,9 +1010,9 @@ validParameters = { # we need to make sure this matches develop
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
     # With MatrixInstruciton: -1 means max(GRVW,MIInput) if TLU=0
-    "LdsPadA": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadA": validLdsPad,
     "LdsPadMXSA": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
-    "LdsPadB": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadB": validLdsPad,
     "LdsPadMXSB": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
@@ -1050,6 +1051,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only temporal-hint modifier.
     "TemporalHint": list(range(-1, 8)),
     "TemporalHintE": list(range(0, 8)),
+    "TemporalHintGate": list(range(0, 8)),
     "TemporalHintD": list(range(0, 8)),
     "TemporalHintC": list(range(0, 8)),
     "TemporalHintA": list(range(0, 8)),
@@ -1061,6 +1063,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only non-volatile memory modifier.
     "NonVolatile": [-1, 0, 1],
     "NonVolatileE": [0, 1],
+    "NonVolatileGate": [0, 1],
     "NonVolatileD": [0, 1],
     "NonVolatileC": [0, 1],
     "NonVolatileA": [0, 1],
@@ -1083,7 +1086,8 @@ validParameters = { # we need to make sure this matches develop
     "KernelLanguage": ["Assembly"],
     # We set validParams["ISA"] in multiple places
     "ISA": validISA,  # arch for assembly kernels
-    # Name of the custom kernel located at `CUSTOM_KERNEL_PATH`.
+    # Name of a bundled custom kernel, or one located in an explicitly supplied
+    # custom-kernel directory.
     # a custom kernel is a user written assembly kernel with its associated configuration parameters included in a custom.config section
     # inside the yaml block between the --- and ... markers.  These parameters are only used for information purposes, not kernel generation.
     # Ex:
@@ -1096,7 +1100,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
-    "CustomKernelName": -1,
+    "CustomKernel": -1,
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],
@@ -1183,12 +1187,30 @@ validParameters = { # we need to make sure this matches develop
     # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
+    # Also supported for Sparse (2:4 structured sparsity): the sparse-tracked operand's
+    # LDS footprint holds the compressed (K/2) data, which the split boundary accounts for;
+    # the metadata tensor itself is never split.
     "TDMSplit": [False, True],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
+    # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
+    # not two heterogeneous regions in one instruction.
+    #
+    #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
+    #      when NumWaves>1). Hidden from the kernel name.
+    #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
+    #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
+    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
+    "TDMFuse": [0, 1, 2, 3],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
@@ -1231,6 +1253,28 @@ validParameters = { # we need to make sure this matches develop
     # 3: Use iterate-mode for both A and B
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
+
+
+def validParametersForArch(gfxName: str) -> dict:
+    """validParameters, widened where an architecture needs it.
+
+    Only gfx1250 resolves LdsPad and LdsBlockSizePerPad through a solver, and
+    only a config targeting it may name what that solver reports. Every other
+    architecture reads the table above, so a yaml for one can still name only
+    what it could before.
+
+    Returns a new dict rather than editing the table, which is a module-level
+    object every other reader shares.
+    """
+    if not gfxName.startswith("gfx1250"):
+        return validParameters
+    wider = dict(validParameters)
+    pads = sorted(set(validLdsPad) | ldsPadValues())
+    blocks = sorted(set(validLdsBlockSizePerPad) | ldsBlockValues())
+    wider["LdsPadA"] = wider["LdsPadB"] = pads
+    wider["LdsBlockSizePerPadA"] = wider["LdsBlockSizePerPadB"] = blocks
+    return wider
+
 
 newMIValidParameters = {
     "EnableF32XdlMathOp": [False, True],

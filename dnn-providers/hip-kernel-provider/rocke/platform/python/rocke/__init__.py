@@ -51,6 +51,12 @@ re-exports listed below are a convenience.
 from __future__ import annotations
 
 # ---- core ----
+from .core.codegen_policy import (
+    CodegenPolicy,
+    SchedulerStrategy,
+    apply_codegen_policy,
+    codegen_policy_for_kernel,
+)
 from .core.ir import (
     BF8E5M2,
     BF16,
@@ -62,6 +68,7 @@ from .core.ir import (
     I16,
     I32,
     I64,
+    TF32,
     IRBuilder,
     KernelDef,
     Op,
@@ -154,6 +161,10 @@ from .helpers.transforms import (
 
 __all__ = [
     # core
+    "CodegenPolicy",
+    "SchedulerStrategy",
+    "apply_codegen_policy",
+    "codegen_policy_for_kernel",
     "BF8E5M2",
     "BF16",
     "F16",
@@ -164,6 +175,7 @@ __all__ = [
     "I16",
     "I32",
     "I64",
+    "TF32",
     "IRBuilder",
     "KernelDef",
     "Op",

@@ -63,6 +63,7 @@ BenchmarkProblems:
     - # BenchmarkProblemSizeGroup
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]   # 2x2 wave-group, MI16x16x128
@@ -84,7 +85,8 @@ BenchmarkProblems:
         - StaggerU: [0]
         - SourceSwap: [True]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitU: [1]
         - UseSubtileImpl: [True]
       BenchmarkFinalParameters:

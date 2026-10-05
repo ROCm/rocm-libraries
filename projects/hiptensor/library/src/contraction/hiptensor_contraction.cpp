@@ -982,13 +982,30 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
     int                  nModeE = descE->mLengths.size();
     std::vector<int32_t> modeEV(modeE, modeE + nModeE);
 
-    if(int32_t sharedMode; hasSharedBatchMode(modeAV, modeBV, modeEV, sharedMode))
+    // A trinary contraction runs as two chained binary contractions, T = A * B
+    // followed by E = T * C, and neither step tolerates a batch mode.
+    auto modeTV = computeTrinaryContractionIntermediateModes(modeAV, modeBV, modeCV, modeEV);
+
+    int32_t     sharedMode = 0;
+    char const* sharedStep = nullptr;
+    if(hasSharedBatchMode(modeAV, modeBV, modeTV, sharedMode))
+    {
+        sharedStep = "A * B";
+    }
+    else if(hasSharedBatchMode(modeTV, modeCV, modeEV, sharedMode))
+    {
+        sharedStep = "(A * B) * C";
+    }
+
+    if(sharedStep != nullptr)
     {
         char msg[256];
         snprintf(msg,
                  sizeof(msg),
-                 "Batched contraction (mode '%c' shared by A, B and E) is not supported",
-                 sharedMode);
+                 "Batched contraction (mode '%c' shared by both inputs and the output of the %s "
+                 "step) is not supported",
+                 sharedMode,
+                 sharedStep);
         logger->logError("hiptensorCreateContractionTrinary", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }

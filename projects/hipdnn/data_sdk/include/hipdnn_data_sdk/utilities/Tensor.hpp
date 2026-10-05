@@ -439,9 +439,26 @@ private:
         }
     }
 
+    /// True iff walking memory linearly visits the elements in index order, i.e. the
+    /// strides are the packed row-major strides for these dims.
+    ///
+    /// This is a question about ORDER. isPacked() is a question about EXTENT, and the
+    /// two are independent: any permutation of the strides spans the same memory, so it
+    /// is packed while visiting out of index order. RFC 0014 §7.2 proposes the same
+    /// split from the ragged-tensor side.
+    ///
+    /// An axis of extent 1 is exempt, because its index is always 0 and its stride
+    /// therefore never reaches an offset. NHWC activations with 1x1 spatial extent rely
+    /// on this: they carry a spatial stride of C rather than 1.
+    ///
+    /// Defined out-of-line below: ITensor is only forward-declared at this point.
+    static bool visitsInIndexOrder(const ITensor& tensor);
+
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor.get().isPacked())
+        // Both predicates are required. isPacked() keeps ragged tensors off this path
+        // (RFC 0014 §4.5.7), and visitsInIndexOrder keeps stride permutations off it.
+        if(tensor.get().isPacked() && visitsInIndexOrder(tensor.get()))
         {
             return LinearIndex(tensor, isEnd);
         }
@@ -523,6 +540,10 @@ public:
     virtual ITensorIterator<true> cbegin() const = 0;
     virtual ITensorIterator<true> cend() const = 0;
 
+    /// True iff the elements occupy the memory span with no gaps, i.e.
+    /// elementCount == elementSpace. This says nothing about the ORDER in which a
+    /// linear walk of that span visits them; a permutation of the strides is packed
+    /// too, and iterating one linearly visits the right addresses in the wrong order.
     virtual bool isPacked() const = 0;
 
     virtual void markHostModified() = 0;
@@ -576,6 +597,29 @@ protected:
 template <typename T>
 using ValueGenerator = std::function<void(T* data, size_t count)>;
 
+template <bool IsConst>
+bool ITensorIterator<IsConst>::visitsInIndexOrder(const ITensor& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    if(dims.size() != strides.size())
+    {
+        return false;
+    }
+
+    int64_t expected = 1;
+    for(size_t axis = dims.size(); axis-- > 0;)
+    {
+        // Extent 1 pins the index to 0, so this stride never reaches an offset.
+        if(dims[axis] != 1 && strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= dims[axis];
+    }
+    return true;
+}
+
 template <typename T>
 class TensorBase : public ITensor
 {
@@ -612,6 +656,7 @@ public:
         fillWithRandomValues(static_cast<T>(min), static_cast<T>(max), seed);
     }
 
+    // BOOLEAN has no out-of-band value; its sentinel is true and cannot detect an unwritten mask.
     void fillWithSentinelValue() override
     {
         if constexpr(std::numeric_limits<T>::has_quiet_NaN)

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "11ae57ea-0f82-5dd5-af34-f8362e1e9c22",
+  "name": "example pointwise dispatch",
+  "dispatch_symbol": "hipkernel.pointwise.dispatch"
+}

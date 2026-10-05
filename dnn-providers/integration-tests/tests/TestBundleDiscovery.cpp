@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -15,12 +16,14 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -45,15 +48,12 @@ protected:
 
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
+    // One load pass's sweep cache, as loadDiscoveredBundles() shares one.
+    SweepManifestCache _sweeps;
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("bundle_discovery_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(claimScratchDirectory("bundle_discovery"));
         _tempDir = _scopedDir->path();
     }
 
@@ -87,6 +87,25 @@ protected:
     {
         std::ofstream(dir / (name + ".meta.json"))
             << R"({"format_version": 1, "operation": "BatchnormInference"})";
+    }
+
+    // Provenance-only metadata: valid JSON, but no `format_version`, so RFC 0011's
+    // reader rejects it. This is the exact shape the SdpaFwd generator emitted for
+    // 35 bundles, and the reason they vanished the moment their blobs were pulled.
+    static void writeMetadataWithoutFormatVersion(const std::filesystem::path& dir,
+                                                  const std::string& name)
+    {
+        std::ofstream(dir / (name + ".meta.json"))
+            << R"({"generator": "generate_sdpa_fwd_golden.py", "seed": 42})";
+    }
+
+    // uid 5 is the only non-virtual output of createMinimalBundle's graph, so its
+    // blob alone decides whether the bundle counts as golden.
+    static void writeGoldenOutputBlob(const std::filesystem::path& dir, const std::string& name)
+    {
+        const std::vector<char> data(480, 0);
+        std::ofstream out((dir / name).string() + ".tensor5.bin", std::ios::binary);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
     }
 
     static void createLoadableBundle(const std::filesystem::path& dir, const std::string& name)
@@ -303,6 +322,146 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
 }
 
+// A bundle root assembled from directory links (say quick/SdpaFwd linked to an
+// installed tree) must discover what a copy of the same tree would, under the link's
+// name, including a sweep that sits further down behind the link.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinksInsideTheRootAreFollowed)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside";
+    createMinimalBundle(outside / "Direct" / "nchw" / "Small", "Small");
+    createTemplateSweep(
+        outside / "Swept" / "Inference",
+        {{"small_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside / "Direct", root / "quick" / "Direct");
+        std::filesystem::create_directory_symlink(outside / "Swept", root / "quick" / "Swept");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 2u);
+
+    const auto* direct = findByTest(result, "Small");
+    ASSERT_NE(direct, nullptr);
+    EXPECT_EQ(direct->suiteName, "quick_Direct_nchw_Small");
+    EXPECT_EQ(direct->jsonPath, root / "quick" / "Direct" / "nchw" / "Small" / "Small.json");
+
+    const auto* swept = findByTest(result, "small_fp32_nchw");
+    ASSERT_NE(swept, nullptr);
+    EXPECT_EQ(swept->suiteName, "quick_Swept_Inference");
+}
+
+// A link back to its own ancestor would make the walk revisit the tree forever. It is
+// not descended: discovery finishes and finds each bundle once.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAnAncestorIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir, _tempDir / "conv" / "loop");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A cycle can span siblings: a/to_b -> b and b/to_a -> a. Neither link points at its
+// own ancestor, but following both returns to a directory the walk is already
+// inside. Discovery must stop there and still find what a copied tree holds: each
+// bundle under its own folder and once more behind the link that reaches it.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkCycleAcrossSiblingsIsNotFollowed)
+{
+    createMinimalBundle(_tempDir / "a" / "good", "good");
+    createMinimalBundle(_tempDir / "b" / "fine", "fine");
+    try
+    {
+        std::filesystem::create_directory_symlink(_tempDir / "b", _tempDir / "a" / "to_b");
+        std::filesystem::create_directory_symlink(_tempDir / "a", _tempDir / "b" / "to_a");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(_tempDir);
+    std::vector<std::string> suites;
+    suites.reserve(result.size());
+    for(const auto& bundle : result)
+    {
+        suites.push_back(bundle.suiteName);
+    }
+    std::sort(suites.begin(), suites.end());
+    EXPECT_EQ(suites, (std::vector<std::string>{"a_good", "a_to_b_fine", "b_fine", "b_to_a_good"}));
+}
+
+// A link out of the root to one of the root's own parents (think root/x -> $HOME)
+// leads back to the root. It must not be followed: the walk would cover the whole
+// parent tree first, here a bundle that sits beside the root, before it reached the
+// root again.
+TEST_F(TestBundleDiscoveryFixture, DirectorySymlinkToAParentOfTheRootIsNotFollowed)
+{
+    const auto root = _tempDir / "root";
+    createMinimalBundle(root / "conv" / "good", "good");
+    createMinimalBundle(_tempDir / "beside" / "other", "other");
+    try
+    {
+        std::filesystem::create_directory_symlink(root.parent_path(), root / "conv" / "up");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto result = discoverBundles(root);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
+// A directory the run may not list is skipped with a warning. Before, the walk threw
+// on it and discovery failed, losing every bundle in the root.
+TEST_F(TestBundleDiscoveryFixture, UnlistableDirectoryIsSkipped)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto locked = _tempDir / "locked";
+    createMinimalBundle(locked / "hidden", "hidden");
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    };
+    const RestorePermissions restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "conv_good");
+}
+
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
     // A .json directly at the data root uses the root folder name as suite.
@@ -515,6 +674,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 
 // A GOLDEN bundle (output .bin blobs present) WITHOUT a .meta.json companion is
 // a load error: metadata is mandatory whenever there is golden data to validate.
+// It is UNVALIDATABLE_GOLDEN_DATA rather than MISSING_METADATA because that
+// distinction is what makes classifyBundle() fail instead of skip.
 TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 {
     auto dir = _tempDir / "op" / "goldennometa";
@@ -524,7 +685,51 @@ TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
 
     auto result = loadIntegrationTestBundle(jsonPath);
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// Present-but-unparseable metadata is as bad as absent metadata: either way the
+// golden blobs on disk have nothing describing how they were produced. A metadata
+// file that parses as JSON but is rejected by the schema (here: no
+// `format_version`) must not be treated as a softer failure than a missing file.
+TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleUnparseableMetadataIsError)
+{
+    auto dir = _tempDir / "op" / "goldenbadmeta";
+    createLoadableBundle(dir, "goldenbadmeta");
+    writeMetadataWithoutFormatVersion(dir, "goldenbadmeta");
+
+    auto result = loadIntegrationTestBundle(dir / "goldenbadmeta.json");
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// The invariant the whole change exists to protect: pulling golden data must never
+// make a bundle quietly disappear. One bundle, one unparseable .meta.json, observed
+// twice — before and after its output blob shows up. Without the blob it is an
+// ordinary graph-only bundle; with it the run must go red, never silently shrink.
+TEST_F(TestBundleDiscoveryFixture, PullingGoldenDataNeverSilentlyDropsABundle)
+{
+    auto dir = _tempDir / "op" / "pullme";
+    createLoadableBundle(dir, "pullme");
+    writeMetadataWithoutFormatVersion(dir, "pullme");
+    std::filesystem::remove(dir / "pullme.tensor5.bin"); // pre-`dvc pull` state
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto beforePull = loadIntegrationTestBundle(dir / "pullme.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(beforePull));
+    EXPECT_FALSE(std::get<IntegrationTestBundle>(beforePull).hasGoldenOutputs);
+    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
+
+    writeGoldenOutputBlob(dir, "pullme"); // post-`dvc pull` state
+
+    auto afterPull = loadIntegrationTestBundle(dir / "pullme.json");
+    ASSERT_TRUE(std::holds_alternative<LoadError>(afterPull));
+    EXPECT_EQ(std::get<LoadError>(afterPull), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(
+        detail::classifyBundle(discovered.front(), _sweeps)));
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
@@ -593,6 +798,61 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutGoldenIsGraphOnly
     ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
     const auto& bundle = std::get<IntegrationTestBundle>(result);
     EXPECT_FALSE(bundle.tensors.has_value());
+}
+
+// Every case of a sweep shares one sweep.json, and a load pass must parse it once
+// rather than once per case: re-parsing it per case cost 5.9 GB of JSON over the
+// checked-in sweeps, and over half an hour before the first test ran on an MI300A
+// host. Shown by breaking the manifest after the first case loads. The second case
+// still loads through the pass's cache; a fresh load sees the broken file, which
+// is the control that the file really is broken.
+TEST_F(TestBundleDiscoveryFixture, SweepCasesInOneLoadPassParseTheManifestOnce)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"case_a_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"case_b_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[0], sweeps)));
+
+    std::ofstream(sweepDir / "sweep.json", std::ios::trunc) << "{ not json";
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered[1], sweeps)));
+
+    const auto fresh = loadIntegrationTestBundle(discovered[1]);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(fresh));
+    EXPECT_EQ(std::get<LoadError>(fresh), LoadError::MALFORMED_JSON);
+}
+
+// The cache holds one sweep at a time. Moving to the next sweep must read that
+// sweep's manifest, or its cases would be looked up in the previous sweep's and
+// come back INVALID_SWEEP_CASE.
+TEST_F(TestBundleDiscoveryFixture, SweepManifestCacheFollowsTheSweepBeingLoaded)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "First",
+        {{"first_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Second",
+        {{"second_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+
+    SweepManifestCache sweeps;
+    for(const auto& bundle : {discovered[0], discovered[1], discovered[0]})
+    {
+        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+            loadIntegrationTestBundle(bundle, sweeps)))
+            << bundle.diagnosticPath();
+    }
 }
 
 TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseMissingGoldenPathIsError)
@@ -730,7 +990,8 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingFileIsError)
 }
 
 // A golden sweep case that omits its inline `metadata` block is rejected with
-// MISSING_METADATA: metadata is what validates the golden data.
+// UNVALIDATABLE_GOLDEN_DATA: metadata is what validates the golden data, and the
+// blobs are right there.
 TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsError)
 {
     createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
@@ -749,7 +1010,42 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsE
 
     auto result = loadIntegrationTestBundle(discovered.front());
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
-    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
+}
+
+// Same rule for sweeps as for direct bundles: a metadata block that is present but
+// rejected by the schema, next to golden blobs, is UNVALIDATABLE_GOLDEN_DATA — not
+// the quiet INVALID_SWEEP_CASE it would be for a case with no golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithUnparseableMetadataIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"golden_bad_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true, // includeGolden
+                          true, // goldenHasPath
+                          true}}); // includeMetadata
+
+    // Strip the required format_version from the case's metadata block, leaving a
+    // well-formed JSON object the metadata reader still refuses.
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"].erase("format_version");
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::UNVALIDATABLE_GOLDEN_DATA);
 }
 
 // Every sweep case must carry metadata, golden or not: a graph-only case that
@@ -851,12 +1147,36 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsLoadedBundleForGoodBundl
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
     auto& loaded = std::get<detail::LoadedBundle>(outcome);
     EXPECT_EQ(loaded.suiteName, discovered.front().suiteName);
     EXPECT_EQ(loaded.testName, discovered.front().testName);
     ASSERT_NE(loaded.bundle, nullptr);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              supportJsonPath(discovered.front().diagnosticPath()));
+    EXPECT_TRUE(loaded.claimLocator.caseId.empty());
+    EXPECT_FALSE(loaded.claimLocator.isSweep());
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleSetsLocatorForSweepCase)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::LoadedBundle>(outcome));
+    auto& loaded = std::get<detail::LoadedBundle>(outcome);
+
+    EXPECT_EQ(loaded.claimLocator.sidecarPath,
+              discovered.front().jsonPath.parent_path() / "support.json");
+    EXPECT_EQ(loaded.claimLocator.caseId, "fp32_nchw");
+    EXPECT_TRUE(loaded.claimLocator.isSweep());
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -887,7 +1207,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForRuntimePass
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
     auto& failed = std::get<detail::FailedLoad>(outcome);
     EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
@@ -916,12 +1236,35 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsSkippedLoadForOrdinaryIn
     const auto discovered = discoverBundles(_tempDir);
     ASSERT_EQ(discovered.size(), 1u);
 
-    auto outcome = detail::classifyBundle(discovered.front());
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
     ASSERT_TRUE(std::holds_alternative<detail::SkippedLoad>(outcome));
     auto& skipped = std::get<detail::SkippedLoad>(outcome);
     EXPECT_NE(skipped.message.find(discovered.front().diagnosticPath().string()),
               std::string::npos);
     EXPECT_NE(skipped.message.find(toString(LoadError::INVALID_SWEEP_CASE)), std::string::npos);
+}
+
+// The counterpart to the SkippedLoad case above: golden blobs with no usable
+// metadata is the second failure that must turn the suite red. Pinning it here
+// stops a future refactor from folding it back into the quiet path, which is
+// precisely the regression that let 35 SdpaFwd bundles disappear.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnvalidatableGoldenData)
+{
+    auto dir = _tempDir / "op" / "goldenbadmeta";
+    createLoadableBundle(dir, "goldenbadmeta");
+    writeMetadataWithoutFormatVersion(dir, "goldenbadmeta");
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    auto& failed = std::get<detail::FailedLoad>(outcome);
+    EXPECT_EQ(failed.suiteName, discovered.front().suiteName);
+    EXPECT_EQ(failed.testName, discovered.front().testName);
+    EXPECT_NE(failed.message.find(discovered.front().diagnosticPath().string()), std::string::npos);
+    EXPECT_NE(failed.message.find(toString(LoadError::UNVALIDATABLE_GOLDEN_DATA)),
+              std::string::npos);
 }
 
 // Direct regression test for the original review repro: corrupting one sweep
@@ -955,19 +1298,42 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDis
     ASSERT_NE(goodBundle, nullptr);
     ASSERT_NE(badBundle, nullptr);
 
-    EXPECT_TRUE(std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle)));
-    EXPECT_TRUE(std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(*goodBundle, _sweeps)));
+    EXPECT_TRUE(
+        std::holds_alternative<detail::FailedLoad>(detail::classifyBundle(*badBundle, _sweeps)));
 }
 
 // Closes the loop between "classifyBundle() decided this bundle failed" and
 // "the failing test GTest actually runs really fails": constructs the
 // synthetic test body directly and confirms it records exactly the stored
 // message as a non-fatal failure, the same way GTest would run it once
-// registerFailedBundleLoad() has registered it.
+// registerSyntheticBundleTest() has registered it.
 TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
 {
-    detail::FailedBundleLoadTest test("boom");
+    detail::SyntheticBundleTest test(detail::SyntheticOutcome::FAIL, "boom");
     EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
+}
+
+// The other outcome stands in for a declared coverage gap, such as a bundle too
+// costly for the one lane that runs. It must skip naming the gap: a failure would
+// turn every device-less run red for a deliberate trade, and a pass would claim a
+// validation that never happened.
+TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticBodySkipsWithItsMessage)
+{
+    detail::SyntheticBundleTest test(detail::SyntheticOutcome::SKIP, "nothing validated this");
+
+    ::testing::TestPartResultArray results;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        test.TestBody();
+    }
+
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_TRUE(results.GetTestPartResult(0).skipped());
+    EXPECT_NE(std::string(results.GetTestPartResult(0).message()).find("nothing validated this"),
+              std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

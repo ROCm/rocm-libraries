@@ -438,6 +438,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT";
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
         return "HIPDNN_ATTR_ENGINE_DEVICEPROP";
+    case HIPDNN_ATTR_ENGINE_NAME_EXT:
+        return "HIPDNN_ATTR_ENGINE_NAME_EXT";
 
     case HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED:
         return "HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED";
@@ -472,6 +474,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT";
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
         return "HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC";
+    case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER:
+        return "HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER";
 
     // Convolution forward operation attributes
     case HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W:
@@ -1001,6 +1005,16 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT";
     case HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT:
         return "HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_ARM_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_ARM_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT";
+    case HIPDNN_ATTR_PROFILING_STALL_USED_EXT:
+        return "HIPDNN_ATTR_PROFILING_STALL_USED_EXT";
+    case HIPDNN_ATTR_PROFILING_RESET_EXT:
+        return "HIPDNN_ATTR_PROFILING_RESET_EXT";
 
     default:
         return "HIPDNN_ATTR_UNKNOWN";

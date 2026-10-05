@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,9 @@ const static std::vector<fft_transform_type> trans_type_range_real
     = {fft_transform_type_real_forward};
 
 const static std::vector<fft_callback_type> callbacks_none = {fft_callback_type_none};
-const static std::vector<fft_callback_type> callbacks_full = {fft_callback_type_funcptr};
+// function pointer callbacks are deprecated
+const static std::vector<fft_callback_type> callbacks_full
+    = {/*fft_callback_type_funcptr, */ fft_callback_type_jit};
 
 // Take a string (in particular the token from a test) and return a uniform random variable in [0,1]
 // using the seed and hash of the string.

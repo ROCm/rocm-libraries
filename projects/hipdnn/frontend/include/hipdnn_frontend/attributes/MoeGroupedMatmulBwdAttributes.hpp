@@ -138,4 +138,6 @@ public:
         return true;
     }
 };
+typedef MoeGroupedMatmulBwdAttributes
+    Moe_grouped_matmul_bwd_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

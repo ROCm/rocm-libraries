@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -113,6 +113,7 @@ else()
     gfx1153
     gfx1200
     gfx1201
+    gfx1250-strict
   )
 endif()
 if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
@@ -162,6 +163,18 @@ endif()
 
 # Setup version
 rocm_setup_version(VERSION "4.1.1")
+
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCALUTION_COPYRIGHT_YEAR "%Y")
+    if(rocalution_VERSION_TWEAK)
+        set(ROCALUTION_PRODUCT_VERSION_DISPLAY "${rocalution_VERSION_MAJOR}.${rocalution_VERSION_MINOR} (${rocalution_VERSION_TWEAK})")
+    else()
+        set(ROCALUTION_PRODUCT_VERSION_DISPLAY "${rocalution_VERSION_MAJOR}.${rocalution_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( BUILD_CLIENTS ON )

@@ -61,24 +61,30 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                                   fft_auto_allocation            auto_alloc_setting
                                                   = fft_auto_allocation_default)
 {
-    const size_t localDeviceCount = rocfft_scoped_device::device_count();
-    // if we have an explicit split of data on the user side, we need
-    // to use the multiprocessing API
-    if(type)
-    {
-        if(mp_lib == fft_params::fft_mp_lib_none)
-            return {};
-    }
-    // data is not explicitly split up, that means the library is
-    // asked to do the split.  We need multiple GPUs to do this.
-    else if(localDeviceCount < 2)
+    if(mp_lib == fft_params::fft_mp_lib_none && mp_ranks != 1)
+        throw std::runtime_error("Unexpected value of mp_ranks (" + std::to_string(mp_ranks)
+                                 + ") without a multi-process library.");
+
+    // need more than one device overall, of course
+    const auto total_num_devices = mp_ranks * gpus_per_rank;
+    if(total_num_devices < 2)
         return {};
+
+    // We must either have an explicit split type or use
+    // library-defined splitting (exclusive OR)
+    if((type && mp_lib == fft_params::fft_mp_lib_none)
+       || (!type && mp_lib == fft_params::fft_mp_lib_mpi))
+    {
+        return {};
+    }
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
 
     // function pointer callbacks need -fgpu-rdc, but that causes build
-    // nondeterminism in kpack
-    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
+    // nondeterminism in kpack.
+    // JIT callbacks are not yet supported on multi-GPU transforms
+    auto multi_device_callbacks
+        = {fft_callback_type_none, /*fft_callback_type_funcptr, fft_callback_type_jit*/};
 
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
@@ -110,7 +116,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                     continue;
 
                 param_multi.multiGPU
-                    = p.nbatch > 1 ? std::min(p.nbatch, localDeviceCount) : localDeviceCount;
+                    = p.nbatch > 1 ? std::min(p.nbatch, gpus_per_rank) : gpus_per_rank;
                 all_params.emplace_back(std::move(param_multi));
             }
             else
@@ -172,8 +178,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 }
 
                 p_dist.mp_lib = mp_lib;
-                p_dist.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
-                p_dist.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
+                p_dist.distribute_field<fft_io::fft_io_in>(gpus_per_rank, input_grid, mp_ranks);
+                p_dist.distribute_field<fft_io::fft_io_out>(gpus_per_rank, output_grid, mp_ranks);
 
                 // "placement" flag is meaningless if exactly one of
                 // input+output is a field.  So just add those cases if
@@ -230,11 +236,8 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({})),
                          accuracy_test::TestName);
-
-// Note: disabled for now due to lack of implementation in hipFFT
-// with rocfft backend (multi-device workspace assignment is not
-// implemented yet)
-INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
+// library-decided splits, with auto-allocation disabled.
+INSTANTIATE_TEST_SUITE_P(various_multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({},
                                                                        fft_auto_allocation_off)),

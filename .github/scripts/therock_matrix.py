@@ -14,6 +14,11 @@ subtree_to_project_map = {
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
+    # Registered as its own repos-config.json subtree (nested inside hipblaslt)
+    # so change detection can distinguish it from hipblaslt-proper; it maps to
+    # the same "blas" bucket, which already tests tensilelite (see below), so
+    # legacy matrix selection is unaffected either way.
+    "projects/hipblaslt/tensilelite": "blas",
     "projects/hipcub": "prim",
     "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
@@ -61,7 +66,12 @@ project_map = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
-        "projects_to_test": ["miopen", "miopenprovider"],
+        # "miopen-dbsync" is not a project -- it's the GPU-free rocjitsu dbsync test component (defined
+        # in ROCm/TheRock fetch_test_configurations.py, keyed on this exact token). Listing it here
+        # selects it in the per-PR flow whenever the MIOpen bundle is tested; TheRock's multi-arch
+        # runs select it via projects_to_test="*". It runs on a CPU runner (linux_cpu_runner) and is
+        # gated to gfx942/gfx950 via the component's include_family.
+        "projects_to_test": ["miopen", "miopenprovider", "miopen-dbsync"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
@@ -95,7 +105,10 @@ project_map = {
     # Windows support is experimental and off by default in TheRock, and
     # TheRock's rpp test job is Linux-only, so this row is restricted to Linux.
     "rpp": {
-        "cmake_options": ["-DTHEROCK_ENABLE_RPP=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_RPP=ON",
+            "-DTHEROCK_DIST_AMDGPU_FAMILIES=gfx94X-dcgpu;gfx950-dcgpu;gfx125X-dcgpu",
+        ],
         "projects_to_test": ["rpp"],
         "platforms": ["linux"],
     },
@@ -202,10 +215,10 @@ dependency_graph = {
 # its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
 SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
-}
-
-ROCJITSU_RACE_CHECK_SUBTREES = {
-    "projects/hipblaslt",
+    # TensileLite is also a real hipSPARSELt dependency (a separate kernel
+    # generator copy lives there too), so a TensileLite-only change must
+    # activate "sparselt" the same way a hipblaslt-proper change does.
+    "projects/hipblaslt/tensilelite": "sparselt",
 }
 
 
@@ -213,10 +226,6 @@ def collect_projects_to_run(subtrees):
     subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
-    # Record why the BLAS row was selected before dependency folding loses the
-    # original subtree identity. Workflows consume this marker after the matrix
-    # is assembled to attach instrumentation to the final merged product row.
-    run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
@@ -306,11 +315,6 @@ def collect_projects_to_run(subtrees):
             project_map_data["projects_to_test"] = list(
                 set(project_map_data["projects_to_test"])
             )
-            project_map_data["run_rocjitsu_race_check"] = (
-                run_rocjitsu_race_check
-                and "tensilelite" in project_map_data["projects_to_test"]
-            )
-
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
             projects_to_test_options = ",".join(project_map_data["projects_to_test"])
             project_map_data["cmake_options"] = cmake_flag_options

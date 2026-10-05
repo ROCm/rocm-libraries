@@ -180,7 +180,7 @@ jobs:
       continue-on-error: true
       run: |
         source .venv/bin/activate
-        pip install lit
+        pip install -r test/requirements-test.txt
         export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
         export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
         export HIPTHREADS_SOURCE_DIR=$GITHUB_WORKSPACE

@@ -37,6 +37,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -477,21 +478,15 @@ namespace TensileLite
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
                 case rocisa::DataType::Float6:
                     initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
                 case rocisa::DataType::BFloat6:
                     initArray<BFloat6x32>(initMode, static_cast<BFloat6x32*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
                 case rocisa::DataType::Float4:
                     initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
                     break;
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
                 case rocisa::DataType::E8:
                     initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
@@ -769,8 +764,8 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
@@ -780,8 +775,8 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
-                size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for
+                const size_t numPacks = elements / TypeInfo<T>::Packing;
+#pragma omp parallel for shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
@@ -798,9 +793,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -813,9 +808,9 @@ namespace TensileLite
             template <typename T>
             void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -828,17 +823,16 @@ namespace TensileLite
             template <>
             void initArraySerialDim<Half>(Half* array, int dim, TensorDescriptor const& tensor)
             {
-                union
-                {
-                    uint16_t bits;
-                    Half     value;
-                } x;
-
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx++)
                 {
+                    union
+                    {
+                        uint16_t bits;
+                        Half     value;
+                    } x;
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
                     x.bits                     = static_cast<uint16_t>(coord[dim]);
@@ -849,9 +843,9 @@ namespace TensileLite
             template <typename T>
             void initArrayIdentity(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -864,9 +858,9 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                auto const& sizes = tensor.sizes();
-                auto        count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for
+                const auto& sizes = tensor.sizes();
+                const auto  count = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -879,7 +873,7 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             void initArrayTrig(T* array, size_t elements)
             {
-#pragma omp parallel for
+#pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
                     array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
@@ -1192,6 +1186,10 @@ namespace TensileLite
             // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // tensor index. The MX equivalent of g_swizzleCache.
+            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
         };
 
         template <>
@@ -2287,7 +2285,6 @@ namespace TensileLite
             return std::numeric_limits<int8_t>::min();
         }
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Zero>()
         {
@@ -2384,9 +2381,7 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Zero>()
         {
@@ -2486,10 +2481,8 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_BF6
 
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Zero>()
         {
@@ -2593,9 +2586,9 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
-            x.bits = (val1 << 4) | val0;
+            uint8_t val0 = static_cast<uint8_t>(rand() % 16);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 16);
+            x.bits       = (val1 << 4) | val0;
             return x.value;
         }
         template <>
@@ -2608,7 +2601,6 @@ namespace TensileLite
         {
             throw std::runtime_error("BadOutput not available for float4.");
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -2818,29 +2810,23 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadInput<Float6x32>(Float6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline bool DataInitialization::isBadInput<BFloat6x32>(BFloat6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline bool DataInitialization::isBadInput<Float4x2>(Float4x2 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -2935,29 +2921,23 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline bool DataInitialization::isBadOutput<Float6x32>(Float6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline bool DataInitialization::isBadOutput<BFloat6x32>(BFloat6x32 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline bool DataInitialization::isBadOutput<Float4x2>(Float4x2 value)
         {
             return false;
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3048,7 +3028,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getTrigValue<Float6x32>(int idx, bool useCos, bool useAbs)
         {
@@ -3090,9 +3069,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getTrigValue<BFloat6x32>(int idx, bool useCos, bool useAbs)
         {
@@ -3134,9 +3111,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
         {
@@ -3144,7 +3119,6 @@ namespace TensileLite
             float val1 = getTrigValue<float>(idx, useCos, useAbs);
             return Float4x2(val0, val1);
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3385,7 +3359,7 @@ namespace TensileLite
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::RandomNarrow>()
         {
-#if _WIN32
+#if defined(_WIN32)
             //msvc's STL implementation follows [rand.req.genl](1.5), so Float8 as template arg
             //is not allowed
             return Float8(rocm_random_narrow_range<float>{}());
@@ -3397,7 +3371,7 @@ namespace TensileLite
         template <>
         inline BFloat8 DataInitialization::getValue<BFloat8, InitMode::RandomNarrow>()
         {
-#if _WIN32
+#if defined(_WIN32)
             //msvc's STL implementation follows [rand.req.genl](1.5), so BFloat8 as template arg
             //is not allowed
             return BFloat8(rocm_random_narrow_range<float>{}());
@@ -3453,7 +3427,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNarrow>()
         {
@@ -3495,9 +3468,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNarrow>()
         {
@@ -3539,15 +3510,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNarrow>()
         {
             return getValue<Float4x2, InitMode::Random>();
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3668,7 +3636,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNegPosLimited>()
         {
@@ -3710,9 +3677,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNegPosLimited>()
         {
@@ -3754,17 +3719,14 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNegPosLimited>()
         {
             return Float4x2(getValueWithUpperLowerBoundFP<float>(),
                             getValueWithUpperLowerBoundFP<float>());
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3823,7 +3785,6 @@ namespace TensileLite
 #undef TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32
             DataInitialization::getValue<Float6x32, InitMode::UniformLowPrecision>()
@@ -3837,9 +3798,7 @@ namespace TensileLite
                             v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
                             v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32
             DataInitialization::getValue<BFloat6x32, InitMode::UniformLowPrecision>()
@@ -3853,9 +3812,7 @@ namespace TensileLite
                             v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
                             v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2
             DataInitialization::getValue<Float4x2, InitMode::UniformLowPrecision>()
@@ -3864,7 +3821,6 @@ namespace TensileLite
             return Float4x2(getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal),
                             getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -3965,7 +3921,6 @@ namespace TensileLite
         }
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::ConvertTo<Float6x32>(size_t i)
         {
@@ -4007,9 +3962,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::ConvertTo<BFloat6x32>(size_t i)
         {
@@ -4051,15 +4004,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::ConvertTo<Float4x2>(size_t i)
         {
             return Float4x2(float(i), float(i));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
@@ -4154,7 +4104,6 @@ namespace TensileLite
             return static_cast<BFloat8_fnuz>(value);
         }
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
         template <>
         inline Float6x32 DataInitialization::convertDoubleTo<Float6x32>(double value)
         {
@@ -4196,9 +4145,7 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_FP6
 
-#ifdef TENSILE_USE_BF6
         template <>
         inline BFloat6x32 DataInitialization::convertDoubleTo<BFloat6x32>(double value)
         {
@@ -4240,15 +4187,12 @@ namespace TensileLite
                             v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
                             v30, v31);
         }
-#endif // #ifdef TENSILE_USE_BF6
 
-#ifdef TENSILE_USE_FP4
         template <>
         inline Float4x2 DataInitialization::convertDoubleTo<Float4x2>(double value)
         {
             return Float4x2(float(value), float(value));
         }
-#endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
         template <>
