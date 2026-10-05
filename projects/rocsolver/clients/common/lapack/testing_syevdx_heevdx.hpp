@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -326,7 +326,7 @@ void syevdx_heevdx_getError(const rocblas_handle handle,
         if(hNev[b][0] != hNevRes[b][0])
             err++;
     }
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
 
     // (We expect the used input matrices to always converge. Testing
     // implicitly the equivalent non-converged matrix is very complicated and it boils
@@ -342,7 +342,7 @@ void syevdx_heevdx_getError(const rocblas_handle handle,
             // using frobenius norm
             if(hinfo[b][0] == 0)
                 err = norm_error('F', 1, hNev[b][0], 1, hW[b], hWRes[b]);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         else
         {
@@ -364,7 +364,7 @@ void syevdx_heevdx_getError(const rocblas_handle handle,
                 // error is ||hZ - hZRes|| / ||hZ||
                 // using frobenius norm
                 err = norm_error('F', n, hNev[b][0], ldz, hZ[b], hZRes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }

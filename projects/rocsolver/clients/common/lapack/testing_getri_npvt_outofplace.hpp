@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -245,7 +245,7 @@ void getri_npvt_outofplace_getError(const rocblas_handle handle,
         if(hInfoRes[b][0] == 0)
         {
             err = norm_error('F', n, n, lda, hA[b], hARes[b], ldc);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }
