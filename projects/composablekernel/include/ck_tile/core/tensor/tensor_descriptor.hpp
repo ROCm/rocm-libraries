@@ -306,8 +306,15 @@ make_naive_tensor_descriptor(const tuple<Lengths...>& lengths,
         detail::calculate_element_space_size_impl(lengths, strides, number<0>{}, long_number<1>{});
     constexpr long_index_t element_space_size_clamp_value =
         static_cast<long_index_t>(std::numeric_limits<index_t>::max());
-    const index_t element_space_size =
-        static_cast<index_t>(std::min(element_space_size_long, element_space_size_clamp_value));
+    // Clamp written as a test on the high bits instead of std::min: there is no
+    // scalar 64-bit signed min, so the min lowers to v_min_i64 and parks a
+    // wave-uniform value in a VGPR. Every buffer resource built from it then
+    // looks divergent and the compiler wraps each buffer op in a waterfall
+    // loop. Comparing against zero lowers to s_cmp_lg_u64 and stays in SGPRs.
+    // element_space_size_long is a sum of length*stride products, always >= 0.
+    const index_t element_space_size = ((element_space_size_long >> 31) != 0)
+                                           ? static_cast<index_t>(element_space_size_clamp_value)
+                                           : static_cast<index_t>(element_space_size_long);
 
     using GuaranteedVectorLengths =
         typename sequence_merge<typename uniform_sequence_gen<N, -1>::type,
@@ -346,8 +353,13 @@ make_naive_tensor_descriptor_with_offset(const tuple<Lengths...>& lengths,
             lengths, strides, number<0>{}, long_number<1>{});
         constexpr long_index_t element_space_size_clamp_value =
             static_cast<long_index_t>(std::numeric_limits<index_t>::max());
+        // See the note in make_naive_tensor_descriptor: std::min on
+        // long_index_t lowers to v_min_i64 and makes the SRD divergent.
+        // element_space_size_long is always >= 0 here.
         const index_t element_space_size =
-            static_cast<index_t>(std::min(element_space_size_long, element_space_size_clamp_value));
+            ((element_space_size_long >> 31) != 0)
+                ? static_cast<index_t>(element_space_size_clamp_value)
+                : static_cast<index_t>(element_space_size_long);
 
         const auto transforms = make_tuple(make_offset_transform(element_space_size, os));
 
