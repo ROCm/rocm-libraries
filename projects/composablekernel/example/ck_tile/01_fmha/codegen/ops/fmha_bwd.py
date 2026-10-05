@@ -1129,7 +1129,9 @@ class FmhaBwdApiTrait:
             F_idx=self.idx,
             F_hdim=self.hdim,
             F_dtype=self.dtype,
-            F_bm0=256,
+            # gfx12 product-dual tuning uses a 256-row dot(dO, O) tile; keep the
+            # generic 1-D tile on every other architecture.
+            F_bm0=256 if self.arch.name == "gfx12" else M0_1D,
             F_spad=self.spad1d,
             F_dvpad=F_dvpad,
             F_mode=self.mode,
