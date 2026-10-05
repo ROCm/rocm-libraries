@@ -120,6 +120,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceMatmul.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceReduction.cpp
+    gpu-ref/TestGpuFpReferenceResampleFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
     gpu-ref/TestGpuFpReferenceRmsValidation.cpp

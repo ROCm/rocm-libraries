@@ -7,6 +7,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/IntegrationGraphVerificationHarness.hpp"
@@ -100,24 +101,6 @@ std::vector<ResampleBwdTestCase> getResampleBwdTestCases()
     return testCases;
 }
 
-template <typename T>
-constexpr float getTolerance()
-{
-    if constexpr(std::is_same_v<T, float>)
-    {
-        return 1e-5f;
-    }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 1e-3f;
-    }
-    else
-    {
-        static_assert(std::is_same_v<T, bfloat16>);
-        return 1e-2f;
-    }
-}
-
 template <typename DyDataType, typename DxDataType, typename ComputeDataType>
 class ResampleBackward : public IntegrationGraphVerificationHarness<DyDataType, ResampleBwdTestCase>
 {
@@ -166,7 +149,7 @@ protected:
         auto dxTensorAttr = graphObj.resample_bwd(dyTensorAttr, resampleAttrs, indexTensorAttr);
         dxTensorAttr->set_output(true);
         dxTensorAttr->set_data_type(dxDataType);
-        this->registerValidator(dxTensorAttr, getTolerance<DxDataType>());
+        this->registerValidator(dxTensorAttr, resample::getTolerance<DxDataType>());
 
         auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
