@@ -211,6 +211,7 @@
 /projects/hipsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/hipsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/hipsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/fortran/                        @ROCm/rocm-fortran-maintainers @ROCm/solvers-reviewers
 
 /projects/hipsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/hipsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
