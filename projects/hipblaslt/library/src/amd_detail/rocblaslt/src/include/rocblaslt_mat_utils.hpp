@@ -30,6 +30,29 @@
 #include "handle.h"
 #include "utility.hpp"
 
+#include <cstdint>
+#include <limits>
+
+/*******************************************************************************
+ * Validate Workspace Size
+ * Kernels and helper kernels address the workspace with 32-bit byte offsets
+ * and buffer sizes, so a larger workspace cannot be used.
+ ******************************************************************************/
+constexpr size_t rocblaslt_max_workspace_bytes = std::numeric_limits<uint32_t>::max();
+
+inline rocblaslt_status validateWorkspaceSize(const char* func, size_t workspaceBytes)
+{
+    if(workspaceBytes <= rocblaslt_max_workspace_bytes)
+        return rocblaslt_status_success;
+    log_error(func,
+              "workspace size",
+              workspaceBytes,
+              "exceeds the maximum of",
+              rocblaslt_max_workspace_bytes,
+              "bytes");
+    return rocblaslt_status_invalid_value;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)

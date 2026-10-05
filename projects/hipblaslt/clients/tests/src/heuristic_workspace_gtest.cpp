@@ -1,13 +1,15 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// The C++ heuristic query must apply a workspace limit of 2 GiB or more as the C query does.
+// The C++ heuristic query must apply a workspace limit from 2 GiB to UINT32_MAX as the C query
+// does. Kernels address the workspace with 32-bit offsets, so both APIs reject anything larger.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <tuple>
 #include <vector>
 
@@ -20,6 +22,11 @@ namespace
     constexpr int64_t     kK         = 16384;
     constexpr hipDataType kType      = HIP_R_16F;
     constexpr int         kRequested = 32;
+    constexpr uint64_t    kGiB       = uint64_t{1} << 30;
+    constexpr uint64_t    kUint32Max = std::numeric_limits<uint32_t>::max();
+    // Covers any solution the heuristic picks for this problem, whose split-K partials are
+    // capped at 128 MiB.
+    constexpr size_t kWorkspace = size_t{128} << 20;
 
     // Solution index, required workspace and workspace limit of each result.
     std::vector<std::tuple<int, size_t, size_t>>
@@ -45,6 +52,7 @@ namespace
         void*                   a       = nullptr;
         void*                   b       = nullptr;
         void*                   d       = nullptr;
+        void*                   ws      = nullptr;
         float                   alpha   = 1.0f;
         float                   beta    = 0.0f;
 
@@ -62,11 +70,12 @@ namespace
             ASSERT_EQ(hipMalloc(&a, kM * kK * sizeof(uint16_t)), hipSuccess);
             ASSERT_EQ(hipMalloc(&b, kK * kN * sizeof(uint16_t)), hipSuccess);
             ASSERT_EQ(hipMalloc(&d, kM * kN * sizeof(uint16_t)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
         }
 
         void TearDown() override
         {
-            for(void* buffer : {a, b, d})
+            for(void* buffer : {a, b, d, ws})
                 static_cast<void>(hipFree(buffer));
             for(hipblasLtMatrixLayout_t layout : {layoutA, layoutB, layoutD})
                 if(layout)
@@ -104,6 +113,31 @@ namespace
             return status;
         }
 
+        hipblasStatus_t setLimit(uint64_t limit)
+        {
+            hipblasLtMatmulPreference_t pref   = nullptr;
+            hipblasStatus_t             status = hipblasLtMatmulPreferenceCreate(&pref);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                return status;
+            status = hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit));
+            hipblasLtMatmulPreferenceDestroy(pref);
+            return status;
+        }
+
+        hipblasStatus_t setProblem(hipblaslt_ext::Gemm& gemm)
+        {
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in;
+            in.setA(a);
+            in.setB(b);
+            in.setC(d);
+            in.setD(d);
+            in.setAlpha(&alpha);
+            in.setBeta(&beta);
+            return gemm.setProblem(kM, kN, kK, 1, epilogue, in);
+        }
+
         hipblasStatus_t cppHeuristic(uint64_t                                       limit,
                                      std::vector<hipblasLtMatmulHeuristicResult_t>& out)
         {
@@ -115,15 +149,7 @@ namespace
                                      kType,
                                      kType,
                                      HIPBLAS_COMPUTE_32F);
-            hipblaslt_ext::GemmEpilogue epilogue;
-            hipblaslt_ext::GemmInputs   in;
-            in.setA(a);
-            in.setB(b);
-            in.setC(d);
-            in.setD(d);
-            in.setAlpha(&alpha);
-            in.setBeta(&beta);
-            hipblasStatus_t status = gemm.setProblem(kM, kN, kK, 1, epilogue, in);
+            hipblasStatus_t     status = setProblem(gemm);
             if(status != HIPBLAS_STATUS_SUCCESS)
                 return status;
             hipblaslt_ext::GemmPreference pref;
@@ -132,17 +158,64 @@ namespace
         }
     };
 
-    TEST_F(HeuristicWorkspaceLimit, smoke_CppQueryKeepsLimitsOf2GiBAndMore)
+    TEST_F(HeuristicWorkspaceLimit, smoke_CppQueryKeepsLimitsFrom2GiBToUint32Max)
     {
-        for(uint64_t limit : {2ull << 30, 3ull << 30, 4ull << 30})
+        for(uint64_t limit : {2 * kGiB, 3 * kGiB, kUint32Max})
         {
             SCOPED_TRACE(limit);
+            ASSERT_EQ(setLimit(limit), HIPBLAS_STATUS_SUCCESS);
             std::vector<hipblasLtMatmulHeuristicResult_t> c, cpp;
             if(cHeuristic(limit, c) != HIPBLAS_STATUS_SUCCESS || c.empty())
                 GTEST_SKIP() << "No solution for this problem in the loaded library";
             ASSERT_EQ(cppHeuristic(limit, cpp), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(c.front().algo.max_workspace_bytes, limit);
             EXPECT_EQ(summary(cpp), summary(c));
+        }
+    }
+
+    // Every entry point that takes a workspace size or limit rejects it before selecting or
+    // launching a kernel, so no solution library is needed.
+    TEST_F(HeuristicWorkspaceLimit, smoke_RejectsWorkspaceAboveUint32Max)
+    {
+        for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
+        {
+            SCOPED_TRACE(limit);
+            EXPECT_EQ(setLimit(limit), HIPBLAS_STATUS_INVALID_VALUE);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> results;
+            EXPECT_EQ(cppHeuristic(limit, results), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_TRUE(results.empty());
+
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      a,
+                                      layoutA,
+                                      b,
+                                      layoutB,
+                                      &beta,
+                                      d,
+                                      layoutD,
+                                      d,
+                                      layoutD,
+                                      nullptr,
+                                      ws,
+                                      limit,
+                                      nullptr),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            ASSERT_EQ(setProblem(gemm), HIPBLAS_STATUS_SUCCESS);
+            gemm.setMaxWorkspaceBytes(limit);
+            hipblasLtMatmulAlgo_t algo{};
+            EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_INVALID_VALUE);
         }
     }
 } // namespace
