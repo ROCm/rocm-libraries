@@ -25,7 +25,10 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
+#include <algorithm>
 #include <iomanip>
+#include <iterator>
+#include <limits>
 #include <map>
 
 #include <hip/hip_runtime_api.h>
@@ -498,6 +501,21 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_datatype value_)
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
     case rocsparse_datatype_bf16_r:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
+{
+    switch(value)
+    {
+    case rocsparse_hyb_partition_auto:
+    case rocsparse_hyb_partition_user:
+    case rocsparse_hyb_partition_max:
     {
         return false;
     }
@@ -1355,6 +1373,221 @@ try
     }
 
     delete hyb;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief Get the internal fields of a HYB matrix, without exposing its layout.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
+                                            rocsparse_int*           m,
+                                            rocsparse_int*           n,
+                                            rocsparse_hyb_partition* partition,
+                                            int64_t*                 ell_nnz,
+                                            rocsparse_int*           ell_width,
+                                            const rocsparse_int**    ell_col_ind,
+                                            const void**             ell_val,
+                                            rocsparse_int*           coo_nnz,
+                                            const rocsparse_int**    coo_row_ind,
+                                            const rocsparse_int**    coo_col_ind,
+                                            const void**             coo_val,
+                                            rocsparse_datatype*      data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    if(m != nullptr)
+    {
+        *m = hyb->m;
+    }
+    if(n != nullptr)
+    {
+        *n = hyb->n;
+    }
+    if(partition != nullptr)
+    {
+        *partition = hyb->partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = hyb->ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = hyb->ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = hyb->ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = hyb->ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = hyb->coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = hyb->coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = hyb->coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = hyb->coo_val;
+    }
+    if(data_type != nullptr)
+    {
+        *data_type = hyb->data_type_T;
+    }
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief Set the internal fields of a HYB matrix, without exposing its layout.
+ * Ownership of the array pointers is transferred to the HYB matrix.
+ *******************************************************************************/
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
+                                            const rocsparse_int*           m,
+                                            const rocsparse_int*           n,
+                                            const rocsparse_hyb_partition* partition,
+                                            const int64_t*                 ell_nnz,
+                                            const rocsparse_int*           ell_width,
+                                            rocsparse_int* const*          ell_col_ind,
+                                            void* const*                   ell_val,
+                                            const rocsparse_int*           coo_nnz,
+                                            rocsparse_int* const*          coo_row_ind,
+                                            rocsparse_int* const*          coo_col_ind,
+                                            void* const*                   coo_val,
+                                            const rocsparse_datatype*      data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, hyb);
+
+    // Validate everything before modifying hyb, so that an error leaves it unchanged.
+    if(m != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(1, *m);
+    }
+    if(n != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(2, *n);
+    }
+    if(partition != nullptr)
+    {
+        ROCSPARSE_CHECKARG_ENUM(3, *partition);
+    }
+    if(ell_nnz != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(4, *ell_nnz);
+        ROCSPARSE_CHECKARG(4,
+                           ell_nnz,
+                           (static_cast<uint64_t>(*ell_nnz) > static_cast<uint64_t>(
+                                std::numeric_limits<decltype(hyb->ell_nnz)>::max())),
+                           rocsparse_status_invalid_size);
+    }
+    if(ell_width != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(5, *ell_width);
+    }
+    if(coo_nnz != nullptr)
+    {
+        ROCSPARSE_CHECKARG_SIZE(8, *coo_nnz);
+    }
+    if(data_type != nullptr)
+    {
+        ROCSPARSE_CHECKARG_ENUM(12, *data_type);
+    }
+
+    void* const old_arrays[]
+        = {hyb->ell_col_ind, hyb->ell_val, hyb->coo_row_ind, hyb->coo_col_ind, hyb->coo_val};
+
+    rocsparse_int* new_ell_col_ind = (ell_col_ind != nullptr) ? *ell_col_ind : hyb->ell_col_ind;
+    void*          new_ell_val     = (ell_val != nullptr) ? *ell_val : hyb->ell_val;
+    rocsparse_int* new_coo_row_ind = (coo_row_ind != nullptr) ? *coo_row_ind : hyb->coo_row_ind;
+    rocsparse_int* new_coo_col_ind = (coo_col_ind != nullptr) ? *coo_col_ind : hyb->coo_col_ind;
+    void*          new_coo_val     = (coo_val != nullptr) ? *coo_val : hyb->coo_val;
+
+    const void* const new_arrays[]
+        = {new_ell_col_ind, new_ell_val, new_coo_row_ind, new_coo_col_ind, new_coo_val};
+
+    // Release every previously held array that is not kept by any field. An array
+    // moved to another field, or passed again unchanged, must not be freed.
+    bool synchronized = false;
+    for(void* old_array : old_arrays)
+    {
+        if(old_array == nullptr
+           || std::find(std::begin(new_arrays), std::end(new_arrays), old_array)
+                  != std::end(new_arrays))
+        {
+            continue;
+        }
+
+        if(!synchronized)
+        {
+            // hipFree may be asynchronous since HIP 7.0 (see rocsparse_destroy_hyb_mat).
+            RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+            synchronized = true;
+        }
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(old_array));
+    }
+
+    if(m != nullptr)
+    {
+        hyb->m = *m;
+    }
+    if(n != nullptr)
+    {
+        hyb->n = *n;
+    }
+    if(partition != nullptr)
+    {
+        hyb->partition = *partition;
+    }
+    if(ell_nnz != nullptr)
+    {
+        hyb->ell_nnz = static_cast<decltype(hyb->ell_nnz)>(*ell_nnz);
+    }
+    if(ell_width != nullptr)
+    {
+        hyb->ell_width = *ell_width;
+    }
+    if(coo_nnz != nullptr)
+    {
+        hyb->coo_nnz = *coo_nnz;
+    }
+    if(data_type != nullptr)
+    {
+        hyb->data_type_T = *data_type;
+    }
+
+    hyb->ell_col_ind = new_ell_col_ind;
+    hyb->ell_val     = new_ell_val;
+    hyb->coo_row_ind = new_coo_row_ind;
+    hyb->coo_col_ind = new_coo_col_ind;
+    hyb->coo_val     = new_coo_val;
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
