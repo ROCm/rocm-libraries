@@ -37,8 +37,8 @@ namespace {
 constexpr GfxArchID kArch = GfxArchID::Gfx1250;
 constexpr std::array<int, 3> kArchTriple = {12, 5, 0};
 
-/// A VMEM load, then an s_set_vgpr_msb whose successor is not memory: the pass
-/// drains XCNT at the s_set_vgpr_msb, so each call costs exactly one drain.
+/// A VMEM load, then an s_set_vgpr_msb: the pass drains XCNT before the
+/// s_set_vgpr_msb, so each call costs exactly one drain.
 /// The block has no loop and no matrix instruction, so it lands in "other".
 void addVgprMsbDrainSite(BasicBlock* bb, int destReg) {
     AsmIRBuilder builder(*bb, kArch);

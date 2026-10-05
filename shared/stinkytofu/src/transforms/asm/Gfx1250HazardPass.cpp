@@ -8,7 +8,6 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -47,17 +46,29 @@ constexpr ReplayMode kReplayMode = ReplayMode::SingleGroup;
 // SMEM, VMEM (global/flat/scratch/buffer), or Other (TDM in single-group
 // mode). GroupState records the type, whether the group has non-atomic memory,
 // and source register DWORDs that must remain intact until it drains.
+//
+// xcntLive is not the replay group. A zero wait retires that counter's sources
+// only; s_wait_loadcnt does not drain stores, scalar, or tensor translations.
+// Only s_wait_xcnt 0, or a real non-memory instruction that hardware stalls
+// until XCNT==0, clears it.
 struct GroupState {
     MemoryGroupKind kind = MemoryGroupKind::None;
     bool hasMemory = false;
     bool hasNonAtomic = false;
+    bool xcntLive = false;
     RegKeySet sources;
 
-    void clear() {
+    // The waited counter's sources are done. Other translations may still be in flight.
+    void clearReplayGroup() {
         kind = MemoryGroupKind::None;
         hasMemory = false;
         hasNonAtomic = false;
         sources.clear();
+    }
+
+    void clear() {
+        clearReplayGroup();
+        xcntLive = false;
     }
 };
 
@@ -114,9 +125,10 @@ bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
            srcs.front().getLiteralInt() == 0;
 }
 
-// A zero-count data wait guarantees translation for the corresponding memory
-// operations. Nonzero waits leave work in flight and are not full drains.
-bool isFullTranslationDrain(const StinkyInstruction& inst) {
+// Data-counter waits. A zero immediate retires that counter; it does not by
+// itself prove XCNT==0. s_wait_loadcnt 1 leaves its load in flight and does
+// not touch any other counter.
+bool isTranslationCounterWait(const StinkyInstruction& inst) {
     switch (inst.getUnifiedOpcode()) {
         case GFX::s_wait_xcnt:
         case GFX::s_wait_loadcnt:
@@ -127,10 +139,16 @@ bool isFullTranslationDrain(const StinkyInstruction& inst) {
         case GFX::s_wait_storecnt:
         case GFX::s_wait_storecnt_dscnt:
         case GFX::s_wait_asynccnt:
-            return hasZeroWaitImmediate(inst);
+            return true;
         default:
             return false;
     }
+}
+
+// A zero-count data wait guarantees translation for the corresponding memory
+// operations. Nonzero waits leave work in flight and are not full drains.
+bool isFullTranslationDrain(const StinkyInstruction& inst) {
+    return isTranslationCounterWait(inst) && hasZeroWaitImmediate(inst);
 }
 
 bool isForeverSleep(const StinkyInstruction& inst) {
@@ -146,17 +164,6 @@ bool isForeverSleep(const StinkyInstruction& inst) {
 
 bool isScalarPrefetch(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_prefetch_inst_pc_rel;
-}
-
-bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
-    for (auto next = std::next(it); next != bb.end(); ++next) {
-        auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
-        if (inst == nullptr || isPseudoInst(inst)) {
-            continue;
-        }
-        return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
-    }
-    return false;
 }
 
 // Rules 2 and 3 are repaired by cutting the replay group short, which costs
@@ -252,8 +259,15 @@ class Gfx1250HazardPass : public Pass {
 
         if (isTensorLoad(*inst)) profile.noteTensorLoad();
 
-        if (isFullTranslationDrain(*inst)) {
-            state.clear();
+        // s_wait_xcnt 0 is the only counter wait that retires every translation.
+        // s_wait_loadcnt 0 ends the load replay group, but stores, scalar, and
+        // tensor XCNT can still be outstanding. A nonzero wait (s_wait_loadcnt 1)
+        // does not even retire the load it names.
+        if (isTranslationCounterWait(*inst)) {
+            if (inst->getUnifiedOpcode() == GFX::s_wait_xcnt && hasZeroWaitImmediate(*inst))
+                state.clear();
+            else if (isFullTranslationDrain(*inst))
+                state.clearReplayGroup();
             return;
         }
         if (enableXnackReplay) {
@@ -277,10 +291,15 @@ class Gfx1250HazardPass : public Pass {
             }
 
             if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
-                if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
+                // S_SET_VGPR_MSB must not execute until XCNT==0: XNACK replay
+                // restores the VGPR map from the faulting instruction. In a
+                // non-leading issue dword it can co-issue and skip that check,
+                // including when the next instruction is the memory op that
+                // uses the new map. An explicit s_wait_xcnt 0 is the workaround
+                // whenever a translation may still be in flight.
+                if (state.xcntLive)
                     insertXcntDrain(builder, archId, inst, state, profile,
                                     XcntDrainReason::VgprMsb);
-                // s_set_vgpr_msb is a non-memory single-group boundary.
                 state.clear();
                 return;
             }
@@ -368,6 +387,7 @@ class Gfx1250HazardPass : public Pass {
         state.kind = kind;
         state.hasMemory = true;
         state.hasNonAtomic |= !atomic;
+        state.xcntLive = true;
         addSources(state.sources, *inst);
     }
 
