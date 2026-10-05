@@ -29,6 +29,8 @@
 #include "../../../shared/rocfft_complex.h"
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -82,6 +84,24 @@ struct hash_output
     Tint buffer_imag;
 };
 
+// Fixed, platform-independent 64-bit mix (splitmix64 finalizer).
+// Unlike std::hash, the result is defined here and does not depend on compiler,
+// standard library, or process.
+static inline uint64_t stable_hash(uint64_t z)
+{
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+static inline uint64_t stable_hash(float v)
+{
+    return stable_hash(static_cast<uint64_t>(std::bit_cast<uint32_t>(v)));
+}
+static inline uint64_t stable_hash(double v)
+{
+    return stable_hash(std::bit_cast<uint64_t>(v));
+}
+
 static inline double get_weight(const size_t counter, const size_t max_counter)
 {
     return (static_cast<double>(counter) / static_cast<double>(max_counter));
@@ -94,7 +114,7 @@ static inline void hash_value(Tint&              hash_value,
                               const rocfft_fp16& input_value)
 {
     auto weight = get_weight(counter, max_counter);
-    hash_value += std::hash<float>{}(weight * input_value);
+    hash_value += stable_hash(static_cast<float>(weight * input_value));
 }
 template <typename Tint>
 static inline void hash_value(Tint&        hash_value,
@@ -103,7 +123,7 @@ static inline void hash_value(Tint&        hash_value,
                               const float& input_value)
 {
     auto weight = get_weight(counter, max_counter);
-    hash_value += std::hash<float>{}(weight * input_value);
+    hash_value += stable_hash(static_cast<float>(weight * input_value));
 }
 template <typename Tint>
 static inline void hash_value(Tint&         hash_value,
@@ -112,7 +132,7 @@ static inline void hash_value(Tint&         hash_value,
                               const double& input_value)
 {
     auto weight = get_weight(counter, max_counter);
-    hash_value  = std::hash<double>{}(weight * input_value) + hash_value;
+    hash_value  = stable_hash(static_cast<double>(weight * input_value)) + hash_value;
 }
 
 template <typename Tint>
