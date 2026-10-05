@@ -493,6 +493,7 @@ namespace TensileLite
 
         column("solution_index", entry.solutionIndex);
         column("kernel_name", entry.kernelName.value_or(std::string{}));
+        column("solution_name", entry.solutionName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
 

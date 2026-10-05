@@ -236,6 +236,32 @@ namespace
         EXPECT_DOUBLE_EQ(read.winnerTimeUs, 12.5);
     }
 
+    // A current row may be named by its kernel, its solution or both, and an
+    // entry's identity includes both names. Each must survive the writer: a
+    // row named only by its solution would otherwise read back with no name
+    // and be rejected.
+    TEST_F(TuningStore, WrittenRowKeepsBothNames)
+    {
+        TunedEntry solutionOnly   = tunedEntry(7, "");
+        solutionOnly.kernelName   = std::nullopt;
+        solutionOnly.solutionName = "Cijk_Alik_Bljk_HHS_MT64x32x64_SN";
+        TunedEntry both           = tunedEntry(9, "Cijk_Alik_Bljk_HHS_MT64x32x64");
+        both.solutionName         = "Cijk_Alik_Bljk_HHS_MT64x32x64_SN";
+
+        for(const auto& written : {solutionOnly, both})
+        {
+            SCOPED_TRACE(written.kernelName ? "both names" : "solution name only");
+            OverrideMap map;
+            ASSERT_EQ(loadInto(map, fileOf({tunedRow(halfKey(), written)})).accepted, 1u);
+
+            const auto found = map.find(halfKey());
+            ASSERT_EQ(found.size(), 1u);
+            EXPECT_EQ(found[0].kernelName, written.kernelName);
+            EXPECT_EQ(found[0].solutionName, written.solutionName);
+            EXPECT_TRUE(found[0].sameIdentity(written));
+        }
+    }
+
     // The FNUZ FP8 types have their own spelling. Written as the plain FP8
     // spelling they would read back as the OCP types, and the row would never
     // match the problem it was tuned for.
