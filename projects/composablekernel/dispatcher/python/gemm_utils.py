@@ -2754,6 +2754,7 @@ def expand_sweep(
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
+    reduction_strategies: Optional[List[str]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2784,6 +2785,10 @@ def expand_sweep(
     only. Each base config is emitted once per distinct resolved triple; a
     triple that is illegal for the tile is dropped and its reason counted in
     ``rejects`` (when given).
+
+    ``reduction_strategies`` (``variant='stream_k'`` only) replaces the
+    config's ``streamk_config.reduction_strategy`` list before expansion, so an
+    override never multiplies the sweep by the config's own strategies.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2845,7 +2850,9 @@ def expand_sweep(
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
         sk = cfg.get("streamk_config", {})
-        reductions = _expand_values(sk.get("reduction_strategy"), ["atomic"])
+        reductions = reduction_strategies or _expand_values(
+            sk.get("reduction_strategy"), ["atomic"]
+        )
     else:
         reductions = ["atomic"]
 

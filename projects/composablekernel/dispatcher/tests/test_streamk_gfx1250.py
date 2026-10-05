@@ -158,6 +158,25 @@ class TestGfx1250StreamKExpansion(unittest.TestCase):
         self.assertEqual({c.tile_k for c in configs}, {64, 128})
         self.assertEqual(len(configs), 4)
 
+    def test_reduction_override_replaces_config_strategies(self):
+        with open(GFX1250_CONFIG) as f:
+            cfg = json.load(f)
+        cfg["streamk_config"] = {
+            "reduction_strategy": {"values": ["atomic", "linear", "tree"]}
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps(cfg))
+            kwargs = dict(dtype="fp16", layout="rcr", variant="stream_k")
+            swept = expand_sweep(str(config_path), "gfx1250", **kwargs)
+            tree = expand_sweep(
+                str(config_path), "gfx1250", reduction_strategies=["tree"], **kwargs
+            )
+        self.assertEqual(len(swept), 3 * len(tree))
+        self.assertEqual({c.reduction_strategy for c in tree}, {"tree"})
+        self.assertEqual(len({c.name for c in tree}), len(tree))
+        self.assertTrue(all(c.name.endswith("_streamk_tree") for c in tree))
+
     def test_gfx1250_streamk_compile_command_has_architecture_features(self):
         config = self._expand()[0]
         from dispatcher_common import arch_feature_defines, unified_framework_flags

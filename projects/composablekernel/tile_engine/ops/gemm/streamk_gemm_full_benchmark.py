@@ -36,7 +36,6 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import replace
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -346,14 +345,12 @@ def main():
                 dtype=args.dtype,
                 layout=args.layout,
                 variant="stream_k",
+                reduction_strategies=(
+                    [args.reduction_strategy] if args.reduction_strategy else None
+                ),
                 **vfb.expand_kwargs,
             )
         )
-
-    if args.reduction_strategy is not None:
-        all_configs = [
-            replace(c, reduction_strategy=args.reduction_strategy) for c in all_configs
-        ]
 
     vfb.report_rejects()
 
