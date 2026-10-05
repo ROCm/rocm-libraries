@@ -139,6 +139,15 @@
 #cmakedefine CK_USE_NATIVE_MX_SUPPORT @CK_USE_NATIVE_MX_SUPPORT@
 #endif
 
+// Set when this CK build contains gfx1250-exclusive instance translation units. The
+// instance-factory headers are installed, so the guards around their gfx1250 registrations
+// must be visible to downstream consumers; CK_USE_GFX1250 is build-local only and would
+// silently evaluate false for them. Deliberately not CK_USE_GFX1250 or CK_GFX1250_SUPPORT --
+// see the comment where it is set in CMakeLists.txt.
+#ifndef CK_HAS_GFX1250_INSTANCES
+#cmakedefine CK_HAS_GFX1250_INSTANCES @CK_HAS_GFX1250_INSTANCES@
+#endif
+
 // clang-format on
 
 #endif // CK_CONFIG_H_IN

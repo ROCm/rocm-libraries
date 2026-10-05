@@ -3,6 +3,7 @@
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data/device_grouped_conv_bwd_data_xdl_v3_instance.hpp"
+#include "ck/host_utility/device_prop.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -23,6 +24,11 @@ void add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_in
                                                                   PassThrough,
                                                                   PassThrough>>>& instances)
 {
+    // These instances exist only for gfx1250; register nothing on any other device.
+    if(!ck::is_gfx125_supported())
+    {
+        return;
+    }
     // 1. Default
     add_device_operation_instances(
         instances,

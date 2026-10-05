@@ -77,34 +77,36 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 
         constexpr index_t LDS_size =
             GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
-        __shared__ char p_shared[LDS_size];
+        if constexpr(LDS_size <= get_lds_size(get_device_arch()))
+        {
+            __shared__ char p_shared[LDS_size];
 
-        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
-                                   AGridDesc_AK0_M_K1,
-                                   BGridDesc_BK0_N_K1,
-                                   ck::Tuple<>, // Empty tuple
-                                   CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   decltype(block_2_ctile_map_),
-                                   ComputePtrOffsetOfBatch,
-                                   ComputePtrOffsetOfBatch, // placeholder
-                                   1,
-                                   HasMainKBlockLoop,
-                                   CGlobalMemoryDataOperation,
-                                   false,
-                                   TailNum,
-                                   decltype(epilogue_args)>(
-            p_shared,
-            a_grid_desc_ak0_m_ak1,
-            b_grid_desc_bk0_n_bk1,
-            ck::Tuple<>(), // placeholder
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            block_2_ctile_map_,
-            compute_ptr_offset_of_batch,
-            ComputePtrOffsetOfBatch{}, // placeholder
-            num_k_per_block,
-            karg,
-            epilogue_args);
-
+            GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
+                                       AGridDesc_AK0_M_K1,
+                                       BGridDesc_BK0_N_K1,
+                                       ck::Tuple<>, // Empty tuple
+                                       CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                       decltype(block_2_ctile_map_),
+                                       ComputePtrOffsetOfBatch,
+                                       ComputePtrOffsetOfBatch, // placeholder
+                                       1,
+                                       HasMainKBlockLoop,
+                                       CGlobalMemoryDataOperation,
+                                       false,
+                                       TailNum,
+                                       decltype(epilogue_args)>(
+                p_shared,
+                a_grid_desc_ak0_m_ak1,
+                b_grid_desc_bk0_n_bk1,
+                ck::Tuple<>(), // placeholder
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                block_2_ctile_map_,
+                compute_ptr_offset_of_batch,
+                ComputePtrOffsetOfBatch{}, // placeholder
+                num_k_per_block,
+                karg,
+                epilogue_args);
+        }
 #if defined(__gfx11__)
     }
 #endif

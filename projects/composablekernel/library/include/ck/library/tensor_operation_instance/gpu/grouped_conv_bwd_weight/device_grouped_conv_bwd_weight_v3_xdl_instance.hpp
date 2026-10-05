@@ -234,6 +234,14 @@ using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_instances =
         ::std::declval<device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_base_instances<NDimSpatial, ALayout, BLayout, ELayout, ConvSpec, Scheduler, PipelineVersion>>(),
         ::std::declval<device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_high_reg_usage_instances<NDimSpatial, BF16, ALayout, BLayout, ELayout, ConvSpec, Scheduler, PipelineVersion>>()));
 
+// gfx1250-exclusive backward-weight instances (XDL).
+//
+// Tiles here reach 196608 B of LDS (e.g. 256/64/32/1024), three times the 64 KB budget
+// of every non-gfx1250 target, and they are tuned for the wave32 path only. They are
+// instantiated solely by *_gfx1250_instance.cpp translation units, which the instance
+// CMakeLists restricts to --offload-arch=gfx1250*. Do NOT gate them on the host-side
+// CK_USE_GFX1250 macro: that macro is global to the build and cannot distinguish one
+// offload architecture from another.
 template <ck::index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -241,8 +249,7 @@ template <ck::index_t NDimSpatial,
           ConvolutionBackwardWeightSpecialization ConvSpec,
           BlockGemmPipelineScheduler Scheduler,
           BlockGemmPipelineVersion PipelineVersion>
-using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances = std::tuple<
-#if defined(CK_USE_GFX1250)
+using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_gfx1250_instances = std::tuple<
     // clang-format off
         //#########################################|       Num| InLayout| WeiLayout| OutLayout| InData| WeiData| OutData| AccData|          In|         Wei|         Out|              ConvBackward| Block|  MPer|  NPer| K0Per| K1| MPer| NPer| MXdl| NXdl|  ABlockTransfer|   ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle|   CBlockTransfer|  CBlockTransfer| BlockGemm| BlockGemm|
         //#########################################|       Dim|         |          |          |   Type|    Type|    Type|    Type| Elementwise| Elementwise| Elementwise|                    Weight|  Size| Block| Block| Block|   |  XDL|  XDL|  Per|  Per|   ThreadCluster|    ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|   ClusterLengths| ScalarPerVector|  Pipeline|  Pipeline|
@@ -259,7 +266,6 @@ using device_grouped_conv_bwd_weight_v3_xdl_c_shuffle_bf16_large_k_instances = s
         DeviceGroupedConvBwdWeight_Xdl_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,                  ConvSpec,   256,    64,   128,   256, 16,   16,   16,    1,    4,     S<16, 8, 2>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,      true,     S<16, 8, 2>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,      true,           1,           1,   S<1, 64, 1, 4>,               8, Scheduler, PipelineVersion>,
         DeviceGroupedConvBwdWeight_Xdl_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,                  ConvSpec,   256,    64,   128,   256, 16,   16,   16,    4,    1,     S<16, 8, 2>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,      true,     S<16, 8, 2>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,      true,           1,           1,   S<1, 16, 1,16>,               8, Scheduler, PipelineVersion>    
         //clang-format on
-#endif
     >;
 
 // large-tensor variants (uses ck::long_index_t for index arithmetic; requires packed tensors)
