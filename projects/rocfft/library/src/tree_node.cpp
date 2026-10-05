@@ -269,9 +269,10 @@ bool LeafNode::CreateDevKernelArgs()
 
 bool LeafNode::CreateDeviceResources()
 {
-    if(need_chirp)
+    if(NeedsChirp())
     {
-        std::tie(chirp, chirp_size) = Repo::GetChirp(lengthBlueN, precision, deviceProp);
+        std::tie(chirp, chirp_size)
+            = Repo::GetChirp(blue->get_transform_length(), precision, deviceProp);
     }
 
     if(need_twd_table)
@@ -519,12 +520,13 @@ bool TreeNode::IsBluesteinChirpSetup()
     // setup nodes must be under a bluestein parent. multi-kernel fused
     // bluestein is an exception to this rule as the first two chirp + padding
     // nodes are under an L1D_CC node.
-    if(typeBlue != BT_MULTI_KERNEL_FUSED && (parent == nullptr || parent->scheme != CS_BLUESTEIN))
+    if(GetBluesteinType() != BT_MULTI_KERNEL_FUSED
+       && (parent == nullptr || parent->scheme != CS_BLUESTEIN))
         return false;
     // bluestein could either be 3-kernel plan (so-called single kernel Bluestein),
     // meaning the first two are setup kernels, or multi-kernel bluestein (fused or non-fused)
     // where only the first is setup
-    switch(parent->typeBlue)
+    switch(parent->GetBluesteinType())
     {
     case BluesteinType::BT_NONE:
         return false;
@@ -533,10 +535,24 @@ bool TreeNode::IsBluesteinChirpSetup()
     case BluesteinType::BT_MULTI_KERNEL:
         return this == parent->childNodes[0].get();
     case BluesteinType::BT_MULTI_KERNEL_FUSED:
-        return (fuseBlue == BFT_FWD_CHIRP) ? true : false;
+        return GetBluesteinFuseType() == BFT_FWD_CHIRP;
     }
 
     throw std::runtime_error("unexpected bluestein plan shape");
+}
+
+bool TreeNode::NeedsChirp() const
+{
+    const auto fuse = GetBluesteinFuseType();
+    switch(scheme)
+    {
+    case CS_KERNEL_STOCKHAM_BLOCK_CC:
+        return fuse == BFT_FWD_CHIRP || fuse == BFT_FWD_CHIRP_MUL;
+    case CS_KERNEL_STOCKHAM_BLOCK_RC:
+        return fuse == BFT_INV_CHIRP_MUL;
+    default:
+        return false;
+    }
 }
 
 MultiPlanItem::MultiPlanItem() {}

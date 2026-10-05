@@ -205,7 +205,8 @@ static bool ValidOutBufferBluestein(TreeNode& node)
     //   (2) chirp / input Hadamard product + padding + forward fft
 
     // First check multi-kernel fused Bluestein implementation
-    if((node.fuseBlue == BFT_FWD_CHIRP || node.fuseBlue == BFT_FWD_CHIRP_MUL)
+    if((node.GetBluesteinFuseType() == BFT_FWD_CHIRP
+        || node.GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL)
        && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
     {
         return true;
@@ -298,10 +299,11 @@ static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(TreeN
     auto len    = node.UseOutputLengthForPadding() ? node.GetOutputLength() : node.length;
     auto stride = node.outStride;
     // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
-    if(node.fuseBlue == BFT_INV_CHIRP_MUL && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
+    if(node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL
+       && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
     {
         len.erase(len.begin(), len.begin() + 2);
-        len.insert(len.begin(), node.lengthBlueN);
+        len.insert(len.begin(), node.blue->get_transform_length());
         stride.erase(stride.begin() + 1);
     }
     return {len, stride};
@@ -365,7 +367,7 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         // self-explanatory with explicit strides [1, A] -> [B, 1] without
         // changing the ordering of axes). That would remove the ambiguity of
         // "which length to use in this context?"
-        if(node.fuseBlue == BFT_NONE)
+        if(node.GetBluesteinFuseType() == BFT_NONE)
         {
             nodeLen = node.GetOutputLength();
             if(doubleFront)
@@ -413,12 +415,12 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // second node in multi-kernel fused Bluestein must write only to
     // two specific buffers
     else if((buffer == OB_USER_OUT || buffer == OB_TEMP_CMPLX_FOR_REAL)
-            && node.fuseBlue == BFT_FWD_CHIRP_MUL)
+            && node.GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL)
     {
         test_result = false;
     }
     // third node in multi-kernel fused Bluestein must not write to OB_TEMP_CMPLX_FOR_REAL
-    else if(buffer == OB_TEMP_CMPLX_FOR_REAL && node.fuseBlue == BFT_INV_CHIRP_MUL)
+    else if(buffer == OB_TEMP_CMPLX_FOR_REAL && node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
     {
         test_result = false;
     }
@@ -597,7 +599,7 @@ void AssignmentPolicy::FindBluesteinFusedNodes(ExecPlan&               execPlan,
     execPlan.rootPlan->AssignParams();
 
     for(const auto& node : blueNodes)
-        if(node->typeBlue == BT_MULTI_KERNEL_FUSED)
+        if(node->GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
             fusedNodes.emplace_back(node);
 }
 
@@ -824,7 +826,7 @@ void AssignmentPolicy::Enumerate(PlacementTrace*   parent,
         // bluestein setup kernels can input/output bluestein buffer only.
         do
         {
-            if(blueNode->typeBlue != BT_MULTI_KERNEL_FUSED)
+            if(blueNode->GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
             {
                 // chirp setup nodes must use bluestein buffer, not
                 // connected to other nodes, so just set their buffers

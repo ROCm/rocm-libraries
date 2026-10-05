@@ -341,15 +341,8 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // first plan, column-to-column
     auto col2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
 
-    col2colPlan->typeBlue = typeBlue;
-    col2colPlan->fuseBlue = fuseBlue;
-    if(fuseBlue != BFT_NONE)
-    {
-        col2colPlan->lengthBlue  = lengthBlue;
-        col2colPlan->lengthBlueN = lengthBlueN;
-        if(fuseBlue == BFT_FWD_CHIRP || fuseBlue == BFT_FWD_CHIRP_MUL)
-            col2colPlan->need_chirp = true;
-    }
+    if(GetBluesteinFuseType() != BFT_NONE)
+        col2colPlan->blue = blue;
 
     // large1D flag to confirm we need multiply twiddle factor
     col2colPlan->large1D = length[0];
@@ -366,15 +359,8 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // second plan, row-to-column
     auto row2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_RC, this);
 
-    row2colPlan->typeBlue = typeBlue;
-    row2colPlan->fuseBlue = fuseBlue;
-    if(fuseBlue != BFT_NONE)
-    {
-        row2colPlan->lengthBlue  = lengthBlue;
-        row2colPlan->lengthBlueN = lengthBlueN;
-        if(fuseBlue == BFT_INV_CHIRP_MUL)
-            row2colPlan->need_chirp = true;
-    }
+    if(GetBluesteinFuseType() != BFT_NONE)
+        row2colPlan->blue = blue;
 
     row2colPlan->length.push_back(lenFactor0);
     row2colPlan->length.push_back(lenFactor1);
@@ -396,9 +382,6 @@ void CC1DNode::AssignParams_internal()
     auto& col2colPlan = childNodes[0];
     auto& row2colPlan = childNodes[1];
 
-    assert(inStrideBlue.size() == outStrideBlue.size());
-    bool setBlueData = inStrideBlue.size();
-
     if((obOut == OB_USER_OUT) || (obOut == OB_TEMP_CMPLX_FOR_REAL) || (obOut == OB_TEMP_BLUESTEIN))
     {
         // B -> T
@@ -410,29 +393,29 @@ void CC1DNode::AssignParams_internal()
         col2colPlan->outStride.push_back(1);
         col2colPlan->oDist = length[0];
 
-        if(setBlueData)
-        {
-            col2colPlan->outStrideBlue.push_back(col2colPlan->length[1]);
-            col2colPlan->outStrideBlue.push_back(1);
-            col2colPlan->oDistBlue = lengthBlue;
-
-            col2colPlan->inStrideBlue.push_back(inStrideBlue[0] * col2colPlan->length[1]);
-            col2colPlan->inStrideBlue.push_back(inStrideBlue[0]);
-            col2colPlan->iDistBlue = iDistBlue;
-        }
-
         for(size_t index = 1; index < length.size(); index++)
         {
             col2colPlan->inStride.push_back(inStride[index]);
             col2colPlan->outStride.push_back(col2colPlan->oDist);
             col2colPlan->oDist *= length[index];
+        }
 
-            if(setBlueData)
+        if(col2colPlan->GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL
+           || col2colPlan->GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
+        {
+            // identical convolution buffer layout on either I/O side
+            std::vector<size_t> col2col_strides(col2colPlan->length.size(), 1);
+            col2col_strides[0] = col2colPlan->length[1];
+            auto tmp           = col2colPlan->length[0] * col2colPlan->length[1];
+            for(size_t i = 2; i < col2col_strides.size(); i++)
             {
-                col2colPlan->inStrideBlue.push_back(inStrideBlue[index]);
-                col2colPlan->outStrideBlue.push_back(col2colPlan->oDistBlue);
-                col2colPlan->oDistBlue *= length[index];
+                col2col_strides[i] = tmp;
+                tmp *= col2colPlan->length[i];
             }
+            auto c2c_layout = data_layout_t::full_layout(
+                col2colPlan->length, col2col_strides, col2colPlan->batch, tmp);
+            for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+                col2colPlan->blue->set_conv_buffer_layout(io, c2c_layout);
         }
 
         // T -> B
@@ -444,28 +427,30 @@ void CC1DNode::AssignParams_internal()
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
         row2colPlan->oDist = oDist;
 
-        if(setBlueData)
-        {
-            row2colPlan->inStrideBlue.push_back(1);
-            row2colPlan->inStrideBlue.push_back(row2colPlan->length[0]);
-            row2colPlan->iDistBlue = lengthBlue;
-
-            row2colPlan->outStrideBlue.push_back(outStrideBlue[0]);
-            row2colPlan->outStrideBlue.push_back(outStrideBlue[0] * row2colPlan->length[1]);
-            row2colPlan->oDistBlue = oDistBlue;
-        }
-
         for(size_t index = 1; index < length.size(); index++)
         {
             row2colPlan->inStride.push_back(row2colPlan->iDist);
             row2colPlan->iDist *= length[index];
             row2colPlan->outStride.push_back(outStride[index]);
+        }
 
-            if(setBlueData)
+        if(row2colPlan->GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL
+           || row2colPlan->GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
+        {
+            for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
             {
-                row2colPlan->inStrideBlue.push_back(row2colPlan->iDistBlue);
-                row2colPlan->iDistBlue *= length[index];
-                row2colPlan->outStrideBlue.push_back(outStrideBlue[index]);
+                const auto& lens
+                    = io == io_data_label::INPUT ? row2colPlan->length : row2colPlan->outputLength;
+                std::vector<size_t> row2col_strides(lens.size(), 1);
+                row2col_strides[1] = lens[0];
+                auto tmp           = lens[0] * lens[1];
+                for(size_t i = 2; i < row2col_strides.size(); i++)
+                {
+                    row2col_strides[i] = tmp;
+                    tmp *= lens[i];
+                }
+                row2colPlan->blue->set_conv_buffer_layout(
+                    io, data_layout_t::full_layout(lens, row2col_strides, row2colPlan->batch, tmp));
             }
         }
     }
@@ -476,25 +461,19 @@ void CC1DNode::AssignParams_internal()
         if(isRootNode())
             throw std::runtime_error("error: out-buffer mangled for root node (L1D_CC)");
 
+        // Bluestein nodes only get here in AssignChirpBuffers' pre-pass, before buffers are assigned
+        assert((obOut == OB_UNINIT || !blue)
+               && "fused Bluestein stages must take the first branch once buffers are assigned");
+
         // here we don't have B info right away, we get it through its parent
         // T-> B
         col2colPlan->inStride.push_back(inStride[0] * col2colPlan->length[1]);
         col2colPlan->inStride.push_back(inStride[0]);
         col2colPlan->iDist = iDist;
 
-        if(setBlueData)
-        {
-            col2colPlan->inStrideBlue.push_back(inStrideBlue[0] * col2colPlan->length[1]);
-            col2colPlan->inStrideBlue.push_back(inStrideBlue[0]);
-            col2colPlan->iDistBlue = iDistBlue;
-        }
-
         for(size_t index = 1; index < length.size(); index++)
         {
             col2colPlan->inStride.push_back(inStride[index]);
-
-            if(setBlueData)
-                col2colPlan->inStrideBlue.push_back(inStrideBlue[index]);
         }
 
         if(parent->scheme == CS_L1D_TRTRT)
@@ -505,22 +484,9 @@ void CC1DNode::AssignParams_internal()
                                              * col2colPlan->length[0]);
             col2colPlan->oDist = parent->oDist;
 
-            if(setBlueData)
-            {
-                col2colPlan->outStrideBlue.push_back(parent->outStrideBlue[0]
-                                                     * col2colPlan->length[1]);
-                col2colPlan->outStrideBlue.push_back(parent->outStrideBlue[0]);
-                col2colPlan->outStrideBlue.push_back(
-                    parent->outStrideBlue[0] * col2colPlan->length[1] * col2colPlan->length[0]);
-                col2colPlan->oDistBlue = parent->oDistBlue;
-            }
-
             for(size_t index = 1; index < parent->length.size(); index++)
             {
                 col2colPlan->outStride.push_back(parent->outStride[index]);
-
-                if(setBlueData)
-                    col2colPlan->outStrideBlue.push_back(parent->outStrideBlue[index]);
             }
         }
         else
@@ -528,35 +494,15 @@ void CC1DNode::AssignParams_internal()
             // we dont have B info here, need to assume packed data and descended
             // from 2D/3D
             //assert(parent->outStride[0] == 1);
-            //assert(parent->outStrideBlue[0] == 1);
 
             col2colPlan->outStride.push_back(col2colPlan->length[1]);
             col2colPlan->outStride.push_back(1);
-
-            if(setBlueData)
-            {
-                col2colPlan->outStrideBlue.push_back(col2colPlan->length[1]);
-                col2colPlan->outStrideBlue.push_back(1);
-            }
-
-            if(fuseBlue != BFT_NONE)
-            {
-                col2colPlan->oDist     = lengthBlueN;
-                col2colPlan->oDistBlue = lengthBlue;
-            }
-            else
-                col2colPlan->oDist = col2colPlan->length[1] * col2colPlan->length[0];
+            col2colPlan->oDist = col2colPlan->length[1] * col2colPlan->length[0];
 
             for(size_t index = 1; index < length.size(); index++)
             {
                 col2colPlan->outStride.push_back(col2colPlan->oDist);
                 col2colPlan->oDist *= length[index];
-
-                if(setBlueData)
-                {
-                    col2colPlan->outStrideBlue.push_back(col2colPlan->oDistBlue);
-                    col2colPlan->oDistBlue *= length[index];
-                }
             }
         }
 
@@ -569,22 +515,9 @@ void CC1DNode::AssignParams_internal()
                                             * row2colPlan->length[1]);
             row2colPlan->iDist = parent->oDist;
 
-            if(setBlueData)
-            {
-                row2colPlan->inStrideBlue.push_back(parent->outStrideBlue[0]);
-                row2colPlan->inStrideBlue.push_back(parent->outStrideBlue[0]
-                                                    * row2colPlan->length[0]);
-                row2colPlan->inStrideBlue.push_back(
-                    parent->outStrideBlue[0] * row2colPlan->length[0] * row2colPlan->length[1]);
-                row2colPlan->iDistBlue = parent->oDistBlue;
-            }
-
             for(size_t index = 1; index < parent->length.size(); index++)
             {
                 row2colPlan->inStride.push_back(parent->outStride[index]);
-
-                if(setBlueData)
-                    row2colPlan->inStrideBlue.push_back(parent->outStrideBlue[index]);
             }
         }
         else
@@ -593,31 +526,12 @@ void CC1DNode::AssignParams_internal()
             // from 2D/3D
             row2colPlan->inStride.push_back(1);
             row2colPlan->inStride.push_back(row2colPlan->length[0]);
-
-            if(setBlueData)
-            {
-                row2colPlan->inStrideBlue.push_back(1);
-                row2colPlan->inStrideBlue.push_back(row2colPlan->length[0]);
-            }
-
-            if(fuseBlue != BFT_NONE)
-            {
-                row2colPlan->iDist     = lengthBlueN;
-                row2colPlan->iDistBlue = lengthBlue;
-            }
-            else
-                row2colPlan->iDist = row2colPlan->length[0] * row2colPlan->length[1];
+            row2colPlan->iDist = row2colPlan->length[0] * row2colPlan->length[1];
 
             for(size_t index = 1; index < length.size(); index++)
             {
                 row2colPlan->inStride.push_back(row2colPlan->iDist);
                 row2colPlan->iDist *= length[index];
-
-                if(setBlueData)
-                {
-                    row2colPlan->inStrideBlue.push_back(row2colPlan->iDistBlue);
-                    row2colPlan->iDistBlue *= length[index];
-                }
             }
         }
 
@@ -625,19 +539,9 @@ void CC1DNode::AssignParams_internal()
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
         row2colPlan->oDist = oDist;
 
-        if(setBlueData)
-        {
-            row2colPlan->outStrideBlue.push_back(outStrideBlue[0]);
-            row2colPlan->outStrideBlue.push_back(outStrideBlue[0] * row2colPlan->length[1]);
-            row2colPlan->oDistBlue = oDistBlue;
-        }
-
         for(size_t index = 1; index < length.size(); index++)
         {
             row2colPlan->outStride.push_back(outStride[index]);
-
-            if(setBlueData)
-                row2colPlan->outStrideBlue.push_back(outStrideBlue[index]);
         }
     }
 
@@ -650,10 +554,10 @@ void CC1DNode::AssignParams_internal()
     // dimensions so the kernels use the batch dimension as the
     // adjacent one.
     //
-    // Fused Bluestein is excluded: its stages' Bluestein strides and dists
+    // Fused Bluestein is excluded: its stages' convolution buffer layouts
     // are set against the original geometry, which the reshape would break.
     if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP
-       && typeBlue != BT_MULTI_KERNEL_FUSED)
+       && GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
     {
         // hack the plan to put batch as second dimension since it moves
         // faster than the actual second dimension
@@ -934,7 +838,7 @@ bool Stockham1DNode::CreateDeviceResources()
 std::vector<size_t> Stockham1DNode::CollapsibleDims()
 {
     // do not collapse on multi-kernel fused Bluestein nodes
-    if(typeBlue == BT_MULTI_KERNEL_FUSED)
+    if(GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
         return {};
 
     // fastest dim is FFT, the rest is collapsible
@@ -1152,7 +1056,7 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 std::vector<size_t> SBCCNode::CollapsibleDims()
 {
     // do not collapse on multi-kernel fused Bluestein nodes
-    if(typeBlue == BT_MULTI_KERNEL_FUSED)
+    if(GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
         return {};
 
     // second-fastest dim is FFT, higher dims are collapsible
