@@ -8,7 +8,7 @@ from typing import Literal, Optional
 
 import pytest
 
-from conftest import _arg, _kernel, _object, requires_msgpack
+from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline

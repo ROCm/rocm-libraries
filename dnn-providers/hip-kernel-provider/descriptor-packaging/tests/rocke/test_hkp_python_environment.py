@@ -10,17 +10,15 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
-import sys
 import time
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from cmake_harness import SuppliedPython, consumer_preamble, write_module
+
 pytestmark = pytest.mark.quick
-PKG = Path(__file__).resolve().parent.parent
-MODULE = PKG / "cmake" / "HkpPackaging.cmake"
 
 # Executed both outside packaging (parent inventory) and by the pack consumer.
 PROBE = """
@@ -101,108 +99,42 @@ def _wheel(directory, distribution, files):
     return path
 
 
-def _module(directory, name, value):
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{name}.py").write_text(f"VALUE = {value!r}\n", encoding="utf-8")
-
-
-class _Environment:
+class _Environment(SuppliedPython):
     def __init__(self, root, *, cmake, make_program, pip=True, user_site=False):
         self.cmake = cmake
         self.make_program = make_program
-        self.root = root
         self.source = root / "source with spaces"
         self.build_dir = root / "build with spaces"
         self.wheels = root / "local wheels"
-        self.parent = root / "supplied python"
         self.source.mkdir(parents=True)
-        self.env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith(("PYTHON", "PIP_", "CMAKE_"))
-            and key not in ("VIRTUAL_ENV", "CONDA_PREFIX")
-        }
-        self.env.update(
-            {
-                "PYTHONUSERBASE": str(root / "isolated user base"),
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "PIP_CONFIG_FILE": os.devnull,
-                "PIP_NO_INDEX": "1",
-                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            }
-        )
-        command = [sys.executable, "-m", "venv", "--copies"]
-        if not pip:
-            command.append("--without-pip")
-        if user_site:
-            # Normal venv startup permits user-site only in this mode. All writes
-            # still target this venv or the isolated PYTHONUSERBASE below.
-            command.append("--system-site-packages")
-        self.run(*command, self.parent)
-        executable = (
-            f"Scripts/{Path(sys._base_executable).name}"
-            if os.name == "nt"
-            else "bin/python"
-        )
-        self.python = self.parent / executable
-        self.site = Path(
-            self.run(
-                self.python,
-                "-c",
-                "import sysconfig; print(sysconfig.get_path('purelib'))",
-            ).stdout.strip()
-        )
+        super().__init__(root, pip=pip, user_site=user_site)
         self.private = self.build_dir / "hkp-rocke-python"
         self.ready = self.private / ".installed"
         self.digest = self.build_dir / "hkp-rocke-wheels.sha256"
-        self.runtime = root / "pth runtime only"
-        _module(self.runtime, "msgpack", "parent-msgpack")
-        _module(self.runtime, "zstandard", "parent-zstandard")
-        (self.site / "hkp_fixture_runtime.pth").write_text(
-            str(self.runtime) + "\n", encoding="utf-8"
-        )
         self.write_wheels()
         (self.source / "consumer.py").write_text(CONSUMER, encoding="utf-8")
         (self.source / "authored").mkdir()
         (self.source / "kpack with spaces" / "rocm_kpack").mkdir(parents=True)
-        # Include and call production functions, not a copy of their commands.
         (self.source / "CMakeLists.txt").write_text(
-            f"""cmake_minimum_required(VERSION 3.25.2)
-project(HkpPythonEnvironment NONE)
-list(APPEND CMAKE_MODULE_PATH "{(PKG.parent / 'cmake').as_posix()}")
-include("{MODULE.as_posix()}")
-set(ROCKE_WHEEL_VERSION 0.1.0)
+            consumer_preamble("HkpPythonEnvironment")
+            + """set(ROCKE_WHEEL_VERSION 0.1.0)
 hkp_rocke_wheel_stamp(wheel_stamp)
-hkp_rocke_wheel_python_interp(interp ready python_dir "${{wheel_stamp}}")
-set(HKP_TOOL "${{CMAKE_CURRENT_SOURCE_DIR}}/consumer.py")
+hkp_rocke_wheel_python_interp(interp ready python_dir "${wheel_stamp}")
+set(HKP_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/consumer.py")
 foreach(label first second)
     hkp_wire_pack_target(
-        NAME "${{label}}"
-        SOURCE_ROOT "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
-        OUT_ROOT "${{CMAKE_CURRENT_BINARY_DIR}}/${{label}}"
+        NAME "${label}"
+        SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
+        OUT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/${label}"
         ARCHES gfx942 HIPCC unused
-        ROCM_KPACK_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/kpack with spaces"
-        ROCKE_INTERP "${{interp}}" ROCKE_READY "${{ready}}"
-        ROCKE_PYTHON_DIR "${{python_dir}}" ROCKE_WHEEL_STAMP "${{wheel_stamp}}"
-        ROCKE_COMGR_LIB "${{HIPKERNELPROVIDER_ROCKE_COMGR_LIB}}" PACK_JOBS 2)
+        ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
+        ENABLE_ROCKE ON ROCKE_INTERP "${interp}" ROCKE_READY "${ready}"
+        ROCKE_PYTHON_DIR "${python_dir}" ROCKE_WHEEL_STAMP "${wheel_stamp}"
+        ROCKE_COMGR_LIB "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}" PACK_JOBS 2)
 endforeach()
 """,
             encoding="utf-8",
         )
-
-    def run(self, *command, success=True):
-        proc = subprocess.run(
-            [str(arg) for arg in command],
-            cwd=self.root,
-            env=self.env,
-            capture_output=True,
-            text=True,
-        )
-        if success:
-            assert proc.returncode == 0, proc.stdout + proc.stderr
-        else:
-            assert proc.returncode != 0, proc.stdout + proc.stderr
-        return proc
 
     def write_wheels(self, value="wheel-one", *, removed=True, invalid=False):
         files = {"rocke/__init__.py": f"VALUE = {value!r}\n"}
@@ -338,7 +270,7 @@ def test_enabled_user_site_runtime_preserved(tmp_path, build_environment):
     )
     assert user_site.is_relative_to(tmp_path)
     for name in ("msgpack", "zstandard"):
-        _module(user_site, name, "user-site")
+        write_module(user_site, name, "user-site")
     before = env.snapshot()
     assert before["user_site_enabled"] is True
     for name in ("msgpack", "zstandard"):
@@ -354,13 +286,13 @@ def test_enabled_user_site_runtime_preserved(tmp_path, build_environment):
 def test_execution_time_pythonpath_and_startup_precedence(tmp_path, build_environment):
     env = build_environment()
     first, second = tmp_path / "ambient first", tmp_path / "ambient second"
-    _module(first, "ambient", "first")
-    _module(second, "ambient", "second")
-    _module(second, "second_only", "preserved")
-    _module(first, "rocke", "ambient-conflict")
-    _module(first, "kernels", "ambient-conflict")
-    _module(first, "script_choice", "ambient")
-    _module(env.source, "script_choice", "script-directory")
+    write_module(first, "ambient", "first")
+    write_module(second, "ambient", "second")
+    write_module(second, "second_only", "preserved")
+    write_module(first, "rocke", "ambient-conflict")
+    write_module(first, "kernels", "ambient-conflict")
+    write_module(first, "script_choice", "ambient")
+    write_module(env.source, "script_choice", "script-directory")
     env.configure()
     # Change after configure: the production command must preserve execution-time
     # PYTHONPATH, not reconstruct a configure-time snapshot of the environment.
