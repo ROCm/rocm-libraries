@@ -14,9 +14,12 @@
 #include "fast_check.hpp"
 #include "hipBuffer.hpp"
 #include "hip_placement.hpp"
+#include "hipblaslt_init.hpp"
+#include "hipblaslt_math.hpp"
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -394,6 +397,77 @@ namespace
                   "  solution 0 (library index 9, kernel Cijk_MT32x32)");
     }
 
+    // The bound must be the largest sum over K of |a| times the largest |b| in that row of B, and
+    // a configuration must be refused once the bound reaches the range the compute type holds
+    // exactly (2^11 for f16), and accepted below it.
+    TEST(FastCheck_pre_checkin, exactness_bound_refuses_results_the_accumulator_cannot_hold)
+    {
+        for(int64_t K : {300, 1200})
+        {
+            HostProblem      hp(9, 4, K, 1, false, true, 1.f, 0.f, false, false);
+            FastCheckProblem p = hp.problem();
+            p.compute_type     = HIP_R_16F;
+
+            double expected = 0;
+            for(int64_t i = 0; i < hp.M; i++)
+            {
+                double s = 0;
+                for(int64_t k = 0; k < K; k++)
+                {
+                    double b_max = 0;
+                    for(int64_t j = 0; j < hp.N; j++)
+                        b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                    s += std::fabs(hp.a(0, i, k)) * b_max;
+                }
+                expected = std::max(expected, s);
+            }
+
+            FastCheckExpected e = fast_check_expected(p);
+            EXPECT_EQ(e.max_partial, expected) << "K=" << K;
+            EXPECT_EQ(e.max_result, expected) << "K=" << K;
+            if(K == 300)
+            {
+                ASSERT_LT(expected, 0x1p11);
+                EXPECT_TRUE(e.status.passed) << e.status.message;
+            }
+            else
+            {
+                ASSERT_GE(expected, 0x1p11);
+                EXPECT_FALSE(e.status.passed);
+                EXPECT_NE(e.status.message.find("refuses this configuration"), std::string::npos)
+                    << e.status.message;
+            }
+        }
+
+        // With alpha, the scaleAlpha vector, beta * C and the bias, a partial sum is bounded by
+        // the larger of the plain and the scaled sum, and a result by the scaled sum plus |beta|
+        // times the largest |C| in its row plus |bias|.
+        HostProblem      hp(9, 4, 50, 1, false, true, 2.f, -2.f, true, true);
+        FastCheckProblem p           = hp.problem();
+        double           max_partial = 0, max_result = 0;
+        for(int64_t i = 0; i < hp.M; i++)
+        {
+            double s = 0, c_max = 0;
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                double b_max = 0;
+                for(int64_t j = 0; j < hp.N; j++)
+                    b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                s += std::fabs(hp.a(0, i, k)) * b_max;
+            }
+            for(int64_t j = 0; j < hp.N; j++)
+                c_max = std::max(c_max, std::fabs(double(hp.C[size_t(j * hp.ldc + i)])));
+            const double scaled = 2 * std::fabs(double(hp.scale[size_t(i)])) * s;
+            max_partial         = std::max({max_partial, s, scaled});
+            max_result
+                = std::max(max_result, scaled + 2 * c_max + std::fabs(double(hp.bias[size_t(i)])));
+        }
+        FastCheckExpected e = fast_check_expected(p);
+        EXPECT_EQ(e.max_partial, max_partial);
+        EXPECT_EQ(e.max_result, max_result);
+        EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
+    }
+
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
     // ------------------------------------------------------------------------------------------
@@ -617,6 +691,149 @@ namespace
         auto res = fast_check_scan_padding_device(
             m.matrix(), DeviceMatrix::batch, DeviceMatrix::total, true, 0);
         EXPECT_TRUE(res.passed) << res.message;
+    }
+
+    // sparse_k must keep each row of A nonzero only at its chosen K indices, at most one per
+    // sixteenth of K plus the last, whichever way A is stored, and with at least K/16 rows every K
+    // index must be nonzero in some row; ternary must give B values in {-1, 0, 1} only.
+    TEST(FastCheckDevice_pre_checkin, integer_exact_patterns_keep_their_ranges)
+    {
+        IntegerExactPatternScope scope;
+        const size_t             K = 200, M = 16, pad = 2;
+        for(bool k_is_row : {false, true})
+        {
+            const size_t rows = k_is_row ? K : M, cols = k_is_row ? M : K, ld = rows + pad;
+            float*       d = nullptr;
+            ASSERT_EQ(hipMalloc(&d, ld * cols * sizeof(float)), hipSuccess);
+            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, k_is_row);
+            hipblaslt_init_device(ABC_dims::A,
+                                  hipblaslt_initialization::integer_exact,
+                                  false,
+                                  d,
+                                  rows,
+                                  cols,
+                                  ld,
+                                  HIP_R_32F,
+                                  0,
+                                  1);
+            std::vector<float> h(ld * cols);
+            ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            (void)hipFree(d);
+
+            std::vector<bool> covered(K, false);
+            for(size_t m = 0; m < M; m++)
+            {
+                size_t kept = 0;
+                for(size_t k = 0; k < K; k++)
+                {
+                    const bool keep = integer_exact_sparse_k_kept(k, K, m);
+                    kept += keep;
+                    float v = k_is_row ? h[m * ld + k] : h[k * ld + m];
+                    EXPECT_TRUE(v == 0 || v == 1 || v == 2) << "k=" << k << " m=" << m;
+                    if(!keep)
+                        EXPECT_EQ(v, 0.f) << "k=" << k << " m=" << m << " k_is_row=" << k_is_row;
+                    if(keep)
+                        covered[k] = true;
+                }
+                EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K, m));
+                EXPECT_LE(kept, kIntegerExactSparseKTerms + 1) << "m=" << m;
+                EXPECT_GE(kept, kIntegerExactSparseKTerms - 1) << "m=" << m;
+            }
+            for(size_t k = 0; k < K; k++)
+                EXPECT_TRUE(covered[k]) << "K index " << k << " is zero in every row";
+        }
+
+        float* d = nullptr;
+        ASSERT_EQ(hipMalloc(&d, 64 * 64 * sizeof(float)), hipSuccess);
+        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
+        hipblaslt_init_device(ABC_dims::B,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d,
+                              64,
+                              64,
+                              64,
+                              HIP_R_32F,
+                              0,
+                              1);
+        std::vector<float> h(64 * 64);
+        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        (void)hipFree(d);
+        int counts[3] = {0, 0, 0};
+        for(float v : h)
+        {
+            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+            counts[int(v) + 1]++;
+        }
+        EXPECT_GT(counts[0], 0);
+        EXPECT_GT(counts[1], 0);
+        EXPECT_GT(counts[2], 0);
+    }
+
+    // With overlapping batches (a stride shorter than one matrix), the sparse_k fill must stay
+    // inside the allocation, lda * N + (batch_count - 1) * stride elements.
+    TEST(FastCheckDevice_pre_checkin, sparse_k_fill_stays_inside_overlapping_batches)
+    {
+        IntegerExactPatternScope scope;
+        const size_t             K = 64, M = 5, ld = 8, stride = 2 * ld, batches = 3, guard = 64;
+        const size_t             used = ld * K + (batches - 1) * stride;
+        std::vector<float>       h(used + guard, 77.f);
+        float*                   d = nullptr;
+        ASSERT_EQ(hipMalloc(&d, h.size() * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(d, h.data(), h.size() * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, false);
+        hipblaslt_init_device(ABC_dims::A,
+                              hipblaslt_initialization::integer_exact,
+                              false,
+                              d,
+                              M,
+                              K,
+                              ld,
+                              HIP_R_32F,
+                              stride,
+                              batches);
+        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        (void)hipFree(d);
+        for(size_t idx = used; idx < h.size(); idx++)
+            EXPECT_EQ(h[idx], 77.f) << "offset " << idx;
+    }
+
+    // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
+    // name is rejected.
+    TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
+    {
+        IntegerExactPattern p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("standard", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        p = IntegerExactPattern::ternary;
+        EXPECT_TRUE(parse_integer_exact_pattern("", p));
+        EXPECT_EQ(p, IntegerExactPattern::standard);
+        EXPECT_TRUE(parse_integer_exact_pattern("ternary", p));
+        EXPECT_EQ(p, IntegerExactPattern::ternary);
+        EXPECT_TRUE(parse_integer_exact_pattern("sparse_k", p));
+        EXPECT_EQ(p, IntegerExactPattern::sparse_k);
+        EXPECT_FALSE(parse_integer_exact_pattern("sparse", p));
+    }
+
+    // integer_exact negates half of B. FNUZ fp8 has no negative zero (0x80 is NaN), so negating
+    // zero must leave it zero, and NaN stays NaN.
+    TEST(FastCheck_pre_checkin, fnuz_negate_keeps_zero_and_nan)
+    {
+        for(float v : {0.f, 1.f, 2.f})
+        {
+            EXPECT_EQ(float(static_cast<hipblasLtHalf>(negate(hipblaslt_f8_fnuz(v)))), -v) << v;
+            EXPECT_EQ(float(static_cast<hipblasLtHalf>(negate(hipblaslt_bf8_fnuz(v)))), -v) << v;
+        }
+        hipblaslt_f8_fnuz nan_e4m3(0.f);
+        nan_e4m3.__x = 0x80;
+        EXPECT_EQ(negate(nan_e4m3).__x, 0x80);
+        hipblaslt_bf8_fnuz nan_e5m2(0.f);
+        nan_e5m2.__x = 0x80;
+        EXPECT_EQ(negate(nan_e5m2).__x, 0x80);
     }
 
     // The fast_check_inject self-test corrupts exactly one element, and never leaves it holding

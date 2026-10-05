@@ -288,6 +288,50 @@ namespace
         return trans ? View{base, m.type, m.ld, 1} : View{base, m.type, 1, m.ld};
     }
 
+    // Calls f(r, c, |m(r, c)|) for every element, each row r from one thread only, in an order
+    // that walks memory contiguously.
+    template <typename F>
+    void for_each_abs_by_row(const View& m, int64_t rows, int64_t cols, F&& f)
+    {
+        if(std::llabs(m.rs) <= std::llabs(m.cs))
+        {
+            constexpr int64_t block = 256;
+#pragma omp parallel for schedule(dynamic)
+            for(int64_t r0 = 0; r0 < rows; r0 += block)
+                for(int64_t c = 0; c < cols; c++)
+                    for(int64_t r = r0; r < std::min(rows, r0 + block); r++)
+                        f(r, c, std::fabs(m.at(r, c)));
+        }
+        else
+        {
+#pragma omp parallel for schedule(dynamic)
+            for(int64_t r = 0; r < rows; r++)
+                for(int64_t c = 0; c < cols; c++)
+                    f(r, c, std::fabs(m.at(r, c)));
+        }
+    }
+
+    // out[r] = max over c of |m(r, c)|.
+    std::vector<double> abs_row_max(const View& m, int64_t rows, int64_t cols)
+    {
+        std::vector<double> out(size_t(rows), 0);
+        for_each_abs_by_row(m, rows, cols, [&](int64_t r, int64_t, double x) {
+            out[size_t(r)] = std::max(out[size_t(r)], x);
+        });
+        return out;
+    }
+
+    // out[r] = sum over c of |m(r, c)| * v[c], with v[c] >= 0.
+    std::vector<double>
+        abs_mul_right(const View& m, int64_t rows, int64_t cols, const std::vector<double>& v)
+    {
+        std::vector<double> out(size_t(rows), 0);
+        for_each_abs_by_row(m, rows, cols, [&](int64_t r, int64_t c, double x) {
+            out[size_t(r)] += x * v[size_t(c)];
+        });
+        return out;
+    }
+
     // out[r] = sum over c of m(r, c) * v[c], modulo P. Sets non_integer when an element is not an
     // exact integer.
     void mul_right(const View&                  m,
@@ -681,6 +725,23 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         const View opB = batch_view(p.B, b, p.transB); // K x N
         const View C   = batch_view(p.C, b, false); // M x N
 
+        // |any partial sum of row i| <= sum over k of |A(i, k)| * max over j of |B(k, j)|.
+        {
+            const std::vector<double> b_max = abs_row_max(opB, K, N);
+            const std::vector<double> s     = abs_mul_right(opA, M, K, b_max);
+            const std::vector<double> c_max
+                = use_c ? abs_row_max(C, M, N) : std::vector<double>(size_t(M), 0);
+            for(int64_t i = 0; i < M; i++)
+            {
+                const double scaled
+                    = std::fabs(p.alpha * double(e.scale[size_t(i)])) * s[size_t(i)];
+                e.max_partial = std::max({e.max_partial, s[size_t(i)], scaled});
+                e.max_result  = std::max(e.max_result,
+                                        scaled + std::fabs(p.beta) * c_max[size_t(i)]
+                                            + std::fabs(double(bias[size_t(i)])));
+            }
+        }
+
         // Expected D*r = alpha * diag(scale) * opA * (opB * r) + beta * C * r + bias * sum(r)
         // and t^T*D = alpha * ((t .* scale)^T * opA) * opB + beta * t^T * C + (t^T * bias) * 1^T.
         std::vector<uint64_t> y, z, cr, u, w, ct;
@@ -695,8 +756,24 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         }
         if(non_integer_input)
         {
-            fail("fast_check found a non-integer value in A, B or C; it requires integer_exact "
-                 "initialization");
+            std::string where;
+            auto        find = [&](const View& m, int64_t rows, int64_t cols, const char* name) {
+                for(int64_t c = 0; c < cols && where.empty(); c++)
+                    for(int64_t r = 0; r < rows && where.empty(); r++)
+                        if(!is_exact_integer(m.at(r, c)))
+                        {
+                            std::ostringstream s;
+                            s << " (first: batch " << b << ", " << name << "(" << r << ", " << c
+                              << ") = " << m.at(r, c) << ")";
+                            where = s.str();
+                        }
+            };
+            find(opA, M, K, "op(A)");
+            find(opB, K, N, "op(B)");
+            if(use_c)
+                find(C, M, N, "C");
+            fail("fast_check found a non-integer value in A, B or C" + where
+                 + "; it requires integer_exact initialization");
             return finish();
         }
 
@@ -723,6 +800,17 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
                 v = mod_add(v, mod_mul(beta_m, ct[size_t(j)]));
             cols[size_t(j)] = v;
         }
+    }
+
+    const double acc_limit = exact_limit(p.compute_type);
+    if(e.max_partial >= acc_limit || e.max_result >= acc_limit)
+    {
+        std::ostringstream s;
+        s << "fast_check refuses this configuration: a partial sum can reach " << e.max_partial
+          << " and a result " << e.max_result << ", but the compute type holds integers exactly "
+          << "only below " << acc_limit << ", so D would depend on summation order. Reduce K, "
+          << "alpha or the scale factors, or use integer_exact_pattern ternary or sparse_k.";
+        fail(s.str());
     }
     return finish();
 }

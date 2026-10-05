@@ -1910,8 +1910,28 @@ void testing_matmul(const Arguments& arg)
         }
         // fast_check models the rounding of large results into 16-bit outputs, so the limit
         // applies only when a host reference comparison runs.
+        // A misspelled pattern must fail here rather than be hidden by the skip below.
+        IntegerExactPattern pattern = IntegerExactPattern::standard;
+        if(!parse_integer_exact_pattern(arg.integer_exact_pattern, pattern))
+        {
+            std::string why = std::string("unknown integer_exact_pattern '")
+                              + arg.integer_exact_pattern + "'; use ternary or sparse_k";
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+        // sparse_k keeps every result below 2 * 17 * 4 + 4 = 140 whatever K is, as long as alpha
+        // and beta are at most 2 and nothing else scales the result.
         const bool host_reference = arg.unit_check || arg.norm_check || arg.allclose_check;
-        if(is_16bit && (host_reference || !arg.fast_check))
+        const bool sparse_k_bounded
+            = pattern == IntegerExactPattern::sparse_k && std::fabs(arg.alpha) <= 2
+              && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
+              && arg.scaleA == hipblaslt_scaling_format::none
+              && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
+        if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
             const int32_t k_limit
@@ -2461,6 +2481,27 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "fast_check_inject must be -1 (no injection) or an iteration number";
         else if(arg.fast_check_inject >= arg.fast_check_repeat)
             why = "fast_check_inject must name an iteration below fast_check_repeat";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    IntegerExactPattern      iePattern = IntegerExactPattern::standard;
+    IntegerExactPatternScope iePatternScope;
+    if(arg.integer_exact_pattern[0])
+    {
+        std::string why;
+        if(arg.initialization != hipblaslt_initialization::integer_exact)
+            why = "integer_exact_pattern requires initialization: integer_exact";
+        else if(!parse_integer_exact_pattern(arg.integer_exact_pattern, iePattern))
+            why = std::string("unknown integer_exact_pattern '") + arg.integer_exact_pattern
+                  + "'; use ternary or sparse_k";
         if(!why.empty())
         {
 #ifdef GOOGLE_TEST
@@ -3098,6 +3139,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         // positive-only so the reference dot products do not cancel toward zero
         // (near-zero outputs inflate the per-element ULP error spuriously).
         set_ulp_positive_init_state(arg.ulp_check);
+        set_integer_exact_pattern_state(iePattern, size_t(K[i]), transA == HIPBLAS_OP_T);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
@@ -5661,6 +5703,53 @@ void testing_matmul_with_bias(const Arguments& arg,
         const int            fcIterations = arg.fast_check ? std::max(1, arg.fast_check_repeat) : 1;
         const bool           fcInjecting  = arg.fast_check && arg.fast_check_inject >= 0;
         FastCheckSolutionLog fcLog;
+        // The problem fast_check verifies for GEMM i, with D at d_dev.
+        auto fcProblem = [&](int i, const FastCheckMatrix& d_dev) {
+            FastCheckProblem fp;
+            fp.M           = M[i];
+            fp.N           = N[i];
+            fp.K           = K[i];
+            fp.batch_count = num_batches[i];
+            fp.transA      = transA == HIPBLAS_OP_T;
+            fp.transB      = transB == HIPBLAS_OP_T;
+            fp.A           = {fcA[i].get(), TiA, A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
+            fp.B           = {fcB[i].get(), TiB, B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
+            fp.C           = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};
+            fp.D           = d_dev;
+            fp.compute_type = Tc;
+            fp.alpha        = get_computeInterface(h_alpha[i], Tc);
+            fp.beta         = get_computeInterface(h_beta[i], Tc);
+            if(arg.scaleAlpha_vector)
+            {
+                fp.scale_alpha_vec      = hScaleAlphaVec[i].buf();
+                fp.scale_alpha_vec_type = Talpha;
+            }
+            if(arg.bias_vector)
+            {
+                fp.bias        = hBias[i].buf();
+                fp.bias_type   = Tbias;
+                fp.bias_stride = arg.bias_stride > 0 ? arg.bias_stride : 0;
+            }
+            fp.seed = fast_check_seed(arg);
+            return fp;
+        };
+        // The expected sums depend only on the inputs. Computing them before any launch also
+        // refuses a configuration whose results the compute type cannot hold exactly.
+        if(arg.fast_check)
+            for(int i = 0; i < gemm_count; i++)
+            {
+                fcExpected[i] = fast_check_expected(
+                    fcProblem(i, {(*dDp)[i].buf(), To, M[i], N[i], ldd[i], stride_d[i]}));
+                if(!fcExpected[i].status.passed)
+                {
+#ifdef GOOGLE_TEST
+                    FAIL() << fcExpected[i].status.message;
+#else
+                    hipblaslt_cerr << fcExpected[i].status.message << std::endl;
+                    return;
+#endif
+                }
+            }
         for(size_t run = 0; run < heuristicResult.size() * fcIterations; run++)
         {
             const size_t sol  = run / fcIterations;
@@ -5923,34 +6012,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     FastCheckResult scan = fast_check_scan_padding_device(
                         d_dev, num_batches[i], size_D[i], arg.c_equal_d, stream);
 
-                    FastCheckProblem fp;
-                    fp.M           = M[i];
-                    fp.N           = N[i];
-                    fp.K           = K[i];
-                    fp.batch_count = num_batches[i];
-                    fp.transA      = transA == HIPBLAS_OP_T;
-                    fp.transB      = transB == HIPBLAS_OP_T;
-                    fp.A = {fcA[i].get(), TiA, A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
-                    fp.B = {fcB[i].get(), TiB, B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
-                    fp.C = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};
-                    fp.D = d_dev;
-                    fp.compute_type = Tc;
-                    fp.alpha        = get_computeInterface(h_alpha[i], Tc);
-                    fp.beta         = get_computeInterface(h_beta[i], Tc);
-                    if(arg.scaleAlpha_vector)
-                    {
-                        fp.scale_alpha_vec      = hScaleAlphaVec[i].buf();
-                        fp.scale_alpha_vec_type = Talpha;
-                    }
-                    if(arg.bias_vector)
-                    {
-                        fp.bias        = hBias[i].buf();
-                        fp.bias_type   = Tbias;
-                        fp.bias_stride = arg.bias_stride > 0 ? arg.bias_stride : 0;
-                    }
-                    fp.seed = fast_check_seed(arg);
-                    if(run == 0)
-                        fcExpected[i] = fast_check_expected(fp);
+                    FastCheckProblem fp  = fcProblem(i, d_dev);
                     FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
                     if(!scan.passed || !res.passed)
                     {
