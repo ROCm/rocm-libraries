@@ -224,6 +224,7 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
         sliding_window=int(req.sliding_window),
+        use_sinks=bool(req.use_sinks),
         waves_per_eu=_resolve_dense_waves_per_eu(
             req, _tuned_waves_per_eu(head_size, dtype)
         ),
@@ -265,8 +266,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     ``builders/gfx942/attention/prefill/README.md``.
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
-    spec the builder cannot emit (varlen / ragged / sinks are later follow-ups;
-    plus block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
+    spec the builder cannot emit (varlen / ragged are later follow-ups; plus
+    block_n, LDS-budget and 32-bit-extent limits). That keeps ``admits`` and
     ``build`` in agreement, so an out-of-scope request falls through to another
     candidate instead of being selected and then failing to build.
     """
@@ -349,12 +350,12 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         capability=Capability(
             arches=("gfx942",),
             dtypes=("bf16", "fp16"),
-            # Dense: causal + sliding-window; no sinks or moving bottom-right
-            # diagonal. The latter is a distinct request feature, absent here.
-            # Head size stays out -- D64/D128 coverage is
+            # Dense: causal, sliding-window and sinks (alone or combined); no
+            # moving bottom-right diagonal. That is a distinct request feature,
+            # absent here. Head size stays out: D64/D128 coverage is
             # ``supports_attention_dense``'s call, and it reads the built spec
             # (LDS budget, block_n divisibility), which a ShapeRange cannot.
-            supports_features=frozenset({"causal", "sliding_window"}),
+            supports_features=frozenset({"causal", "sliding_window", "sinks"}),
         ),
         _supports=support,
         select_spec=select,

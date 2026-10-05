@@ -267,7 +267,7 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv"}),
+    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "sinks"}),
     "gfx950": frozenset(
         {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks"}
     ),

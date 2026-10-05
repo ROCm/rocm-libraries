@@ -5,7 +5,8 @@
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
 gfx942 GPU and checks max_abs against an fp32 ``scaled_dot_product_attention``
-oracle, for both the default and the P4 persistent grid. This is the committed,
+oracle (the sink cohorts use an fp32 masked softmax with an appended sink column),
+for both the default and the P4 persistent grid. This is the committed,
 CI-collectable form of the acceptance criterion's "functional GPU-numeric bench,
 both variants, vs torch fp32 SDPA" -- previously only an out-of-tree verifier.
 
@@ -74,7 +75,7 @@ _COHORT = [
 ]
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, sliding_window) --
-# STANDALONE sliding-window (no sinks; gfx942 dense has no sink support yet). All rows
+# STANDALONE sliding-window (no sinks; SWA-sink is _SWA_SINK_COHORT below). All rows
 # are causal (sliding_window > 0 requires causal). Window is a multiple of the shipped
 # block_n (64): 128, 256. Covers both dtypes, D64/D128, and BOTH grid variants -- the
 # persistent rows exercise the per-work-item start_tile prune that the default grid
@@ -88,9 +89,37 @@ _SWA_COHORT = [
     ("bf16", 64, 16, 4, True, 128),
 ]
 
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal): full-sink
+# cohort. Both dtypes, D64/D128, GQA + MHA, both grids, and non-causal on both grids.
+_SINK_COHORT = [
+    ("fp16", 128, 16, 4, False, True),
+    ("fp16", 128, 16, 4, True, True),
+    ("bf16", 128, 16, 4, False, True),
+    ("bf16", 128, 16, 4, True, True),
+    ("fp16", 64, 16, 16, False, True),
+    ("bf16", 64, 16, 4, True, True),
+    ("fp16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, False, False),
+    ("bf16", 128, 16, 4, True, False),
+]
+
+# SWA-sink: the standalone SWA rows with sinks on.
+_SWA_SINK_COHORT = _SWA_COHORT
+
 
 def _spec(
-    dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
+    dtype,
+    d,
+    hq,
+    hkv,
+    persistent,
+    *,
+    causal=True,
+    batch=1,
+    sq=512,
+    sk=None,
+    sliding_window=0,
+    use_sinks=False,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
@@ -127,13 +156,14 @@ def _spec(
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
             mask_type=1 if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
+            use_sinks=use_sinks,
             algorithm="attention_dense",
             dense_persistent="on" if persistent else "off",
         )
@@ -305,9 +335,9 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
     ``ki > qi`` plus window ``ki <= qi - W`` masked out) and the kernel applies
     (``cmp_le(ktok, q)`` + ``cmp_gt(ktok, q - SW)``): keep key k for query q iff
     ``q - W < k <= q``. Expressed here as a boolean SDPA attn_mask -- matching this
-    file's SDPA-based base oracle -- rather than gfx950's manual masked-softmax,
-    which exists only because gfx950 also concatenates a sink column (gfx942 has no
-    sinks yet). The diagonal k==q is always kept (W>0), so no row is fully masked."""
+    file's SDPA-based base oracle. The sink cohorts use the manual masked-softmax
+    in :func:`_sink_reference` instead, since SDPA cannot append a sink column. The
+    diagonal k==q is always kept (W>0), so no row is fully masked."""
     import torch
     import torch.nn.functional as F
 
@@ -354,6 +384,213 @@ def test_dense_swa_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent, sliding_w
         f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
+
+
+def _sink_reference(q, k, v, sinks, scale, *, causal=True, sliding_window=0):
+    """fp32 ``softmax(concat([QK*scale, sink]))[..., :-1] @ V``, the gfx950 sibling's
+    oracle. The sink is one extra logit per query head with no value row, so it only
+    grows the softmax denominator. Full [B,Hq,Sq,Skv] matrix; fine at these sizes.
+    Causal is top-left aligned (key ki visible to query qi iff ki <= qi), so a row
+    whose window holds no key softmaxes over the sink alone and outputs 0."""
+    import torch
+
+    B, Sq, Hq, _ = q.shape
+    Skv = k.shape[1]
+    rep = Hq // k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vh = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
+    qi = torch.arange(Sq, device=q.device).view(-1, 1)
+    ki = torch.arange(Skv, device=q.device).view(1, -1)
+    mask = torch.zeros(Sq, Skv, dtype=torch.bool, device=q.device)
+    if causal:
+        mask |= ki > qi
+    if sliding_window > 0:
+        mask |= ki <= qi - sliding_window
+    attn.masked_fill_(mask.view(1, 1, Sq, Skv), float("-inf"))
+    sink_col = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, Sq, 1)
+    attn = torch.softmax(torch.cat([attn, sink_col], dim=-1), dim=-1)[..., :-1]
+    return torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
+
+
+_SINK_OFFSET = {"above_qk_max": 1.0, "below_qk_max": -1.0, "dominates_qk": 8.0}
+
+
+def _check_sinks(
+    dtype, d, hq, hkv, persistent, causal, sliding_window, magnitude, *, sq=512, sk=None
+):
+    """Run the shipped sink spec and compare against :func:`_sink_reference`.
+
+    The sink is set relative to each head's max over the first (block_m x block_n)
+    tile. One logit above: the seeded m0 stays the running max through tile 0, so
+    alpha is 1 and the tile's p values carry the scaling. One below: tile 0 raises
+    the max and the seeded l0 = 1 must be rescaled by alpha on the first tile. Both
+    halves of the seed are exercised, which IR goldens cannot do. Eight above
+    (``dominates_qk``): the sink takes nearly all of every row's softmax, so the
+    non-vacuity check holds even with no causal mask."""
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B, Sq, Skv = 1, sq, sq if sk is None else sk
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+
+    q = torch.randn(B, Sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, Skv, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, Sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        causal=causal,
+        batch=B,
+        sq=Sq,
+        sk=Skv,
+        sliding_window=sliding_window,
+        use_sinks=True,
+    )
+
+    bm, bn = spec.block_m, spec.block_n
+    qt = q[:, :bm].transpose(1, 2).float()
+    kt = k[:, :bn].transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
+    qk = torch.einsum("bhqd,bhkd->bhqk", qt, kt) * scale
+    if causal:
+        qi = torch.arange(bm, device="cuda").view(-1, 1)
+        ki = torch.arange(bn, device="cuda").view(1, -1)
+        qk.masked_fill_((ki > qi).view(1, 1, bm, bn), float("-inf"))
+    tile_max = qk.amax(dim=(-1, -2))[0]  # [Hq]
+    sinks = (tile_max + _SINK_OFFSET[magnitude]).to(tdt).contiguous()
+
+    run_attention_dense_torch(
+        spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
+    )
+    torch.cuda.synchronize()
+
+    ref = _sink_reference(
+        q, k, v, sinks, scale, causal=causal, sliding_window=sliding_window
+    )
+    label = (
+        f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
+        f"sq{Sq} sk{Skv} swa{sliding_window} "
+        f"{'persist' if persistent else 'default'} {magnitude}"
+    )
+    # max() propagates NaN and NaN < tol is False, so a NaN row fails here too.
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+
+    # Rows whose window holds no key (qi >= Skv + W - 1) run a zero-trip KV loop.
+    # With sinks they softmax over the sink alone, so the output is exactly 0.
+    empty_rows = 0
+    if causal and sliding_window > 0 and Sq >= Skv + sliding_window:
+        first_empty = Skv + sliding_window - 1
+        tail = out[:, first_empty:]
+        empty_rows = tail.shape[1]
+        assert (
+            torch.count_nonzero(tail).item() == 0
+        ), f"{label}: rows >= {first_empty} have no visible key but are not all 0"
+
+    if causal or magnitude == "dominates_qk":
+        # Non-vacuity: under causal, query row 0 sees only key 0, so the sink takes a
+        # large share of its softmax; with dominates_qk it takes nearly all of every
+        # row. Either way the sink reference must move well past tol, so a kernel
+        # that ignored the sink would fail the parity assert above. Not asserted for
+        # non-causal at +/-1: with 512 visible keys the sink's share can sit under
+        # tol. Empty-window rows are NaN without a sink; they are checked above.
+        ref_nosink = _sink_reference(
+            q,
+            k,
+            v,
+            torch.full_like(sinks, float("-inf")),
+            scale,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
+        delta = (ref - ref_nosink).nan_to_num(0.0).abs().max().item()
+        assert delta > tol, f"{label}: sinks moved the reference only {delta:.3e}"
+
+    return empty_rows
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,causal", _SINK_COHORT)
+def test_dense_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, causal, sink_magnitude
+):
+    """Full-sink numeric parity (no sliding window), both grids."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, sink_magnitude)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,causal", [r for r in _SINK_COHORT if not r[-1]]
+)
+def test_dense_sinks_non_causal_sink_dominates(dtype, d, hq, hkv, persistent, causal):
+    """Non-causal sink parity with a non-vacuity check: the sink sits eight logits
+    above the QK max, so it takes nearly all of every row and a kernel that dropped
+    it would miss the reference by far more than tol."""
+    _check_sinks(dtype, d, hq, hkv, persistent, causal, 0, "dominates_qk")
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
+# sliding_window): SWA-sink with Sq > Skv so the trailing query blocks' windows
+# start past seqlen_kv. Those blocks run a zero-trip KV loop that supports only
+# admits with sinks (NaN without). At block_m 256 the first empty row is 383, so
+# query block 1 straddles the boundary and blocks 2 and 3 are fully empty.
+_SWA_SINK_EMPTY_WINDOW_COHORT = [
+    ("bf16", 128, 16, 4, False, 1024, 256, 128),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128),
+    ("fp16", 128, 16, 4, False, 1024, 256, 128),
+    ("fp16", 128, 16, 4, True, 1024, 256, 128),
+    ("bf16", 64, 16, 4, False, 1024, 256, 128),
+    ("bf16", 64, 16, 4, True, 1024, 256, 128),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window", _SWA_SINK_EMPTY_WINDOW_COHORT
+)
+def test_dense_swa_sinks_empty_window_outputs_zero(
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window, sink_magnitude
+):
+    """Empty-window rows output exactly 0 (softmax over the sink alone) and every
+    other row keeps parity, on both grids."""
+    empty_rows = _check_sinks(
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        True,
+        sliding_window,
+        sink_magnitude,
+        sq=sq,
+        sk=sk,
+    )
+    assert empty_rows > 0, "cohort row does not reach an empty window"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
+@pytest.mark.parametrize("dtype,d,hq,hkv,persistent,sliding_window", _SWA_SINK_COHORT)
+def test_dense_swa_sinks_numeric_vs_fp32_reference(
+    dtype, d, hq, hkv, persistent, sliding_window, sink_magnitude
+):
+    """SWA-sink numeric parity: the window prune and the sink seed together, on the
+    same rows as the standalone SWA cohort. Always causal (SWA requires it)."""
+    _check_sinks(dtype, d, hq, hkv, persistent, True, sliding_window, sink_magnitude)
 
 
 @requires_gfx942_gpu
