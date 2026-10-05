@@ -24,6 +24,7 @@
 
 #include "internal/extra/rocsparse_bsrgeam.h"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsrgeam_device.h"
@@ -187,24 +188,40 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(dir,
-                                                                                mb,
-                                                                                nb,
-                                                                                block_dim,
-                                                                                alpha,
-                                                                                bsr_row_ptr_A,
-                                                                                bsr_col_ind_A,
-                                                                                bsr_val_A,
-                                                                                beta,
-                                                                                bsr_row_ptr_B,
-                                                                                bsr_col_ind_B,
-                                                                                bsr_val_B,
-                                                                                bsr_row_ptr_C,
-                                                                                bsr_col_ind_C,
-                                                                                bsr_val_C,
-                                                                                idx_base_A,
-                                                                                idx_base_B,
-                                                                                idx_base_C);
+        // Grid-stride over the block rows: grid.x is clamped against maxGridSize[0],
+        // so one grid sweep only covers hipGridDim_x of them. The bound is block
+        // uniform -- it uses only hipBlockIdx_x, hipGridDim_x and the kernel argument
+        // mb -- which matters because the device function runs a multipass chunk loop
+        // behind __syncthreads(): a bound that varied within the block would diverge
+        // at those barriers. There is no cross-block dependency here; every block row
+        // of C is written independently, so the rows a block picks up are arbitrary.
+        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        {
+            rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(
+                static_cast<rocsparse_int>(row),
+                dir,
+                mb,
+                nb,
+                block_dim,
+                alpha,
+                bsr_row_ptr_A,
+                bsr_col_ind_A,
+                bsr_val_A,
+                beta,
+                bsr_row_ptr_B,
+                bsr_col_ind_B,
+                bsr_val_B,
+                bsr_row_ptr_C,
+                bsr_col_ind_C,
+                bsr_val_C,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C);
+
+            // The device function leaves its last reads of its shared table/data unfenced
+            // against the next iteration's first store. Fence them here.
+            __syncthreads();
+        }
     }
 
     template <typename T>
@@ -425,7 +442,12 @@ namespace rocsparse
 #define BSRGEAM_DIM 256
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 16>),
-                dim3(mb),
+                // One block per block row, clamped to the device's grid.x limit.
+                // With BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to
+                // dim3 unclamped narrows it to unsigned int and silently drops most
+                // of the matrix. The kernel grid-strides over the block rows, so an
+                // undersized grid still covers [0, mb).
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
@@ -455,7 +477,12 @@ namespace rocsparse
 #define BSRGEAM_DIM 256
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 32>),
-                dim3(mb),
+                // One block per block row, clamped to the device's grid.x limit.
+                // With BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to
+                // dim3 unclamped narrows it to unsigned int and silently drops most
+                // of the matrix. The kernel grid-strides over the block rows, so an
+                // undersized grid still covers [0, mb).
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
