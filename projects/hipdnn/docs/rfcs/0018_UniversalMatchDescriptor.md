@@ -886,7 +886,7 @@ Mapping to the hand-written code:
 | `q == k == v` dtype (:265-271) | UMD `{"==": ["$k.dtype", "$q.dtype"]}` |
 | `k.dims[1] == v.dims[1]` head count (:272-276) | UMD `{"==": ["$v.dims[1]", "$k.dims[1]"]}` |
 | head dim, enforced implicitly by a registry miss (`key.empty()`, :309) | UMD `{"==": ["$q.dims[3]", "$kernel.head_size"]}`, stated explicitly |
-| `getMaskType` throw-on-contradiction (:293) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
+| `resolveMaskFor` throw-on-contradiction (:451) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
 | `getKernelNameKey` table lookup (:301) | dissolves into the KDP's Launch ([§6](#6-the-native-matcher-escape-hatch)) |
 
 The split is visible in the two columns: everything about *which graph* is the engine's, and

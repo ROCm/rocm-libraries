@@ -71,14 +71,6 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
-    {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
-    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
@@ -125,6 +117,29 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // Flash2 shape variables (declare before guards that reference them)
     const int seqLenQ = static_cast<int>(qTensor->dims()->Get(2));
     const int seqLenKv = static_cast<int>(kTensor->dims()->Get(2));
+
+    // K2: reject mask types the kernel does not implement, classified at these
+    // sequence lengths (a causal window that covers the whole sequence is plain
+    // causal). Decline the invalid mask attributes resolveMaskFor throws on (both
+    // deprecated booleans, a bound below -1, a causal flag with a positive
+    // right_bound) instead of letting the exception escape.
+    {
+        asm_sdpa_engine::plan_utils::MaskType maskType
+            = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            maskType = asm_sdpa_engine::plan_utils::resolveMaskFor(attrs, seqLenQ, seqLenKv).type;
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(HIP_KERNEL_LOG_PREFIX << e.what());
+            return false;
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
 
     // K3: reject partial query tiles (divergent __syncthreads under my_valid)
     HIP_KERNEL_RETURN_FALSE_IF(
@@ -355,7 +370,7 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
         p.attnScale = attrs.attn_scale_value().value();
     }
 
-    p.causal = attrs.causal_mask();
+    p.causal = requestsCausal(attrs, p.seqLenQ, p.seqLenKv);
 
     p.qStrideBatch = q->strides()->Get(0);
     p.qStrideHead = q->strides()->Get(1);
@@ -371,6 +386,16 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
     p.oStrideSeq = o->strides()->Get(2);
 
     return p;
+}
+
+bool HipFlash2FwdPlanBuilder::requestsCausal(const data_objects::SdpaAttributes& attrs,
+                                             int64_t seqLenQ,
+                                             int64_t seqLenKv)
+{
+    // The same classification isApplicable gates on, so a causal mask spelled with
+    // the bounds trio, or a causal window that covers the whole sequence, is masked.
+    return asm_sdpa_engine::plan_utils::resolveMaskFor(attrs, seqLenQ, seqLenKv).type
+           == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 }
 
 } // namespace hip_flash2_engine

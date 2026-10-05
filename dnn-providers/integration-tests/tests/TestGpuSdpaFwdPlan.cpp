@@ -240,6 +240,72 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
         << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
 }
 
+// causal_mask=true plus left_bound=2 is a causal sliding window. The deprecated flag
+// fixes the diagonal but must keep the left bound, the same rule as the CPU reference,
+// so the plan equals a direct fprop() with (leftBound=2, rightBound=0, top-left).
+// hipDNN's left_bound=2 keeps 3 keys per row with the diagonal (cuDNN's
+// set_sliding_window_length(2) would keep 2; see #12982). With Sq = Skv = 8 that
+// hipDNN window makes rows 3..7 lose keys, so plain causal attention would not match.
+TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+
+    SdpaAttributesT attrs;
+    attrs.causal_mask = true;
+    attrs.left_bound = 2;
+    auto graphBuilder = makeGraph(attrs);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
+    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
+    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+
+    Tensor<float> oPlan(DIMS);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    auto direct = [&](int64_t leftBound) {
+        Tensor<float> out(DIMS);
+        GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
+                                                                     k,
+                                                                     v,
+                                                                     out,
+                                                                     std::nullopt,
+                                                                     /*attnMask=*/nullptr,
+                                                                     leftBound,
+                                                                     /*rightBound=*/0,
+                                                                     /*topLeftAlignment=*/true);
+        return out;
+    };
+    auto oWindow = direct(/*leftBound=*/2);
+    auto oCausal = direct(/*leftBound=*/-1);
+
+    const float tolerance = 1e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oWindow, oPlan))
+        << "causal_mask=true with left_bound=2 should run as leftBound=2, rightBound=0";
+    // Control: the window must actually change the output.
+    EXPECT_FALSE(validation.allClose(oCausal, oPlan))
+        << "A left bound of 2 on Sq=Skv=8 should differ from plain causal attention";
+}
+
 TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
 {
     SKIP_IF_NO_DEVICES();

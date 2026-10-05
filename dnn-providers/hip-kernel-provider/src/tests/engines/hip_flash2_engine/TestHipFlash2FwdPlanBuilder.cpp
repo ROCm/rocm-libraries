@@ -236,5 +236,69 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
+// -- requestsCausal: the kernel's causal flag ----------------------------------
+
+struct MaskSpec
+{
+    bool causalMask = false;
+    flatbuffers::Optional<int64_t> rightBound = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> leftBound = flatbuffers::nullopt;
+};
+
+flatbuffers::FlatBufferBuilder sdpaAttributesWith(const MaskSpec& spec)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder fbb;
+    SdpaAttributesBuilder attributes(fbb);
+    attributes.add_causal_mask(spec.causalMask);
+    if(spec.rightBound.has_value())
+    {
+        attributes.add_right_bound(*spec.rightBound);
+    }
+    if(spec.leftBound.has_value())
+    {
+        attributes.add_left_bound(*spec.leftBound);
+    }
+    attributes.add_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+    fbb.Finish(attributes.Finish());
+    return fbb;
+}
+
+bool requestsCausalFor(const MaskSpec& spec, int64_t seqLenQ = 256, int64_t seqLenKv = 256)
+{
+    const auto fbb = sdpaAttributesWith(spec);
+    return HipFlash2FwdPlanBuilder::requestsCausal(
+        *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>(
+            fbb.GetBufferPointer()),
+        seqLenQ,
+        seqLenKv);
+}
+
+// isApplicable accepts right_bound 0 with top-left alignment as TOP_LEFT_CAUSAL, so
+// the plan must mask it. Reading only causal_mask ran it unmasked.
+TEST(TestHipFlash2RequestsCausal, BoundsSpelledTopLeftCausalSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/false, /*rightBound=*/0}));
+}
+
+TEST(TestHipFlash2RequestsCausal, DeprecatedCausalMaskSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/true, /*rightBound=*/flatbuffers::nullopt}));
+}
+
+TEST(TestHipFlash2RequestsCausal, UnmaskedGraphDoesNotSetCausal)
+{
+    EXPECT_FALSE(requestsCausalFor({/*causalMask=*/false, /*rightBound=*/flatbuffers::nullopt}));
+}
+
+// A causal window whose left_bound reaches Sq - 1 hides nothing, so it is plain
+// causal and the kernel's causal flag serves it. One key narrower and it is a
+// real window, which isApplicable declines.
+TEST(TestHipFlash2RequestsCausal, CausalWindowCoveringTheSequenceSetsCausal)
+{
+    EXPECT_TRUE(requestsCausalFor({/*causalMask=*/true, flatbuffers::nullopt, /*leftBound=*/255}));
+    EXPECT_FALSE(requestsCausalFor({/*causalMask=*/true, flatbuffers::nullopt, /*leftBound=*/254}));
+}
+
 } // namespace
 } // namespace hip_flash2_engine

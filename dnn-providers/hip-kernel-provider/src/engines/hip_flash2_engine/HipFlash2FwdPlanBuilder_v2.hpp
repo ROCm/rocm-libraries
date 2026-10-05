@@ -11,7 +11,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 #include <vector>
@@ -68,6 +70,14 @@ public:
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+    /// Whether the kernel's causal flag must be set for this SDPA node at these
+    /// sequence lengths: true for a top-left causal mask however it is spelled
+    /// (causal_mask, right_bound 0 with top-left alignment, or a causal window that
+    /// covers the whole sequence). isApplicable has already declined every other mask.
+    static bool requestsCausal(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                               int64_t seqLenQ,
+                               int64_t seqLenKv);
 
 private:
     /// Extract Flash2FwdParams from a validated SDPA graph.
