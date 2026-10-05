@@ -451,7 +451,7 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertStrideDEqual": "StrideDEqual",
 }
 
-def extractDimPredicate(cls, key, value, predicateName):
+def extractDimPredicate(cls, value, predicateName):
     """
     Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
     Value is a dictionary of {index: size}. A value of -1 skips that index.
@@ -505,7 +505,7 @@ class ProblemPredicate(Properties.Predicate):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
-            return extractDimPredicate(cls, key, value, ASSERT_DIM_MAP_PREDICATES[key])
+            return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
 
         if key.endswith('Multiple'):
             if value == 1:

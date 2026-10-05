@@ -51,14 +51,8 @@ Triton-specific concerns for the compile step / YAML argument map:
   arguments in the constrained custom-kernel layout. Use a named semantic such
   as `StrideCK` when the value depends on split-K. For packed FP4 kernels that
   take the summation size in bytes, use `SizeSumDiv2`.
-- Keep the `.amdgcn_target` / `.amdhsa_code_object_version` directives: the
-  assembler rewrites `.amdgcn_target` and `amdhsa.target` when a kernel is built
-  for another architecture (`Assembler._retargetAssemblySource`), and the
-  StaggerU census disassembles each kernel at the target it declares.
-- A kernel that library logic references is linked into the same code object as
-  Tensile's kernels, and `ld.lld` rejects mixed ABI versions. Emit it at code
-  object version 4 (`-mcode-object-version=4`), the version hipBLASLt builds
-  its libraries at; the directive in the `.s` overrides the assembler's flag.
+- Strip the `.amdgcn_target` / `.amdhsa_code_object_version` directives from the
+  emitted assembly so Tensile's assembler flags drive target + COV.
 
 ## What `custom.config` looks like
 
@@ -136,6 +130,12 @@ filled in by hand.
 
 The tool refuses to operate on a file that already contains a `custom.config`
 block; if you need to regenerate one, delete the existing block first.
+
+If library logic references the kernel, TensileCreateLibrary links it into the
+same code object as Tensile's kernels, and `ld.lld` rejects mixed ABI versions.
+The kernel must then be at code object version 4, the version hipBLASLt builds
+its libraries at: either strip its `.amdhsa_code_object_version` directive so the
+assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
 ## Validation
 
