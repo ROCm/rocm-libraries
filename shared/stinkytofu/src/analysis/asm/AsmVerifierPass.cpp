@@ -28,6 +28,7 @@
 #include <sstream>
 #include <string_view>
 
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu {
@@ -218,7 +219,11 @@ static std::string checkReadWriteOperands(const StinkyInstruction* inst) {
     unsigned destIdx = 0, srcIdx = 0;
 
     for (const auto& field : hwDesc->operandFields) {
-        if (!field.isReadWrite) {
+        // A destination is read-write when the opcode always reads it, and also
+        // when this instance's write keeps part of the register.
+        const bool isReadWrite =
+            field.isDest ? readsDestination(*inst, destIdx) : field.isReadWrite;
+        if (!isReadWrite) {
             if (field.isDest)
                 destIdx++;
             else

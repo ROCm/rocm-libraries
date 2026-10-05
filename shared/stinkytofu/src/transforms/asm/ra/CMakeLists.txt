@@ -15,6 +15,7 @@ target_sources(stinkytofu_objs PRIVATE
     RegisterSymbolSync.cpp
     allocators/LegacyIdentityAllocator.cpp
     allocators/GreedyAllocator.cpp
+    allocators/FreedomOrderedGreedyAllocator.cpp
 )
 
 add_subdirectory(target)

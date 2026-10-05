@@ -26,11 +26,13 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
@@ -75,6 +77,37 @@ AllocationRules selfOverwriteTable(RuleStatus status) {
     rule.description = "this instruction must not write a register it reads";
     rule.status = status;
     rule.clobbersEarly = [](const StinkyInstruction&) { return true; };
+    return AllocationRules({rule});
+}
+
+/// `v<dest> = v_mov_b32 v<src>` -- one source, so it asks for no pairing and
+/// can scaffold a fixture without adding to the count under test.
+StinkyInstruction* vMov(BasicBlock* bb, int dest, int src) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", dest, 1));
+    mov->addSrcReg(StinkyRegister("v", src, 1));
+    return mov;
+}
+
+/// Pairs a destination with its second source, wherever there is one.
+///
+/// A stand-in for the shipped WMMA rule. What the report has to explain is why
+/// a pairing went unmet, and that reasoning does not depend on which rule asked
+/// or on an instruction only one chip has.
+AllocationRules destReusesSrc1() {
+    AllocationRule rule;
+    rule.name = "DestReusesSrc1";
+    rule.description = "a destination should reuse its second source's register";
+    rule.status = RuleStatus::Active;
+    rule.satisfiedBy = [](RegKey dest, RegKey source) { return dest == source; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues& values,
+                             std::vector<Preference>& preferences) {
+        const std::span<const SSAValueID> dest = values(0, true);
+        const std::span<const SSAValueID> source = values(1, false);
+        if (dest.empty() || source.empty()) return;
+        preferences.push_back({dest[0], source[0], 0, 1.0});
+    };
     return AllocationRules({rule});
 }
 
@@ -319,6 +352,22 @@ TEST_F(RegisterAllocationPassTest, AnUnknownForcedRuleNameIsAnError) {
     EXPECT_TRUE(contains(result.getError(), "SelfOverwrit")) << result.getError();
 }
 
+TEST_F(RegisterAllocationPassTest, ForcingARuleBothOnAndOffIsAnError) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.activate.push_back("SelfOverwrite");
+    options.rules.disable.push_back("SelfOverwrite");
+
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(result.hasError());
+    EXPECT_TRUE(contains(result.getError(), "activate and to disable")) << result.getError();
+    EXPECT_TRUE(contains(result.getError(), "SelfOverwrite")) << result.getError();
+}
+
 TEST_F(RegisterAllocationPassTest, ForcingARuleActiveIgnoresTheArchGate) {
     // The testing hatch: a standalone run has no rocisa capabilities, so a
     // filecheck test has to be able to switch a rule on by name.
@@ -347,6 +396,75 @@ TEST_F(RegisterAllocationPassTest, NoRulesRestoresThePreFrameworkBehaviour) {
     LegacyIdentityAllocator allocator;
     Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
     EXPECT_TRUE(result.hasValue()) << result.getError();
+}
+
+// ---------------------------------------------------------------------------
+// Why a pairing went unmet
+// ---------------------------------------------------------------------------
+//
+// The legacy allocator hands back the registers as written, so these fixtures
+// set the colouring the report has to read rather than hoping an allocator
+// produces one. Both shapes leave the pairing unmet; they differ only in
+// whether the shared register was there to be had.
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithRoomReportsAsMissed) {
+    // v1 dies at the add and nothing else ever names it, so the destination
+    // could have been put there. Nothing was in the way, so the colouring is
+    // the only thing left to blame.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/3, /*src=*/2);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 0 blocked 1 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithNoRoomEitherWayReportsAsBlocked) {
+    // Both ends walled in. A live-in on v2 reaches past the point where v1 is
+    // born, so v1 cannot move up; and a fresh value takes v1 while the add's v2
+    // is still live, so v2 cannot move down.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    vMov(entry, /*dest=*/4, /*src=*/2);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/1, /*src=*/0);
+    vMov(entry, /*dest=*/5, /*src=*/2);
+    vMov(entry, /*dest=*/6, /*src=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 1 blocked 0 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, ASatisfiedPairingAddsNoUnmetBreakdown) {
+    // The breakdown explains a loss, so with nothing lost it must stay out of
+    // the line. Otherwise every clean report carries two zeroes.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/1, /*src0=*/0, /*src1=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 1/1]")) << report;
 }
 
 TEST_F(RegisterAllocationPassTest, PassReportsAnUnknownAllocator) {
@@ -473,4 +591,73 @@ TEST_F(RegisterAllocationPassTest, ShadowReportIncludesRegionPeak) {
 
     ASSERT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
     EXPECT_TRUE(contains(report, "regionPeak=")) << report;
+}
+
+namespace {
+
+/// `v_wmma_scale16 dst, a, b, 0, scaleA, scaleB`. Its two scale fields select
+/// no s_set_vgpr_msb slot, so they reach the first bank only.
+StinkyInstruction* createWmmaScale16(BasicBlock* bb, int dst, int a, int b, int scaleA,
+                                     int scaleB) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister(0));
+    wmma->addSrcReg(StinkyRegister("v", scaleA, 2));
+    wmma->addSrcReg(StinkyRegister("v", scaleB, 2));
+    return wmma;
+}
+
+/// A scale operand the producer left at v300, which no bank selector can name,
+/// defined in the function so that a policy is free to move it.
+StinkyInstruction* outOfReachScaleOperand(Function& func, BasicBlock* entry) {
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 300 + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+    return createWmmaScale16(entry, /*dst=*/100, /*a=*/110, /*b=*/120, /*scaleA=*/300,
+                             /*scaleB=*/130);
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, OnlyAllocateBringsAnOutOfReachScaleOperandBackIntoTheBank) {
+    // The case a hold cannot fix, and the reason the Allocate policy exists.
+    //
+    // Hold keeps whatever register the producer chose, which is only right while
+    // the producer chooses reachable ones. Asked to freeze v300, a register no
+    // selector can name, it now refuses instead: the ceiling is collected under
+    // either policy, so the contradiction is caught rather than emitted. That is
+    // as far as holding can get, since it has no other register to offer.
+    //
+    // Allocate owes the producer nothing. It places the value under the ceiling
+    // like any other constrained block, which brings it back into the bank.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = outOfReachScaleOperand(*func, entry);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> scale = ssaSourceUnits(*wmma, 3);
+    ASSERT_EQ(scale.size(), 2u);
+    ASSERT_NE(scale[0], nullptr);
+    const SSAValueID outOfReach = scale[0]->valueId();
+
+    RegisterAllocationOptions options;
+    options.allocator = "greedy-compact";
+    options.allocate = RegClassSet::only(RegType::V);
+
+    GreedyAllocator allocator;
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Hold;
+    Expected<AllocationResult> held = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(held.hasError()) << "holding an unreachable register cannot be honoured";
+    EXPECT_TRUE(contains(held.getError(), "v300")) << held.getError();
+
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+    Expected<AllocationResult> allocated = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(allocated.hasValue()) << allocated.getError();
+    EXPECT_LT(allocated->assignmentOf(outOfReach).idx, kVgprBankSize) << allocated->toString();
 }
