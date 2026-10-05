@@ -119,7 +119,8 @@ def _grModule(name, mtA=256, waveGroup=(4, 1)):
     gpu_test_helpers, which serves the TLU=0 tests that do not need them.
     """
     writer, kernel, tileInfoA, _ = _writer(name, mtA, waveGroup)
-    init_rocisa()
+
+    init_rocisa(target="gfx950")
     kernel["ProblemType"]["IndexUnroll"] = 2
     writer.sgprPool.checkOut(12, tag="_grModule_sgprs")
     writer.sgprs["StrideA0I"] = 10
