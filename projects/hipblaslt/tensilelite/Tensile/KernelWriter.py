@@ -4551,14 +4551,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.codes.gl2PrefetchIncrement = Module()
       self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
         comment="counterL<=PGR+GL2"))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncA"), 0))
-      self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncB"), 0))
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
-      if kernel["enableTDMMetadata"]:
-        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMetadata"), 0))
+      self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchClearIncrement(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
@@ -9537,21 +9530,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
   
       if kernel["PrefetchGL2"]:
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -9592,21 +9571,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # GL2 prefetch: init tp fields and allocate address VGPRs
       if kernel["PrefetchGL2"]:
         self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
-        vgprIdx = int((vgprIdx + 1) / 2) * 2
-        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
-        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
-        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
-        if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
-        if kernel["enableTDMMetadata"]:
-          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tPM["gl2nl"] * self.states.rpga
+        vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       self.states.totalVgprs = vgprIdx
 
@@ -11975,6 +11940,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     return ""
+
+  @abc.abstractmethod
+  def allocGL2PrefetchAddrVgprs(self, kernel, tPA, tPB, vgprIdx: int) -> int:
+    return vgprIdx
   
   @abc.abstractmethod
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
@@ -11984,6 +11953,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     return ""
   
+  @abc.abstractmethod
+  def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
+    return ""
+
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""

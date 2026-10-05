@@ -122,6 +122,21 @@ static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
     return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
 }
 
+// True when the instruction's saddr operand is a register. A null saddr ("off",
+// or omitted in FLAT syntax) selects the full-width address form.
+static bool hasRegisterSaddr(const StinkyInstruction* inst, const HwInstDesc* hwDesc) {
+    const auto& srcRegs = inst->getSrcRegs();
+    unsigned srcIdx = 0;
+    for (const auto& f : hwDesc->operandFields) {
+        if (f.isDest) continue;
+        if (f.encodeField == EncodeField::saddr)
+            return srcIdx < srcRegs.size() &&
+                   srcRegs[srcIdx].dataType == StinkyRegister::Type::Register;
+        srcIdx++;
+    }
+    return false;
+}
+
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                        const AsmVerifierConfig& config) {
     const HwInstDesc* hwDesc = inst->getHwInstDesc();
@@ -140,7 +155,14 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
 
         if (field.fieldSizeBits == 0) continue;
 
-        unsigned expectedWidth = field.fieldSizeBits / 32;
+        unsigned expectedWidth =
+            field.isSaddrOffset && hasRegisterSaddr(inst, hwDesc) ? 1 : field.fieldSizeBits / 32;
+
+        // FLAT syntax spells a null saddr by omitting it (GLOBAL writes "off").
+        bool omittedFlatSaddr = operandIndex >= regs.size() && !isDest &&
+                                field.encodeField == EncodeField::saddr &&
+                                hwDesc->microcode == MicrocodeFormat::MC_VFLAT;
+        if (omittedFlatSaddr) continue;
 
         if (operandIndex >= regs.size() && !canUseLessOperand(inst)) {
             errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
@@ -157,8 +179,9 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
         // or integer/double literals) carry no register-level constraints.
         if (reg.dataType != StinkyRegister::Type::Register) continue;
 
-        // Width check: only meaningful for operands wider than one DWORD.
-        if (expectedWidth > 1) {
+        // Width check: only meaningful for operands wider than one DWORD, or
+        // whose width depends on the saddr addressing mode.
+        if (expectedWidth > 1 || field.isSaddrOffset) {
             // M64 operands are 64-bit lane masks that may be truncated to
             // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;

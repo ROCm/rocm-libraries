@@ -447,13 +447,13 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
     .logical = "GlobalPrefetchB8",
-    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 64, SADDR_OFFSET}, {S1, saddr, sreg, 64} })
 
 // FLAT-addressed form of the same prefetch: identical operands and semantics, including
 // both addressing modes (null saddr + 64-bit vaddr, or 64-bit saddr + 32-bit vaddr).
 // Only the spelling of a null saddr differs: GLOBAL writes "off", FLAT omits it.
 DEF_T(FlatPrefetchB8Inst, "flat_prefetch_b8", .format = FLAT, .flags = {FLATPrefetch},
-    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+    .operand_fields = { {S0, vaddr, vgpr, 64, SADDR_OFFSET}, {S1, saddr, sreg, 64} })
 
 // Global load with transpose-read (TR) — gfx1250 only.
 // global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
