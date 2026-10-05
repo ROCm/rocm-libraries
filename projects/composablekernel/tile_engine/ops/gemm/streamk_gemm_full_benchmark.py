@@ -47,7 +47,11 @@ sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
 sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
-from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep, _resolve_arch  # noqa: E402
+from gemm_utils import (  # noqa: E402
+    _resolve_arch,
+    expand_sweep,
+    setup_multiple_gemm_dispatchers,
+)
 from smi_utils import detect_gpu_ids  # noqa: E402
 from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 
@@ -108,12 +112,16 @@ def resolve_devices(spec):
 
 
 def resolve_configs(args):
-    """Resolve positional configs -> concrete list of config paths."""
+    """Resolve positional configs -> concrete list of config paths.
+
+    Without explicit configs, use ``default_config_<arch>.json`` when it exists
+    and ``default_config.json`` otherwise, so a new architecture only needs a
+    config file drop.
+    """
     if args.configs:
         return args.configs
-    if args.arch == "gfx1250":
-        return [str(DEFAULT_CONFIG.with_name("gfx1250_config.json"))]
-    return [str(DEFAULT_CONFIG)]
+    arch_config = DEFAULT_CONFIG.with_name(f"{DEFAULT_CONFIG.stem}_{args.arch}.json")
+    return [str(arch_config if arch_config.exists() else DEFAULT_CONFIG)]
 
 
 def load_problems(path):

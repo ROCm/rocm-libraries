@@ -37,7 +37,7 @@ GFX1250_CONFIG = (
     / "gemm"
     / "gemm_streamk"
     / "configs"
-    / "gfx1250_config.json"
+    / "default_config_gfx1250.json"
 )
 
 
@@ -247,6 +247,15 @@ class TestGfx1250StreamKDriver(unittest.TestCase):
                 self.assertEqual(
                     {c.reduction_strategy for c in configs}, {reduction or "atomic"}
                 )
+
+    def test_arch_config_is_a_file_drop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            default = Path(tmp) / "default_config.json"
+            arch_config = Path(tmp) / "default_config_gfx950.json"
+            arch_config.write_text("{}")
+            args = SimpleNamespace(configs=[], arch="gfx950")
+            with patch.object(self.driver, "DEFAULT_CONFIG", default):
+                self.assertEqual(self.driver.resolve_configs(args), [str(arch_config)])
 
     def test_ocp_reference_matches_device_input_quantization(self):
         try:
