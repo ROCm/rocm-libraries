@@ -1320,8 +1320,8 @@ _LOGIC_ROOT = os.path.normpath(
 
 _WVSPLTK_NN_RANGES = {
     "wvSpltK_f16_nn_m1": [1, 1, 9, -1, 1, 1, 8, -1],
-    "wvSpltK_f16_nn_m2": [2, 2, 9, -1, 1, 1, 8, 16384],
-    "wvSpltK_f16_nn_m4": [3, 4, 9, -1, 1, 1, 8, 8192],
+    "wvSpltK_f16_nn_m2": [2, 2, 9, -1, 1, 1, 8, 4096],
+    "wvSpltK_f16_nn_m4": [3, 4, 9, -1, 1, 1, 8, 4096],
 }
 
 
@@ -1338,9 +1338,9 @@ _WVSPLTK_NN_RANGES = {
             "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
             "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
             {
-                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, -1],
-                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, -1],
-                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, -1],
+                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, 4096],
+                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, 4096],
+                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, 4096],
             },
         ),
     ],

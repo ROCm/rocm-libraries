@@ -106,9 +106,13 @@ Every range has `batch == 1`:
 
 | Logic file | Ranges (skinny side; long side; K) |
 | ---------- | ---------------------------------- |
-| `aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml` | m = 1, 2, 3-4; n >= 9; K >= 8, capped as above |
+| `aquavanjaram/gfx942/Range/aquavanjaram_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml` | m = 1: n >= 9; K >= 8. m = 2, 3-4: n >= 9; 8 <= K <= 4096 |
 | `gfx950/gfx950/Range/gfx950_Cijk_Ailk_Bljk_HHS_BH_UserArgs.yaml` | same as gfx942 |
-| `gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml` | n = 1, 2, 3-4; m >= 9; K >= 8 |
+| `gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml` | n = 1, 2, 3-4; m >= 9; 8 <= K <= 4096 |
+
+Every range but FP16 NN m = 1 stops at K = 4096, short of the kernels' own
+bounds. Past that, hipBLASLt's own kernels match or beat wvSpltK on MI355X, by
+up to 1.8x.
 
 Each file carries the plain-GEMM problem type (no bias, activation or scale
 vector), because a custom kernel takes the logic file's problem type and these
