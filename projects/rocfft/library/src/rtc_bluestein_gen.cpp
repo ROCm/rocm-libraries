@@ -261,7 +261,6 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable lengths{"lengths", "const integer_type", true, true};
     Variable stride_in{"stride_in", "const integer_type", true, true};
     Variable stride_out{"stride_out", "const integer_type", true, true};
-    Variable scale_factor{"scale_factor", "const real_type_t<scalar_type>"};
 
     Function func{kernel_name};
     func.launch_bounds = LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL;
@@ -278,7 +277,6 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     func.arguments.append(stride_out);
     for(const auto& arg : get_callback_args().arguments)
         func.arguments.append(arg);
-    func.arguments.append(scale_factor);
 
     // local variables
     Variable tx{"tx", "size_t"};
