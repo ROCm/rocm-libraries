@@ -154,9 +154,9 @@ def _dense_spec(req: OperatorRequest):
       rule this factory follows, not a one-off: any value the kernel bakes into its
       ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
       the compiled binary can disagree and the name-keyed launcher cache serves the
-      wrong HSACO. ``batch`` / ``seqlen_q`` / ``seqlen_kv`` are the exception on the
-      non-persistent grid: ``runtime_shape`` reads them as kernel params, so they
-      stay on the spec for the launch but drop out of the name and the cache key.
+      wrong HSACO. ``batch`` / ``seqlen_q`` / ``seqlen_kv`` are the exception on
+      both grids: ``runtime_shape`` reads them as kernel params, so they stay on
+      the spec for the launch but drop out of the name and the cache key.
     The D64 K row-group pad is deliberately NOT set here: it is the shared
     ``lds_k_group_pad`` field, whose default (8) is already the value gfx942 wants,
     and which the gfx942 builder reads directly. Restating it would reintroduce the
@@ -250,12 +250,14 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     shape -- and at priority 3 it is the only thing keeping this candidate off the
     default path.
 
-    The non-persistent body reads ``batch``, ``seqlen_q``, and ``seqlen_kv`` from
-    kernel params (``Gfx942AttentionDenseSpec.runtime_shape``). ``signature`` is
-    ``attention_dense_signature``, which appends those three i32s, and
-    ``bind_torch`` launches through ``run_attention_dense_torch``, which packs
-    them. The persistent grid declares no shape params and keeps batch in the
-    kernel name.
+    When ``Gfx942AttentionDenseSpec.runtime_shape`` holds (default and persistent
+    grids, sliding window included), the body reads ``batch``, ``seqlen_q``,
+    ``seqlen_kv``, ``num_query_heads``, and ``num_kv_heads`` from kernel params
+    (``spec.runtime_param_fields``). On the persistent grid the work decode's
+    fast-division magic/shift pairs follow them (``spec.runtime_kernarg_fields``).
+    ``signature`` is ``attention_dense_signature``, which appends those i32s after
+    ``scale``, and ``bind_torch`` launches through ``run_attention_dense_torch``,
+    which packs them via ``attention_dense_runtime_args``.
 
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
