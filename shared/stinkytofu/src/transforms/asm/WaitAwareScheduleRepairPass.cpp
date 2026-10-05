@@ -186,7 +186,9 @@ void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMov
     for (IRBase& ir : bb)
         if (ir.getType() == IRBase::IRType::StinkyTofu) stage.add(*cast<StinkyInstruction>(&ir));
     const bool pinPrefetches =
-        stage.effectiveLead(passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadWmmas) > 0;
+        stage.effectiveLead(passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadWmmas,
+                            passCtx.getPassFeatureConfig().dagFeatures.prefetchLeadMinStageWmmas) >
+        0;
 
     auto flushSegment = [&]() {
         if (segment.empty()) return;

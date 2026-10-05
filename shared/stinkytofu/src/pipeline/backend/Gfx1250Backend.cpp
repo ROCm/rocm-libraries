@@ -198,6 +198,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
                 passFeatureConfig.dagFeatures.prefetchLeadWmmas = moduleOptions.PrefetchLeadWmmas;
+                passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
+                    moduleOptions.PrefetchLeadMinStageWmmas;
                 passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
                 applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
                 if (moduleOptions.DsReadOrder >= 0)

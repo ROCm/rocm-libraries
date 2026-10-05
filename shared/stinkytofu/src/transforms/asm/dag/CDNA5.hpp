@@ -2509,16 +2509,17 @@ bool CDNA5ReadyQueue::empty() const {
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
     regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
     deferFirstHeadWmmaActive_ = false;
-    StageWmmaCounter stage;
-    for (IRList::iterator it = regionStart; it != regionEnd; ++it)
-        if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
-    blockPrefetchLead_ =
-        stage.effectiveLead(getPassContext().getPassFeatureConfig().dagFeatures.prefetchLeadWmmas);
     deferHeadBalanceThisRegion_ = false;
 
     // Per-BB like the PipeOps lanes: the tracker walks the BB's final order from an empty
     // state.
     const auto& feats = getPassContext().getPassFeatureConfig().dagFeatures;
+    // Per-BB prefetch lead: a block of short stages runs with none (StageWmmaCounter).
+    StageWmmaCounter stage;
+    for (IRList::iterator it = regionStart; it != regionEnd; ++it)
+        if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) stage.add(*inst);
+    blockPrefetchLead_ =
+        stage.effectiveLead(feats.prefetchLeadWmmas, feats.prefetchLeadMinStageWmmas);
     waitAlu_ =
         feats.waitAluHoldStrictCount >= 0
             ? std::make_unique<WaitAluTracker>(

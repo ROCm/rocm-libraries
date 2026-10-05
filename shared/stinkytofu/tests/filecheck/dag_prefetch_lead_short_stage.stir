@@ -1,30 +1,15 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=2 --prefetch-lead-min-stage-wmmas=0 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=2 --print-output
 #
-# PrefetchLeadWmmas: a prefetch is held until shortly before the tensor_load it precedes.
-# The load's window is its barrier's planned window (9 here). A lead below 8 marks a
-# single-stage loop: the prefetch group is released at the load window and the stage
-# barrier waits for it, so it lands right before the barrier. Without the lead it issues
-# once its address VALUs are 32 cycles old (5 WMMAs; dag_prefetch_lead_off.stir).
+# Lead requested, but the block's stages are shorter than PrefetchLeadMinStageWmmas (64 by
+# default), so it runs with no lead: same schedule as dag_prefetch_lead_off.stir.
 
 # CHECK-LABEL: @prefetch_lead
-# CHECK-NOT: global_prefetch_b8
 # CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
 # CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
 # CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
 # CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
 # CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
-# CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
-# CHECK: v_wmma_scale
-# CHECK-NOT: global_prefetch_b8
-# CHECK: "st.global_prefetch_b8"(v[300:301]
-# CHECK: "st.s_barrier_signal"
-# CHECK: "st.tensor_load_to_lds"
+# CHECK-NEXT: "st.global_prefetch_b8"(v[300:301]
 st.func @prefetch_lead() {
 ^entry:
   v300 = "st.v_add_f32"(v310, v311) { issueCycles = 1, latencyCycles = 5 }

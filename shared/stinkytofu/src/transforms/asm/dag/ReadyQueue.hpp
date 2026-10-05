@@ -44,9 +44,8 @@ namespace dag {
 struct RegionDAG;
 
 // WMMAs per TDM stage of a basic block: WMMAs / tensor_load groups (a group ends at a WMMA).
-// A stage under kMinPrefetchLeadStageWmmas WMMAs has no room for a prefetch lead, so the
-// block runs as if PrefetchLeadWmmas = 0. Blocks without WMMAs or tensor_loads keep the lead.
-inline constexpr int kMinPrefetchLeadStageWmmas = 64;
+// A stage under minStageWmmas (PrefetchLeadMinStageWmmas) has no room for a prefetch lead, so
+// the block runs as if PrefetchLeadWmmas = 0. Blocks without WMMAs or tensor_loads keep it.
 struct StageWmmaCounter {
     int wmmas = 0;
     int groups = 0;
@@ -61,9 +60,8 @@ struct StageWmmaCounter {
             wmmaSinceTensorLoad = false;
         }
     }
-    int effectiveLead(int lead) const {
-        const bool shortStage =
-            groups > 0 && wmmas > 0 && wmmas < kMinPrefetchLeadStageWmmas * groups;
+    int effectiveLead(int lead, int minStageWmmas) const {
+        const bool shortStage = groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
         return lead > 0 && shortStage ? 0 : lead;
     }
 };

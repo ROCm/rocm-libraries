@@ -164,6 +164,9 @@ struct PassFeatureConfig {
         /// group; below 8 marks a single-stage loop (whole group at the load's window,
         /// ahead of the stage barrier); 0 = off.
         int prefetchLeadWmmas = 0;
+        /// Mirrors ModuleOptions::PrefetchLeadMinStageWmmas. A basic block whose stages
+        /// (WMMAs / tensor_load groups) are shorter than this runs with no prefetch lead.
+        int prefetchLeadMinStageWmmas = 64;
         /// Mirrors ModuleOptions::WarGateWmmas. WMMAs a ds_load waits before
         /// overwriting a vgpr a WMMA read (WmmaVgprSrcToDsWrite); <= 0 = derived.
         int warGateWmmas = 0;
