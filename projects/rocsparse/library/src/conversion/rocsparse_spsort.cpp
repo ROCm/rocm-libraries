@@ -26,6 +26,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_coosort.hpp"
+#include "rocsparse_csrsort.hpp"
 #include "rocsparse_spsort.hpp"
 
 namespace rocsparse
@@ -40,6 +41,9 @@ namespace rocsparse
         }
         case rocsparse_format_csr:
         case rocsparse_format_csc:
+        {
+            return mat->offsets_batch_stride == 0 && mat->columns_values_batch_stride == 0;
+        }
         case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
@@ -64,6 +68,18 @@ namespace rocsparse
         }
         case rocsparse_format_csr:
         case rocsparse_format_csc:
+        {
+            // The offsets may be shared by all samples with a stride of zero.
+            const int64_t offsets_size
+                = ((mat->format == rocsparse_format_csr) ? mat->rows : mat->cols) + 1;
+            ROCSPARSE_CHECKARG(
+                arg,
+                mat,
+                (mat->columns_values_batch_stride < mat->nnz
+                 || (mat->offsets_batch_stride != 0 && mat->offsets_batch_stride < offsets_size)),
+                rocsparse_status_invalid_size);
+            return rocsparse_status_success;
+        }
         case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
@@ -152,12 +168,12 @@ namespace rocsparse
             switch(format)
             {
             case rocsparse_format_coo:
+            case rocsparse_format_csr:
             {
                 return rocsparse_status_success;
             }
 
                 // LCOV_EXCL_START
-            case rocsparse_format_csr:
             case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
@@ -188,9 +204,18 @@ namespace rocsparse
                                                              buffer));
                 return rocsparse_status_success;
             }
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort(handle,
+                                                             rocsparse_csrsort_alg_default,
+                                                             source,
+                                                             target,
+                                                             buffer_size_in_bytes,
+                                                             buffer));
+                return rocsparse_status_success;
+            }
 
                 // LCOV_EXCL_START
-            case rocsparse_format_csr:
             case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:

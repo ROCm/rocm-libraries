@@ -232,6 +232,7 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int64_t);
+INSTANTIATE(int32_t, int64_t);
 #undef INSTANTIATE
 
 #define INSTANTIATE(ITYPE, JTYPE)                                                         \
