@@ -177,7 +177,7 @@ python3 -c "
 import torch
 import rocke.runtime.comgr as c
 from rocke.runtime import runtime_coexistence as rc
-print('torch rocm    :', rc._torch_rocm_version())
+print('torch rocm    :', rc._torch_rocm_version(rc._torch_bundled_lib('amd_comgr')))
 print('newest system :', rc._newest_rocm_root_version())
 print('resolved comgr:', c.resolved_lib_path())
 print('comgr vintage :', c.resolved_lib_rocm_version())

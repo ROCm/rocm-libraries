@@ -29,7 +29,13 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ._ctypes_bind import _LazyFn
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from .runtime_coexistence import (
+    _IS_WINDOWS,
+    _add_dll_dir,
+    _candidate_lib_paths,
+    _in_rocm_sdk_core,
+    _rocm_sdk_core_release,
+)
 
 
 # Status codes.
@@ -146,6 +152,10 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
 
       * torch-bundled (path under the imported torch's package dir) ->
         ``torch.version.hip``;
+      * TheRock's ``rocm-sdk-core`` wheel (path under its ``_rocm_sdk_core``
+        package, where TheRock torch loads comgr from) -> the wheel's ROCm
+        release (``rocm_sdk.__version__``); see
+        :func:`runtime_coexistence._rocm_sdk_core_release`;
       * a ROCm tree (``<root>/lib/libamd_comgr.so`` or, on a packaged install,
         ``<root>/core-<X>/lib/libamd_comgr.so``) -> the install root's
         ``.info/version`` (with ``/opt/rocm`` as a final fallback).
@@ -172,6 +182,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
+    # TheRock wheel comgr -> the wheel's ROCm release. Without this the climb
+    # below finds no .info/version inside site-packages and falls back to
+    # /opt/rocm, reporting the host's release for the wheel's LLVM.
+    if _in_rocm_sdk_core(rp):
+        return _rocm_sdk_core_release()
     # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
     # dir collecting every ``.info/version`` we pass. This is deliberately a
     # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps

@@ -205,12 +205,29 @@ The runtime resolves the ROCm shared libs WITHOUT importing torch
 priority order:
 
 1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
-2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
-   is already imported** (never imports torch to get it);
+2. the lib torch uses, an opportunistic fast-path **only if torch is already
+   imported** (never imports torch to get it): the copy already mapped into the
+   process, else `<torch>/lib/lib*.so`, else TheRock's
+   `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
+   torch is TheRock's). Exception for comgr only: a stale torch comgr moves
+   below every step 3 candidate (see below);
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first;
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
+of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
+release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
+elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
+and compared with the release of the first step 3 install whose version is
+readable. If both are known and torch's is older, torch's comgr is tried after
+every step 3 candidate (still before step 4), because an older comgr rejects
+ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
+process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
+`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
+ERROR: support is already registered for analysis`. It stays first; if it
+cannot handle the target ISA, the compile fails at `set_isa`.
 
 If you hit `cannot load libamd_comgr.so` in a torch-less process, set
 `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.

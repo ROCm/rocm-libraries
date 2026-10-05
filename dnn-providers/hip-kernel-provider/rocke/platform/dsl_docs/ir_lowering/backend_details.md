@@ -51,7 +51,7 @@ The signature changes at the llvm20 → llvm21+ boundary:
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
 1. `ROCKE_LLVM_FLAVOR` env var (`llvm20`, `llvm22`, or `llvm23`).
-2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. The version is mapped through `_ROCM_FLAVOR_LADDER`: ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`). Teaching rocke about a newer ROCm is one row in that ladder.
+2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (a comgr under the torch package → `torch.version.hip`; a comgr in TheRock's `_rocm_sdk_core` wheel → the wheel's ROCm release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. The version is mapped through `_ROCM_FLAVOR_LADDER`: ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/runtime_coexistence.py::_torch_bundled_lib`). Teaching rocke about a newer ROCm is one row in that ladder.
 3. `torch.version.hip` / `/opt/rocm/.info/version` — fallbacks when the comgr-lib path cannot be resolved.
 4. Default: `llvm22`.
 

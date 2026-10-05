@@ -32,27 +32,56 @@ AMD_COMGR_STATUS_SUCCESS                         = 0
 
 Library loading: the runtime defers `dlopen` until the first comgr call,
 then resolves the library in this order (see
-`runtime/hip_module.py::_candidate_lib_paths`):
+`runtime/runtime_coexistence.py::_candidate_lib_paths`):
 
 1. `$ROCKE_COMGR_LIB` if set (explicit override; full path).
-2. `<torch>/lib/libamd_comgr.so` if `torch` is already in `sys.modules`.
-3. `/opt/rocm/lib/libamd_comgr.so`, then `.so.3` for the SONAME.
+2. If `torch` is already in `sys.modules`, the comgr torch uses: the copy
+   already mapped into the process, else `<torch>/lib/libamd_comgr.so`, else
+   `_rocm_sdk_core/lib/libamd_comgr.so*` (TheRock wheels, only when
+   `rocm_sdk` is imported). Exception: when that comgr is stale (below), it
+   moves after step 3.
+3. A ROCm install: `$ROCM_PATH/lib` / `$ROCM_HOME/lib`, then
+   `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib` newest first; in each,
+   `libamd_comgr.so` then `.so.3` for the SONAME.
 4. Bare `libamd_comgr.so` via the dynamic linker's search path.
 
-The torch-bundled-lib step exists because PyTorch+ROCm wheels (e.g.
-`torch>=2.12 / rocm7.2`) ship their own `libamdhip64.so` and
-`libamd_comgr.so` inside `<torch>/lib/`. When torch is imported, those
-bundled libraries get loaded into the process and own torch's HIP
-context. A second copy of HIP loaded by rocke from `/opt/rocm/lib`
-would be a different runtime instance with disjoint state — modules
-loaded via one are invisible to `hipModuleGetFunction` from the other,
-surfacing as `hipError(500) named symbol not found`. Preferring torch's
-bundled libs (and lazily resolving on first use, so import order does
-not matter) keeps both halves of the process talking to the same
-runtime. `ComgrError` is raised if no candidate loads.
+Stale torch comgr (`_torch_comgr_is_stale`): rocke reads the release of
+torch's comgr from its location, the same way `resolved_lib_rocm_version`
+does (in `_rocm_sdk_core`: the wheel's release, `rocm_sdk.__version__` or
+the installed `rocm-sdk-core` version; elsewhere: `torch.version.hip`), and
+compares it with the release of the first step 3 install whose version it
+can read. If both are known and torch's is older, the torch comgr is
+demoted below every step 3 candidate, still ahead of step 4, because an
+older comgr rejects ISAs newer than its ROCm. If either version is unknown,
+the order above stands. A `_rocm_sdk_core` comgr already mapped into the
+process is never demoted (see the LLVM abort below): it stays first, and
+if it cannot handle the target ISA the compile fails at `set_isa`.
+
+The torch step exists because PyTorch+ROCm wheels load their own
+`libamdhip64` and `libamd_comgr` on `import torch`: older wheels from
+`<torch>/lib/`, TheRock wheels from `_rocm_sdk_core/lib/` (preloaded by
+`rocm_sdk.initialize_process`, SONAME only). A second copy of HIP loaded
+by rocke from `/opt/rocm/lib` would be a different runtime instance with
+disjoint state: modules loaded via one are invisible to
+`hipModuleGetFunction` from the other, surfacing as `hipError(500) named
+symbol not found`. Preferring the copy torch loaded (and lazily resolving
+on first use, so import order does not matter) keeps both halves of the
+process talking to the same runtime. `ComgrError` is raised if no
+candidate loads.
 
 The same resolution order applies to `libamdhip64.so` (env var
-`ROCKE_HIP_LIB`, SONAME `.so.7`).
+`ROCKE_HIP_LIB`, SONAME `.so.7`), without the stale demotion: HIP always
+keeps step 2, since a second HIP runtime breaks module lookup.
+
+Do not load a comgr built from a different LLVM than the one torch already
+loaded. TheRock torch preloads its comgr with `RTLD_GLOBAL`; loading a
+second LLVM into the process aborts with `LLVM ERROR: support is already
+registered for analysis` (seen with the ROCm 10.1 wheel comgr, LLVM 23,
+beside the ROCm 10.2 `/opt/rocm` comgr, LLVM 24). The stale demotion skips
+a mapped wheel comgr for this reason, so in a TheRock torch process only
+`ROCKE_COMGR_LIB` can trigger it. To compile with another comgr, do it in a
+separate process that does not import torch, and hand the HSACO bytes to
+the torch process.
 
 ## Entry Point
 
@@ -106,11 +135,14 @@ options are not automatically validated or included in artifact identity.
 ### Library loading
 
 The HIP module loader follows the same `_candidate_lib_paths` order as
-COMGR: `$ROCKE_HIP_LIB` override, then the torch-bundled
-`<torch>/lib/libamdhip64.so` if torch is already imported, then
-`/opt/rocm/lib/libamdhip64.so` (and the `.so.7` SONAME), then bare
-`libamdhip64.so` via the dynamic linker. Preferring torch's bundled lib
-keeps rocke and torch on the same HIP runtime instance.
+COMGR: `$ROCKE_HIP_LIB` override, then, if torch is already imported, the
+`libamdhip64` torch uses (the copy already mapped into the process, else
+`<torch>/lib/libamdhip64.so`, else `_rocm_sdk_core/lib/libamdhip64.so*` when
+`rocm_sdk` is imported), then the ROCm installs (`libamdhip64.so` and the
+`.so.7` SONAME), then bare `libamdhip64.so` via the dynamic linker.
+Preferring the copy torch loaded keeps rocke and torch on the same HIP
+runtime instance. The stale-comgr demotion does not apply to HIP: its torch
+step is never moved.
 
 Failure raises `HipError`.
 

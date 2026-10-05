@@ -8,9 +8,10 @@ resolve the *same* loaded runtime instance. The crux is process-level
 coexistence with a host that may already own a ROCm runtime:
 
     A ROCm PyTorch wheel bundles ``libamdhip64.so`` / ``libamd_comgr.so``
-    inside ``torch/lib`` and, as a side effect of ``import torch``, loads
-    them into the process. A *second* copy of HIP loaded by rocke from
-    ``/opt/rocm`` is a **different runtime instance** with disjoint state
+    (inside ``torch/lib``, or TheRock's ``_rocm_sdk_core/lib``) and, as a side
+    effect of ``import torch``, loads them into the process. A *second* copy
+    of HIP loaded by rocke from ``/opt/rocm`` is a **different runtime
+    instance** with disjoint state
     -- a module loaded via one is invisible to ``hipModuleGetFunction``
     from the other, surfacing as ``hipError(500) named symbol not found``
     even when the HSACO is well-formed. This is a loader / runtime-instance
@@ -46,23 +47,127 @@ from typing import Any, List, Optional
 _IS_WINDOWS = sys.platform == "win32"
 
 
-def _torch_bundled_lib(stem: str) -> Optional[str]:
-    """Return path to ``<torch>/lib/lib<stem>.so`` if torch is in this process.
+# Read by :func:`_mapped_lib`; a module constant so tests can point it at a fixture.
+_PROC_MAPS = "/proc/self/maps"
 
-    Newer PyTorch+ROCm wheels (e.g. torch>=2.12 / ROCm 7.2) ship their
-    own ``libamdhip64.so`` and ``libamd_comgr.so`` inside the wheel's
-    ``torch/lib/`` directory. When torch is imported, those bundled
-    libraries become torch's loaded HIP runtime instance.
-    A second copy of HIP loaded by rocke from ``/opt/rocm/lib`` is a
-    *different* runtime instance with disjoint state — modules loaded
-    via one are invisible to ``hipModuleGetFunction`` from the other,
-    surfacing as ``hipError(500) named symbol not found`` even when the
+
+def _mapped_lib(stem: str) -> Optional[str]:
+    """Path of a ``lib<stem>.so[.N...]`` already mapped into this process, or None.
+
+    A mapped copy is the runtime instance something else in the process (torch)
+    actually loaded, whatever layout it came from, so it is the exact library to
+    share. Linux only: reads :data:`_PROC_MAPS`; anything unreadable is None.
+    """
+    if _IS_WINDOWS:
+        return None
+    name_re = re.compile(rf"lib{re.escape(stem)}\.so(\.\d+)*")
+    try:
+        with open(_PROC_MAPS) as fh:
+            for line in fh:
+                # address perms offset dev inode [path]; the path may hold spaces.
+                fields = line.rstrip("\n").split(maxsplit=5)
+                if len(fields) < 6:
+                    continue
+                path = fields[5]
+                if name_re.fullmatch(os.path.basename(path)):
+                    return path
+    except OSError:
+        return None
+    return None
+
+
+def _rocm_sdk_core_dirs() -> List[str]:
+    """Package dirs of the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core``, or [].
+
+    Located with ``importlib.util.find_spec``, which does not import the package.
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("_rocm_sdk_core")
+    except Exception:
+        return []
+    if spec is None or not spec.submodule_search_locations:
+        return []
+    return list(spec.submodule_search_locations)
+
+
+def _in_rocm_sdk_core(path: str) -> bool:
+    """True if ``path`` lies inside the ``_rocm_sdk_core`` package (symlinks resolved)."""
+    rp = os.path.realpath(path)
+    for loc in _rocm_sdk_core_dirs():
+        root = os.path.realpath(loc)
+        if rp == root or rp.startswith(root + os.sep):
+            return True
+    return False
+
+
+def _rocm_sdk_core_release() -> Optional[tuple]:
+    """``(major, minor)`` ROCm release of TheRock's ``rocm-sdk-core`` wheel, or None.
+
+    ``rocm_sdk.__version__`` (e.g. ``'10.1.0a20260822'``) when ``rocm_sdk`` is
+    already imported (TheRock's ``import torch`` imports it), else the installed
+    ``rocm-sdk-core`` distribution's version. Neither imports anything. The
+    libs in ``_rocm_sdk_core`` belong to this release; ``torch.version.hip`` on
+    those wheels is the HIP version, a different scheme.
+    """
+    version = getattr(sys.modules.get("rocm_sdk"), "__version__", None)
+    if not version:
+        try:
+            from importlib import metadata
+
+            version = metadata.version("rocm-sdk-core")
+        except Exception:
+            return None
+    nums = re.findall(r"\d+", str(version))
+    if len(nums) < 2:
+        return None
+    return (int(nums[0]), int(nums[1]))
+
+
+def _rocm_sdk_core_lib(stem: str) -> Optional[str]:
+    """``lib<stem>.so*`` from the ``rocm-sdk-core`` wheel's ``_rocm_sdk_core/lib``.
+
+    TheRock torch wheels (multi-arch ``whl-next`` and the per-target-family
+    indexes alike) do not ship the HIP runtime or comgr in ``torch/lib``: they
+    sit in ``_rocm_sdk_core/lib`` with only a SONAME (``libamdhip64.so.7``,
+    ``libamd_comgr.so.3``), and ``import torch`` preloads them through
+    ``rocm_sdk.initialize_process``. Returns the shortest matching name (the
+    bare ``.so`` if present, else the SONAME) or None. POSIX only; Windows uses
+    :func:`_rocm_sdk_dll`.
+    """
+    if _IS_WINDOWS:
+        return None
+    for loc in _rocm_sdk_core_dirs():
+        matches = glob.glob(os.path.join(loc, "lib", f"lib{stem}.so*"))
+        if matches:
+            return min(matches, key=lambda p: (len(p), p))
+    return None
+
+
+def _torch_bundled_lib(stem: str) -> Optional[str]:
+    """Path of the ``lib<stem>`` torch uses, if torch is in this process.
+
+    ROCm torch wheels bring their own ``libamdhip64`` / ``libamd_comgr`` and
+    load them as a side effect of ``import torch``; they become torch's HIP
+    runtime instance. A second copy of HIP loaded by rocke from
+    ``/opt/rocm/lib`` is a *different* runtime instance with disjoint state --
+    modules loaded via one are invisible to ``hipModuleGetFunction`` from the
+    other, surfacing as ``hipError(500) named symbol not found`` even when the
     HSACO is well-formed and the symbol is present in its ELF.
 
-    To keep both halves of the process talking to the same HIP/comgr
-    runtime, prefer torch's bundled lib when torch is already imported.
-    Avoids importing torch as a side effect: only honors a torch that
-    is *already* in :data:`sys.modules`.
+    To keep both halves of the process on one runtime, return, in order:
+
+    1. the copy already mapped into the process (:func:`_mapped_lib`), which is
+       what torch loaded regardless of wheel layout;
+    2. ``<torch>/lib/lib<stem>.so`` (wheels that bundle the libs in torch);
+    3. ``_rocm_sdk_core/lib/lib<stem>.so*`` (see :func:`_rocm_sdk_core_lib`),
+       only when ``rocm_sdk`` is imported, i.e. the torch is TheRock's. A
+       CUDA, CPU or older ROCm torch in a venv that merely has
+       ``rocm-sdk-core`` installed does not use those libs.
+
+    Avoids importing torch as a side effect: only honors a torch that is
+    *already* in :data:`sys.modules`.
     """
     torch_mod = sys.modules.get("torch")
     if torch_mod is None:
@@ -81,8 +186,15 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
             return direct
         matches = sorted(glob.glob(os.path.join(libdir, f"{stem}*.dll")))
         return matches[0] if matches else None
+    mapped = _mapped_lib(stem)
+    if mapped is not None:
+        return mapped
     candidate = os.path.join(libdir, f"lib{stem}.so")
-    return candidate if os.path.exists(candidate) else None
+    if os.path.exists(candidate):
+        return candidate
+    if "rocm_sdk" not in sys.modules:
+        return None
+    return _rocm_sdk_core_lib(stem)
 
 
 def _rocm_sdk_dll(stem: str) -> Optional[str]:
@@ -95,15 +207,7 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     """
     if not _IS_WINDOWS:
         return None
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("_rocm_sdk_core")
-    except Exception:
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    for loc in spec.submodule_search_locations:
+    for loc in _rocm_sdk_core_dirs():
         bindir = os.path.join(loc, "bin")
         direct = os.path.join(bindir, f"{stem}.dll")
         if os.path.exists(direct):
@@ -114,19 +218,30 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     return None
 
 
-def _torch_rocm_version() -> Optional[tuple]:
-    """``(major, minor)`` of the ROCm that torch was built against, or None.
+def _torch_rocm_version(bundled: Optional[str] = None) -> Optional[tuple]:
+    """``(major, minor)`` ROCm **release** of torch's bundled comgr, or None.
 
-    Read off ``torch.version.hip`` (e.g. ``'6.3.42134-a9a80e791'``). Only
-    consults a torch that is *already* imported -- never imports it.
+    Compared against :func:`_newest_rocm_root_version`, a release, so this must
+    be one too. The source follows the bundled lib's location, the same way
+    :func:`rocke.runtime.comgr.resolved_lib_rocm_version` classifies a path:
+
+    - inside TheRock's ``_rocm_sdk_core``: the wheel's release
+      (:func:`_rocm_sdk_core_release`). ``torch.version.hip`` on those wheels is
+      the *HIP* version (``'7.16.26332'`` on ROCm 10.1), a different scheme.
+    - anywhere else: ``torch.version.hip`` (e.g. ``'6.3.42134-a9a80e791'``),
+      where the HIP version is the ROCm release.
+
+    Only consults modules that are *already* imported -- never imports them.
     """
     torch_mod = sys.modules.get("torch")
     if torch_mod is None:
         return None
-    hip = getattr(getattr(torch_mod, "version", None), "hip", None)
-    if not hip:
+    if bundled is not None and _in_rocm_sdk_core(bundled):
+        return _rocm_sdk_core_release()
+    version = getattr(getattr(torch_mod, "version", None), "hip", None)
+    if not version:
         return None
-    nums = re.findall(r"\d+", str(hip))
+    nums = re.findall(r"\d+", str(version))
     if len(nums) < 2:
         return None
     return (int(nums[0]), int(nums[1]))
@@ -151,7 +266,7 @@ def _rocm_version_from_libdir(libdir: str) -> Optional[tuple]:
     - A packaged ROCm keeps its runtime under a versioned *component* subdir,
       ``/opt/rocm-7.2.0/core-7.13/lib``. ``core-7.13`` is a component version,
       not a release: taking the parent of ``lib`` would yield ``(7, 13)`` and
-      compare it against ``torch.version.hip``, which reports the release. A
+      compare it against :func:`_torch_rocm_version`, which reports the release. A
       torch on ROCm 7.10 would then look *older* than a 7.2 install, because
       ``(7, 10) < (7, 13)`` -- and comgr would be demoted backwards.
 
@@ -182,7 +297,7 @@ def _newest_rocm_root_version() -> Optional[tuple]:
     return None
 
 
-def _torch_comgr_is_stale() -> bool:
+def _torch_comgr_is_stale(bundled: Optional[str] = None) -> bool:
     """True when torch's bundled comgr is *older* than the newest ROCm install.
 
     The resolution order below prefers torch's bundled lib so both halves of the
@@ -193,12 +308,15 @@ def _torch_comgr_is_stale() -> bool:
     ``set_isa: INVALID_ARGUMENT`` for any arch newer than torch's ROCm, which is
     a confusing failure a long way from its cause.
 
+    ``bundled`` is the comgr path :func:`_torch_bundled_lib` returned; its
+    location picks the version source (see :func:`_torch_rocm_version`).
+
     Only demotes when BOTH versions are positively known and torch's is strictly
     older; anything unknown keeps the historical order. Deliberately scoped to
     comgr by its one caller: comgr is a compile-only library, while loading a
     second *HIP runtime* beside torch's would be a genuine hazard.
     """
-    torch_v = _torch_rocm_version()
+    torch_v = _torch_rocm_version(bundled)
     root_v = _newest_rocm_root_version()
     if torch_v is None or root_v is None:
         return False
@@ -274,13 +392,17 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
 
     Order:
       1. ``$ROCKE_HIP_LIB`` / ``$ROCKE_COMGR_LIB`` (explicit override, full path).
-      2. ``<torch>/lib/lib<stem>.so`` if torch is *already* imported -- an
-         opportunistic fast-path only (see :func:`_torch_bundled_lib`); we never
-         import torch to populate it. For ``amd_comgr`` this tier is skipped
-         when the bundled comgr is demonstrably older than the newest ROCm
-         install (see :func:`_torch_comgr_is_stale`), because a stale comgr
-         rejects every ISA newer than its own ROCm and would shadow a system
-         comgr that handles the target fine.
+      2. The lib torch uses if torch is *already* imported: the copy already
+         mapped into the process, else ``<torch>/lib/lib<stem>.so``, else (TheRock
+         torch only) ``_rocm_sdk_core/lib/lib<stem>.so*`` (see
+         :func:`_torch_bundled_lib`); we never import torch to populate it. For
+         ``amd_comgr`` this tier is moved after tier 3 when the bundled comgr is
+         demonstrably older than the newest ROCm install (see
+         :func:`_torch_comgr_is_stale`), because a stale comgr rejects every ISA
+         newer than its own ROCm and would shadow a system comgr that handles
+         the target fine. A ``_rocm_sdk_core`` comgr that is already mapped is
+         never moved: ``rocm_sdk.initialize_process`` loaded it ``RTLD_GLOBAL``,
+         so a second comgr would put a second LLVM in the process and abort.
       3. A real ROCm install discovered without torch (see
          :func:`_rocm_root_libdirs`): ``$ROCM_PATH``/``$ROCM_HOME`` then globbed
          ``/opt/rocm*`` trees, newest version first, each with the bare ``.so``
@@ -296,9 +418,16 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
         paths.append(override)
     bundled = _torch_bundled_lib(stem)
     # A stale bundled comgr is demoted below the ROCm installs rather than
-    # dropped: if none of them load, it is still better than nothing.
+    # dropped: if none of them load, it is still better than nothing. Except a
+    # mapped _rocm_sdk_core comgr: TheRock's initialize_process loaded it
+    # RTLD_GLOBAL, demotion cannot unload it, and loading another comgr beside
+    # it aborts in LLVM ("support is already registered"). Keeping it first
+    # means either it handles the ISA or set_isa fails with a clear error.
     _demote_bundled = (
-        bundled is not None and stem == "amd_comgr" and _torch_comgr_is_stale()
+        bundled is not None
+        and stem == "amd_comgr"
+        and not (bundled == _mapped_lib(stem) and _in_rocm_sdk_core(bundled))
+        and _torch_comgr_is_stale(bundled)
     )
     if bundled is not None and not _demote_bundled:
         paths.append(bundled)
