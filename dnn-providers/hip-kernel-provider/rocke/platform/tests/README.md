@@ -119,15 +119,19 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
   package) and `test_rocke_examples.py` (drives the external `example/ck_tile/dsl`
   tree, not part of rocKE) stay in `composablekernel/python/test`.
 
-### Native storage parity in the standard runner
+### Native parity binaries in the standard runner
 
 `run_all.py --build-root <build>` builds all configured targets before pytest,
-then obtains the `rocke_storage` executable path from CTest. Both pytest passes
-receive that path, so storage IR/HIP parity and serialization tests run automatically.
-`--config` selects the native test configuration (default `Release`). A build or
-fixture-discovery failure stops the runner instead of silently skipping coverage.
+then obtains each native parity executable from CTest, as listed in
+`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`) and
+`rocke_nontemporal_hip` (`ROCKE_NONTEMPORAL_HIP_TEST`). Both pytest passes
+receive those paths, so the storage IR/HIP parity, serialization and nontemporal
+HIP-source parity tests run automatically. `--config` selects the native test
+configuration (default `Release`). A build or fixture-discovery failure stops the
+runner instead of silently skipping coverage.
 
-An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
-executable; it does not skip the configured build. With no configured build or
-explicit override, the runner reports native storage parity as skipped; direct
-pytest invocations can use the same override.
+An explicit `ROCKE_STORAGE_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` overrides
+discovery for that binary and must name an existing executable; it does not skip
+the configured build. With no configured build or explicit override, the runner
+reports that parity as skipped; direct pytest invocations can use the same
+overrides.

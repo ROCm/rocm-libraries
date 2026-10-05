@@ -33,6 +33,11 @@ CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
 NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
 ```
 
+GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
+on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
+gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
+
 ### `Value`
 
 ```text
@@ -172,8 +177,13 @@ global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}
-global_store_vN(...)                   # vector stores
+global_load_vN(ptr, idx, dtype, n, temporal_hint=TemporalHint.DEFAULT)   # 16-bit n in {2,4,6,8,16}; f32/i32 {2,3,4,8}; 8-bit {2,4,8,12,16}
+global_store_vN(ptr, idx, value, n, temporal_hint=TemporalHint.DEFAULT)  # vector stores
+# TemporalHint.STREAMING: semantic intent (data read/written once). Lowered today to LLVM
+# `!nontemporal` (HIP: __builtin_nontemporal_load/store); the backend chooses the bits per
+# arch (gfx942/gfx950: `nt` only = CACHE_STREAM, NOT NON_TEMPORAL; gfx90a: GLC+SLC).
+# DEFAULT records nothing. C: rocke_b_global_{load,store}_vN_ex(..., const rocke_mem_opts_t*),
+# opts initialized with ROCKE_MEM_OPTS_INIT (records struct_size; see ir.h for the contract).
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
 

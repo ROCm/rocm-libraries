@@ -24,6 +24,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 from dataclasses import dataclass, field
@@ -99,6 +100,31 @@ CACHE_ALL = 0  # Cache at all levels (default).
 CACHE_GLOBAL = 1  # GLC set — skip L2; useful for one-shot loads.
 CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
 NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
+# GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same bit values
+# are SC0 (1) and NT (2).
+#
+# Not the same thing as ``TemporalHint.STREAMING`` on ``global_load_vN`` /
+# ``global_store_vN``. That hint emits LLVM ``!nontemporal`` and the backend
+# picks the bits per arch: on gfx942 / gfx950 it sets NT only, i.e. the bits
+# of CACHE_STREAM, NOT NON_TEMPORAL (which also sets SC0).
+
+
+class TemporalHint(enum.Enum):
+    """Temporal-locality intent for ``global_load_vN`` / ``global_store_vN``.
+
+    A semantic hint, not raw cache bits: the backend chooses the bits per
+    arch. C twin: ``rocke_temporal_hint_t`` in ``rocke/ir.h``.
+    """
+
+    DEFAULT = "default"  # the existing cache policy; IR unchanged
+    STREAMING = "streaming"  # read/written once; lowers to LLVM !nontemporal
+
+
+def _streaming(temporal_hint: TemporalHint) -> bool:
+    """True for STREAMING; any value that is not a TemporalHint is rejected."""
+    if not isinstance(temporal_hint, TemporalHint):
+        raise TypeError(f"temporal_hint must be a TemporalHint, got {temporal_hint!r}")
+    return temporal_hint is TemporalHint.STREAMING
 
 
 # ----- target-neutral MMA metadata ---------------------------------------
@@ -1614,6 +1640,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
@@ -1625,6 +1652,16 @@ class IRBuilder:
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
         guarantee about the address after adding idx.
+
+        ``temporal_hint`` states the access's temporal-locality intent.
+        ``TemporalHint.STREAMING`` means the data is read once, so it should
+        not displace reused lines. Today it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_load``) and the AMDGPU backend chooses
+        the cache-policy bits per arch -- on gfx942 / gfx950 the ``nt`` bit
+        (the bits of ``CACHE_STREAM``, NOT ``NON_TEMPORAL``). ``DEFAULT``
+        keeps the existing policy and records nothing, so default loads are
+        unchanged. Any value that is not a ``TemporalHint`` raises
+        ``TypeError``.
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
@@ -1649,17 +1686,20 @@ class IRBuilder:
                 "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
+        attrs = {
+            "elem_type": dtype.name,
+            "vec": n,
+            "align": int(
+                align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
+            ),
+        }
+        if _streaming(temporal_hint):
+            attrs["nontemporal"] = True
         return self._op(
             "memref.global_load_vN",
             [ptr, idx],
             [VectorType(dtype, n)],
-            attrs={
-                "elem_type": dtype.name,
-                "vec": n,
-                "align": int(
-                    align or (elem_bytes if n * elem_bytes == 12 else n * elem_bytes)
-                ),
-            },
+            attrs=attrs,
             result_name_hint=f"gv{n}",
         ).result
 
@@ -4234,6 +4274,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        temporal_hint: TemporalHint = TemporalHint.DEFAULT,
     ) -> None:
         """Vectorised global store of N consecutive elements.
 
@@ -4243,6 +4284,11 @@ class IRBuilder:
         a single ``store <N x elem>`` with the supplied address alignment.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
+
+        ``temporal_hint`` as for ``global_load_vN``: ``TemporalHint.STREAMING``
+        means the data is written once; it lowers to LLVM ``!nontemporal``
+        (HIP: ``__builtin_nontemporal_store``) and the backend chooses the
+        bits per arch (gfx942 / gfx950: ``nt``). ``DEFAULT`` records nothing.
         """
         if n not in (1, 2, 4, 8, 16):
             raise ValueError(f"global_store_vN n must be 1, 2, 4, 8, or 16 (got {n})")
@@ -4266,15 +4312,14 @@ class IRBuilder:
                 "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
-        self._op(
-            "memref.global_store_vN",
-            [ptr, idx, value],
-            attrs={
-                "elem_type": elem_name,
-                "vec": n,
-                "align": int(align or (n * elem_bytes)),
-            },
-        )
+        attrs = {
+            "elem_type": elem_name,
+            "vec": n,
+            "align": int(align or (n * elem_bytes)),
+        }
+        if _streaming(temporal_hint):
+            attrs["nontemporal"] = True
+        self._op("memref.global_store_vN", [ptr, idx, value], attrs=attrs)
 
     # ----- atomics (for split-K) -----
 

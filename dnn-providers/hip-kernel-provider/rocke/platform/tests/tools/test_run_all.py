@@ -17,7 +17,10 @@ def runner(monkeypatch):
     spec = importlib.util.spec_from_file_location("rocke_run_all", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.delenv("ROCKE_STORAGE_TEST", raising=False)
+    # Every native parity var: run_all.py exports them into its own pytest pass,
+    # and a leaked value would let these tests pass without exercising CTest.
+    for var, _, _ in module.NATIVE_PARITY_TESTS:
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
     return module
 
@@ -34,6 +37,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
+    nontemporal.touch()
     selected = tmp_path / "override" if override else executable
     if override:
         selected.touch()
@@ -42,7 +47,12 @@ def test_runner_passes_registered_fixture_to_both_backends(
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        listing = {"tests": [{"name": "rocke_storage", "command": [str(executable)]}]}
+        listing = {
+            "tests": [
+                {"name": "rocke_storage", "command": [str(executable)]},
+                {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
+            ]
+        }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
@@ -65,6 +75,9 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
+    assert all(
+        env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
+    )
     assert "ROCKE_BACKEND" not in children[0][1]
     assert children[-1][1]["ROCKE_BACKEND"] == "both"
     assert calls[0][0] == [
@@ -75,7 +88,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "Debug",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
-    assert any("-R" in cmd for cmd, _ in calls) is not override
+    # An explicit override skips the storage lookup; other binaries still resolve.
+    assert any("^rocke_storage$" in cmd for cmd, _ in calls) is not override
 
 
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
@@ -218,7 +232,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_dtypes)\n"
+        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -243,6 +257,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")

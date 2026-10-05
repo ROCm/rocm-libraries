@@ -205,6 +205,45 @@ void rocke_b_global_store(
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED, ops, 3, &a);
 }
 
+/* True when `field` lies inside the caller's struct_size, i.e. the caller's
+ * header had it. Fields past struct_size come from an older, shorter struct
+ * and must not be read; they take their default. */
+#define MEM_OPT_HAS(opts, field) \
+    ((opts)->struct_size >= offsetof(rocke_mem_opts_t, field) + sizeof((opts)->field))
+
+/* Resolve rocke_mem_opts_t.temporal_hint (NULL opts = defaults): 1 for
+ * ROCKE_TEMPORAL_STREAMING, 0 for ROCKE_TEMPORAL_DEFAULT or a temporal_hint
+ * outside the caller's struct_size, -1 (builder error set) for a struct_size
+ * too small to hold the size field itself (missing ROCKE_MEM_OPTS_INIT) or any
+ * other hint value -- never silently treated as streaming. */
+static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opts, const char* what)
+{
+    if(!opts)
+        return 0;
+    if(!MEM_OPT_HAS(opts, struct_size))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "%s: invalid rocke_mem_opts_t.struct_size %u (initialize with "
+                              "ROCKE_MEM_OPTS_INIT)",
+                              what,
+                              (unsigned)opts->struct_size);
+        return -1;
+    }
+    if(!MEM_OPT_HAS(opts, temporal_hint))
+        return 0;
+    switch(opts->temporal_hint)
+    {
+    case ROCKE_TEMPORAL_DEFAULT:
+        return 0;
+    case ROCKE_TEMPORAL_STREAMING:
+        return 1;
+    }
+    (void)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "%s: invalid temporal_hint %d", what, (int)opts->temporal_hint);
+    return -1;
+}
+
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -212,10 +251,22 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       int n,
                                       int align)
 {
+    return rocke_b_global_load_vN_ex(b, ptr, idx, dtype, n, align, NULL);
+}
+
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         const rocke_mem_opts_t* opts)
+{
     rocke_value_t* ops[2];
     rocke_attr_map_t a;
     const rocke_type_t* vt;
     int elem_bytes;
+    int streaming;
     const char* en;
     if(!rocke_i_live(b))
         return NULL;
@@ -255,6 +306,9 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
             "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
+    streaming = mem_opts_streaming(b, opts, "global_load_vN");
+    if(streaming < 0)
+        return NULL;
     vt = rocke_vector_type(b, dtype, n);
     if(!vt)
         return NULL;
@@ -268,6 +322,9 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         &a,
         "align",
         (int64_t)(align > 0 ? align : (n * elem_bytes == 12 ? elem_bytes : n * elem_bytes)));
+    /* Python records the attr only for STREAMING, keeping default IR unchanged. */
+    if(streaming)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     {
         char hint[16];
         /* result_name_hint = "gv{n}" */
@@ -310,11 +367,23 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              int n,
                              int align)
 {
+    rocke_b_global_store_vN_ex(b, ptr, idx, value, n, align, NULL);
+}
+
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                const rocke_mem_opts_t* opts)
+{
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
     const rocke_type_t* et;
     const char* en;
     int elem_bytes;
+    int streaming;
     if(!rocke_i_live(b))
         return;
     if(!ptr || !idx || !value)
@@ -364,6 +433,9 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
             en);
         return;
     }
+    streaming = mem_opts_streaming(b, opts, "global_store_vN");
+    if(streaming < 0)
+        return;
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
@@ -371,6 +443,8 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_str(b, &a, "elem_type", en);
     rocke_attr_set_int(b, &a, "vec", (int64_t)n);
     rocke_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
+    if(streaming)
+        rocke_attr_set_bool(b, &a, "nontemporal", true);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_STORE_VN, ops, 3, &a);
 }
 
