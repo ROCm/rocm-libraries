@@ -42,6 +42,19 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
+# Decided before project(): the first enable_language(Fortran) fixes the compiler
+# for the whole tree. The test/benchmark clients link the host LAPACK, a gfortran
+# build needing its runtime, so keep gfortran for them; fortran/ prefers amdflang
+# otherwise. Only if gfortran exists: a preset name would skip fortran/'s probe.
+if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC}
+   AND (BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS))
+  find_program(_hipblas_gfortran NAMES gfortran)
+  if(_hipblas_gfortran)
+    set(CMAKE_Fortran_COMPILER "${_hipblas_gfortran}")
+  endif()
+  unset(_hipblas_gfortran CACHE)
+endif()
+
 project( hipblas LANGUAGES CXX )
 
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
@@ -122,7 +135,15 @@ if(NOT SKIP_LIBRARY)
   add_subdirectory(library)
 endif()
 
+# Outside the SKIP_LIBRARY guard: the bindings link libhipblas, they do not build it.
+add_subdirectory(fortran)
+
 include( clients/cmake/build-options.cmake )
+
+# Seen by clients/, where the Fortran clients are built.
+if(DEFINED HIPBLAS_BUILD_FORTRAN_CLIENTS)
+  set(BUILD_FORTRAN_CLIENTS ${HIPBLAS_BUILD_FORTRAN_CLIENTS})
+endif()
 
 # Build clients of the library
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
@@ -133,7 +154,8 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   endif()
   message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
 
-  if(BUILD_FORTRAN_CLIENTS)
+  # libgfortran only for gfortran-built clients; amdflang's runtime ships with ROCm.
+  if(BUILD_FORTRAN_CLIENTS AND HIPBLAS_FORTRAN_COMPILER_ID STREQUAL "GNU")
     set(GFORTRAN_RPM "libgfortran4")
     set(GFORTRAN_DEB "libgfortran4")
     if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
@@ -168,7 +190,8 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
       DEPENDS
         COMPONENT clients-common)
   endif()
-  if(BUILD_FORTRAN_CLIENTS)
+  # Same condition as above, which leaves GFORTRAN_RPM/GFORTRAN_DEB unset otherwise.
+  if(BUILD_FORTRAN_CLIENTS AND HIPBLAS_FORTRAN_COMPILER_ID STREQUAL "GNU")
     if(BUILD_CLIENTS_TESTS)
       rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
       rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
