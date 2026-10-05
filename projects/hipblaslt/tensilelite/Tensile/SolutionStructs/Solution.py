@@ -82,7 +82,8 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
+from .Validators.Subtile import (SUBTILE_STACK_SIZES_B16, subtileStackForB16TLU1,
+                                 subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 
 
@@ -1215,13 +1216,29 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            # AB_B16_TLU1 exists but nothing gives the free dim the element
-            # multiple its 16B chunk needs, the way the fp4 branch below does.
-            # Without a reject here these solutions clear validation and then
-            # assert in kernelBodySubtile instead of failing cleanly.
-            reject(state, printRejectionReason,
-                   f"UseSubtileImpl=1 TLU=1 is not implemented for dtype {dtype}")
-            return
+            # Deliberately *no* AssertFree{0,1}ElementMultiple raise here, unlike
+            # the fp4 arm below.  The free-dim multiple becomes a
+            # Free0SizeMultiple solution predicate (see Contractions.py), so
+            # pinning it to the 8-element GR chunk would make these kernels
+            # inapplicable to every size with M % 8 != 0 -- exactly the odd-M
+            # edge sizes the bf16 subtile suite exists to cover, and silently,
+            # since DID_NOT_SATISFY_ASSERTS is a skip rather than a failure.
+            # computeLoadSrd instead rounds numToEnd up to a whole load at
+            # runtime so the last workgroup's partial load keeps its DTL write.
+            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+            mtTiles = mtFree // state["MatrixInstM"]
+            stack = subtileStackForB16TLU1(state, tc, mtTiles)
+            if stack is None:
+              # Report the preferred height's reason: it is the one that
+              # describes the shape the caller asked for.
+              reject(state, printRejectionReason,
+                     subtileTLU1StackReason(state, tc, mtTiles,
+                                            SUBTILE_STACK_SIZES_B16[0]))
+              return
+            state[f"_ABTilePair{tc}"] = {
+              2: "AB_B16_TLU1_2x1",
+              4: "AB_B16_TLU1_4x1",
+            }[stack]
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K
             # stride on a half byte and the elements-to-bytes shift truncates
@@ -2505,20 +2522,13 @@ class Solution(collections.abc.Mapping):
       if not state["MIWaveTile"] or len(state["MIWaveTile"]) != 2:
         reject(state, printRejectionReason, "invalid MIWaveTile")
         return
-      # LraTileAssignment computes wave/block offsets with vectorStaticRemainder
-      # using num1DWaves (=MIWaveGroup[0|1]) or num1DBlocks (=MatrixInstBM|BN)
-      # as the divisor, and reuses one vgpr for dividend / quotient / remainder.
-      # That aliasing is safe only on the power-of-2 fast path (single
-      # v_and_b32); the magic-number path would overwrite the dividend with the
-      # quotient before computing the remainder.
-      for _name, _val in (("MIWaveGroup[0]", state["MIWaveGroup"][0]),
-                          ("MIWaveGroup[1]", state["MIWaveGroup"][1]),
-                          ("MatrixInstBM",   state["MatrixInstBM"]),
-                          ("MatrixInstBN",   state["MatrixInstBN"])):
-        if _val > 1 and (_val & (_val - 1)) != 0:
-          reject(state, printRejectionReason,
-                 f"{_name}={_val} must be a power of two (LraTileAssignment vectorStaticRemainder fast path)")
-          return
+      # MIWaveGroup[0|1] / MatrixInstBM|BN reach LraTileAssignment as the divisor
+      # of an in-place vectorStaticRemainder.  Those call sites used to alias
+      # quotient/remainder/dividend onto one vgpr, which is only correct on the
+      # power-of-2 fast path, so non-power-of-2 values were rejected here.
+      # staticRemainderInPlace (LraTileAssignment.py) now hands the magic-number
+      # path a distinct quotient register, so the restriction is lifted.  This
+      # is what makes MT320 (320/16 = 20 = 4*5) reachable via MIWaveGroup 5.
       if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
         if state["MIWaveTile"][0] % 2 != 0 or state["MIWaveTile"][1] % 2 != 0:
           reject(state, printRejectionReason,

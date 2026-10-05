@@ -312,6 +312,24 @@ AB_B16_2x2 = ABTilePair(
 )
 
 # Column-major A/B (TLU=1): GR and LR contiguous along M
+#
+# The LR side reads with ds_read_b64_tr_b16, which hands a lane 4 M-rows (unlike
+# ds_read_b64_tr_b4, where one lane covers a whole 16-row MFMA-M tile).  So the
+# LR loadShape is m=4 at loadWidth=8 regardless of the stack, and only the GR
+# side and subtileShape scale with the stack height.
+AB_B16_TLU1_4x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 128-bit GR: 8 bf16 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=4, k=1), loadWidth=8),     #  64-bit LR: 4 bf16 along M (ds_read_b64_tr_b16)
+)
+# Half-height fallback for M-tile counts a 4-stack cannot lay out (see
+# SUBTILE_STACK_SIZES_B16).  A 2-tile strip is 32 rows = 64 B, half a line, so
+# this is strictly worse on line utilization and is only ever chosen when 4 is
+# refused.  The swizzle narrows with it: swizzleBitsForSubtile(2) is 1 bit, the
+# 32-row M-extent case both TLU=1 swizzle halves already spell out.
+AB_B16_TLU1_2x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 128-bit GR: 8 bf16 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=4, k=1), loadWidth=8),     #  64-bit LR: 4 bf16 along M (ds_read_b64_tr_b16)
+)
 AB_B16_TLU1 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
@@ -378,6 +396,8 @@ AB_GEOMETRY_MAP = {
   "AB_B4":       AB_B4,
   "AB_B4_2x2":   AB_B4_2x2,
   "AB_B8":       AB_B8,
+  "AB_B16_TLU1_2x1": AB_B16_TLU1_2x1,
+  "AB_B16_TLU1_4x1": AB_B16_TLU1_4x1,
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
@@ -911,6 +931,16 @@ class TileInfo:
     if self.lr: return self.lr.sharedVgprLROffsetSwap
     return getattr(self, '_sharedVgprLROffsetSwap', [])
 
+  @property
+  def sharedVgprLRBigOffset(self):
+    """Scratch address for LR reads past the 16-bit ds offset field, or None.
+
+    Only the bf16 TLU=1 arm allocates one, and only when the operand's LDS region
+    reaches 64 KB -- see _tlu1B16MaxLROffset in SubtileLREmit.
+    """
+    if self.lr: return getattr(self.lr, 'sharedVgprLRBigOffset', None)
+    return getattr(self, '_sharedVgprLRBigOffset', None)
+
   def grOffsetVgpr(self, idx: int) -> int:
     """VGPR holding per-lane GR byte offset for load `idx` within a subtile."""
     return self.sharedVgprGROffset[idx]
@@ -1399,6 +1429,7 @@ def mainLoop(writer, kernel):
           pgr=schedulerPgr,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          ldsBuffers=1 if kernel.get("1LDSBuffer", 0) else 2,
       )
 
       scheduler = LogicalScheduler(cfg)

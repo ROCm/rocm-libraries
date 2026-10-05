@@ -44,6 +44,26 @@ class LraTilePropertiesMFMA(LraTileProperties):
    vectorWidth: int
    maxKId: int
 
+def staticRemainderInPlace(writer, dummy, divisor, tmpVgprRes, tmpSgprRes, comment):
+    """In-place `dummy = dummy % divisor`, safe for any divisor.
+
+    The call sites below historically passed the same vgpr as quotient,
+    remainder and dividend.  That aliasing is only correct on
+    vectorStaticRemainder's power-of-2 fast path, which emits a single
+    v_and_b32 and never writes the quotient register.  The magic-number path
+    moves the quotient into qReg and *then* reads the dividend for the final
+    v_sub_u32, so an aliased qReg destroys the result.  Hand that path a
+    scratch quotient instead; the power-of-2 path is unchanged, so existing
+    kernels regenerate byte-identically.
+    """
+    module = Module("staticRemainderInPlace")
+    isPow2 = (divisor & (divisor - 1)) == 0
+    qReg = dummy if isPow2 else writer.vgprPool.checkOut(1, "lraRemainderQuot")
+    module.add(vectorStaticRemainder(qReg, dummy, dummy, divisor, tmpVgprRes, tmpSgprRes, comment))
+    if not isPow2:
+        writer.vgprPool.checkIn(qReg)
+    return module
+
 class LraTileAssignmentVALU(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": False}
 
@@ -233,7 +253,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
             if num1DWaves > 1:
                 module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
@@ -403,7 +423,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
             if num1DWaves > 1:
                 module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
@@ -586,7 +606,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
             if num1DWaves > 1:
                 module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
@@ -687,7 +707,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
             if num1DWaves > 1:
                 module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
@@ -967,7 +987,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             if num1DBlocks > 1:
                 module.add(vectorStaticDivide(dummy, kReg, dividedForBlkId, tmpVgprRes, \
                     "2. block offset: bnIdx = wtid / dividedForBlkId(%u)" % dividedForBlkId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DBlocks, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DBlocks, tmpVgprRes, tmpSgprInfo, \
                     "2. block offset: bnIdx = bnIdx %% num1DBlocks(%u)" % num1DBlocks))
                 module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideBlock, vgpr(tReg), tmpSgprInfo, \
                     "2. block offset: bnOffset = bnIdx * strideBlock(%u); 3. add N and block offset: bnOffset = block and N offset" % strideBlock))
@@ -1031,7 +1051,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             if num1DWaves > 1:
                 module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                module.add(staticRemainderInPlace(writer, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
                 _segPacked = kernel.get("LDSSegmentInterleave") == 1 \
                     and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILActive

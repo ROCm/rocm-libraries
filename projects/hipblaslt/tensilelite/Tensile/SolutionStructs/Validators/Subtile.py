@@ -114,14 +114,22 @@ def _subtileStripSharingReason(state, tc, mtTiles, stack):
 
 
 def subtileTLU1StackReason(state, tc, mtTiles, stack):
-  """Why `stack` cannot lay out the TLU=1 fp4 operand tc, or None when it can."""
+  """Why `stack` cannot lay out the TLU=1 operand tc, or None when it can.
+
+  Dtype-general: every rule here is about how many bytes a strip spans and how
+  many waves want a slot in it, so bpe comes from the operand's own dtype rather
+  than the fp4 literal this started as.  DataType("float4").numBytes() is 0.5,
+  so the substitution is arithmetically identical for fp4 and cannot move an
+  fp4 answer; bf16 is 4x wider and needs the real width to lay out at all.
+  """
   mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+  bpe    = state["ProblemType"][f"DataType{tc}"].numBytes()
   strips = -(-mtTiles // stack)
   # A partial tail strip has no register list of its own, so the GR emit indexes
   # past the end of localSubtilesRegister.  Padding is only emittable while the
   # operand is a single strip.
   if mtTiles % stack != 0 and strips > 1:
-    return ("UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+    return ("UseSubtileImpl=1 TLU=1 pads tensor %s across more than one "
             "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
             "partial tail, which the GR emit cannot address (MacroTile=%d)"
             % (tc, mtTiles, stack, strips, mtFree))
@@ -142,11 +150,11 @@ def subtileTLU1StackReason(state, tc, mtTiles, stack):
   otherWaves = max(1, numWaves // wgSize)
   perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
   fetchGroup = max(1, stack // perWave) * otherWaves
-  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * bpe
   slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
                * (state["DepthU"] // state["MatrixInstK"])
   if slots < fetchGroup:
-    return ("UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+    return ("UseSubtileImpl=1 TLU=1 leaves the LDS strip on tensor %s with "
             "%d (block x K window) slots for a fetch group of %d, so the surplus "
             "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
             % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
@@ -167,6 +175,93 @@ def subtileStackForTLU1(state, tc, mtTiles):
   return preferred
 
 
+# bf16 is 4x wider than fp4, so its strip reaches a 128 B cache line at a stack
+# of 4 (4 * MatrixInstM 16 * 2 B), where fp4 needs 16.  Taller is therefore not
+# better here: a stack of 8 or 16 spans 256/512 B and buys no extra line
+# coverage while doubling or quadrupling the LDS footprint and the padding.
+#
+# So 4 is the ceiling as well as the preference.  That is also what the LDS
+# swizzle supports: swizzleBitsForSubtile(4) is 2 bits, and
+# SubtileGeometry._SWZ_K_BITS_MSB_FIRST defines exactly the two k bits those
+# consume.  A stack of 8 would need a third, which is not derived anywhere, so
+# admitting 8 or 16 here would trade a clean rejection for an assertion during
+# emit.
+#
+# Shorter, though, is reachable.  A 2-tile strip spans 64 B -- half a line, so it
+# is never preferred -- but it lays out M-tile counts a 4-stack refuses: 6, 10,
+# 14, ... tiles hit the partial-tail rule at 4 and are whole strips at 2, and an
+# odd number of strips per wave straddles at 4 and does not at 2.  Both swizzle
+# halves already handle the 1-bit width it implies: _SWZ_K_BITS_MSB_FIRST is
+# sliced [:swizzleBits], and _emitTLU1LRSwizzle documents the 32-row M-extent
+# case alongside the 64-row one.  So bf16 walks a two-rung ladder, 4 then 2,
+# the same shape as the fp4 chooser above.
+SUBTILE_STACK_SIZES_B16 = (4, 2)
+
+
+# ds_read's offset field is 16-bit unsigned.  Mirrors _DS_IMM_LIMIT in
+# Components/Subtile/SubtileLREmit.py, which asserts the same bound at emit.
+_SUBTILE_DS_IMM_LIMIT = 1 << 16
+
+
+def _subtileMaxLRDsOffset(subtileSize, localGrid, globalGrid):
+  """Largest ds immediate the swizzled non-TLU=1 LR path builds, in bytes.
+
+  emitSingleDsRead walks `sId0 * subtileSize + sId1 * globalGrid[0] *
+  subtileSize`, and the scheduler drives sId0/sId1 over the *local* subtile
+  grid, so the last read is the last local subtile of the last K-window.
+  """
+  return ((int(localGrid[0]) - 1) * int(subtileSize)
+          + (int(localGrid[1]) - 1) * int(globalGrid[0]) * int(subtileSize))
+
+
+def _subtileLRDsImmediateReason(tileInfo):
+  """Why tensor tc's local reads cannot be addressed, or None when they can.
+
+  The swizzled non-TLU=1 LR path (emitSingleDsRead) carries the whole subtile /
+  K-window walk in the ds immediate off a single per-lane base register.  Unlike
+  the TLU=1 bf16 path it has no staging register to hold the 64 KB-aligned top,
+  so once the walk reaches the 16-bit field the operand simply cannot be
+  addressed and the emitted `ds_read_b128 ... offset:65536` is rejected by the
+  assembler ("expected a 16-bit unsigned offset").  Reject here so the solution
+  never reaches codegen -- the emit-time assert would otherwise abort the whole
+  Tensile run rather than skipping one kernel.
+
+  The bound is the largest offset that path builds: the last local subtile row
+  plus the last K-window, both in units of subtileSize.  Measured exact against
+  MT 256/288/320/352/384 on the B operand of an NN bf16 subtile kernel.
+  """
+  # Lazy import: see validateSubtileGRKPartition.
+  from Tensile.Components.Subtile.Kernel import LRTag_TLU1
+  lr = getattr(tileInfo, "lr", None)
+  if lr is not None and isinstance(lr.config.tag, LRTag_TLU1):
+    return None   # TLU=1: staged through sharedVgprLRBigOffset (bf16) or fits (fp4)
+  localGrid = tileInfo.localSubtileGrid
+  globalGrid = tileInfo.globalSubtileGrid
+  maxOffset = _subtileMaxLRDsOffset(tileInfo.subtileSize, localGrid, globalGrid)
+  if maxOffset < _SUBTILE_DS_IMM_LIMIT:
+    return None
+  return ("UseSubtileImpl=1 local reads on tensor %s outgrow the 16-bit ds "
+          "immediate: the last subtile of localSubtileGrid=%s over "
+          "globalSubtileGrid=%s needs offset %d (limit %d) and this LR path has "
+          "no staging register (MacroTile=%d)"
+          % (tileInfo.tc, tuple(localGrid), tuple(globalGrid), maxOffset,
+             _SUBTILE_DS_IMM_LIMIT, int(tileInfo.macroTile)))
+
+
+def subtileStackForB16TLU1(state, tc, mtTiles):
+  """Stack height for a TLU=1 bf16/fp16 operand, or None when neither fits.
+
+  Unlike subtileStackForTLU1 this returns None rather than the preferred height
+  on total failure: there is no geometry to fall back to, so the caller rejects
+  and the rejection reason should be the one from the *preferred* height, which
+  is what the caller re-derives.
+  """
+  for stack in SUBTILE_STACK_SIZES_B16:
+    if subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
+      return stack
+  return None
+
+
 def validateSubtileGRKPartition(state, printRejectionReason):
   # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
   # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
@@ -185,6 +280,10 @@ def validateSubtileGRKPartition(state, printRejectionReason):
     sharingReason = _subtileStripSharingReason(state, tc, mtTiles, stack)
     if sharingReason:
       reject(state, printRejectionReason, sharingReason)
+      return False
+    dsImmReason = _subtileLRDsImmediateReason(tileInfo)
+    if dsImmReason:
+      reject(state, printRejectionReason, dsImmReason)
       return False
     loadRatioGR = tileInfo.loadRatioGR
     localSubtileGrid = tileInfo.localSubtileGrid
