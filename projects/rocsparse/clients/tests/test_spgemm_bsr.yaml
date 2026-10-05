@@ -378,3 +378,45 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   spgemm_alg: [rocsparse_spgemm_alg_default]
   filename: [Chevron4]
+
+# Block rows of C whose hash table does not fit in shared memory: the dense block rows of
+# Chebyshev4 take about 136000 products at block dimension 1 and 68000 at block dimension 2.
+- name: spgemm_mult_bsr_file
+  category: pre_checkin
+  function: spgemm_bsr
+  indextype: *i32_i64
+  precision: *double_only_precisions
+  M: 1
+  N: [68121]
+  K: 1
+  block_dim: [1, 2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [Chebyshev4]
+
+- name: spgemm_mult_bsr_file
+  category: nightly
+  function: spgemm_bsr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: [68121]
+  K: 1
+  block_dim: [1, 2]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [Chebyshev4]

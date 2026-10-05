@@ -28,6 +28,7 @@
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_primitives.hpp"
@@ -160,70 +161,6 @@ namespace rocsparse
                 csr_row_ptr_C,
                 csr_col_ind_C,
                 csr_val_C,
-                idx_base_A,
-                idx_base_B,
-                idx_base_C,
-                idx_base_D,
-                mul,
-                add);
-    }
-
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t CHUNKSIZE,
-              uint32_t WARPSIZE,
-              typename I,
-              typename J,
-              typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_fill_block_per_row_multipass(J n,
-                                              const J* __restrict__ offset,
-                                              const J* __restrict__ perm,
-                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                              const I* __restrict__ csr_row_ptr_A,
-                                              const J* __restrict__ csr_col_ind_A,
-                                              const T* __restrict__ csr_val_A,
-                                              const I* __restrict__ csr_row_ptr_B,
-                                              const J* __restrict__ csr_col_ind_B,
-                                              const T* __restrict__ csr_val_B,
-                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                              const I* __restrict__ csr_row_ptr_D,
-                                              const J* __restrict__ csr_col_ind_D,
-                                              const T* __restrict__ csr_val_D,
-                                              const I* __restrict__ csr_row_ptr_C,
-                                              J* __restrict__ csr_col_ind_C,
-                                              T* __restrict__ csr_val_C,
-                                              I*                   workspace_B,
-                                              rocsparse_index_base idx_base_A,
-                                              rocsparse_index_base idx_base_B,
-                                              rocsparse_index_base idx_base_C,
-                                              rocsparse_index_base idx_base_D,
-                                              bool                 mul,
-                                              bool                 add,
-                                              bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
-        rocsparse::
-            csrgemm_fill_block_per_row_multipass_device<BLOCKSIZE, WFSIZE, CHUNKSIZE, WARPSIZE>(
-                n,
-                offset,
-                perm,
-                alpha,
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                csr_val_A,
-                csr_row_ptr_B,
-                csr_col_ind_B,
-                csr_val_B,
-                beta,
-                csr_row_ptr_D,
-                csr_col_ind_D,
-                csr_val_D,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                csr_val_C,
-                workspace_B,
                 idx_base_A,
                 idx_base_B,
                 idx_base_C,
@@ -568,43 +505,6 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     CSRGEMM_FILL_BLOCK_PER_ROW(                                                    \
         GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)
 
-#define CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS(                                    \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
-        (rocsparse::csrgemm_fill_block_per_row_multipass<CSRGEMM_DIM,            \
-                                                         CSRGEMM_SUB,            \
-                                                         CSRGEMM_CHUNKSIZE,      \
-                                                         CSRGEMM_WARPSIZE>),     \
-        dim3(h_group_size[10]),                                                  \
-        dim3(CSRGEMM_DIM),                                                       \
-        0,                                                                       \
-        stream,                                                                  \
-        n,                                                                       \
-        &d_group_offset[10],                                                     \
-        d_perm,                                                                  \
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host), \
-        csr_row_ptr_A,                                                           \
-        csr_col_ind_A,                                                           \
-        csr_val_A,                                                               \
-        csr_row_ptr_B,                                                           \
-        csr_col_ind_B,                                                           \
-        csr_val_B,                                                               \
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),  \
-        csr_row_ptr_D,                                                           \
-        csr_col_ind_D,                                                           \
-        csr_val_D,                                                               \
-        csr_row_ptr_C,                                                           \
-        csr_col_ind_C,                                                           \
-        csr_val_C,                                                               \
-        workspace_B,                                                             \
-        base_A,                                                                  \
-        base_B,                                                                  \
-        descr_C->base,                                                           \
-        base_D,                                                                  \
-        info_C->csrgemm_info->mul,                                               \
-        info_C->csrgemm_info->add,                                               \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
-
     // Group 2: 33 - 256 non-zeros per row
     if(h_group_size[2] > 0)
     {
@@ -768,39 +668,39 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             return rocsparse_status_requires_sorted_storage;
         }
 
-        I* workspace_B = nullptr;
+        rocsparse::csrgemm_bitmap_workspace<I, J> workspace(handle);
 
-        if(info_C->csrgemm_info->mul == true)
-        {
-            // Allocate additional buffer for C = alpha * A * B
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream));
-        }
-
-#define CSRGEMM_DIM 512
-#define CSRGEMM_SUB 16
-#define CSRGEMM_CHUNKSIZE 2048
-        if(handle->wavefront_size == 32)
-        {
-            CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS(9, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, 32)
-        }
-        else
-        {
-            CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS(9, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, 64)
-        }
-#undef CSRGEMM_CHUNKSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrgemm_calc_bitmap<I, J, T>(handle,
+                                                     workspace,
+                                                     m,
+                                                     n,
+                                                     h_group_size[10],
+                                                     &d_group_offset[10],
+                                                     d_perm,
+                                                     alpha_device_host,
+                                                     csr_row_ptr_A,
+                                                     csr_col_ind_A,
+                                                     csr_val_A,
+                                                     base_A,
+                                                     csr_row_ptr_B,
+                                                     csr_col_ind_B,
+                                                     csr_val_B,
+                                                     base_B,
+                                                     info_C->csrgemm_info->add,
+                                                     beta_device_host,
+                                                     csr_row_ptr_D,
+                                                     csr_col_ind_D,
+                                                     csr_val_D,
+                                                     base_D,
+                                                     csr_row_ptr_C,
+                                                     csr_col_ind_C,
+                                                     csr_val_C,
+                                                     descr_C->base)));
+    }
 
 #undef CSRGEMM_FILL_BLOCK_PER_ROW
 #undef CSRGEMM_FILL_BLOCK_PER_ROW_2
-#undef CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS
-
-        if(info_C->csrgemm_info->mul == true)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));
-        }
-    }
 
     return rocsparse_status_success;
 }

@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrgemm_symbolic_calc.hpp"
 #include "../conversion/rocsparse_identity.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
@@ -36,55 +37,6 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t CHUNKSIZE,
-              uint32_t WARPSIZE,
-              typename I,
-              typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_fill_block_per_row_multipass(J n,
-                                                       const J* __restrict__ offset,
-                                                       const J* __restrict__ perm,
-                                                       const I* __restrict__ csr_row_ptr_A,
-                                                       const J* __restrict__ csr_col_ind_A,
-                                                       const I* __restrict__ csr_row_ptr_B,
-                                                       const J* __restrict__ csr_col_ind_B,
-                                                       const I* __restrict__ csr_row_ptr_D,
-                                                       const J* __restrict__ csr_col_ind_D,
-                                                       const I* __restrict__ csr_row_ptr_C,
-                                                       J* __restrict__ csr_col_ind_C,
-                                                       I*                   workspace_B,
-                                                       rocsparse_index_base idx_base_A,
-                                                       rocsparse_index_base idx_base_B,
-                                                       rocsparse_index_base idx_base_C,
-                                                       rocsparse_index_base idx_base_D,
-                                                       bool                 mul,
-                                                       bool                 add)
-    {
-        rocsparse::csrgemm_symbolic_fill_block_per_row_multipass_device<BLOCKSIZE,
-                                                                        WFSIZE,
-                                                                        CHUNKSIZE,
-                                                                        WARPSIZE>(n,
-                                                                                  offset,
-                                                                                  perm,
-                                                                                  csr_row_ptr_A,
-                                                                                  csr_col_ind_A,
-                                                                                  csr_row_ptr_B,
-                                                                                  csr_col_ind_B,
-                                                                                  csr_row_ptr_D,
-                                                                                  csr_col_ind_D,
-                                                                                  csr_row_ptr_C,
-                                                                                  csr_col_ind_C,
-                                                                                  workspace_B,
-                                                                                  idx_base_A,
-                                                                                  idx_base_B,
-                                                                                  idx_base_C,
-                                                                                  idx_base_D,
-                                                                                  mul,
-                                                                                  add);
-    }
-
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
@@ -525,49 +477,6 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW(                                                 \
         GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)
 
-#define CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS(                                  \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)        \
-    I* workspace_B = nullptr;                                                           \
-                                                                                        \
-    if(info_C->csrgemm_info->mul == true)                                               \
-    {                                                                                   \
-        RETURN_IF_HIP_ERROR(                                                            \
-            rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream)); \
-    }                                                                                   \
-                                                                                        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
-        (rocsparse::csrgemm_symbolic_fill_block_per_row_multipass<CSRGEMM_DIM,          \
-                                                                  CSRGEMM_SUB,          \
-                                                                  CSRGEMM_CHUNKSIZE,    \
-                                                                  CSRGEMM_WARPSIZE>),   \
-        dim3(h_group_size[GROUP_SIZE_ID]),                                              \
-        dim3(CSRGEMM_DIM),                                                              \
-        0,                                                                              \
-        stream,                                                                         \
-        n,                                                                              \
-        &d_group_offset[GROUP_SIZE_ID],                                                 \
-        d_perm,                                                                         \
-        csr_row_ptr_A,                                                                  \
-        csr_col_ind_A,                                                                  \
-        csr_row_ptr_B,                                                                  \
-        csr_col_ind_B,                                                                  \
-        csr_row_ptr_D,                                                                  \
-        csr_col_ind_D,                                                                  \
-        csr_row_ptr_C,                                                                  \
-        csr_col_ind_C,                                                                  \
-        workspace_B,                                                                    \
-        base_A,                                                                         \
-        base_B,                                                                         \
-        descr_C->base,                                                                  \
-        base_D,                                                                         \
-        info_C->csrgemm_info->mul,                                                      \
-        info_C->csrgemm_info->add);                                                     \
-                                                                                        \
-    if(info_C->csrgemm_info->mul == true)                                               \
-    {                                                                                   \
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));       \
-    }
-
     // Group 2: 33 - 256 non-zeros per row
     if(h_group_size[2] > 0)
     {
@@ -731,26 +640,31 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
             return rocsparse_status_requires_sorted_storage;
         }
 
-#define CSRGEMM_DIM 512
-#define CSRGEMM_SUB 16
-#define CSRGEMM_CHUNKSIZE 2048
-        if(handle->wavefront_size == 32)
-        {
-            CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS(
-                10, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, 32)
-        }
-        else
-        {
-            CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS(
-                10, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, 64)
-        }
-#undef CSRGEMM_CHUNKSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
+        rocsparse::csrgemm_bitmap_workspace<I, J> workspace(handle);
+
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrgemm_symbolic_bitmap<I, J>(handle,
+                                                      workspace,
+                                                      n,
+                                                      h_group_size[10],
+                                                      &d_group_offset[10],
+                                                      d_perm,
+                                                      csr_row_ptr_A,
+                                                      csr_col_ind_A,
+                                                      base_A,
+                                                      csr_row_ptr_B,
+                                                      csr_col_ind_B,
+                                                      base_B,
+                                                      info_C->csrgemm_info->add,
+                                                      csr_row_ptr_D,
+                                                      csr_col_ind_D,
+                                                      base_D,
+                                                      csr_row_ptr_C,
+                                                      csr_col_ind_C,
+                                                      descr_C->base)));
 
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_2
-#undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS
     }
     return rocsparse_status_success;
 }

@@ -27,6 +27,7 @@ Documentation for rocSPARSE is available at
 ### Optimized
 * Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
+* Optimized `rocsparse_spgemm` (CSR and BSR), `rocsparse_csrgemm_nnz`, `rocsparse_Xcsrgemm`, `rocsparse_csrgemm_symbolic`, `rocsparse_Xcsrgemm_numeric`, `rocsparse_bsrgemm_nnzb`, and `rocsparse_Xbsrgemm` for rows of `C` whose hash table does not fit in shared memory. For BSR matrices with a block dimension greater than 1, only `rocsparse_bsrgemm_nnzb` is affected.
 
 ### Resolved issues
 * Fixed an overflow issue in the COO atomic SpMV kernels used by `rocsparse_spmv` and `rocsparse_v2_spmv` for COO and COO AoS matrices. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-ID calculation could overflow and prevent some nonzeros from being accumulated. The kernels now compute element IDs in 64-bit arithmetic.

@@ -27,6 +27,7 @@
 #include "csrgemm_device.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_primitives.hpp"
@@ -611,49 +612,25 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
             return rocsparse_status_requires_sorted_storage;
         }
 
-#define CSRGEMM_DIM 512
-#define CSRGEMM_SUB 16
-#define CSRGEMM_CHUNKSIZE 2048
-        I* workspace_B = nullptr;
+        rocsparse::csrgemm_bitmap_workspace<I, J> workspace(handle);
 
-        if(info_C->csrgemm_info->mul == true)
-        {
-            // Allocate additional buffer for C = alpha * A * B
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream));
-        }
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::
-                 csrgemm_nnz_block_per_row_multipass<CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_CHUNKSIZE>),
-            dim3(h_group_size[10]),
-            dim3(CSRGEMM_DIM),
-            0,
-            stream,
-            n,
-            &d_group_offset[10],
-            d_perm,
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_row_ptr_C,
-            workspace_B,
-            base_A,
-            base_B,
-            base_D,
-            mul,
-            add);
-
-        if(info_C->csrgemm_info->mul == true)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));
-        }
-#undef CSRGEMM_CHUNKSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_nnz_bitmap<I, J>(handle,
+                                                                       workspace,
+                                                                       n,
+                                                                       h_group_size[10],
+                                                                       &d_group_offset[10],
+                                                                       d_perm,
+                                                                       csr_row_ptr_A,
+                                                                       csr_col_ind_A,
+                                                                       base_A,
+                                                                       csr_row_ptr_B,
+                                                                       csr_col_ind_B,
+                                                                       base_B,
+                                                                       info_C->csrgemm_info->add,
+                                                                       csr_row_ptr_D,
+                                                                       csr_col_ind_D,
+                                                                       base_D,
+                                                                       csr_row_ptr_C)));
     }
 
     // Exclusive sum to obtain row pointers of C

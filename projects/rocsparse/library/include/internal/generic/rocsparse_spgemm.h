@@ -132,8 +132,9 @@ extern "C" {
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note This function is non-blocking and executed asynchronously with respect to the
 *        host. It can return before the actual computation has finished.
-*  \note Note that for rare matrix products with more than 4096 non-zero entries
-*  per row, an additional temporary storage buffer is allocated by the algorithm.
+*  \note Note that for rows of \f$C\f$ whose hash table does not fit in shared
+*  memory, the algorithm allocates additional device memory during the call.
+*  \ref rocsparse_status_memory_error is returned if it cannot be allocated.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -179,6 +180,9 @@ extern "C" {
 *          \p A, \p B, \p D, \p C, or \p buffer_size pointer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
+*  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted, or
+*          \f$C\f$ in the numeric stage, and a row of \f$C\f$ has a hash table that does not
+*          fit in shared memory.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none or
 *          \p trans_B != \ref rocsparse_operation_none.
