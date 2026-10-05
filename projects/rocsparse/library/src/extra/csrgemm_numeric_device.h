@@ -191,7 +191,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE / WFSIZE + wid;
 
         // Hash table in shared memory
         __shared__ J stable[BLOCKSIZE / WFSIZE * HASHSIZE];
