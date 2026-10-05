@@ -1,0 +1,115 @@
+# -----------------
+# Test Control File
+# -----------------
+#
+# This file lists tests that are disabled.
+# The format is:
+# /test_name_regex/ : /arch_regex/ : size_limit[units] : build_type[, build_type...] : "skip_msg"
+#
+# Where:
+# - test_name_regex   : is a regular expression to match against the fully qualified name of the currently running test (TestSuiteName.TestName).
+# - arch_regex        : is a regular expression which will be matched against the gfx id of the current device (eg. gfx942).
+#                       This regex can contain "keywords". Please see the section below for a description of these.
+# - size_limit        : is an integer (or '*') that specifies the limit at which sizes will begin to be filtered out. In other words,
+#                       all sizes >= size_limit will be filtered out.
+#                       You can also use '*' instead of an integer, to filter out all sizes. Note that in this case, the entire test
+#                       function will be skipped. To filter out all test sizes but still run the test function, use a size limit of 0.
+#                       It is also possible to use limits for tests that use a non-scalar size type (eg. tuple), provided that type can
+#                       be reduced down to a single integer value (eg. the sum of the values in the tuple). See the note in the "caveats"
+#                       section o "transformer" functors for more information.
+# - build_type        : is a comma-delimited (or space-delimited) list of build types that will be used to restrict the scope of the current
+#                       line to particular build types.
+#                       For example, you can make the current line apply only to asan or valgrind builds. See the section below for details.
+# - skip_msg          : is a message to print to stdout when the test is skipped. Note: if environment variable HIPCUB_EXTRA_TC_INFO == 1,
+#                       then additional information about which test sizes were skipped and which control file line caused them to be skipped
+#                       is also printed.
+#
+# --------
+# Keywords
+# --------
+# Keywords are predefined regex snippets that match a number of related architectures. They must be specified within angle brackets.
+# You can embed them in the arch_regex.
+# For example, to specify that the given test(s) should be disabled on all mi300 architectures and on gfx1100, you could use this
+# arch_regex: /<mi300-family>|gfx1100/
+#
+# When this control file is processed, keywords are substituted for their regular expression equivalents.
+# eg. /<mi300-family>|gfx1100/ expands to /(gfx942, gfx950)|gfx1100/
+#
+# This allows you to quickly disable whole families of architectures without having to individually specify each one.
+# Here are some sample keywords and the architectures they map to:
+# - <all>           : all architectures from any vendor
+# - <amd>           : all AMD architectures
+# - <nvidia>        : Nvidia devices
+# - <apus>          : gfx1103, gfx1150, gfx1151, gfx1152
+# - <navi2x-family> : gfx1030, gfx1031, gfx1032
+# - <navi3x-family> : gfx1100, gfx1101, gfx1102
+# - <navi4x-family> : gfx1200, gfx1201
+# - <mi100-family>  : gfx908
+# - <mi200-family>  : gfx90a
+# - <mi300-family>  : gfx942, gfx950
+#
+# For a full list of keywords and their regex equivalents, please see the definition of the keywords unordered map at the bottom of
+# the test/hipcub/test_utils_controller.hpp file.
+#
+# -----------
+# Build Types
+# -----------
+# You can specify that the current line should only disable tests when running with one or more specific build types, or you can
+# allow the current line to disable tests when running with any build type.
+# Available build types options include "asan", "valgrind", "windows", "linux", and "*" (to specify all build types).
+# You can list multiple build types delimited with a comma or space. This is equivalent to combining them using a logical OR.
+#
+# Examples:
+# - This will cause matching tests (on any architecture) to be disabled when running an asan build.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan : "Skipping test under ASAN."
+#
+# - This will cause matching tests (on any architecture) to be disabled when running an asan or a valgrind build.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : asan, valgrind : "Skipping test under ASAN or Valgrind."
+#
+# - This will cause matching tests (on any architecture) to be disabled when running on any build type.
+# /HipcubDeviceRadixSort\/.*/ : /<all>/ : * : * : "Skipping test under all build types."
+#
+# -------
+# Caveats
+# -------
+# - After modifying this file, please rebuild target copy_control_file_changes, which copies it into the correct location in the build directory.
+#   - If you have other code changes, it's sufficient to just rebuild that target, since test targets are all dependent on copy_control_file_changes.
+#
+# - Regexes are sensitive to spaces, so those should be omitted unless you want to match them.
+#   For example, /(gfx1100|gfx1101) | gfx1200/ will not match "gfx1100" or "gfx1200" but will match "gfx1100 " or " gfx1200".
+#   To match all three architectures, you should omit the spaces: /(gfx1100|gfx1101)|gfx1200/
+#
+# - Remember to escape literal '.' and '/' characters in test names - otherwise they'll have their regex meaning. Characters '<', '>', and ":" are
+#   used to delimit keywords and sections of the control line, so they will not work in regexes.
+#
+# - Tests that are compiled in parallel may have an "Id<integer>/" prefix. This prefix is stripped out before regex matching
+#   on the test name takes place, so you should ignore it when writing test name regexes.
+#
+# - If multiple regexes cover the same test, then rules will be examined in order from top to bottom, and the first matching rule will be used.
+#
+# - The size limits use unsigned arithmetic (size_t, i.e. unsigned long long).
+#
+# - There's a small difference between disabling all test sizes using "*" and disabling all tests sizes using a size_limit of 0.
+#   With the "*", the test will not be run at all (GTEST_SKIP will be called). However, with the size_limit of 0, the test will
+#   still be run, but each individual test size will all be skipped (i.e. the vector returned by CHECK_SIZE_FILTERS will be empty).
+#   This means that other test code (eg. for setup or cleanup) that is unrelated to the sizes will still be run.
+#
+# - Some tests specify sizes using types other than size_t. However, values in size expressions in this control file are always interpreted as type size_t.
+#   To work around this, you can create a "transformer" functor that's passed into the filter functions. For more information, see the documentation
+#   in test_utils_controller.cpp.
+
+# ---------------
+# Add rules here:
+#----------------
+# Test Regex                                         : Arch Regex                                      : Sizes  : Build Types    : Skip Message
+/HipcubDeviceRadixSort\/.*/                          : /<apus>/                                        : 4Gi    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceRadixSortLargeInput.*/                  : /<apus>/                                        : 1Gi    : *              : "Skipping sizes over 2^30 on APUs"
+/HipcubDeviceMergeSort\/.*/                          : /<apus>/                                        : 4Gi    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMerge\/.*/                              : /<apus>/                                        : 17908  : *              : "Skipping large sizes on APUs"
+/HipcubDeviceMergeNonTyped\..*/                      : /<apus>/                                        : 256Mi  : *              : "Skipping sizes over 2^28 on APUs"
+/HipcubDeviceMergeNonTyped\.MergeLargeSizeIterators/ : /<all>/                                         : *      : windows        : "Windows AMD HIP cannot allocate >= 4 GiB buffers."
+/HipcubIteratorTests\/\d+\.TestTex.+/                : /<mi300-family>|<navi4x-family>|<apus>|gfx1250/ : *      : *              : "Test not run on gfx94x, gfx95x, gfx115x, gfx120x, or gfx1250 as texture cache API is not supported."
+/HipcubCachingDeviceAllocatorTests\.Test1/           : /<all>/                                         : *      : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
+/HipcubDeviceSelectLargeIndicesTest\/.*/             : /<nvidia>/                                      : *      : *              : "Test disabled for large sizes until support is present in CUB."
+/HipcubDeviceSelectLargeIndicesTest\/.*/             : /<all>/                                         : *      : asan           : "Skipping large size test in ASAN build."
+/HipcubDeviceUniqueByKeySingleTests\.LargeIndices.*/ : /<all>/                                         : *      : asan           : "Skipping large size test in ASAN build."

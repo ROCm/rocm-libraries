@@ -27,6 +27,7 @@
 #endif
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_run_length_encode.hpp>
@@ -48,7 +49,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceRunLengthEncode : public ::testing::Test
+class HipcubDeviceRunLengthEncode : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -98,7 +99,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -261,7 +262,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 

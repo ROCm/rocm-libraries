@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // Thread operators fixes for extended float types
 #include "test_utils_data_generation.hpp"
@@ -50,7 +51,7 @@ struct params1
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduceOp : public ::testing::Test
+class HipcubDeviceSegmentedReduceOp : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -106,7 +107,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -247,7 +248,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduce : public ::testing::Test
+class HipcubDeviceSegmentedReduce : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -305,7 +306,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -462,7 +463,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -619,7 +620,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -827,7 +828,7 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -985,7 +986,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMax)
 }
 
 template<class T>
-class HipcubDeviceSegmentedReduceArgMinMaxSpecialTests : public testing::Test
+class HipcubDeviceSegmentedReduceArgMinMaxSpecialTests : public test_controller::ControlledTest<>
 {};
 
 using HipcubDeviceSegmentedReduceArgMinMaxSpecialTestsParams
@@ -1135,7 +1136,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
 // Test for large indices
 // ---------------------------------------------------------
 
-TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
+class HipcubDeviceSegmentedReduceLargeIndicesTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -1159,7 +1163,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = test_utils::get_large_sizes(seed_value);
+        const std::vector<size_t> sizes = CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value));
 
         for(const auto size : sizes)
         {

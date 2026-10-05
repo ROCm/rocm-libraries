@@ -36,6 +36,9 @@
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>
 
+// Test utils
+#include "test_utils_controller.hpp"
+
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_PUSH
 #else
@@ -55,7 +58,10 @@ void KernelGridBarrier(hipcub::GridBarrier global_barrier, int iterations)
     }
 }
 
-TEST(HipcubGridTests, GridBarrier)
+class HipcubGridTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubGridTests, GridBarrier)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -100,6 +106,7 @@ TEST(HipcubGridTests, GridBarrier)
 #else
     HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 #endif
+    CHECK_SIZE_ENABLEMENT(grid_size);
     HIP_CHECK(global_barrier.Setup(grid_size));
 
     KernelGridBarrier<<<grid_size, block_size>>>(global_barrier, iterations);
@@ -136,7 +143,7 @@ __global__ void KernelGridEvenShare(
     }
 }
 
-TEST(HipcubGridTests, GridEvenShare)
+TEST_F(HipcubGridTests, GridEvenShare)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -147,6 +154,7 @@ TEST(HipcubGridTests, GridEvenShare)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -258,7 +266,7 @@ __global__ void KernelGridQueue(
     }
 }
 
-TEST(HipcubGridTests, GridQueue)
+TEST_F(HipcubGridTests, GridQueue)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -269,6 +277,7 @@ TEST(HipcubGridTests, GridQueue)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
