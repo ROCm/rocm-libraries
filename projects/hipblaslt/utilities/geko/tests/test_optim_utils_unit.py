@@ -50,8 +50,8 @@ def test_get_build_state_variants(tmp_path: Path) -> None:
 
 
 def test_list_configs_and_failed_optimizations(tmp_path: Path) -> None:
-    (tmp_path / "job_2.yaml").write_text("x", encoding="utf-8")
-    (tmp_path / "job_10.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "job_2.yaml").write_text("MatrixInstruction: [1]", encoding="utf-8")
+    (tmp_path / "job_10.yaml").write_text("MatrixInstruction: [1]", encoding="utf-8")
     (tmp_path / "config.yaml").write_text("x", encoding="utf-8")
 
     cfgs = outils.list_optimization_configs(tmp_path)
@@ -115,8 +115,8 @@ def test_clean_failed_build_unsupported_state_raises(monkeypatch: pytest.MonkeyP
 
 
 def test_clean_failed_builds_calls_per_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    (tmp_path / "job_1.yaml").write_text("x", encoding="utf-8")
-    (tmp_path / "job_2.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "job_1.yaml").write_text("MatrixInstruction: [1]", encoding="utf-8")
+    (tmp_path / "job_2.yaml").write_text("MatrixInstruction: [1]", encoding="utf-8")
 
     seen = []
     monkeypatch.setattr(outils, "clean_failed_build", lambda p: seen.append(Path(p).name))

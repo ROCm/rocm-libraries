@@ -19,14 +19,14 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 import yaml
 
 from geko import logger, _set_log_level
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
-from geko.config_generator.constants import HARDWARE_MAP
-from geko.constants import SUPPORTED_ARCH
+from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
+from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
@@ -47,16 +47,22 @@ def _alloc_run_root() -> Path:
     return root
 
 
-def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> List[dict]:
-    """Flatten GemmProblems from load_prepared_config_from_yaml to workload-log dicts."""
+def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> Tuple[List[dict], Dict[str, Any]]:
+    """Flatten GemmProblems from load_prepared_config_from_yaml to workload-log dicts.
+
+    Returns:
+        Tuple of (rows, config_overrides), where config_overrides holds the
+        LIST_FORWARDED_KEYS present in the prepared config (e.g. EPILOGUES,
+        LIBRARY_TYPE) for forwarding into optim.configure.
+    """
     prepared = load_prepared_config_from_yaml(config_path=path, arch=arch)
     resolved_arch = prepared["ARCH"]
-    mx_scale = HARDWARE_MAP[resolved_arch]["mx_scale"] if resolved_arch in HARDWARE_MAP else 3
     problems: List[GemmConfig] = prepared["GemmProblems"]
     rows: List[dict] = []
     for gc in problems:
-        rows.extend(gc.workload_log_rows(mx_scale=mx_scale))
-    return rows
+        rows.extend(gc.workload_log_rows(mx_scale=mx_scale_code(resolved_arch, mx_format(gc, resolved_arch))))
+    config_overrides = {k: prepared[k] for k in LIST_FORWARDED_KEYS if k in prepared}
+    return rows, config_overrides
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--arch",
-        type=str,
+        type=canonical_arch,
         default=None,
         choices=SUPPORTED_ARCH,
         metavar="ARCH",
@@ -158,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--search-space",
         type=str,
         default=None,
-        choices=["heuristic", "generic"],
+        choices=["heuristic", "generic", "subtile"],
         dest="search_space",
         help="Search space strategy. Defaults to 'generic' for ductile, 'heuristic' for tensile (only used with --tune)",
     )
@@ -356,11 +362,12 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
 
     log_path: Path
+    config_overrides: Dict[str, Any] = {}
     if args.workload is not None:
         log_path = Path(args.workload)
     elif args.gemm_config is not None:
         try:
-            rows = _rows_from_gemm_config_yaml(Path(args.gemm_config), args.arch)
+            rows, config_overrides = _rows_from_gemm_config_yaml(Path(args.gemm_config), args.arch)
         except (ValueError, FileNotFoundError) as e:
             logger.error(str(e))
             logger.error("Example tuning YAML: %s", _SAMPLE_GEMM_LIST_YAML)
@@ -370,13 +377,12 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             yaml.safe_dump(rows, f, default_flow_style=None, sort_keys=False, width=5000)
     elif args.inline is not None:
         m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b, inline_mx = args.inline
-        mx_scale = HARDWARE_MAP[args.arch]["mx_scale"] if args.arch and args.arch in HARDWARE_MAP else 3
         try:
             gtype = GemmType.from_tensile(trans_a, trans_b, data_t, dest_t, comp_t)
             gconfig = GemmConfig(gtype, [[m, n, batch_count, k]], mx=inline_mx)
             if args.arch is not None:
                 validate_mx_arch_support([gconfig], args.arch)
-            rows = gconfig.workload_log_rows(mx_scale=mx_scale)
+            rows = gconfig.workload_log_rows(mx_scale=mx_scale_code(args.arch, mx_format(gconfig, args.arch)))
         except ValueError as e:
             logger.error(str(e))
             return 1
@@ -425,6 +431,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             workdir=run_root_str,
             verbose=args.verbose,
             bench_freq=args.bench_freq,
+            config_overrides=config_overrides,
         )
         run_optimize(
             hipblaslt_path,

@@ -84,9 +84,9 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | Key | Role |
 |-----|------|
 | `MX` | `True` = Microscaling mode (block-scaled MX FP4/FP8, block size 32, E8M0 scales). Auto-forced for `DataType: F4`; auto-detected from workload logs (`scaleA/scaleB >= 3`). Defaults to `False`. |
-| `StreamK` | `True` = StreamK, `False` = DataParallel |
+| `StreamK` | `True` adds persistent kernels (`TileProcessingStrategy` StreamK, plus DataParallel in the gfx1250 generic space). `False` keeps ordinary one-workgroup-per-tile kernels (`TileProcessingStrategy: None`) |
 | `backend` | `"ductile"` or `"tensile"` (default: `"ductile"`; CLI `--backend` overrides). |
-| `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
+| `search_space` | `"heuristic"`, `"generic"`, or `"subtile"` (default: auto from `backend` — `generic` for ductile, `heuristic` for tensile). Subtile uses UseSubtileImpl=1 variants with MI16x16-base only, persistent StreamK, CMS off (gfx950 only). For full fork ranges with `backend: tensile`, set `search_space: generic`. |
 | `MACROTILE_OPT` | Origami macro-tile tuning. Works with the Ductile backend, or with `backend: tensile` when `SIZE_OPTION: 0` (explicit `Sizes:` list); the tensile path emits `Backend: Tensile` and Tensile enumerates the pinned fork space exhaustively. |
 | `MT_DU` | Fixed `[MT0, MT1, DU]` when `MACROTILE_OPT` |
 | `USE_HEURISTICS` | Refined heuristic param lists per size |

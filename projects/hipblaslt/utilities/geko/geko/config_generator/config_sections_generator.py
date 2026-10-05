@@ -10,12 +10,38 @@ are computed once at init. Per-size sections are built via build_config().
 """
 
 import math
+from collections import Counter
+
 import numpy as np
 
 from geko.config_generator.constants import *
 from geko.config_generator.mi_designer import MIDesign
 from geko.config_generator.shared_utils import ConfigEntry
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# Ductile draws group_0 entry i with probability proportional to
+# exp(-DUCTILE_COST_SCALE * cost_i) (Ductile/ductile/algorithm/ga.py).
+DUCTILE_COST_SCALE = 0.25
+
+
+def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
+
+    An MI group entry repeated once per ClusterDim shape would otherwise be
+    drawn as many times more often as it has shapes. Adding ln(n) / scale to
+    each of the n variants divides each variant's probability by n, so the MI
+    as a whole keeps the probability its cost gives it.
+    """
+    keys: List[Optional[tuple]] = [
+        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
+        if "ClusterDim" in entry else None
+        for entry in mi_groups
+    ]
+    counts = Counter(key for key in keys if key is not None)
+    return np.array(
+        [math.log(counts[key]) / DUCTILE_COST_SCALE if key is not None else 0.0 for key in keys],
+        dtype=np.float32,
+    )
 
 
 class ConfigSectionGenerator:
@@ -44,9 +70,18 @@ class ConfigSectionGenerator:
         """Estimate iteration count for benchmarking based on problem size."""
         return max(round((-(m + n + k) * 0.015 + 431) / b), 5)
 
+    def _mx_format(self) -> Optional[Tuple[int, str]]:
+        """(block size, scale DataType) of this GEMM's MX format, or None when not block scaled."""
+        return mx_format(self.config["GemmProblem"], self.config["ARCH"])
+
     def _is_mx(self) -> bool:
         """Whether Microscaling (MX) mode is enabled for this config."""
-        return self.config.get("MX", False)
+        return self._mx_format() is not None
+
+    def _mx_block(self) -> int:
+        """MX block size for A and B, or 0 when the problem is not block scaled."""
+        mx = self._mx_format()
+        return mx[0] if mx else 0
 
     def _use_epilogues(self) -> bool:
         """Whether to emit epilogue fields for this GEMM type."""
@@ -84,28 +119,40 @@ class ConfigSectionGenerator:
         pt['DestDataType'] = self._convert_type(self._gt.dest_data_type)
         pt['ComputeDataType'] = self._convert_type(self._gt.compute_data_type)
         pt['HighPrecisionAccumulate'] = val_HighPrecisionAccumulate
-        if self._is_mx():
-            mx_block_size = HARDWARE_MAP.get(self.config["ARCH"], {}).get("mx_block_size")
-            if mx_block_size is None:
-                raise ValueError(f"MX is not supported on ARCH '{self.config['ARCH']}'")
-            pt['MXBlockA'] = mx_block_size
-            pt['MXBlockB'] = mx_block_size
+
+        epi_tag = "" if self._use_epilogues() else "#"
+        mx = self._mx_format()
+        if mx:
+            mx_block, scale_type = mx
+            pt['MXBlockA'] = mx_block
+            pt['MXBlockB'] = mx_block
+            if scale_type != "E8":
+                pt['DataTypeMXSA'] = scale_type
+                pt['DataTypeMXSB'] = scale_type
+        # These follow the ProblemTypes of the hipBLASLt MX libraries the tuned
+        # logic merges into; Tensile names the solution after them, so a mismatch
+        # changes the call signature the library serves. gfx950 MX libraries set
+        # both. gfx1250 MX libraries never set UseScaleAB, as the block scales
+        # replace it, and set UseScaleAlphaVec only in the OOB (Origami) library,
+        # not in the Equality / GridBased ones.
+        gfx1250_mx = mx is not None and self.config["ARCH"].startswith("gfx1250")
+        equality = str(self.config.get("LIBRARY_TYPE", "OOB")).lower() == "equality"
+        if not (gfx1250_mx and equality):
+            pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
+        if not gfx1250_mx and ("8" in pt["DataType"] or "8" in pt["DestDataType"]):
+            pt[f'{epi_tag}UseScaleAB'] = "Scalar"
+
         pt['TransposeA'] = val_transA
         pt['TransposeB'] = val_transB
         if self._gt.data_type in ("C", "Z"):
             pt['ComplexConjugateA'] = "True" if self._gt.transA == "C" else "False"
             pt['ComplexConjugateB'] = "True" if self._gt.transB == "C" else "False"
         pt['UseBeta'] = "True"
+        pt[f'{epi_tag}UseBias'] = "1"
 
-        epi_tag = "" if self._use_epilogues() else "#"
         pt[f'{epi_tag}Activation'] = "True"
         pt[f'{epi_tag}ActivationHPA'] = "True"
         pt[f'{epi_tag}ActivationType'] = "hipblaslt_all"
-        pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
-        pt[f'{epi_tag}UseBias'] = "1"
-        if not self._is_mx():
-            if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
-                pt[f'{epi_tag}UseScaleAB'] = "Scalar"
 
         pt['Batched'] = "True"
 
@@ -126,6 +173,25 @@ class ConfigSectionGenerator:
         so emitted YAML keeps stable key ordering before per-size overrides.
         """
         is_i8 = self._gt.data_type == 'I8'
+        # TODO(subtile-rotating-buffer): Disable the rotating buffer whenever
+        # subtile is involved (search_space == "subtile"; matches
+        # tensilelite's reference subtile configs subtile_bf16.yaml /
+        # subtile_mxfp4.yaml).  The default 1 GiB
+        # rotating buffer is smaller than a single tensor set in our subtile
+        # MT sweeps (e.g. BF16 (32768, 192, 1, 65536) -> A alone is ~4 GiB).
+        # In that case every unit in m_rotatingInfo gets rotatingNum=1 inside
+        # createRotatingMemory (Rotating.cpp), so m_size == m_largestUnitSize
+        # and (m_size - m_largestUnitSize) == 0.  When a smaller per-problem
+        # rotatingSize then asks for >0 rotations in prepareRotatingGPUOutput
+        # (DataInitialization.cpp), the client aborts with
+        #   ``terminate called after throwing an instance of 'std::runtime_error'
+        #    what():  Insufficient rotating buffer size.``
+        # Remove this special-case once tensilelite clamps the per-problem
+        # rotatingNum to (m_size - m_largestUnitSize) / rotatingSize instead
+        # of ceil(m_rotatingBuffer / rotatingSize) - 1, or once it sizes the
+        # rotating buffer using per-problem tensor bytes rather than the
+        # global maxElements across the whole benchmark set.
+        rotating_buffer_size = 0 if self.config.get("search_space") == "subtile" else 1024
         params = {
             'MinimumRequiredVersion': '5.0.0',
             'SleepPercent': 0,
@@ -133,13 +199,18 @@ class ConfigSectionGenerator:
             'NumWarmups': 0,
             'KernelTime': True,
             'NumElementsToValidate': 0,
-            'DataInitTypeBeta': 1,
+            # Keyed on the EPILOGUES config, not _use_epilogues(): the latter is
+            # also False for D->D and complex regardless of the setting, which
+            # would benchmark fp64 and complex at beta = 0 while still emitting
+            # UseBeta: True, leaving the beta path unmeasured on gfx942/gfx950.
+            'DataInitTypeBeta': 1 if self.config["EPILOGUES"] else 0,
             'DataInitTypeAlpha': 1,
             'DataInitTypeA': 3 if is_i8 else 12,
             'DataInitTypeB': 3 if is_i8 else 13,
             'DataInitTypeC': 3 if is_i8 else 12,
             'DataInitTypeD': 3 if is_i8 else 12,
             'DataInitTypeScaleAlphaVec': 3 if is_i8 else 12,
+            'DataInitSeed': 1,
             'CSVExportWinner': True,
             'CSVMergeSameProblemID': True,
             'PreciseKernelTime': False,
@@ -147,13 +218,14 @@ class ConfigSectionGenerator:
             'SkipSlowSolutionRatio': 0.0,
             '#PrintSolutionRejectionReason': True,
             'KeepBuildTmp': False,
-            'RotatingBufferSize': 1024,
+            'RotatingBufferSize': rotating_buffer_size,
             'UseEffLike': False,
         }
         if self._is_mx():
             params['DataInitTypeMXSA'] = 3
             params['DataInitTypeMXSB'] = 3
-            params['MXScaleFormat'] = 1
+            if self.config["ARCH"].startswith("gfx950"):
+                params['MXScaleFormat'] = 1
         return params
 
     def _resolve_bias_type(self) -> Optional[str]:
@@ -255,13 +327,18 @@ class ConfigSectionGenerator:
 
         # pop_size must be <= SearchSpace.n_perms in Ductile GA.
         n_perms = self._compute_n_perms(fork_params)
-        pop_size = self._safe_pop_size(n_perms)
+        ga_n_gen, pop_default, ga_explicit = self._ga_budget()
+        pop_size = self._safe_pop_size(n_perms, default=pop_default)
 
         non_cms_mask = np.array([not has_priority(grp) for grp in mi_groups], dtype=bool)
         if non_cms_mask.sum() <= 1 or len(sizes) == 0:
             d = dict(soo=soo, n_elements_to_validate=n_elements_to_validate)
             if pop_size:
                 d["pop_size"] = pop_size
+                if ga_explicit:
+                    d["auto_pop_size"] = False
+            if ga_n_gen is not None:
+                d["n_gen"] = ga_n_gen
             return d
         
         gsu_values = [float(grp["MatrixInstruction"].metadata.get("GSU", 1)) for grp in mi_groups if not has_priority(grp)]
@@ -306,6 +383,7 @@ class ConfigSectionGenerator:
         cost = np.empty(len(mi_groups), dtype=np.float32)
         cost[non_cms_mask] = cost_matrix[:, non_cms_mask].mean(axis=0)
         cost[~non_cms_mask] = cost[non_cms_mask].min()
+        cost += _cluster_variant_cost_offsets(mi_groups)
         
         d = dict(
             soo=soo,
@@ -314,6 +392,10 @@ class ConfigSectionGenerator:
         )
         if pop_size:
             d["pop_size"] = pop_size
+            if ga_explicit:
+                d["auto_pop_size"] = False
+        if ga_n_gen is not None:
+            d["n_gen"] = ga_n_gen
         return d
 
     @staticmethod
@@ -340,6 +422,25 @@ class ConfigSectionGenerator:
         if n_perms < 3:
             return 0
         return min(n_perms, max(3, n_perms - 1))
+
+    def _ga_budget(self):
+        """(n_gen, pop_size_default, explicit) for the active arch + search space.
+
+        Keyed by (arch, search_space): only gfx1250 generic has a budget, so every
+        other arch/mode keeps the previous ``(None, 512)`` behaviour byte for byte.
+
+        ``explicit`` says the budget was configured rather than defaulted. Only then
+        is ``auto_pop_size: False`` emitted -- pinning it unconditionally would change
+        the emitted YAML for gfx942/gfx950, which this change must not touch.
+        """
+        budget = SEARCH_SPACE_GA_BUDGET.get(
+            (self.config.get("ARCH"), self.config.get("search_space"))
+        )
+        if not budget:
+            return None, 512, False
+        # pop_size is per-generation: the number of kernels generated, built, run
+        # and evaluated in each generation. Not a total split across generations.
+        return budget["n_gen"], max(3, int(budget["pop_size"])), True
 
     # ------------------------------------------------------------------
     # Public API
@@ -373,9 +474,10 @@ class ConfigSectionGenerator:
         self._apply_enqueue_and_warmup_params(global_params, sizes, backend)
 
         problem_sizes = []
+        mx_block = self._mx_block()
         for M, N, batch, K in sizes:
-            if self._is_mx():
-                K = ((K + 31) // 32) * 32
+            if mx_block:
+                K = ((K + mx_block - 1) // mx_block) * mx_block
             problem_sizes.append({"Exact": f'[ {M}, {N}, {batch}, {K} ]'})
 
         benchmark_final = [{"ProblemSizes": problem_sizes}]
@@ -416,7 +518,7 @@ class ConfigSectionGenerator:
             f"# This yaml is auto-generated by geko.config_generator.\n"
             f"# Version: {VERSION}\n"
             f"# GEMM Type: "
-            f"{self._gt.gemm_name}\n"
+            f"{self.config['GemmProblem'].name}\n"
             f"# Total #kernels: {nkernels}\n"
         )
         header += '#==================================\n\n'

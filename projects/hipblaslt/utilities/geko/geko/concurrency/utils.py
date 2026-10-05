@@ -11,6 +11,7 @@ from threading import current_thread, main_thread
 import joblib
 import signal
 import os
+import time
 import subprocess
 import logging
 
@@ -91,8 +92,10 @@ def wait_process_or_stop(
     proc_name: str,
     poll_interval: float = 1.0,
     terminate_timeout: float = 30.0,
-) -> None:
-    """Wait for process completion or terminate it if stop_event is set.
+    progress_path=None,
+    stall_timeout: float = 0.0,
+) -> bool:
+    """Wait for process completion, a stop request, or a progress stall.
 
     Args:
         proc: Child process to monitor.
@@ -100,19 +103,61 @@ def wait_process_or_stop(
         proc_name: Process name to wait for or stop.
         poll_interval: Seconds between stop checks while process is running.
         terminate_timeout: Seconds to wait after terminate() before kill().
-    """
-    while proc.poll() is None:
-        if not stop_event.wait(timeout=poll_interval):
-            continue
+        progress_path: File whose mtime indicates forward progress (the worker's
+            tensilelite log). Required for stall detection; ignored when None.
+        stall_timeout: Seconds without progress before the worker is considered
+            stalled and torn down. 0 disables the check.
 
-        logger.warning(
-            f"Stop requested while running config={proc_name}; terminating subprocess"
-        )
+    Returns:
+        True if the worker was killed for stalling, False otherwise.
+
+    Detection is mtime-based rather than a wall-clock budget per shape: shapes
+    legitimately differ by an order of magnitude in runtime, but a healthy worker
+    writes to its log once per solution, so "no write for N seconds" separates a
+    dead worker from a slow one far better than any total-time cap.
+    """
+    def _terminate_process_tree() -> None:
         if os.name == "nt":
             _terminate_process_tree_windows(proc, terminate_timeout)
         else:
             _terminate_process_tree_posix(proc, proc_name, terminate_timeout)
-        break
+
+    last_progress = time.monotonic()
+    last_mtime = None
+
+    while proc.poll() is None:
+        if stop_event.wait(timeout=poll_interval):
+            logger.warning(
+                f"Stop requested while running config={proc_name}; terminating subprocess"
+            )
+            _terminate_process_tree()
+            return False
+
+        if not stall_timeout or progress_path is None:
+            continue
+
+        try:
+            mtime = os.path.getmtime(progress_path)
+        except OSError:
+            # Progress file missing or unreadable. Keep waiting: the stall
+            # clock starts from when this call began, so a worker that never
+            # produces the file is still caught.
+            mtime = last_mtime
+
+        if mtime != last_mtime:
+            last_mtime, last_progress = mtime, time.monotonic()
+            continue
+
+        stalled_for = time.monotonic() - last_progress
+        if stalled_for >= stall_timeout:
+            logger.warning(
+                f"Config={proc_name} made no progress for {stalled_for:.0f}s "
+                f"(stall_timeout={stall_timeout:.0f}s); terminating to free the GPU slot"
+            )
+            _terminate_process_tree()
+            return True
+
+    return False
 
 
 def install_stop_handlers(stop_event) -> tuple[object | None, object | None]:

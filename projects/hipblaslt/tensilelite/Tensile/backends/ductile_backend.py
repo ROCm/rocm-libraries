@@ -15,11 +15,12 @@ import csv
 import functools
 import os
 import shutil
-from copy import deepcopy
 
 import rocisa
 
-from ..Common import Path, print1, printExit, printWarning
+from copy import deepcopy
+
+from ..Common import Path, print1, printExit, printWarning, BENCHMARK_DATA_DIR
 from ..Common.GlobalParameters import globalParameters
 from ..SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
 from ..KernelWriterAssembly import KernelWriterAssembly
@@ -248,7 +249,9 @@ class DuctileBackend(OptimizationBackend):
         survival = Survival.get(**ductile_config.populate(merged_config, "survival"))
         
         print1(f"# DuctileBackend: Starting GA optimization")
-        
+
+        _last_results_file = [None]
+
         def _evaluate(individuals):
             """Fitness callback for GA - returns multi-dimensional fitness array.
             
@@ -286,6 +289,7 @@ class DuctileBackend(OptimizationBackend):
 
             # Benchmark solutions - Ductile forces no cache and no build-only.
             results_filename, returncode = benchmark_runner(solutions, isCached=False, buildOnly=False)
+            _last_results_file[0] = results_filename
 
             if not results_filename or not os.path.isfile(results_filename):
                 printExit(f"BenchmarkProblems: Expected results file does not exist: {results_filename}")
@@ -318,7 +322,21 @@ class DuctileBackend(OptimizationBackend):
             log_file = root / f"cfg-{cfg_name}__step-{benchmark_config.get('benchmarkStepIdx', 0):02d}__optimization.log"
 
         ckpt_path = root / f"step-{benchmark_config.get('benchmarkStepIdx', 0):02d}__ductile.checkpoint"
-        
+
+        # Per-iteration benchmark data saving
+        ga_iters_dir = root / BENCHMARK_DATA_DIR / "GA_iters"
+
+        def _save_iteration_csv(gen):
+            """Copy the benchmark results CSV for this generation to GA_iters."""
+            results_file = _last_results_file[0]
+            if not results_file or not os.path.isfile(results_file):
+                return
+            os.makedirs(ga_iters_dir, exist_ok=True)
+            group_name = Path(results_file).parent.parent.name
+            csv_suffix = "_CSVWinner" if globalParameters.get("CSVExportWinner") else ""
+            iter_name = f"{group_name}{csv_suffix}_iter{gen}.csv"
+            shutil.copy(results_file, ga_iters_dir / iter_name)
+
         # Create GA instance with evaluate callback
         ga = GeneticAlgorithm(
             space,
@@ -337,6 +355,8 @@ class DuctileBackend(OptimizationBackend):
             checkpoint_path=ckpt_path,
             weights=merged_config["weights"],
             weight_beta=merged_config["weight_beta"],
+            auto_pop_size=merged_config.get("auto_pop_size", True),
+            on_generation_end=_save_iteration_csv,
         )
 
         if ckpt_path.is_file():

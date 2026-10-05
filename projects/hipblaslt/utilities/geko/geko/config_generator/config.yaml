@@ -23,7 +23,9 @@ DataType: "B"
 DestDataType: "B"
 ComputeDataType: "S"
 
-# Hardware target. Valid: gfx950, gfx942, gfx942_80cu, gfx942_38cu, gfx942_20cu, gfx942_228cu
+# Hardware target. Valid: gfx950, gfx942, gfx942_80cu, gfx942_38cu, gfx942_20cu, gfx942_228cu,
+# gfx1250, gfx1250_96cu, gfx1250_192cu (MI455X B0), gfx1250-strict, gfx1250-strict_96cu,
+# gfx1250-strict_192cu (A0). The retired gfx1250v0* names still load, with a warning.
 ARCH: "gfx950"
 
 # Sizes as [M, N, B, K] lists (required when SIZE_OPTION=0, the default)
@@ -51,9 +53,13 @@ Sizes:
 # ============================================================
 
 # MX: False                # Microscaling mode (block-scaled MX FP4/FP8); auto-detected from workload logs
-# StreamK: True            # True=StreamK (default), False=DataParallel
+# StreamK: True            # True adds persistent kernels (StreamK; also DataParallel in the gfx1250
+                           #   generic space). False keeps non-persistent kernels only.
+                           #   Default True; False on gfx1250*.
 # backend: ductile         # "ductile" or "tensile" (default: ductile; CLI --backend overrides)
-# search_space:            # "heuristic" or "generic" (default: auto from backend)
+# search_space:            # "heuristic", "generic", or "subtile" (default: auto from backend).
+                           #   "subtile" (gfx950 only) tunes macro tiles via
+                           #   UseSubtileImpl=1 (MI16x16 base, persistent StreamK, CMS off).
 # MACROTILE_OPT: False     # Origami MT tuning (Ductile only)
 # MT_DU: None              # Fixed [MT0, MT1, DU] for MACROTILE_OPT
 # USE_HEURISTICS: False    # Refined heuristic param lists per size
