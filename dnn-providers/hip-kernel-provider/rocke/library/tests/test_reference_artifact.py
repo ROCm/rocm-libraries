@@ -457,3 +457,13 @@ def test_reference_local_run_without_a_gpu_fails():
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
         architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
+    from importlib import import_module
+
+    worker = import_module(f"{operation}_reference.worker")
+    # Reject the malformed request before runtime imports, GPU probing, or files.
+    with pytest.raises(KeyError, match="architecture"):
+        worker.run({}, tmp_path)

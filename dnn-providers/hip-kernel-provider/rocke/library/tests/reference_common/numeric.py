@@ -72,9 +72,7 @@ class ErrorBudget:
         if self.baseline_error_bound < 0 or self.margin <= 0 or self.tolerance <= 0:
             raise ValueError("invalid GPU reference error budget")
         if self.remaining <= 0:
-            raise ValueError(
-                "pinned GPU reference reference leaves no comparison budget"
-            )
+            raise ValueError("pinned GPU reference leaves no comparison budget")
 
     @property
     def remaining(self) -> Fraction:

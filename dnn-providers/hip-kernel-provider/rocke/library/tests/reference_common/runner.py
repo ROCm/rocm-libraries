@@ -74,7 +74,7 @@ def run_worker(
     if report.get("torch_imported"):
         raise RuntimeError("GPU reference worker imported Torch")
     if report["launches"] != request["repetitions"]:
-        raise RuntimeError("required GPU reference GPU launches did not execute")
+        raise RuntimeError("required GPU reference launches did not execute")
     with np.load(work / "outputs.npz", allow_pickle=False) as archive:
         outputs = [archive[f"out_{i}"] for i in range(request["repetitions"])]
     return outputs, report
