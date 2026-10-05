@@ -3,8 +3,10 @@
 Each directory is a complete, standalone generic-kernel-ingestor descriptor bundle
 (KMD + UHD + UED + UMD + UDD + KDP with two inline kernels), modeled on the shipped
 `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv_fwd/`
-example. `valid/` is the unmutated baseline; every other directory differs by exactly one
-deliberate defect and must make `hipdnn_validate_descriptors <dir>` exit non-zero.
+example. `valid/` is the unmutated baseline; every malformed directory below differs by
+exactly one deliberate defect and must make `hipdnn_validate_descriptors <dir>` exit
+non-zero. The role fixtures at the end instead pin which role-bound models the validator
+admits, and must agree with the runtime admission for that role.
 
 ## `valid/`
 
@@ -57,3 +59,19 @@ Note: a *declared-but-non-int* knob cannot be a fixture here — `GenericEngine.
 `findUndeclaredKnob()` checks name membership only. The non-int-knob drop happens later,
 in `GenericPlanBuilder::getCustomKnobs` at plan-build time against a real graph and
 device, which this standalone binary cannot reach.
+
+## Role fixtures
+
+`valid/` plus one change to a role-bound UHD. The engine loads in every case; the verdict
+is the bound model's `model_checks` entry and the exit status. A kernel-scoped role is
+admitted through `UhdKernelHeuristic::tryCreate`; `predict_engine` through the L1 guards
+GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `model`).
+
+- `l2_static_order/`: the `sort_kernel_catalog` UHD is `static_order`. Expected: exit 0
+  -- declared order is a legal kernel ranking.
+- `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
+  `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
+  or `custom_library` model, so the runtime refuses it.
+- `l1_native/`: `predict_engine` binds a calibrated `time` UHD with a signature-less
+  `native` scorer. Expected: exit 0 -- the symbol resolves through the UHD scorer
+  registry the L1 path uses, not the kernel comparator registry.

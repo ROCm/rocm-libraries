@@ -5,13 +5,17 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <map>
 #include <memory>
+#include <string>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
@@ -20,6 +24,183 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+/// @brief Descriptor dependencies published even before the first L1 model is trained.
+inline nlohmann::json enginePredictionProvenance(const DescriptorSet& set)
+{
+    const auto dependency = [](const auto& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"revision",
+                               std::to_string(descriptor.revision.major) + "."
+                                   + std::to_string(descriptor.revision.minor)}};
+    };
+    auto provenance = nlohmann::json{{"ued", dependency(set.engine)},
+                                     {"kmd", dependency(set.schema)},
+                                     {"umd", nlohmann::json::array()}};
+    for(const auto& matcher : set.matchers)
+    {
+        provenance["umd"].push_back(dependency(matcher));
+    }
+    std::sort(provenance["umd"].begin(),
+              provenance["umd"].end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.at("id") < rhs.at("id"); });
+    return provenance;
+}
+
+/// @brief Stable selector identity, including ranker provenance but never evaluating L2.
+inline std::string engineSelectorRevision(const DescriptorSet& set)
+{
+    auto selector = enginePredictionProvenance(set);
+    selector["selector"] = "generic-untuned-v1";
+    selector["graph_match"] = set.engine.graphMatchNativeSymbol;
+    selector["knobs"] = set.engine.knobs;
+    selector["rankers"] = nlohmann::json::object();
+    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"model_hash", descriptor.modelHash},
+                              {"features_hash", descriptor.featuresHash},
+                              {"adapter", static_cast<int>(descriptor.adapter)},
+                              {"native", descriptor.nativeSymbol},
+                              {"objective", descriptor.objective},
+                              {"metric", descriptor.score.metric},
+                              {"transform", descriptor.score.transform}};
+    };
+    // Per metric, then arch: which model ranks depends on the request's metric as well as the
+    // device (RFC 0019 §11.4), so either changing is a different selector.
+    for(const auto& [metric, byArch] : set.heuristicsByMetric)
+    {
+        for(const auto& [arch, descriptor] : byArch)
+        {
+            selector["rankers"][metric][arch] = rankerIdentity(descriptor);
+        }
+    }
+    // A set built in memory may carry only its default ranker.
+    if(set.heuristic && !selector["rankers"][set.heuristic->score.metric].contains("default"))
+    {
+        selector["rankers"][set.heuristic->score.metric]["default"]
+            = rankerIdentity(*set.heuristic);
+    }
+    for(const auto& [metric, arches] : set.unavailableHeuristicArches)
+    {
+        for(const auto& arch : arches)
+        {
+            selector["rankers"][metric][arch] = "unavailable";
+        }
+    }
+    for(const auto& matcher : set.matchers)
+    {
+        selector["matchers"][toString(matcher.id)] = matcher.matchSymbol;
+    }
+    for(const auto& dispatch : set.dispatches)
+    {
+        selector["dispatches"][toString(dispatch.id)] = dispatch.dispatchSymbol;
+    }
+    for(const auto& pack : set.packs)
+    {
+        auto& resolvedPack
+            = selector["packs"][toString(pack.id) + "/" + nlohmann::json(pack.arch).dump()];
+        resolvedPack["dispatch"] = toString(pack.dispatchId);
+        for(const auto& kernel : pack.kernels)
+        {
+            auto& value = resolvedPack["kernels"][toString(kernel.id)];
+            value = {{"priority", kernel.priority},
+                     {"arch", kernel.arch},
+                     {"source_kind", static_cast<int>(kernel.source.kind)},
+                     {"entry_point", kernel.source.entryPoint},
+                     {"source_file", kernel.source.sourceFile},
+                     {"toc_key", kernel.source.tocKey},
+                     {"symbol", kernel.source.symbol},
+                     {"sha256", kernel.source.sha256}};
+            for(const auto& [name, metadata] : kernel.metadata)
+            {
+                value["metadata"][name] = detail::metadataValueToJson(metadata);
+            }
+        }
+    }
+    return "generic-untuned-v1/" + uhd::sha256(selector.dump());
+}
+
+/// @brief The engine facts a cached ranking's validity depends on, for `EngineIdentity`.
+///
+/// Digests every heuristic @p set can resolve: the per-arch choice happens at first
+/// rank(), but the cache directory is not arch-keyed. Kernels are excluded; a new kernel is
+/// the coverage gate's concern. Empty when the engine ships no heuristic.
+inline std::string engineModelHash(const DescriptorSet& set)
+{
+    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"model_hash", descriptor.modelHash},
+                              {"features_hash", descriptor.featuresHash},
+                              {"adapter", static_cast<int>(descriptor.adapter)},
+                              {"native", descriptor.nativeSymbol},
+                              {"objective", descriptor.objective},
+                              {"metric", descriptor.score.metric},
+                              {"transform", descriptor.score.transform}};
+    };
+
+    // An ordered map, so the digest does not depend on hash-table iteration order. Keyed by
+    // metric and arch together: one UHD per (metric, arch key).
+    std::map<std::string, nlohmann::json> rankers;
+    for(const auto& [metric, byArch] : set.heuristicsByMetric)
+    {
+        const std::string metricPrefix = metric + "@";
+        for(const auto& [arch, descriptor] : byArch)
+        {
+            rankers.emplace(metricPrefix + arch, rankerIdentity(descriptor));
+        }
+    }
+    if(set.heuristic)
+    {
+        rankers.emplace(set.heuristic->score.metric + "@default", rankerIdentity(*set.heuristic));
+    }
+    if(rankers.empty())
+    {
+        return {};
+    }
+    return uhd::sha256(nlohmann::json(rankers).dump());
+}
+
+/// @brief Whether every ranker @p set can resolve has a content identity.
+///
+/// False when one names an artifact but carries no digest: none was declared and no bytes
+/// were present to digest at load. engineModelHash() cannot version such a model, so the
+/// persistent winner cache is declined for the engine (EngineIdentity::contentIdentified).
+inline bool engineContentIdentified(const DescriptorSet& set)
+{
+    const auto identified = [](const HeuristicDescriptor& descriptor) {
+        return descriptor.modelArtifactPath.empty() || !descriptor.modelHash.empty();
+    };
+    for(const auto& byMetric : set.heuristicsByMetric)
+    {
+        for(const auto& byArch : byMetric.second)
+        {
+            if(!identified(byArch.second))
+            {
+                return false;
+            }
+        }
+    }
+    return !set.heuristic || identified(*set.heuristic);
+}
+
+/// @brief What identifies this engine to the caches that outlive one ranking.
+inline EngineIdentity engineIdentity(const DescriptorSet& set)
+{
+    // Read off the descriptor (the loader keeps it in step with DescriptorSet::heuristic) so
+    // a set built in memory still identifies its cache directory.
+    std::string uhdId;
+    if(set.engine.heuristicId.has_value())
+    {
+        uhdId = toString(*set.engine.heuristicId);
+    }
+    else if(set.heuristic)
+    {
+        uhdId = toString(set.heuristic->id);
+    }
+    EngineIdentity identity{set.engine.name, set.engine.revision, uhdId, engineModelHash(set)};
+    identity.contentIdentified = engineContentIdentified(set);
+    return identity;
+}
+
 /// Takes @p set by value so a caller building both an engine and its state manager
 /// builds the set once.
 /// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
@@ -27,26 +208,44 @@ namespace hipdnn_plugin_sdk::ingestor
 /// @param describedBy Names the engine in the graph_match resolution failure and in the
 ///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
 ///        caller that already moved `set.engine` out must pass it, or both name nothing.
-/// @param engineName The engine's scoped name, used to locate its on-disk
-///        winner-cache shard. Defaulted from @p set like @p describedBy -- a caller
-///        that already moved `set.engine` out must pass it explicitly, or the state
-///        manager gets an empty name and disables its disk cache.
+/// @param engine The engine's identity, locating its winner-cache shard and versioning its
+///        catalog cache. Defaulted from @p set; pass it if `set.engine` was moved out, or
+///        the disk cache is disabled.
+/// @param knobs The UED's declared knobs for RFC 0019 §6.3 check 2. Defaulted from @p set;
+///        pass it if `set.engine` was moved out, or the check passes vacuously.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
                      const std::string& graphMatchSymbol,
                      std::string describedBy = {},
-                     std::string engineName = {})
+                     EngineIdentity engine = {},
+                     std::vector<std::string> knobs = {})
 {
     if(describedBy.empty())
     {
         describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     }
-    if(engineName.empty())
+    if(engine.name.empty())
     {
-        engineName = set.engine.name;
+        engine = engineIdentity(set);
     }
-    auto heuristic = makeKernelHeuristic(set.heuristic, describedBy);
+    if(knobs.empty())
+    {
+        knobs = set.engine.knobs;
+    }
+    // Read before `set.schema` is moved below: a moved-from schema declares no fields and
+    // would fail RFC 0019 §6.3 check 2 for every model reading `$kernel.*`.
+    std::unordered_set<std::string> kmdFields;
+    for(const auto& field : set.schema.fields)
+    {
+        kmdFields.insert(field.name);
+    }
+    auto heuristic = makeKernelHeuristic(set.heuristic,
+                                         describedBy,
+                                         knobs,
+                                         kmdFields,
+                                         set.heuristicsByMetric,
+                                         set.unavailableHeuristicArches);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),
@@ -56,7 +255,7 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
         graphMatchSymbol,
         describedBy,
         KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
-        std::move(engineName));
+        std::move(engine));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
@@ -66,11 +265,16 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     makeEngine(DescriptorSet set, const IDeviceResolver<THandle>& deviceResolver)
 {
     // Each read of the UED is its own statement, sequenced before the moves below:
-    // reading engine/describedBy/engineName inside the same call as a move would be
+    // reading engine/describedBy/identity inside the same call as a move would be
     // unsequenced and could read an already-moved-from (empty) engine, silently
     // disabling the disk cache.
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
-    auto engineName = set.engine.name;
+    auto identity = engineIdentity(set);
+    auto knobs = set.engine.knobs;
+    auto predictions = std::move(set.enginePredictionsByMetric);
+    auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
+    auto provenance = enginePredictionProvenance(set);
+    auto selectorRevision = engineSelectorRevision(set);
     auto engine = std::move(set.engine);
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
@@ -78,8 +282,13 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         makeStateManager<THandle>(std::move(set),
                                   std::move(graphMatchSymbol),
                                   std::move(describedBy),
-                                  std::move(engineName)),
-        deviceResolver);
+                                  std::move(identity),
+                                  std::move(knobs)),
+        deviceResolver,
+        std::move(predictions),
+        std::move(unavailablePredictionArches),
+        std::move(selectorRevision),
+        std::move(provenance));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

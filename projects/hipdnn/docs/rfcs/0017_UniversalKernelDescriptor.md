@@ -329,12 +329,20 @@ loaded with its UDD bound. When the caller opts into measurement, the builder in
 prepares the sampled candidates, each loaded and dispatch-ready in the same plan, with a UDD
 per pack they came from, so the measured winner can be chosen and cached.
 
-No new engine or plugin-ABI interfaces are introduced; the generic engine satisfies hipDNN's existing
-contracts using descriptor data, and the new machinery (the matcher, the expression interpreter, the
-selector, and the predicate and custom-plan registries) lives inside the provider behind those
-contracts.
+The generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery
+(the matcher, the expression interpreter, the selector, and the predicate and custom-plan registries)
+lives inside the provider behind those contracts. Two engine-plugin ABI entry points are added beside
+those contracts rather than inside the provider: **`hipdnnEnginePluginEnumerateCandidates`**, which pages
+an engine's matched catalog as complete knob tuples with stable candidate ids, and
+**`hipdnnEnginePluginGetPrediction`**, which describes or evaluates an engine-level or
+configuration-level performance prediction without benchmarking, tuning, or executing GPU work. Both
+are **owned by the plugin SDK**, not by this RFC
+([RFC 0019 §11.3](0019_UniversalHeuristicDescriptor.md#113-cross-engine-comparison)), and both are
+**optional exports an engine may decline**: an absent symbol, or `NOT_APPLICABLE`, means the engine does
+not offer that surface — not an empty catalog and not a missing prediction that changes applicability —
+so an engine that ignores both is unaffected by either.
 
-Four things change outside the provider, none altering an interface an engine implements, and each
+Four things change outside the provider, none altering an interface an engine must implement, and each
 additive:
 
 | Addition | Why it is needed |
@@ -1359,7 +1367,9 @@ sources arrive).
 
 This section covers the runtime order: what loads, when, why, and where the result is kept.
 Everything happens behind `IEngine` and `IPlan`, the contracts a hand-written engine already
-implements, so no new engine or plugin-ABI interface is introduced.
+implements, so this flow introduces no engine or plugin-ABI interface of its own. The two optional
+exports of [Section 3](#3-how-it-works) sit outside it: enumeration serves the generation tooling, and
+prediction serves selection, before the phases below begin.
 
 **hipDNN enforces this order.** Four host calls arrive, and each one can only arrive after the
 last:

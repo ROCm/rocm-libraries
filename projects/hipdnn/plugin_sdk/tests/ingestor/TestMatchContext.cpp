@@ -51,8 +51,19 @@ TEST_P(TestIngestorMatchContextCatalogKeyInequality, KeysDifferingInOneFieldComp
 INSTANTIATE_TEST_SUITE_P(
     OneFieldAtATime,
     TestIngestorMatchContextCatalogKeyInequality,
-    ::testing::Values(CatalogKeyInequalityCase{"DifferentGraphId", CatalogKey{makeGraphId(2), 0}},
-                      CatalogKeyInequalityCase{"DifferentDeviceId", CatalogKey{makeGraphId(1), 1}}),
+    ::testing::Values(
+        CatalogKeyInequalityCase{"DifferentGraphId", CatalogKey{makeGraphId(2), 0}},
+        CatalogKeyInequalityCase{"DifferentDeviceId", CatalogKey{makeGraphId(1), 1}},
+        // RFC 0019 §9.2: the engine descriptor revision stands in for the inventory
+        // generation counter, so any bump, patch included, must miss.
+        CatalogKeyInequalityCase{"DifferentEngineMajorVersion",
+                                 CatalogKey{makeGraphId(1), 0, {1, 0, 0}}},
+        CatalogKeyInequalityCase{"DifferentEnginePatchVersion",
+                                 CatalogKey{makeGraphId(1), 0, {0, 0, 1}}},
+        // RFC 0019 §11.4: an order ranked for one metric is not an order for another, so
+        // a `time` request must never read the entry a `tflops` request cached.
+        CatalogKeyInequalityCase{"DifferentRankingMetric",
+                                 CatalogKey{makeGraphId(1), 0, {}, "time"}}),
     [](const ::testing::TestParamInfo<CatalogKeyInequalityCase>& info) { return info.param.name; });
 
 TEST(TestIngestorMatchContext, CatalogKeyHashIsConsistentForEqualKeys)
@@ -71,6 +82,16 @@ TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesDifferentDeviceIds)
     const CatalogKey onDeviceOne{makeGraphId(4), 1};
 
     EXPECT_NE(hash(onDeviceZero), hash(onDeviceOne));
+}
+
+/// A cheap packing such as `major * 10 + minor` would collide 1.10.0 with 2.0.0.
+TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesEngineVersionsThatPackAlike)
+{
+    const CatalogKeyHash hash;
+    const CatalogKey onOneTen{makeGraphId(5), 0, {1, 10, 0}};
+    const CatalogKey onTwoZero{makeGraphId(5), 0, {2, 0, 0}};
+
+    EXPECT_NE(hash(onOneTen), hash(onTwoZero));
 }
 
 TEST(TestIngestorMatchContext, TryGetGraphIdReturnsTheGraphsIdentity)

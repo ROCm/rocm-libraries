@@ -6,11 +6,16 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -25,7 +30,39 @@ struct DeviceProperties
     std::string gcnArchName;
     int warpSize = 0; ///< Threads per wavefront; 0 if unresolved.
     int multiProcessorCount = 0; ///< Compute units; 0 if unresolved.
+
+    // One arch spans several boards (gfx942: MI300X, MI325X, MI308X), and boards with equal
+    // CU counts can differ in memory, which changes the winner on bandwidth-bound shapes.
+    /// HBM capacity in bytes; 0 if unresolved.
+    std::size_t totalGlobalMem = 0;
+    /// Memory bus width in bits; 0 if unresolved.
+    int memoryBusWidth = 0;
+    /// Peak memory clock in kHz; 0 if unresolved.
+    int memoryClockRate = 0;
+    /// LDS bytes available to one workgroup; 0 if unresolved.
+    std::size_t sharedMemPerBlock = 0;
 };
+
+/// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is
+/// unresolved. The factor of 2 is double data rate; kHz and bits convert to Hz and bytes.
+inline double peakMemoryBandwidth(const DeviceProperties& properties) noexcept
+{
+    if(properties.memoryClockRate <= 0 || properties.memoryBusWidth <= 0)
+    {
+        return 0.0;
+    }
+    return 2.0 * static_cast<double>(properties.memoryClockRate) * 1000.0
+           * (static_cast<double>(properties.memoryBusWidth) / 8.0);
+}
+
+/// The `$device.*` feature vocabulary as (name, value) pairs. The feature extractor and
+/// the benchmark recorder must both use this list, or a model trains on columns the
+/// runtime cannot produce. `arch` is absent: it selects which UHD runs (RFC 0019 §3.1).
+inline std::vector<std::pair<std::string, std::variant<std::int64_t, double>>>
+    deviceFeatureValues(const DeviceProperties& properties)
+{
+    return heuristics::deviceFeatureValues(properties);
+}
 
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit
 /// @p deviceArch? Entries are base ids and the device carries its features, so this is

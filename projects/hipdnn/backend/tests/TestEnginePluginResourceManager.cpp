@@ -42,6 +42,8 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/engine_api_version.h>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -71,6 +73,225 @@ TEST(TestEnginePluginResourceManager, PluginLoading)
 
     {
         const EnginePluginResourceManager resourceManager(pluginManager);
+    }
+}
+
+class TestEnginePredictionTransport : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        _plugin = std::make_shared<NiceMock<MockEnginePlugin>>();
+        _plugins.push_back(_plugin);
+        _manager = std::make_shared<NiceMock<MockEnginePluginManager>>();
+        ON_CALL(*_manager, getPlugins()).WillByDefault(ReturnRef(_plugins));
+        ON_CALL(*_plugin, createHandle()).WillByDefault(Return(_handle));
+        ON_CALL(*_plugin, getAllEngineIds()).WillByDefault(Return(std::vector<int64_t>{100}));
+        _resources = std::make_unique<EnginePluginResourceManager>(_manager);
+        ON_CALL(*_plugin, getPrediction(_, _, _, _, _, _))
+            .WillByDefault([this](hipdnnEnginePluginHandle_t,
+                                  const hipdnnPluginConstData_t*,
+                                  const hipdnnPluginConstData_t*,
+                                  hipdnnEnginePredictionKind_t,
+                                  bool,
+                                  hipdnnPluginConstData_t* out) {
+                _response.Clear();
+                _response.Finish(hipdnn_flatbuffers_sdk::data_objects::EnginePrediction::Pack(
+                    _response, &_prediction));
+                *out = {_response.GetBufferPointer(), _response.GetSize()};
+                return true;
+            });
+        _prediction.engine_id = 100;
+        _prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
+        _prediction.value = 10.0;
+        _prediction.metric = "tflops";
+        _prediction.uhd_id = "b29341f4-7a55-4b9b-b9a2-8cb3cac13368";
+        _config.engine_id = 100;
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT query(hipdnnEnginePredictionKind_t kind
+                                                                  = HIPDNN_ENGINE_PREDICTION_ENGINE)
+    {
+        flatbuffers::FlatBufferBuilder configBytes;
+        configBytes.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(configBytes, &_config));
+        const auto graphBytes = createValidGraph();
+        return _resources->getEnginePrediction(
+            {configBytes.GetBufferPointer(), configBytes.GetSize()},
+            {graphBytes.GetBufferPointer(), graphBytes.GetSize()},
+            kind);
+    }
+
+    std::shared_ptr<NiceMock<MockEnginePlugin>> _plugin;
+    std::vector<std::shared_ptr<EnginePlugin>> _plugins;
+    std::shared_ptr<NiceMock<MockEnginePluginManager>> _manager;
+    std::unique_ptr<EnginePluginResourceManager> _resources;
+    hipdnnEnginePluginHandle_t _handle = hipdnnEnginePluginHandle_t(0xdeadbeef);
+    flatbuffers::FlatBufferBuilder _response;
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT _prediction;
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT _config;
+};
+
+TEST_F(TestEnginePredictionTransport, NonfiniteEstimateCannotRankAnEngine)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.value = std::numeric_limits<double>::infinity();
+    const auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.engine_config, nullptr);
+}
+
+TEST_F(TestEnginePredictionTransport, RejectsConfigurationThatChangesWorkspaceConstraint)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    auto knob = std::make_unique<fb::KnobSettingT>();
+    knob->knob_id = "global.workspace_size_limit";
+    fb::IntValueT limit;
+    limit.value = 1024;
+    knob->value.Set(limit);
+    _config.knobs.push_back(std::move(knob));
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>(_config);
+    ASSERT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status,
+              fb::PredictionStatus::AVAILABLE);
+
+    _prediction.engine_config->knobs.front()->value.AsIntValue()->value = 2048;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.engine_config, nullptr);
+}
+
+// RFC 0019 §11.4: invalid whatever its status, and still named by the requested metric.
+TEST_F(TestEnginePredictionTransport, AnswerInAnotherMetricIsInvalid)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.metric = "time";
+    auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.metric, "tflops");
+
+    _prediction.status = fb::PredictionStatus::UNAVAILABLE;
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+    _prediction.metric.clear();
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+
+    _prediction.metric = "tflops";
+    result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(result.metric, "tflops");
+}
+
+// Zero is a legal (worst) throughput but never a legal time.
+TEST_F(TestEnginePredictionTransport, AvailableValueIsValidatedByTheRequestedMetric)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.value = 0.0;
+    EXPECT_EQ(query().status, fb::PredictionStatus::AVAILABLE);
+
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+    _prediction.value = 2.5;
+    const auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_EQ(result.metric, "time");
+    EXPECT_DOUBLE_EQ(result.value, 2.5);
+}
+
+TEST_F(TestEnginePredictionTransport, UnregisteredRequestedMetricIsRefusedBeforeThePlugin)
+{
+    _config.ranking_metric = "flops";
+    EXPECT_CALL(*_plugin, getPrediction(_, _, _, _, _, _)).Times(0);
+    ASSERT_THROW_HIPDNN_STATUS(query(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A configuration the plugin says it selected by another metric is refused.
+TEST_F(TestEnginePredictionTransport, SelectedConfigurationCarriesTheRequestedMetric)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>();
+    _prediction.engine_config->engine_id = 100;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    ASSERT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    ASSERT_NE(result.engine_config, nullptr);
+    EXPECT_EQ(result.engine_config->ranking_metric, "time");
+
+    _prediction.engine_config->ranking_metric = "tflops";
+    EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
+}
+
+// A measured configuration value names no UHD (RFC 0019 §5 step 9); an engine-level
+// estimate must name one.
+TEST_F(TestEnginePredictionTransport, MeasuredConfigurationNeedsNoUhdButEngineEstimateDoes)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    _prediction.value = 1.0;
+    _prediction.uhd_id.clear();
+
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>();
+    _prediction.engine_config->engine_id = 100;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    ASSERT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_DOUBLE_EQ(result.value, 1.0);
+    EXPECT_TRUE(result.uhd_id.empty());
+    ASSERT_NE(result.engine_config, nullptr);
+    EXPECT_EQ(result.engine_config->engine_id, 100);
+
+    _prediction.value = 0.0;
+    EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
+}
+
+// A KnobSetting tagged with no payload table passes VerifyBuffer; the host must refuse it
+// before UnPackTo() dereferences the missing payload.
+TEST_F(TestEnginePredictionTransport, KnobTaggedWithoutItsValueIsInvalidNotUnpacked)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    for(const auto tag :
+        {fb::KnobValue::IntValue, fb::KnobValue::FloatValue, fb::KnobValue::StringValue})
+    {
+        SCOPED_TRACE(fb::EnumNameKnobValue(tag));
+        ON_CALL(*_plugin, getPrediction(_, _, _, _, _, _))
+            .WillByDefault([this, tag](hipdnnEnginePluginHandle_t,
+                                       const hipdnnPluginConstData_t*,
+                                       const hipdnnPluginConstData_t*,
+                                       hipdnnEnginePredictionKind_t,
+                                       bool,
+                                       hipdnnPluginConstData_t* out) {
+                _response.Clear();
+                // Offset 0 for the payload: the builder omits the field, leaving the tag.
+                const std::vector<flatbuffers::Offset<fb::KnobSetting>> knobs{
+                    fb::CreateKnobSettingDirect(_response, "test.knob", tag, 0)};
+                const auto config = fb::CreateEngineConfigDirect(_response, 100, &knobs);
+                _response.Finish(fb::CreateEnginePredictionDirect(_response,
+                                                                  100,
+                                                                  fb::PredictionKind::CONFIGURATION,
+                                                                  fb::PredictionStatus::AVAILABLE,
+                                                                  10.0,
+                                                                  _prediction.uhd_id.c_str(),
+                                                                  nullptr,
+                                                                  config,
+                                                                  nullptr,
+                                                                  nullptr,
+                                                                  "tflops"));
+                *out = {_response.GetBufferPointer(), _response.GetSize()};
+                return true;
+            });
+
+        const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+
+        // The precondition that makes this a host-side obligation: the buffer verifies.
+        flatbuffers::Verifier verifier(_response.GetBufferPointer(), _response.GetSize());
+        ASSERT_TRUE(verifier.VerifyBuffer<fb::EnginePrediction>());
+        EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+        EXPECT_EQ(result.engine_config, nullptr);
     }
 }
 
@@ -4289,4 +4510,225 @@ TEST(TestEnginePluginResourceManager, MismatchedEngineNameIsDroppedAtLoad)
 
     EXPECT_TRUE(resourceManager.getEngineInfos().empty());
     EXPECT_FALSE(resourceManager.findEngineIdByName(K_MISMATCHED_NAME).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Optional enumeration and prediction entry points, against real plugin binaries. The
+// codegen fixture exports both; the lying engine-name fixture exports neither.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Returns the message of the HipdnnException `call` throws, after checking its status.
+template <typename Call>
+std::string thrownMessage(Call&& call, hipdnnStatus_t expectedStatus)
+{
+    try
+    {
+        std::forward<Call>(call)();
+    }
+    catch(const HipdnnException& error)
+    {
+        EXPECT_EQ(error.getStatus(), expectedStatus) << error.what();
+        return error.what();
+    }
+    ADD_FAILURE() << "Expected a HipdnnException";
+    return {};
+}
+
+class TestEnginePluginOptionalCapabilities : public ::testing::Test
+{
+protected:
+    void load(const std::filesystem::path& path)
+    {
+        ASSERT_TRUE(std::filesystem::exists(path))
+            << "Test precondition: plugin missing at " << path;
+        _manager = std::make_shared<EnginePluginManager>();
+        _manager->loadPlugins({path}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+        ASSERT_EQ(_manager->getPlugins().size(), 1U);
+        _plugin = _manager->getPlugins().front();
+        _handle = _plugin->createHandle();
+        ASSERT_NE(_handle, nullptr);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            _plugin->destroyHandle(_handle);
+        }
+    }
+
+    hipdnnPluginConstData_t config(int64_t engineId)
+    {
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+        config.engine_id = engineId;
+        _config.Clear();
+        _config.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(_config, &config));
+        return {_config.GetBufferPointer(), _config.GetSize()};
+    }
+
+    hipdnnPluginConstData_t graph() const
+    {
+        return {_graph.GetBufferPointer(), _graph.GetSize()};
+    }
+
+    std::shared_ptr<EnginePluginManager> _manager;
+    std::shared_ptr<EnginePlugin> _plugin;
+    hipdnnEnginePluginHandle_t _handle = nullptr;
+    flatbuffers::FlatBufferBuilder _config;
+    flatbuffers::FlatBufferBuilder _graph = createValidGraph();
+};
+
+} // namespace
+
+TEST_F(TestEnginePluginOptionalCapabilities, PredictionAnswerIsReturnedAndReleasedLikeEngineDetails)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t prediction{nullptr, 0};
+    ASSERT_TRUE(_plugin->getPrediction(
+        _handle, &engineConfig, &opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, false, &prediction));
+    ASSERT_NE(prediction.ptr, nullptr);
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(prediction.ptr), prediction.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<fb::EnginePrediction>());
+    const auto* answer = fb::GetEnginePrediction(prediction.ptr);
+    EXPECT_EQ(answer->engine_id(), codegen_fixture::K_FIXTURE_ENGINE_ID);
+    EXPECT_EQ(answer->kind(), fb::PredictionKind::ENGINE);
+    EXPECT_EQ(answer->status(), fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(answer->metric()->string_view(), "tflops");
+
+    EXPECT_NO_THROW(_plugin->destroyEngineDetails(_handle, &prediction));
+}
+
+// The decline must leave no output for the caller to free.
+TEST_F(TestEnginePluginOptionalCapabilities, DeclinedPredictionIsAbsentNotAnError)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    int sentinel = 0;
+    hipdnnPluginConstData_t prediction{&sentinel, 1};
+    EXPECT_FALSE(_plugin->getPrediction(_handle,
+                                        &engineConfig,
+                                        &opGraph,
+                                        HIPDNN_ENGINE_PREDICTION_CONFIGURATION,
+                                        true,
+                                        &prediction));
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
+}
+
+TEST_F(TestEnginePluginOptionalCapabilities, FailedPredictionIsAPluginErrorWithThePluginMessage)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    constexpr int64_t UNKNOWN_ENGINE_ID = 0x7777;
+    const auto engineConfig = config(UNKNOWN_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t prediction{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] {
+            std::ignore = _plugin->getPrediction(_handle,
+                                                 &engineConfig,
+                                                 &opGraph,
+                                                 HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                                 true,
+                                                 &prediction);
+        },
+        HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr("Engine prediction failed"));
+    EXPECT_THAT(message, HasSubstr("Engine with ID " + std::to_string(UNKNOWN_ENGINE_ID)));
+}
+
+TEST_F(TestEnginePluginOptionalCapabilities, DeclinedEnumerationIsNotSupported)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 10, &page); },
+        HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_THAT(message, HasSubstr("Engine does not support matched-catalog enumeration"));
+    EXPECT_EQ(page.ptr, nullptr);
+}
+
+TEST_F(TestEnginePluginOptionalCapabilities, FailedEnumerationIsAPluginErrorWithThePluginMessage)
+{
+    load(CODEGEN_FIXTURE_PATH);
+    const auto engineConfig = config(codegen_fixture::K_FIXTURE_ENGINE_ID);
+    const auto opGraph = graph();
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 0, &page); },
+        HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_THAT(message, HasSubstr("Candidate enumeration failed"));
+    EXPECT_THAT(message, HasSubstr("Candidate page limit must be in [1, 10000]"));
+}
+
+TEST_F(TestEnginePluginOptionalCapabilities, PluginWithoutTheExportsReportsNoCapability)
+{
+    load(LYING_ENGINE_NAME_PLUGIN_PATH);
+    const auto engineConfig = config(K_LYING_NULL_NAME_ENGINE_ID);
+    const auto opGraph = graph();
+
+    int sentinel = 0;
+    hipdnnPluginConstData_t prediction{&sentinel, 1};
+    EXPECT_FALSE(_plugin->getPrediction(
+        _handle, &engineConfig, &opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, true, &prediction));
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
+
+    hipdnnPluginConstData_t page{nullptr, 0};
+    const auto message = thrownMessage(
+        [&] { _plugin->enumerateCandidates(_handle, &engineConfig, &opGraph, 0, 10, &page); },
+        HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_THAT(message, HasSubstr("does not export"));
+}
+
+// Through the resource manager: an answer is passed on, a decline is absent, and a
+// plugin failure becomes INVALID.
+TEST(TestEnginePluginResourceManager, CodegenFixturePredictionsThroughResourceManager)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    auto pluginManager = std::make_shared<EnginePluginManager>();
+    pluginManager->loadPlugins({CODEGEN_FIXTURE_DIR}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+    ASSERT_EQ(pluginManager->getPlugins().size(), 1);
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    fb::EngineConfigT request;
+    request.engine_id = codegen_fixture::K_FIXTURE_ENGINE_ID;
+    flatbuffers::FlatBufferBuilder configBytes;
+    configBytes.Finish(fb::EngineConfig::Pack(configBytes, &request));
+    const hipdnnPluginConstData_t engineConfig{configBytes.GetBufferPointer(),
+                                               configBytes.GetSize()};
+    const auto graphBytes = createValidGraph();
+    const hipdnnPluginConstData_t opGraph{graphBytes.GetBufferPointer(), graphBytes.GetSize()};
+
+    const auto engine = resourceManager.getEnginePrediction(
+        engineConfig, opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(engine.status, fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(engine.reason, "Engine does not provide predictions");
+    EXPECT_EQ(engine.metric, "tflops");
+
+    const auto configuration = resourceManager.getEnginePrediction(
+        engineConfig, opGraph, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_NE(configuration.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_NE(configuration.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(configuration.reason, "Engine does not expose this prediction capability");
+
+    const std::array<uint8_t, 8> notAGraph{};
+    const auto failed = resourceManager.getEnginePrediction(
+        engineConfig, {notAGraph.data(), notAGraph.size()}, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(failed.status, fb::PredictionStatus::INVALID);
+    EXPECT_THAT(failed.reason, HasSubstr("Engine prediction failed"));
+    EXPECT_THAT(failed.reason, HasSubstr("valid graph"));
 }

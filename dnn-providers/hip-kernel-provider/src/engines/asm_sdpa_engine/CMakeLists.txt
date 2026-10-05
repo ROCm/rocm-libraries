@@ -85,6 +85,17 @@ target_compile_definitions(hip_kernel_provider_impl PRIVATE
     AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
 )
 
+# ============================================================================
+# Forward selector revision
+# ============================================================================
+# The `selector_revision` a deployed L1 model for this engine must record; inputs are
+# documented in AsmSdpaSelectorRevision.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
+hkp_asm_sdpa_fwd_revision(_fwd_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
+target_compile_definitions(hip_kernel_provider_impl PRIVATE
+    HKP_ASM_SDPA_FWD_REVISION="${_fwd_revision}")
+message(STATUS "hip-kernel-provider: asm_sdpa forward selector revision ${_fwd_revision}")
+
 # Copy ASM kernel binaries to build directory for local testing
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/
      DESTINATION ${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels
