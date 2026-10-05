@@ -94,6 +94,7 @@ See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV with in-loop latent expansion. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---
 

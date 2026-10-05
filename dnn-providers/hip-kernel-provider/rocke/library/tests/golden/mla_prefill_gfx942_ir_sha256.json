@@ -1,0 +1,61 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "mla_prefill_gfx942/dispatch_fwd_h128": {
+          "bytes": 839802,
+          "sha256": "74e38471fa822299b03c5ca59ca9cf746a250b10e24097dfaec4889932d6372f"
+        },
+        "mla_prefill_gfx942/dispatch_fwd_h64": {
+          "bytes": 839263,
+          "sha256": "64c7dd2836367cfd8dd72c3d947b17b3085cfcac513cc509980066be1e21071b"
+        },
+        "mla_prefill_gfx942/fwd_h128": {
+          "bytes": 678211,
+          "sha256": "69f60d6e11d7712949cd510955104b88c1103799bb1be61c60f2884d7b327a63"
+        },
+        "mla_prefill_gfx942/fwd_h64": {
+          "bytes": 677867,
+          "sha256": "6d7fd10ca2e16d932739e6620c66cb1a3b88cca6137296fe6438cdcf361950a7"
+        },
+        "mla_prefill_gfx942/probe_h128": {
+          "bytes": 166284,
+          "sha256": "80a43f0547679537e7ed5cc462ed3a93e52d73f35ffcae31d780577f4e3c437b"
+        },
+        "mla_prefill_gfx942/probe_h64": {
+          "bytes": 166256,
+          "sha256": "2ef63eb3d272cb131e3127bd0654654b7339345f4e6e33fa2f183d0d664fab65"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "mla_prefill_gfx942/dispatch_fwd_h128": {
+          "bytes": 839902,
+          "sha256": "00798ff7909f9779820651afbdf31d79b56a841c7f70c45db131bca0a90e9cb3"
+        },
+        "mla_prefill_gfx942/dispatch_fwd_h64": {
+          "bytes": 839363,
+          "sha256": "f13b998fcc9e2bd10f1aefde97e0322aa13a3ef8941a6e8a7f48c4591432fe73"
+        },
+        "mla_prefill_gfx942/fwd_h128": {
+          "bytes": 678311,
+          "sha256": "bd6095558bc0bca6f450065eb52b9eeb3a80f6b09b99cb48863d97feeb6264d6"
+        },
+        "mla_prefill_gfx942/fwd_h64": {
+          "bytes": 677967,
+          "sha256": "b0a7e237aab1b4f3758db9415af001e86c67f354c23d55d44490389a12513161"
+        },
+        "mla_prefill_gfx942/probe_h128": {
+          "bytes": 166291,
+          "sha256": "2b22355376461a312b8d6724345f2a61d3d98114ac809d6e08ba17efb00bc8c7"
+        },
+        "mla_prefill_gfx942/probe_h64": {
+          "bytes": 166263,
+          "sha256": "be36abda66a9273e66243ccdfc3922894e144f32835b069c46066018c7492969"
+        }
+      }
+    }
+  },
+  "schema": "mla_prefill_gfx942.ir_golden_sha256/v1"
+}
