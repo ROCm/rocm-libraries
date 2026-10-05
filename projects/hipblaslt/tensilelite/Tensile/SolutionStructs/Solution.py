@@ -57,7 +57,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
 from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
 from ..Common.TypeValidationErrors import ConfigTypeError
-from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs, w4a16DecodeMaxN
+from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -84,6 +84,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
+from .Validators.BlockDequant import validateBlockDequantCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1011,10 +1012,12 @@ class Solution(collections.abc.Mapping):
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
-    # Checked-in W4A16 decode uses dot2 and supplies its own load/store schedule.
-    if (w4a16DecodeMaxN(state.get("CustomKernelName", "")) is not None
-        and state["WaveSplitK"] and not state["EnableMatrixInstruction"]
+      or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())) \
+      or (state["ISA"][0] == 11 and state["ProblemType"]["DataType"].isHalf()))
+    # Custom dot2 kernels can use wave reductions on other architectures
+    # that implement the instruction, independently of the generated MAC path.
+    if (state.get("CustomKernelName") and state["WaveSplitK"]
+        and not state["EnableMatrixInstruction"]
         and state["ProblemType"]["HighPrecisionAccumulate"]):
       caps = isaInfoMap[state["ISA"]].asmCaps
       state["UseDotInstruction"] |= (
@@ -1159,13 +1162,20 @@ class Solution(collections.abc.Mapping):
     _isXF32 = ("F32XdlMathOp" in state["ProblemType"]
                 and not state["ProblemType"]["F32XdlMathOp"].isSingle()
                 and state["ProblemType"]["DataType"].isSingle())
+    # dot2 kernels pair with v_dual_dot2acc_f32_f16 instead, which is the same
+    # VOPD encoding and the same 2x2 pairing; only the opcode and the operand
+    # type differ. Each needs its own capability and its own data type.
+    _dualCap = "v_dual_dot2acc_f32_f16" if state.get("UseDotInstruction", False) \
+               else "v_dual_fmac_f32"
+    _dualTypeOk = state["ProblemType"]["DataType"].isHalf() \
+        if state.get("UseDotInstruction", False) \
+        else (state["ProblemType"]["DataType"].isSingle() and not _isXF32)
     if state.get("UseDualFMAC", False) and (
         state["KernelLanguage"] != "Assembly"
         or EnableMatrixInstruction
-        or not state["ProblemType"]["DataType"].isSingle()
-        or _isXF32
+        or not _dualTypeOk
         or (state["ThreadTile0"] % 2) or (state["ThreadTile1"] % 2)
-        or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
+        or not isaInfoMap[state["ISA"]].asmCaps.get(_dualCap, False)):
       state["UseDualFMAC"] = False
 
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
@@ -4443,6 +4453,33 @@ class Solution(collections.abc.Mapping):
         if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
           state["LocalReadVectorWidthB"] = min(state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
+      def autoLocalReadVectorWidth(tc, maxLRVW, maxNumDsLoadBytes):
+        """The width the LocalReadVectorWidth{tc} == -1 path derives.
+
+        Hoisted out of that path so the explicit-width branch can recognise a
+        value it produced itself.  Every reader of a stored solution re-runs
+        assignDerivedParameters -- LibraryIO clears AssignedDerivedParameters
+        before constructing a Solution, for both benchmark-data and library-logic
+        files -- so a width derived here comes back in place of the -1 it was
+        derived from.  The explicit-width checks are written for a user-supplied
+        value and reject some of what this path itself produces, notably
+        maxLRVW < MIInputPerThread, which is what any 2-byte MacDataType gives
+        whenever one MI input does not fit a single ds_load.  Without this the
+        derivation is not a fixed point and such a solution cannot be reloaded.
+        """
+        miInputPerThread = state["MIInputPerThread%s" % tc]
+        if state["TransposeLDS"] or \
+           (state["MIInputPerThread"] * state["ProblemType"]["MacDataType%s" % tc].numBytes() > maxNumDsLoadBytes):
+          width = maxLRVW
+        else:
+          width = min(miInputPerThread, maxLRVW)
+        # if only have 1 iteration with wider local read, reduce LRVW to have
+        # better scheduling (at least 2 iterations)
+        if miInputPerThread and width // miInputPerThread > 1 \
+           and state["DepthU"] // state["MatrixInstK"] <= width // miInputPerThread:
+          width //= 2
+        return width
+
       def calLRVW():
         # Default LocalReadVectorWidth
         if state["EnableMatrixInstruction"]:
@@ -4453,12 +4490,10 @@ class Solution(collections.abc.Mapping):
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
             maxLRVWA = 32
+          autoWidthA = autoLocalReadVectorWidth("A", maxLRVWA, maxNumDsLoadBytesA)
           if state["LocalReadVectorWidthA"] == -1:
             autoLRVWA = True
-            if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
-              state["LocalReadVectorWidthA"] = maxLRVWA
-            else:
-              state["LocalReadVectorWidthA"] = min(state["MIInputPerThreadA"], maxLRVWA)
+            state["LocalReadVectorWidthA"] = autoWidthA
             if state["LocalReadVectorWidthA"] > maxLRVWA:
               raise RuntimeError("LocalReadVectorWidthA (%d) exceeds max %d (# bytes of lrvw > 32)" \
                                  % (state["LocalReadVectorWidthA"], maxLRVWA))
@@ -4470,16 +4505,10 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA(%d) * BytePerMacDataTypeA(%s) > %d bytes." % (state["LocalReadVectorWidthA"], state["ProblemType"]["MacDataTypeA"].numBytes(), maxNumDsLoadBytesA))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeA"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+              if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and state["LocalReadVectorWidthA"] != autoWidthA and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA < %u" %(state["MIInputPerThread"])) # << Rejected here
             if state["LocalReadVectorWidthA"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidth require Transpose LDS")
-
-          if autoLRVWA:
-            if state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"] > 1:
-              if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]):
-                # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
-                state["LocalReadVectorWidthA"] //= 2
 
           # Default LocalReadVectorWidth
           autoLRVWB = False
@@ -4488,12 +4517,10 @@ class Solution(collections.abc.Mapping):
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
             maxLRVWB = 32
+          autoWidthB = autoLocalReadVectorWidth("B", maxLRVWB, maxNumDsLoadBytesB)
           if state["LocalReadVectorWidthB"] == -1:
             autoLRVWB = True
-            if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB):
-              state["LocalReadVectorWidthB"] = maxLRVWB
-            else:
-              state["LocalReadVectorWidthB"] = min(state["MIInputPerThreadB"], maxLRVWB)
+            state["LocalReadVectorWidthB"] = autoWidthB
             if state["LocalReadVectorWidthB"] > maxLRVWB:
               raise RuntimeError("LocalReadVectorWidthB (%d) exceeds max %d (# bytes of lrvw > 32)" \
                                  % (state["LocalReadVectorWidthB"], maxLRVWB))
@@ -4506,16 +4533,10 @@ class Solution(collections.abc.Mapping):
               if state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB(%d) * BytePerMacDataTypeB(%s) > %d bytes." % (state["LocalReadVectorWidthB"], state["ProblemType"]["MacDataTypeB"].numBytes(), maxNumDsLoadBytesB))
             elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeB"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-              if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+              if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and state["LocalReadVectorWidthB"] != autoWidthB and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB < %u" %(state["MIInputPerThread"]))
             if state["LocalReadVectorWidthB"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
               reject(state, printRejectionReason, "LocalReadVectorWidthB require Transpose LDS")
-
-          if autoLRVWB:
-            if state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"] > 1:
-              if (state["DepthU"] // state["MatrixInstK"] <= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]):
-                # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
-                state["LocalReadVectorWidthB"] //= 2
 
           if autoLRVWA or autoLRVWB:
             wlrA = max(state["LocalReadVectorWidthA"] // state["MIInputPerThread"], 1)
@@ -7050,12 +7071,20 @@ class Solution(collections.abc.Mapping):
       if cont1 and cont2:
         reject(state, printRejectionReason, "MatrixInstN %u %% GlobalReadVectorWidthB %u must be 0" % \
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
-    elif not (w4a16DecodeMaxN(state.get("CustomKernelName", "")) is not None
-              and state["WaveSplitK"]):
+    elif not (state.get("CustomKernelName") and state["WaveSplitK"]): # generated mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work
+      # The restriction above is only there to keep shift-ptr working. Block
+      # dequantization decouples the two widths outright -- A's global read
+      # feeds the dequantize, which writes LDS at its own width -- and with
+      # TLUA false the tile cannot be partial in A's vector direction anyway,
+      # so the path this guards is unreachable. B has no such conversion.
+      dequantDecouplesA = state["ProblemType"]["UseScaleAB"] == "Block" \
+          and state["ProblemType"]["ScaleBlockSizeA"] != 0 \
+          and state["GuaranteeNoPartialA"]
       if state["GlobalReadVectorWidthA"] > 1 \
-          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
+          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"] \
+          and not dequantDecouplesA:
           reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
                   (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
       if state["GlobalReadVectorWidthB"] > 1 \
@@ -7112,6 +7141,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
+    # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
+    if not validateBlockDequantCombination(state, printRejectionReason):
+      return
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
     state["AssignedDerivedParameters"] = True

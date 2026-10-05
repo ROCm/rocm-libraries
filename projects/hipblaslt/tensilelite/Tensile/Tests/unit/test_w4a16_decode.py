@@ -334,6 +334,37 @@ def test_small_n_decode_bounds_and_abi(suffix):
         (a[".offset"], a[".size"]) for a in original[".args"]]
 
 
+def test_unsigned_symmetric_regeneration_preserves_measured_selections(tmp_path):
+    import runpy
+    from Tensile.CustomYamlLoader import load_yaml_stream
+
+    generator = runpy.run_path(str(DIRECTORY / "Source/generate_w4a16_unsigned_symmetric.py"))
+    header = "# Copyright Advanced Micro Devices, Inc., or its affiliates.\n# SPDX-License-Identifier: MIT\n# Test logic\n# Runtime groups\n"
+    generated = {"Solutions": [{"SolutionIndex": 0, "CustomKernelName": "matrix"},
+                               {"SolutionIndex": 1, "CustomKernelName": "decode"}],
+                 "ExactLogic": [[[64, 1, 1, 256], [0, 1.0]]]}
+    shared = []
+    for solution in generated["Solutions"]:
+        solution["MatrixInstruction"] = shared
+    previous = {"Solutions": generated["Solutions"],
+                "ExactLogic": [[[64, 1, 1, 256], [1, 2.0]],
+                               [[128, 2, 1, 256], [1, 3.0]]]}
+    text = header + yaml.safe_dump(generated)
+    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
+    assert yaml.safe_load(result)["ExactLogic"] == previous["ExactLogic"]
+    path = tmp_path / "logic.yaml"
+    path.write_text(result)
+    assert load_yaml_stream(path, yaml.SafeLoader) == yaml.safe_load(result)
+    assert generator["preserve_exact_logic"](result, result) == result
+    previous["Solutions"][1]["CustomKernelName"] = "different"
+    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
+    retained = yaml.safe_load(result)
+    assert retained["Solutions"][2]["CustomKernelName"] == "different"
+    assert retained["Solutions"][2]["SolutionIndex"] == 2
+    assert all(selection[0] == 2 for _, selection in retained["ExactLogic"])
+    assert generator["preserve_exact_logic"](result, result) == result
+
+
 def test_wide_decode_launch_geometry():
     name = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
     config = readCustomKernelConfig(name, DIRECTORY)
