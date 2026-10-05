@@ -25,6 +25,7 @@
 from . import BenchmarkProblems
 from . import ClientWriter
 from . import LibraryIO
+from . import ExactLogicSidecar
 from . import LibraryLogic
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, restoreDefaultGlobalParameters, __version__
 from .Common.Utilities import print1, printWarning, ensurePath as ensurePathUtil
@@ -68,7 +69,9 @@ def setWorkingPath( fullPathName ):
 
 
 def parseCurrentLibrary(libPath, sizePath):
-    libYaml = LibraryIO.read(libPath)
+    # The retuned output is written as a self-contained YAML, so the sidecar
+    # table (if any) is attached to the raw data that is written back out.
+    libYaml = ExactLogicSidecar.attachSidecar(LibraryIO.read(libPath), libPath)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), libPath)
     (_, _, problemType, solutions, exactLogic, _, _) = fields

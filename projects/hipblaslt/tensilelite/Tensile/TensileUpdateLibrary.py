@@ -23,6 +23,7 @@
 ################################################################################
 
 from . import LibraryIO
+from . import ExactLogicSidecar
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
 from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
@@ -35,14 +36,19 @@ import argparse
 import copy
 import itertools
 import os
+import shutil
 import sys
 
 
 def UpdateLogic(filename, logicPath, outputPath):
     libYaml = LibraryIO.readYAML(filename)
     isDictFormat = isinstance(libYaml, dict)
-    # parseLibraryLogicData mutates the original data, so make a copy
-    fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), filename)
+    # parseLibraryLogicData mutates the original data, so make a copy. The
+    # ExactLogic sidecar (if any) is attached to the copy only: libYaml keeps
+    # its null table so the rewritten YAML stays paired with the sidecar.
+    fields = LibraryIO.parseLibraryLogicData(
+        ExactLogicSidecar.attachSidecar(copy.deepcopy(libYaml), filename), filename)
+    srcSidecar = ExactLogicSidecar.findSidecar(filename)
     (_, _, problemType, solutions, _, _, _) = fields
 
     # problem type object to state
@@ -120,6 +126,8 @@ def UpdateLogic(filename, logicPath, outputPath):
         filename = filename.replace(logicPath, outputPath)
     ensurePath(os.path.dirname(filename))
     LibraryIO.writeYAML(filename, libYaml, explicit_start=False, explicit_end=False)
+    if srcSidecar and os.path.abspath(srcSidecar) != os.path.abspath(ExactLogicSidecar.sidecarPath(filename)):
+        shutil.copyfile(srcSidecar, ExactLogicSidecar.sidecarPath(filename))
 
 def TensileUpdateLibrary(userArgs):
     print1("")

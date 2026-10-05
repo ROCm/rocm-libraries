@@ -743,13 +743,7 @@ Solutions:
   tailLoopOptA: true
   tailLoopOptB: true
 IndexOrder: [2, 3, 0, 1]
-ExactLogic:
-- - [32, 8388608, 1, 10]
-  - [0, 7.1]
-- - [10, 32, 1, 8388608]
-  - [2, 6.59]
-- - [8388608, 10, 1, 32]
-  - [1, 6.38]
+ExactLogic: null
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
