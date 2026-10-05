@@ -257,7 +257,8 @@ class KernelWriterAssembly(KernelWriter):
       totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
       vgprAllocateAligned = 4 if not doubleVgpr else 8
     else:
-      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"]//2 if not doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]
+      # doubleVgpr is set for ArchAccUnifiedRegs or wave32; only wave64 halves the file.
+      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"] if doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]//2
       # The per-SIMD VGPR file splits into 64 allocation blocks.
       vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned

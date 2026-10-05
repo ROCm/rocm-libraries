@@ -151,7 +151,7 @@ def test_gfx11_lds_limited_occupancy_uses_wgp_pool(lds_bytes, expected_occ):
     kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
     assert kw.states.archCaps["DeviceLDS"] == 65536  # per-workgroup cap, not the pool
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
-               sgprs=66, ldsBytes=lds_bytes, doubleVgpr=False)
+               sgprs=66, ldsBytes=lds_bytes)
     assert occ == expected_occ
 
 
@@ -252,7 +252,7 @@ def test_gfx11_floor_round_trips_through_getoccupancy(max_occupancy):
     kw = _make_writer(_init_rocisa(isa), isa)
     lds = _floor_for(isa, max_occupancy)
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
-               sgprs=66, ldsBytes=lds, doubleVgpr=False)
+               sgprs=66, ldsBytes=lds)
     assert occ == max_occupancy
 
 
@@ -470,7 +470,7 @@ def test_gfx11_low_vgpr_kernel_reaches_wave_cap():
     kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
     assert kw.states.archCaps["MaxWavesPerSimd"] == 16
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
-               sgprs=66, ldsBytes=0, doubleVgpr=False)
+               sgprs=66, ldsBytes=0)
     assert occ == 16
 
 
@@ -479,7 +479,7 @@ def test_gfx11_max_sgpr_kernel_still_reaches_wave_cap():
     ri = _init_rocisa((11, 5, 1))
     kw = _make_writer(ri, (11, 5, 1))
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
-               sgprs=ri.getRegCaps()["MaxSgpr"], ldsBytes=0, doubleVgpr=False)
+               sgprs=ri.getRegCaps()["MaxSgpr"], ldsBytes=0)
     assert occ == kw.states.archCaps["MaxWavesPerSimd"]
 
 
