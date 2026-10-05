@@ -586,9 +586,8 @@ def main():
     if args.record_golden:
         # The golden records the PYTHON reference sha per config, which is the
         # source of truth regardless of whether the C engine currently agrees.
-        # A C-vs-Python DRIFT family is reported as a caveat (e.g. the known
-        # pre-existing gfx950_attention_tiled_2d_fastkv_regp ir drift) but does
-        # not invalidate the reference shas being blessed.
+        # A C-vs-Python DRIFT family is reported as a caveat but does not
+        # invalidate the reference shas being blessed.
         if failures:
             print(
                 "\nNOTE: recording golden from a run the gate would fail: "

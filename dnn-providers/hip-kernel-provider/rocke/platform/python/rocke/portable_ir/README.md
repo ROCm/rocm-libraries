@@ -899,7 +899,7 @@ or reorders ops.
 ## Measured: every kernel in `kernels/gfx950`
 
 The gates above check axes already known to work. This is the opposite exercise —
-point the roller at all five build entry points in `kernels/gfx950`, every axis
+point the roller at all four build entry points in `kernels/gfx950`, every axis
 they expose and every feature flag that changes what they emit, and report what
 happened. Reproduce with `drivers/roll_gfx950_sweep.py`; a refusal there is a
 finding, not a failure.
@@ -910,7 +910,6 @@ finding, not a failure.
 | attention_tiled_2d | `build_unified_attention_2d_tiled` | 11 | 3 | 9 pts, 3 axes | 4 | 22/22 |
 | attention_tiled_3d | `build_unified_attention_3d_tiled` | 7 | 3 | 5 pts, 2 axes | 3 | 10/10 |
 | attention_reduce | `build_unified_attention_reduce_tiled` | 4 | 2 | 3 pts, 1 axis | 2 | 2/2 |
-| fastkv_regp | `build_unified_attention_2d_fastkv_register_p` | 6 | 1 | 3 pts, 1 axis | 2 | 3/3 |
 
 **The `roll_nd` payoff, at full resolution.** Those coverage numbers are from the
 2-samples-per-axis default. Raise it to three and `attention_dense` becomes the
@@ -948,7 +947,6 @@ Constants-only (`roll_nd` with no structural axis) covers most shape parameters:
 | attention_tiled_2d | `num_seqs`, `num_kv_heads`, `kq_lds_pad_halves` |
 | attention_tiled_3d | `num_query_heads`, `num_kv_heads`, `num_seqs` |
 | attention_reduce | `num_query_heads`, `num_kv_heads` |
-| fastkv_regp | `num_seqs` |
 
 Three more roll once the [structural
 roller](#3c-the-structural-roller-and-the-simpler-one-next-to-it) is pointed at
@@ -963,9 +961,8 @@ is asking one recipe to span two regimes.
 The refusals sort into five causes, and only two of them are roller gaps.
 
 **1. The axis barely exists.** `head_size` takes 2 legal values, `block_n` 5,
-`kv_ring_depth` 1. `fastkv_regp` pins four of its six axes to a single value each,
-because its support gate admits exactly one shape. Nothing to roll toward; a
-concrete recipe per value is already the right answer.
+`kv_ring_depth` 1. Nothing to roll toward; a concrete recipe per value is already
+the right answer.
 
 **2. The axis shrinks the code as it grows.** `attention_tiled_2d :: num_warps`
 emits 1387, 1234 and 1162 ops at 1, 2 and 4 warps, because more warps means less
@@ -1097,7 +1094,6 @@ trip count and `tokens` only in the name format, in the same file.
 | attention_tiled_2d | **107.3 KiB** | 106.4 KiB | +0.8% | 957.4 KiB (9) | **9x** | 11.9 KiB |
 | attention_tiled_3d | **270.8 KiB** | 264.8 KiB | +2.3% | 1.3 MiB (5) | **5x** | 54.2 KiB |
 | attention_reduce | **12.0 KiB** | 11.9 KiB | +1.0% | 35.6 KiB (3) | **3x** | 4.0 KiB |
-| fastkv_regp | **459.5 KiB** | 459.5 KiB | +0.0% | 1.3 MiB (3) | **3x** | 153.2 KiB |
 
 The saved column is the point count in every row, give or take the rounding, and
 that is the whole finding for a constants-only roll. The recipe holds the same
@@ -1112,8 +1108,8 @@ that gap on its own, which is measured below.
 
 Because the recipe does not grow, that ratio is bounded only by how much of the
 space you verify. Re-running the whole sweep at three samples per axis produces the
-*byte-identical* recipe in all five families — 548.6, 107.3, 270.8, 12.0 and 459.5
-KiB again — while what each is verified to cover goes up:
+*byte-identical* recipe in all four families — 548.6, 107.3, 270.8 and 12.0 KiB
+again — while what each is verified to cover goes up:
 
 | Family | 2 samples | 3 samples | Rolled recipe | Saved at 3 |
 |---|---|---|---|---|
@@ -1121,7 +1117,6 @@ KiB again — while what each is verified to cover goes up:
 | attention_tiled_2d | 9 pts | 19 pts | 107.3 KiB (unchanged) | 19x |
 | attention_tiled_3d | 5 pts | 10 pts | 270.8 KiB (unchanged) | 10x |
 | attention_reduce | 3 pts | 4 pts | 12.0 KiB (unchanged) | 4x |
-| fastkv_regp | 3 pts | 4 pts | 459.5 KiB (unchanged) | 4x |
 
 That is the cleanest statement of what a sample is for. More samples buy confidence
 in the models already there — a third point is what distinguishes two candidate
@@ -1134,7 +1129,7 @@ roller](#3c-the-structural-roller-and-the-simpler-one-next-to-it) at an axis and
 the picture changes, because the recipe stores a repeated block once instead of
 once per repetition. Its size then stops depending on the axis at all while the
 concrete recipe keeps growing. The two rolls below are *other kernels* — none of the
-five attention families rolls structurally by default, so measuring this at all
+four attention families rolls structurally by default, so measuring this at all
 means leaving `kernels/gfx950`:
 
 | Structural roll | Rolled | Concrete at the smallest sampled value | … and at the largest verified |
@@ -1243,19 +1238,17 @@ one recipe per axis against one recipe for the cross product:
 | attention_tiled_2d | 3 recipes, 320.0 KiB | 7 points | 107.3 KiB | **9 points** |
 | attention_tiled_3d | 3 recipes, 804.6 KiB | 7 points | 270.8 KiB | **5 points** |
 | attention_reduce | 2 recipes, 23.9 KiB | 5 points | 12.0 KiB | **3 points** |
-| fastkv_regp | 1 recipe, 459.5 KiB | 3 points | 459.5 KiB | 3 points |
 
 Since each single-axis recipe is itself constants-only, seven of them cost seven
 full recipes — 3.7 MiB — and buy fifteen points on a cross of lines through the
 space. One `roll_nd` recipe covers 65 points in the volume for 548.6 KiB: 7x fewer
 bytes for 4x the coverage, or 8.4 KiB per point against 256 KiB, 30x better per
-point served. The last row is the honest floor — `fastkv_regp` has one rollable
-axis, so there is nothing to cross and the two forms are the same recipe.
+point served.
 
 **Reproducing these outside the sweep.** The numbers come from
 `roll_gfx950_sweep`, but the rolling is `roll_kernel`'s, so the same figures come
 back from naming the kernel directly — given the sweep's base config as `fixed`
-and the grid its `choose_grid` picked as `axes`. Four of the five reproduce
+and the grid its `choose_grid` picked as `axes`. All four reproduce
 byte-for-byte from a module path alone:
 
 ```bash
@@ -1276,11 +1269,7 @@ CBOR     : 548.6 KiB parametric vs 35616.6 KiB for the same points concrete
 ```
 
 `attention_tiled_3d` and `attention_reduce` live in one module, so they need
-`--spec`/`--build` to say which. `fastkv_regp` is the exception and cannot be
-reached from the command line at all: its spec is built by passing *another*
-kernel's spec through `make_fastkv_register_p_spec`, which no flag expresses. It
-needs a `Kernel(make_spec=...)`, which reproduces its 3 points / 459.5 KiB
-exactly — see [`drivers/README.md`](drivers/README.md#kernels-that-do-not-follow-the-conventions).
+`--spec`/`--build` to say which.
 
 Two caveats about the grid. `choose_grid` picks values that are legal
 *together*, which is why the axis lists look arbitrary (`batch=1,22` rather than

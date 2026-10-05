@@ -270,7 +270,6 @@ _PREDICATE_ALIASES = {
     "build_gfx942_4warp_gqa": "supports_tiled_2d",
     "build_unified_attention_3d_tiled": "supports_tiled_3d",
     "build_unified_attention_reduce_tiled": "supports_tiled_3d",
-    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d",
 }
 
 

@@ -40,7 +40,6 @@ extern "C" {
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h"
-#include "rocke/instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/instance_sage_attention.h"
 #include "rocke/instance_sparse_attention.h"
@@ -925,105 +924,6 @@ std::vector<std::string> t950_verify(const py::dict& d, const std::string& arch)
     return out;
 }
 
-/* ===================== gfx950 tiled-2d fastkv_regp ===================== */
-
-rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
-{
-    rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
-    /* make_base() defaults from the standalone emitter */
-    s.head_size = a_int(d, "head_size", 64);
-    s.block_size = a_int(d, "block_size", 32);
-    s.num_query_heads = a_int(d, "num_query_heads", 64);
-    s.num_kv_heads = a_int(d, "num_kv_heads", 8);
-    s.use_sinks = a_bool(d, "use_sinks", false);
-    s.sliding_window = a_int(d, "sliding_window", 0);
-    s.has_softcap = a_bool(d, "has_softcap", false);
-    s.num_warps = a_int(d, "num_warps", 4);
-    s.has_waves_per_eu = true;
-    s.waves_per_eu = a_int(d, "waves_per_eu", 2);
-    s.has_tile_size = true;
-    s.tile_size = a_int(d, "tile_size", 64);
-    s.block_m_per_warp = a_int(d, "block_m_per_warp", 32);
-    s.use_mfma_32x32 = a_bool(d, "use_mfma_32x32", true);
-    s.use_transposed_qk_32x32 = a_bool(d, "use_transposed_qk_32x32", true);
-    s.use_transposed_scalar_state = a_bool(d, "use_transposed_scalar_state", true);
-    s.use_transposed_mask_once = a_bool(d, "use_transposed_mask_once", true);
-    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", true);
-    /* additive per-config flags */
-    s.use_transposed_half_local_pv
-        = a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
-    s.use_mfma32_skip_legacy_qreg
-        = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
-    s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
-    s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
-    std::string v;
-    if(a_str(d, "dtype", v))
-        s.dtype = st.keep(v);
-    else
-        s.dtype = "bf16";
-    return s;
-}
-std::string fkv_lower(const py::dict& d, const std::string& arch)
-{
-    Store st;
-    rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
-    rocke_ir_builder_t b;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
-    rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(&b, &s, a);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
-                        + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(m);
-    }
-    char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
-    rocke_ir_builder_free(&b);
-    return take_ll(
-        s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_2d_fastkv_regp_lower_llvm");
-}
-std::string fkv_serialize(const py::dict& d, const std::string& arch)
-{
-    Store st;
-    rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
-                        + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(m);
-    }
-    std::string out
-        = ser_kernel(k, "rocke_engine.gfx950_attention_tiled_2d_fastkv_regp_serialize_ir");
-    rocke_ir_builder_free(&b);
-    return out;
-}
-std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
-{
-    Store st;
-    rocke_attention_tiled_2d_spec_t s = fkv_build(d, st);
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_2d_fastkv_register_p(
-        &b, &s, arch.empty() ? "gfx950" : arch.c_str());
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
-                        + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(m);
-    }
-    std::vector<std::string> out = ver_kernel(k);
-    rocke_ir_builder_free(&b);
-    return out;
-}
-
 /* ===================== gfx942 / gfx950 tiled-3d ======================== */
 
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
@@ -1316,12 +1216,6 @@ void register_attention(py::module_& m)
     reg3(m, "sage_attention", &sage_lower, &sage_serialize, &sage_verify, "gfx950");
     reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify, "gfx942");
     reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify, "gfx950");
-    reg3(m,
-         "gfx950_attention_tiled_2d_fastkv_regp",
-         &fkv_lower,
-         &fkv_serialize,
-         &fkv_verify,
-         "gfx950");
     reg3(
         m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify, "gfx942");
     reg3(
