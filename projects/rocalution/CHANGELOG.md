@@ -19,6 +19,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 * Fixed wrong coarse operators of the AMG preconditioners with MPI on wave32 (RDNA) hardware, caused by `LocalMatrix::CompressAdd()` on the accelerator.
 * Fixed a crash in `LocalMatrix::CompressAdd()` on the accelerator when a row of the interior part exceeds the supported number of entries and the computation falls back to the host.
+* Fixed an out-of-bounds access and wrong coarse ghost columns in `GlobalMatrix::CoarsenOperator()`, used by the pairwise AMG with MPI, when boundary points are not aggregated.
+* Fixed the TNS preconditioner keeping its approximate inverse on the host when moved to the accelerator.
+* Fixed HIP work in the distributed CSR receive and in `CompressAdd` running on the null stream instead of the current stream.
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 
