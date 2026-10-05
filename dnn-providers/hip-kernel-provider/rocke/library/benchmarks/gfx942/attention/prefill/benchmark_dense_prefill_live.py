@@ -53,6 +53,12 @@ or directly with a ROCm-torch venv python::
 
 ``--dry-run`` resolves and prints the spec for every shape without a GPU, which is
 how you check WHAT the gate is about to measure.
+
+``--emit-shapes PATH`` writes every shape this benchmark measures, across all of
+its runnable modes, as JSONL in the rocKE benchmark-trace schema that
+``projects/hipdnn/tools/IngestorGenerator/tools/mine_shapes.py --rocke-bench``
+reads, then exits. It needs neither a GPU nor torch: torch is imported only on
+the paths that build inputs and launch kernels.
 """
 from __future__ import annotations
 
@@ -68,18 +74,6 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
-# Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec plumbing,
-# including the raise-on-drift guard. Duplicating it here is what let the two
-# harnesses drift apart from dispatch in the first place.
-from builders.gfx942.attention.prefill.attention_dense_prefill import (  # noqa: E402
-    add_dense_tuning_args,
-    dense_request,
-    dense_spec_overrides,
-    describe_dense_spec,
-    resolve_dense_spec,
-)
 from kernels.gfx942.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
@@ -98,7 +92,6 @@ from rocke.runtime import (  # noqa: E402
 )
 
 _ARCH = "gfx942"
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 # Exit codes. 0 = every shape passed, 1 = no GPU, 2 = at least one shape failed,
@@ -140,6 +133,8 @@ def _gm(vals) -> float:
 
 
 def _bench_stream_handle() -> int:
+    import torch
+
     return int(torch.cuda.current_stream().cuda_stream)
 
 
@@ -182,8 +177,10 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     The spec is the dispatch-resolved one (see :func:`resolve_dense_spec`); this
     function never invents tuning values.
     """
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[spec.dtype]
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[spec.dtype]
     B, S = spec.batch, spec.seqlen_q
     Hq, Hkv, D = spec.num_query_heads, spec.num_kv_heads, spec.head_size
     causal = spec.causal
@@ -346,17 +343,101 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
     }
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+#: Every ``--mode`` choice. ``all`` is the union of causal, mha, gqa and full.
+_MODES = ("causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all")
+
+#: The modes ``--emit-shapes`` writes: every mode that measures something. Derived,
+#: so a mode leaving _DEFERRED_MODES is emitted without editing this line. ``all``
+#: is left out because its modes are listed one by one.
+_EMIT_MODES = tuple(m for m in _MODES if m != "all" and m not in _DEFERRED_MODES)
+
+
+def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
+    """Every shape the benchmark measures, as rocKE benchmark-trace records.
+
+    The schema is the one ``mine_shapes.py --rocke-bench`` reads: ``window_size``
+    is ``[left, right]`` (``[-1, 0]`` causal, ``[W - 1, 0]`` a W-token window) and
+    ``causal`` states the mask explicitly, since a full (non-causal) shape has no
+    window spelling of its own. The persistent mode re-measures the causal cohort
+    on another grid, so its rows repeat request shapes; the miner merges them.
+    """
+    records = []
+    for mode in _EMIT_MODES:
+        for cfg in _configs(mode, Hq, Hkv, D):
+            cmode, variant, label, S, B, hq, hkv, causal = cfg[:8]
+            W = cfg[8] if len(cfg) > 8 else 0
+            records.append(
+                {
+                    "model": "benchmark_dense_prefill_live",
+                    "variant": f"{cmode}/{variant}",
+                    "label": label,
+                    "num_seqs": B,
+                    "max_seqlen_q": S,
+                    "max_seqlen_k": S,
+                    "num_query_heads": hq,
+                    "num_kv_heads": hkv,
+                    "head_size": D,
+                    "q_dtype": dtype,
+                    "causal": causal,
+                    "window_size": (
+                        [W - 1, 0] if W else ([-1, 0] if causal else [-1, -1])
+                    ),
+                    "has_sinks": False,
+                }
+            )
+    return records
+
+
+def _add_shape_args(ap: argparse.ArgumentParser) -> None:
+    """The arguments that decide WHICH shapes run, shared with ``--emit-shapes``."""
     ap.add_argument(
         "--mode",
-        choices=["causal", "mha", "gqa", "full", "swa", "varlen", "persistent", "all"],
+        choices=_MODES,
         default="all",
     )
     ap.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
     ap.add_argument("--hq", type=int, default=128, help="query heads (causal/gqa)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (causal/gqa)")
     ap.add_argument("--d", type=int, default=128, help="head size (64 or 128)")
+    ap.add_argument(
+        "--emit-shapes",
+        metavar="PATH",
+        help="write every shape of every mode as JSONL for mine_shapes.py "
+        "--rocke-bench and exit (no GPU, no torch)",
+    )
+
+
+def main() -> int:
+    pre = argparse.ArgumentParser(add_help=False)
+    _add_shape_args(pre)
+    known, unknown = pre.parse_known_args()
+    if known.emit_shapes:
+        # Only the shape filters apply to an emit. Anything else is a typo, and
+        # emitting the default set for it would look like success.
+        if unknown:
+            pre.error(f"unrecognized arguments: {' '.join(unknown)}")
+        records = shape_records(known.dtype, known.hq, known.hkv, known.d)
+        with open(known.emit_shapes, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in records))
+        print(f"wrote {known.emit_shapes}  ({len(records)} shapes)")
+        return _EXIT_OK
+
+    import torch
+
+    # Single copy of the CLI -> AttentionRequest -> dispatch-resolved spec
+    # plumbing, including the raise-on-drift guard. Duplicating it here is what
+    # let the two harnesses drift apart from dispatch in the first place. Imported
+    # here, not at module scope, because it imports torch.
+    from builders.gfx942.attention.prefill.attention_dense_prefill import (
+        add_dense_tuning_args,
+        dense_request,
+        dense_spec_overrides,
+        describe_dense_spec,
+        resolve_dense_spec,
+    )
+
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    _add_shape_args(ap)
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)

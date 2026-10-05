@@ -134,7 +134,7 @@ rocblas_status rocblas_internal_axpy_launcher_64(rocblas_handle handle,
                                           shifty,
                                           incy,
                                           stride_y,
-                                          batch_count);
+                                          batch_count32);
                 else
                     ROCBLAS_LAUNCH_KERNEL((rocblas_axpy_kernel<int64_t, NB, Tex>),
                                           grid,
@@ -152,7 +152,7 @@ rocblas_status rocblas_internal_axpy_launcher_64(rocblas_handle handle,
                                           shifty,
                                           incy,
                                           stride_y,
-                                          batch_count);
+                                          batch_count32);
             }
         }
     }
