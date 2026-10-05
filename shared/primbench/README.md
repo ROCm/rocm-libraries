@@ -179,27 +179,27 @@ It outputs this `results.json`:
             "specialization_count": 2,
             "library_build_type": "debug",
             "gpu": {
-                "name": "AMD Radeon RX 9070 XT",
-                "arch": "gfx1201",
-                "pci_bus_id": "0000:83:00.0"
+                "name": "AMD Radeon Pro W7900 Dual Slot",
+                "arch": "gfx1100",
+                "pci_bus_id": "0000:3f:00.0"
             },
             "backend": {
                 "name": "hip",
-                "hip_version": "6.4.43482-0f2d60242",
-                "runtime_version": "6.4.43482",
-                "driver_version": "6.4.43482",
+                "hip_version": "7.17.26391-0000000",
+                "runtime_version": "7.17.26391",
+                "driver_version": "7.17.26391",
                 "compiler": {
                     "name": "clang",
-                    "version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+                    "version": "24.0.0git (https://github.com/ROCm/llvm-project.git 4f43f4746ede4cc49ab4129f473dbd54e0d9db4f)"
                 }
             },
             "monitoring": {
                 "name": "amdsmi",
-                "version": "25.3.0"
+                "version": "27.1.0"
             },
             "temperature_type": "edge",
             "host_name": "host",
-            "date": "2025-11-24T15:01:50+00:00"
+            "date": "2026-10-05T16:28:20+00:00"
         },
         "settings": {
             "size": 134217728,
@@ -221,7 +221,8 @@ It outputs this `results.json`:
             "output_batches": false,
             "spaces_per_indent": 4,
             "stream_blocking_timeout_secs": 10,
-            "skip_header": false
+            "skip_header": false,
+            "skip_tests": false
         },
         "flags": {
             "sync": false
@@ -231,19 +232,19 @@ It outputs this `results.json`:
         {
             "index": 0,
             "name": "type: char",
-            "bytes_per_second": 7.5628e+11,
-            "items_per_second": 3.7814e+11,
+            "bytes_per_second": 5.29031e+11,
+            "items_per_second": 2.64515e+11,
             "bytes_per_item": 2,
             "items": 134217728,
             "noise_timeout": false,
-            "noise_percent": 0.0521193,
+            "noise_percent": 0.320167,
             "meta": {
                 "algo": "copy",
                 "type": "char"
             },
             "elapsed_secs": {
-                "host": 1.01423,
-                "gpu": 0.511131
+                "host": 1.21152,
+                "gpu": 0.162656
             },
             "gpu_temp_celsius": {
                 "start": 49,
@@ -251,45 +252,45 @@ It outputs this `results.json`:
             },
             "calls": {
                 "kernel_calls_per_batch": 32,
-                "ms_per_batch": 11.3546,
-                "batches": 45,
-                "kernel_calls": 1440
+                "ms_per_batch": 16.1605,
+                "batches": 10,
+                "kernel_calls": 320
             }
         },
         {
             "index": 1,
             "name": "type: long long",
-            "bytes_per_second": 1.29793e+12,
-            "items_per_second": 8.11204e+10,
+            "bytes_per_second": 5.36214e+11,
+            "items_per_second": 3.35134e+10,
             "bytes_per_item": 16,
             "items": 16777216,
             "noise_timeout": false,
-            "noise_percent": 0.0519677,
+            "noise_percent": 0.215172,
             "meta": {
                 "algo": "copy",
                 "type": "long long"
             },
             "elapsed_secs": {
-                "host": 1.015,
-                "gpu": 0.423253
+                "host": 1.00791,
+                "gpu": 0.287851
             },
             "gpu_temp_celsius": {
                 "start": 49,
-                "end": 49
+                "end": 50
             },
             "calls": {
-                "kernel_calls_per_batch": 64,
-                "ms_per_batch": 13.2405,
-                "batches": 32,
-                "kernel_calls": 2048
+                "kernel_calls_per_batch": 32,
+                "ms_per_batch": 15.9436,
+                "batches": 18,
+                "kernel_calls": 576
             }
         }
     ],
     "summary": {
         "noise_timeouts": 0,
         "elapsed_secs": {
-            "host": 6.67644,
-            "gpu": 0.934384
+            "host": 9.26481,
+            "gpu": 0.450508
         }
     }
 }
@@ -322,6 +323,7 @@ You can also pass `--help` to benchmarks to print the available options.
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
 | `--skip-header`                          | Skip printing the header to output.                                                                                                                                                |
+| `--skip-test`                          | Skip correctness tests                                                                                      |
 
 ### Adding Custom Options
 
