@@ -727,6 +727,8 @@ def build_and_run_fmha(String arch){
     if(arch == "gfx1250"){
         cmd = """export HSA_MODEL_LIB=/libhsakmtmodel.so && \
                  export HSA_MODEL_TOPOLOGY=/topology/mi450 && \
+                 export HSA_MODEL_TOML=/ffm_config.toml && \
+                 export HSA_MODEL_ARGS=ffm_force_mem_dep_check && \
                  cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
                 -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
