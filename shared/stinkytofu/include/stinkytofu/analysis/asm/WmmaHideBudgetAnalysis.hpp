@@ -58,7 +58,11 @@ struct DsLoadBudgetConfig {
     int dsReadThrottleLatency = 0;
     double dsReadThrottleTransitionFactor = 1.0;
     int dsReadThrottleTransitionEntries = 0;
+    /// Cycles of one window (a WMMA batch window when wmmasPerWindow > 1).
     int wmmaLatency = 0;
+    /// WMMAs sharing one window (WMMA batch size). The distribution is still
+    /// indexed per WMMA: each window's count lands on its first WMMA.
+    int wmmasPerWindow = 1;
 };
 
 /// Per-window DS allocation produced by the shared hard-cap/throttle model.
