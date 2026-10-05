@@ -52,7 +52,6 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
     * :doc:`rocRAND precision support <api-reference/data-type-support>`
     * :ref:`cpp-api`
     * :ref:`python-api`
-    * :doc:`Fortran API reference <fortran-api-reference>`
     * :doc:`API library <doxygen/html/index>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

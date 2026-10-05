@@ -81,6 +81,9 @@ repos:
         exclude: &opted_out_but_scanned |
           (?x)
           projects/hipblaslt/.*|
+          # Vendored FRUIT unit-test harness (third party, own LICENSE.txt):
+          # kept byte-identical to upstream so that re-vendoring is a plain copy.
+          projects/rocrand/fortran/test/fruit/.*|
           shared/tensile/.*
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned

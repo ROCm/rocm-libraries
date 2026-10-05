@@ -33,7 +33,6 @@ subtrees:
     - file: api-reference/data-type-support
     - file: api-reference/cpp-api
     - file: api-reference/python-api
-    - file: fortran-api-reference
     - file: doxygen/html/index
 
   - caption: About
