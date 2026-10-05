@@ -114,18 +114,13 @@ struct BlockFmhaBwdDQOnlyQMajor
         return dstr;
     }
 
-    using KsBf16x8 = bf16_t __attribute__((ext_vector_type(8)));
-    using KsF32x8  = float __attribute__((ext_vector_type(8)));
-    CK_TILE_DEVICE static KsF32x8 ks_wmma(const KsBf16x8& a, const KsBf16x8& b, const KsF32x8& c)
-    {
-#if defined(__gfx12__)
-        return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
-#else
-        ignore = a;
-        ignore = b;
-        return c;
-#endif
-    }
+    // K-split dQ: one gfx12 16x16x16 WMMA per (dS block, K^T block); 8 inputs and 8 FP32
+    // accumulators per lane.
+    using KsWmma =
+        WarpGemmAttributeWmmaImpl<WmmaTraits<gfx120_t, GemmDataType, KDataType, float, 16, 16, 16>>;
+    using KsAVec = typename KsWmma::AVecType;
+    using KsBVec = typename KsWmma::BVecType;
+    using KsCVec = typename KsWmma::CVecType;
 
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
     static constexpr index_t kPadHeadDimQ  = Problem::kPadHeadDimQ;
@@ -523,11 +518,11 @@ struct BlockFmhaBwdDQOnlyQMajor
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
 
         // per-wave partial dQ [mb][db] over this wave's keys.
-        KsF32x8 ks_dq[2][kQKHeaddim / 16];
+        KsCVec ks_dq[2][kQKHeaddim / 16];
         if constexpr(kD32DqKsplit)
             for(int i = 0; i < 2; ++i)
                 for(int j = 0; j < kQKHeaddim / 16; ++j)
-                    ks_dq[i][j] = KsF32x8{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+                    ks_dq[i][j] = KsCVec{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
         index_t k_step = seqlen_k_start;
         for(index_t ik = 0; ik < num_k_loops; ++ik)
         {
@@ -638,18 +633,18 @@ struct BlockFmhaBwdDQOnlyQMajor
                 static_assert(remove_cvref_t<decltype(ds_gemm)>::get_thread_buffer_size() == 16);
                 const index_t wv = get_warp_id(), ln = get_lane_id();
                 const auto& dsb = ds_gemm.get_thread_buffer();
-                KsBf16x8 ka[2];
+                KsAVec ka[2];
                 for(int mb = 0; mb < 2; ++mb)
                     for(int j = 0; j < 8; ++j)
                         ka[mb][j] = dsb[mb * 8 + j];
                 const index_t n = 16 * wv + 8 * (ln / 16);
                 for(int db = 0; db < kQKHeaddim / 16; ++db)
                 {
-                    const index_t dd  = 16 * db + ln % 16;
-                    const KsBf16x8 kb = *reinterpret_cast<const KsBf16x8*>(
+                    const index_t dd = 16 * db + ln % 16;
+                    const KsBVec kb  = *reinterpret_cast<const KsBVec*>(
                         kt_lds_ptr + dd * 64 + (((n >> 3) ^ ((dd >> 1) & 7)) << 3));
                     for(int mb = 0; mb < 2; ++mb)
-                        ks_dq[mb][db] = ks_wmma(ka[mb], kb, ks_dq[mb][db]);
+                        KsWmma{}(ks_dq[mb][db], ka[mb], kb);
                 }
             }
             else
