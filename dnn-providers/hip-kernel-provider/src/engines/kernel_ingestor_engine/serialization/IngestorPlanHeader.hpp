@@ -54,8 +54,8 @@ bool isReadableIngestorPlanVersion(uint16_t major,
                                    uint16_t readerMajor,
                                    uint16_t readerMinor);
 
-// Converts the 64 hex characters of a SHA-256 to the raw digest.
-// Throws HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR when the text is not 64 hex characters.
+// Converts the 64 lowercase hex characters of a SHA-256 to the raw digest.
+// Throws HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR when the text is not 64 lowercase hex characters.
 IngestorPlanDigest ingestorPlanDigestFromHex(const std::string& hex);
 
 // Converts a raw digest to 64 lowercase hex characters.

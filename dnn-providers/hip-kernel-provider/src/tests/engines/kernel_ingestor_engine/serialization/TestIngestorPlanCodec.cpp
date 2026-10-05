@@ -57,10 +57,10 @@ std::vector<uint8_t> patternBytes(size_t size, uint8_t seed)
 IngestorPlanPayload makePayload(KernelSourceKind sourceKind, size_t codeSize = 37)
 {
     IngestorPlanPayload payload;
-    payload.engineId = 0x123456789A;
-    for(size_t index = 0; index < payload.kernelId.size(); ++index)
+    payload.engineName = "hipkernel:codec_test_engine";
+    for(size_t index = 0; index < payload.kernelDescriptorId.size(); ++index)
     {
-        payload.kernelId[index] = static_cast<uint8_t>(0x10U + index);
+        payload.kernelDescriptorId[index] = static_cast<uint8_t>(0x10U + index);
     }
     payload.workspaceBytes = 4096;
     payload.dispatchSymbol = "hipkernel.test.dispatch.v1";
@@ -109,8 +109,8 @@ size_t codeObjectOffset(const std::vector<uint8_t>& payload)
     std::vector<detail::IngestorPlanAlignedBlock> storage;
     const uint8_t* body = detail::alignedIngestorPlanBody(
         payload.data() + HEADER_SIZE, payload.size() - HEADER_SIZE, storage);
-    const auto* plan = fb::GetIngestorPlan(body);
-    return static_cast<size_t>(plan->kernel()->code_object()->data() - body);
+    const auto* plan = fb::GetExecutionPlan(body);
+    return static_cast<size_t>(plan->kernel_image()->code_object()->data() - body);
 }
 
 IngestorPlanPayload decode(const std::vector<uint8_t>& payload)
@@ -125,6 +125,20 @@ void expectDecodeRefusal(const std::vector<uint8_t>& payload,
     expectIngestorPlanRefusal([&]() { decode(payload); }, status, phrase);
 }
 
+void expectEncodeInternalError(const IngestorPlanPayload& payload, const std::string& phrase)
+{
+    try
+    {
+        encodeIngestorPlan(payload);
+        ADD_FAILURE() << "expected an internal error that contains '" << phrase << "'";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << error.getMessage();
+        EXPECT_NE(error.getMessage().find(phrase), std::string::npos) << error.getMessage();
+    }
+}
+
 // One launch value as the raw builder writes it. A type other than NONE gets an Int64Value
 // table as its data when withData is true.
 struct RawLaunchValue
@@ -137,7 +151,8 @@ struct RawLaunchValue
 // The body fields a raw build can set to values that encodeIngestorPlan never writes.
 struct RawPlan
 {
-    std::optional<int64_t> engineId = 11;
+    std::optional<std::string> engineName = std::string("hipkernel:raw_engine");
+    std::optional<std::string> providerVersion = std::string("0.0.1");
     std::optional<uint64_t> workspaceBytes = 256;
     std::vector<int64_t> runtimePassByValueUids;
     std::vector<RawLaunchValue> values = {RawLaunchValue{"count"}};
@@ -158,7 +173,7 @@ std::vector<uint8_t> buildRawPayload(const RawPlan& raw)
     const auto symbol = builder.CreateString("raw_kernel");
     const auto target = builder.CreateString("gfx942");
     const auto sha256 = builder.CreateString(raw.sha256);
-    const auto kernel = fb::CreateKernelImage(
+    const auto kernelImage = fb::CreateKernelImage(
         builder, raw.sourceKind, symbol, target, sha256, signature, codeObject);
 
     std::vector<flatbuffers::Offset<fb::LaunchValue>> values;
@@ -174,24 +189,40 @@ std::vector<uint8_t> buildRawPayload(const RawPlan& raw)
     }
     const auto valuesVector = builder.CreateVector(values);
     const auto dispatchSymbol = builder.CreateString("raw.dispatch.v1");
-    const auto launch = fb::CreateLaunchInputs(builder, dispatchSymbol, valuesVector);
+    const auto dispatchData = fb::CreateDispatchData(builder, dispatchSymbol, valuesVector);
     const auto uids = builder.CreateVector(raw.runtimePassByValueUids);
-    const fb::Uuid kernelId;
-
-    fb::IngestorPlanBuilder plan(builder);
-    if(raw.engineId.has_value())
+    flatbuffers::Offset<flatbuffers::String> engineName;
+    if(raw.engineName.has_value())
     {
-        plan.add_engine_id(*raw.engineId);
+        engineName = builder.CreateString(*raw.engineName);
     }
-    plan.add_kernel_id(&kernelId);
+    flatbuffers::Offset<flatbuffers::String> providerVersion;
+    if(raw.providerVersion.has_value())
+    {
+        providerVersion = builder.CreateString(*raw.providerVersion);
+    }
+    const fb::Uuid kernelDescriptorId;
+
+    fb::ExecutionPlanBuilder plan(builder);
+    if(raw.engineName.has_value())
+    {
+        plan.add_engine_name(engineName);
+    }
+    plan.add_kernel_descriptor_id(&kernelDescriptorId);
     if(raw.workspaceBytes.has_value())
     {
         plan.add_workspace_bytes(*raw.workspaceBytes);
     }
     plan.add_runtime_pass_by_value_uids(uids);
-    plan.add_launch(launch);
-    plan.add_kernel(kernel);
-    fb::FinishIngestorPlanBuffer(builder, plan.Finish());
+    plan.add_dispatch_data(dispatchData);
+    plan.add_kernel_image(kernelImage);
+    if(raw.providerVersion.has_value())
+    {
+        plan.add_provider_version(providerVersion);
+    }
+    // End the table directly. The generated Finish() asserts that every required field is set.
+    const flatbuffers::Offset<fb::ExecutionPlan> root(builder.EndTable(plan.start_));
+    fb::FinishExecutionPlanBuffer(builder, root);
 
     const uint8_t* body = builder.GetBufferPointer();
     return seal(std::vector<uint8_t>(body, body + builder.GetSize()));
@@ -208,8 +239,8 @@ TEST_P(TestIngestorPlanCodecRoundTrip, RoundTripsEveryField)
     const IngestorPlanPayload payload = makePayload(GetParam());
     const IngestorPlanPayload decoded = decode(encodeIngestorPlan(payload));
 
-    EXPECT_EQ(decoded.engineId, payload.engineId);
-    EXPECT_EQ(decoded.kernelId, payload.kernelId);
+    EXPECT_EQ(decoded.engineName, payload.engineName);
+    EXPECT_EQ(decoded.kernelDescriptorId, payload.kernelDescriptorId);
     EXPECT_EQ(decoded.workspaceBytes, payload.workspaceBytes);
     EXPECT_EQ(decoded.runtimePassByValueUids, payload.runtimePassByValueUids);
     EXPECT_EQ(decoded.dispatchSymbol, payload.dispatchSymbol);
@@ -252,7 +283,6 @@ TEST(TestIngestorPlanCodec, RoundTripsEmptyOptionalContent)
     IngestorPlanPayload payload = makePayload(KernelSourceKind::EMBEDDED_SOURCE, 0);
     payload.launchValues.clear();
     payload.recordedSignature.clear();
-    payload.providerVersion.clear();
     payload.target.clear();
     EXPECT_TRUE(decode(encodeIngestorPlan(payload)) == payload);
 }
@@ -282,7 +312,7 @@ TEST(TestIngestorPlanCodec, BodyStartsAtTheHeaderSizeAndCodeIsSixteenByteAligned
 
         const IngestorPlanHeader header = decodeIngestorPlanHeader(payload.data(), payload.size());
         EXPECT_EQ(static_cast<size_t>(header.headerSize), HEADER_SIZE);
-        EXPECT_TRUE(fb::IngestorPlanBufferHasIdentifier(payload.data() + header.headerSize));
+        EXPECT_TRUE(fb::ExecutionPlanBufferHasIdentifier(payload.data() + header.headerSize));
         EXPECT_EQ(codeObjectOffset(payload) % ALIGNMENT, 0U);
         EXPECT_EQ(decode(payload).codeObject.size(), codeSize);
     }
@@ -426,15 +456,27 @@ TEST(TestIngestorPlanCodec, RejectsMalformedLaunchValues)
 
 TEST(TestIngestorPlanCodec, RejectsAMissingRequiredScalar)
 {
-    RawPlan withoutEngine;
-    withoutEngine.engineId.reset();
-    expectDecodeRefusal(
-        buildRawPayload(withoutEngine), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "engine_id");
-
     RawPlan withoutWorkspace;
     withoutWorkspace.workspaceBytes.reset();
     expectDecodeRefusal(
         buildRawPayload(withoutWorkspace), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "workspace_bytes");
+}
+
+TEST(TestIngestorPlanCodec, VerifierRejectsABodyWithoutAnEngineNameOrProviderVersion)
+{
+    RawPlan withoutEngineName;
+    withoutEngineName.engineName.reset();
+    expectDecodeRefusal(
+        buildRawPayload(withoutEngineName), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "verifier");
+
+    RawPlan withoutProviderVersion;
+    withoutProviderVersion.providerVersion.reset();
+    expectDecodeRefusal(
+        buildRawPayload(withoutProviderVersion), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "verifier");
+
+    const IngestorPlanPayload decoded = decode(buildRawPayload(RawPlan{}));
+    EXPECT_EQ(decoded.engineName, "hipkernel:raw_engine");
+    EXPECT_EQ(decoded.providerVersion, "0.0.1");
 }
 
 TEST(TestIngestorPlanCodec, RejectsAMalformedKernelDigest)
@@ -465,35 +507,32 @@ TEST(TestIngestorPlanCodec, RejectsAnUnsetOrUnknownSourceKind)
 
 TEST(TestIngestorPlanCodec, WriterRejectsInputsItOwnsAsAnInternalError)
 {
-    const auto expectInternalError = [](const IngestorPlanPayload& payload,
-                                        const std::string& phrase) {
-        try
-        {
-            encodeIngestorPlan(payload);
-            ADD_FAILURE() << "expected an internal error that contains '" << phrase << "'";
-        }
-        catch(const HipdnnPluginException& error)
-        {
-            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << error.getMessage();
-            EXPECT_NE(error.getMessage().find(phrase), std::string::npos) << error.getMessage();
-        }
-    };
-
     IngestorPlanPayload noSymbol = makePayload(KernelSourceKind::EMBEDDED_SOURCE);
     noSymbol.symbol.clear();
-    expectInternalError(noSymbol, "kernel symbol is empty");
+    expectEncodeInternalError(noSymbol, "kernel symbol is empty");
 
     IngestorPlanPayload noDispatch = makePayload(KernelSourceKind::EMBEDDED_SOURCE);
     noDispatch.dispatchSymbol.clear();
-    expectInternalError(noDispatch, "dispatch symbol is empty");
+    expectEncodeInternalError(noDispatch, "dispatch symbol is empty");
 
     IngestorPlanPayload badDigest = makePayload(KernelSourceKind::EMBEDDED_SOURCE);
     badDigest.sha256 = std::string(64, 'A');
-    expectInternalError(badDigest, "kernel digest");
+    expectEncodeInternalError(badDigest, "kernel digest");
 
     IngestorPlanPayload badKind = makePayload(KernelSourceKind::EMBEDDED_SOURCE);
     badKind.sourceKind = static_cast<KernelSourceKind>(99);
-    expectInternalError(badKind, "source kind 99");
+    expectEncodeInternalError(badKind, "source kind 99");
+}
+
+TEST(TestIngestorPlanCodec, WriterRefusesAnEmptyEngineNameOrProviderVersion)
+{
+    IngestorPlanPayload noEngineName = makePayload(KernelSourceKind::KPACK);
+    noEngineName.engineName.clear();
+    expectEncodeInternalError(noEngineName, "engine name is empty");
+
+    IngestorPlanPayload noProviderVersion = makePayload(KernelSourceKind::KPACK);
+    noProviderVersion.providerVersion.clear();
+    expectEncodeInternalError(noProviderVersion, "provider version is empty");
 }
 
 } // namespace

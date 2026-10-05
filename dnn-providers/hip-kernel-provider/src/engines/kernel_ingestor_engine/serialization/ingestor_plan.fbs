@@ -21,26 +21,27 @@ table Int64ListValue { values: [long] (required); }
 union LaunchValueData { BoolValue, Int64Value, DoubleValue, StringValue, Int64ListValue }
 
 table LaunchValue  { name: string (required); value: LaunchValueData; }
-table LaunchInputs { dispatch_symbol: string (required); values: [LaunchValue] (required); }
+table DispatchData { dispatch_symbol: string (required); values: [LaunchValue] (required); }
 
 table KernelImage {
   source_kind: SourceKind;
   symbol: string (required);
   target: string (required);
   sha256: string (required);
+  // The kernel's argument list.
   signature: [KernelArgument] (required);
   code_object: [ubyte] (required, force_align: 16);
 }
 
-table IngestorPlan {
-  engine_id: long = null;
-  kernel_id: Uuid (required);
+table ExecutionPlan {
+  engine_name: string (required);
+  kernel_descriptor_id: Uuid (required);
   workspace_bytes: ulong = null;
   runtime_pass_by_value_uids: [long] (required);
-  launch: LaunchInputs (required);
-  kernel: KernelImage (required);
-  provider_version: string;
+  dispatch_data: DispatchData (required);
+  kernel_image: KernelImage (required);
+  provider_version: string (required);
 }
 
-root_type IngestorPlan;
+root_type ExecutionPlan;
 file_identifier "HKSP";

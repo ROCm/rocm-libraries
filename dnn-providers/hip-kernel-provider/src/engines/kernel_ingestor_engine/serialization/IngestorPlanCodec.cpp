@@ -34,7 +34,8 @@ using hipdnn_plugin_sdk::ingestor::MetadataValues;
 constexpr size_t MAX_BODY_SIZE = static_cast<size_t>(FLATBUFFERS_MAX_BUFFER_SIZE);
 constexpr size_t MIN_BODY_SIZE = FLATBUFFERS_MIN_BUFFER_SIZE;
 
-constexpr size_t KERNEL_ID_SIZE = std::tuple_size_v<hipdnn_plugin_sdk::ingestor::DescriptorId>;
+constexpr size_t KERNEL_DESCRIPTOR_ID_SIZE
+    = std::tuple_size_v<hipdnn_plugin_sdk::ingestor::DescriptorId>;
 
 constexpr size_t SHA256_HEX_LENGTH = INGESTOR_PLAN_DIGEST_SIZE * 2;
 
@@ -42,17 +43,6 @@ constexpr size_t SHA256_HEX_LENGTH = INGESTOR_PLAN_DIGEST_SIZE * 2;
 constexpr size_t BUILDER_HEADROOM = 4096;
 
 constexpr size_t MESSAGE_TEXT_LIMIT = 80;
-
-// Shortens a string from the payload for use in an error message.
-std::string messageText(const std::string& text)
-{
-    if(text.size() <= MESSAGE_TEXT_LIMIT)
-    {
-        return text;
-    }
-    return text.substr(0, MESSAGE_TEXT_LIMIT) + "... (" + std::to_string(text.size())
-           + " characters)";
-}
 
 [[noreturn]] void throwInternal(const std::string& message)
 {
@@ -129,6 +119,14 @@ fb::SourceKind checkWriterInputs(const IngestorPlanPayload& payload)
         throwInternal("source kind " + std::to_string(static_cast<int>(payload.sourceKind))
                       + " is not a known kernel source kind");
     }
+    if(payload.engineName.empty())
+    {
+        throwInternal("the engine name is empty");
+    }
+    if(payload.providerVersion.empty())
+    {
+        throwInternal("the provider version is empty");
+    }
     if(payload.symbol.empty())
     {
         throwInternal("the kernel symbol is empty");
@@ -139,7 +137,7 @@ fb::SourceKind checkWriterInputs(const IngestorPlanPayload& payload)
     }
     if(!isLowercaseSha256Hex(payload.sha256))
     {
-        throwInternal("the kernel digest '" + messageText(payload.sha256)
+        throwInternal("the kernel digest '" + ingestorPlanMessageText(payload.sha256)
                       + "' is not 64 lowercase hex characters");
     }
     return sourceKind;
@@ -180,7 +178,7 @@ flatbuffers::Offset<fb::LaunchValue> writeLaunchValue(flatbuffers::FlatBufferBui
         break;
     }
     default:
-        throwInternal("launch value '" + messageText(name)
+        throwInternal("launch value '" + ingestorPlanMessageText(name)
                       + "' has a type the payload format cannot hold");
     }
     const auto nameOffset = builder.CreateString(name);
@@ -191,6 +189,7 @@ flatbuffers::Offset<fb::KernelImage> writeKernelImage(flatbuffers::FlatBufferBui
                                                       const IngestorPlanPayload& payload,
                                                       fb::SourceKind sourceKind)
 {
+    // The kernel's argument list.
     std::vector<flatbuffers::Offset<fb::KernelArgument>> arguments;
     arguments.reserve(payload.recordedSignature.size());
     for(const KernelArgument& argument : payload.recordedSignature)
@@ -219,23 +218,24 @@ flatbuffers::Offset<fb::KernelImage> writeKernelImage(flatbuffers::FlatBufferBui
         builder, sourceKind, symbol, target, sha256, signature, codeObject);
 }
 
-const fb::IngestorPlan* verifyIngestorPlanBody(const uint8_t* alignedBody, size_t bodySize)
+const fb::ExecutionPlan* verifyIngestorPlanBody(const uint8_t* alignedBody, size_t bodySize)
 {
     const flatbuffers::Verifier::Options options{};
     flatbuffers::Verifier verifier(alignedBody, bodySize, options);
-    if(!fb::VerifyIngestorPlanBuffer(verifier))
+    if(!fb::VerifyExecutionPlanBuffer(verifier))
     {
         refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
                            "the FlatBuffers verifier rejects the payload body, or the body "
                            "does not carry the HKSP file identifier");
     }
-    return fb::GetIngestorPlan(alignedBody);
+    return fb::GetExecutionPlan(alignedBody);
 }
 
 [[noreturn]] void refuseMissingLaunchData(const std::string& name)
 {
     refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
-                       "launch value '" + messageText(name) + "' has a type but no data");
+                       "launch value '" + ingestorPlanMessageText(name)
+                           + "' has a type but no data");
 }
 
 MetadataValue readLaunchValueData(const fb::LaunchValue& value, const std::string& name)
@@ -290,17 +290,18 @@ MetadataValue readLaunchValueData(const fb::LaunchValue& value, const std::strin
     case fb::LaunchValueData::NONE:
     default:
         refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
-                           "launch value '" + messageText(name) + "' has unknown value type "
+                           "launch value '" + ingestorPlanMessageText(name)
+                               + "' has unknown value type "
                                + std::to_string(static_cast<int>(value.value_type())));
     }
 }
 
 // Reads the launch values. Refuses an empty or repeated name, an unknown type and missing data.
-MetadataValues readLaunchValues(const fb::LaunchInputs& launch)
+MetadataValues readLaunchValues(const fb::DispatchData& dispatchData)
 {
     MetadataValues values;
     flatbuffers::uoffset_t index = 0;
-    for(const fb::LaunchValue* value : *launch.values())
+    for(const fb::LaunchValue* value : *dispatchData.values())
     {
         const std::string name = value->name()->str();
         if(name.empty())
@@ -311,7 +312,7 @@ MetadataValues readLaunchValues(const fb::LaunchInputs& launch)
         if(values.find(name) != values.end())
         {
             refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
-                               "launch value name '" + messageText(name)
+                               "launch value name '" + ingestorPlanMessageText(name)
                                    + "' occurs more than once");
         }
         values.emplace(name, readLaunchValueData(*value, name));
@@ -323,23 +324,15 @@ MetadataValues readLaunchValues(const fb::LaunchInputs& launch)
 // The fields that the structure check reads.
 struct CheckedFields
 {
-    int64_t engineId = 0;
     uint64_t workspaceBytes = 0;
     KernelSourceKind sourceKind{};
     MetadataValues launchValues;
 };
 
 // Checks the structure rules that the FlatBuffers verifier does not check.
-CheckedFields checkIngestorPlanStructure(const fb::IngestorPlan& plan)
+CheckedFields checkIngestorPlanStructure(const fb::ExecutionPlan& plan)
 {
     CheckedFields fields;
-
-    const auto engineId = plan.engine_id();
-    if(!engineId.has_value())
-    {
-        refuseIngestorPlan(IngestorPlanRefusal::DAMAGED, "the required field engine_id is missing");
-    }
-    fields.engineId = engineId.value();
 
     const auto workspaceBytes = plan.workspace_bytes();
     if(!workspaceBytes.has_value())
@@ -349,29 +342,29 @@ CheckedFields checkIngestorPlanStructure(const fb::IngestorPlan& plan)
     }
     fields.workspaceBytes = workspaceBytes.value();
 
-    const fb::KernelImage& kernel = *plan.kernel();
-    if(!fromFlatBufferSourceKind(kernel.source_kind(), fields.sourceKind))
+    const fb::KernelImage& kernelImage = *plan.kernel_image();
+    if(!fromFlatBufferSourceKind(kernelImage.source_kind(), fields.sourceKind))
     {
         refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
                            "kernel source kind "
-                               + std::to_string(static_cast<int>(kernel.source_kind()))
+                               + std::to_string(static_cast<int>(kernelImage.source_kind()))
                                + " is unset or unknown");
     }
 
-    const std::string sha256 = kernel.sha256()->str();
+    const std::string sha256 = kernelImage.sha256()->str();
     if(!isLowercaseSha256Hex(sha256))
     {
         refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
-                           "the kernel digest '" + messageText(sha256)
+                           "the kernel digest '" + ingestorPlanMessageText(sha256)
                                + "' is not 64 lowercase hex characters");
     }
 
-    fields.launchValues = readLaunchValues(*plan.launch());
+    fields.launchValues = readLaunchValues(*plan.dispatch_data());
     return fields;
 }
 
 // Refuses a plan that takes runtime pass-by-value tensors.
-void checkIngestorPlanCompatibility(const fb::IngestorPlan& plan)
+void checkIngestorPlanCompatibility(const fb::ExecutionPlan& plan)
 {
     const auto& uids = *plan.runtime_pass_by_value_uids();
     if(uids.empty())
@@ -389,32 +382,33 @@ void checkIngestorPlanCompatibility(const fb::IngestorPlan& plan)
     }
     refuseIngestorPlan(IngestorPlanRefusal::INCOMPATIBLE,
                        "the plan takes runtime pass-by-value tensors (UIDs " + listed
-                           + "), and this provider cannot restore such a plan");
+                           + "), which this provider does not support");
 }
 
-IngestorPlanPayload toIngestorPlanPayload(const fb::IngestorPlan& plan, CheckedFields fields)
+IngestorPlanPayload toIngestorPlanPayload(const fb::ExecutionPlan& plan, CheckedFields fields)
 {
     IngestorPlanPayload payload;
-    payload.engineId = fields.engineId;
-    for(size_t index = 0; index < payload.kernelId.size(); ++index)
+    payload.engineName = plan.engine_name()->str();
+    for(size_t index = 0; index < payload.kernelDescriptorId.size(); ++index)
     {
-        payload.kernelId[index]
-            = plan.kernel_id()->bytes()->Get(static_cast<flatbuffers::uoffset_t>(index));
+        payload.kernelDescriptorId[index]
+            = plan.kernel_descriptor_id()->bytes()->Get(static_cast<flatbuffers::uoffset_t>(index));
     }
     payload.workspaceBytes = fields.workspaceBytes;
     const auto& uids = *plan.runtime_pass_by_value_uids();
     payload.runtimePassByValueUids.assign(uids.begin(), uids.end());
 
-    payload.dispatchSymbol = plan.launch()->dispatch_symbol()->str();
+    payload.dispatchSymbol = plan.dispatch_data()->dispatch_symbol()->str();
     payload.launchValues = std::move(fields.launchValues);
 
-    const fb::KernelImage& kernel = *plan.kernel();
+    const fb::KernelImage& kernelImage = *plan.kernel_image();
     payload.sourceKind = fields.sourceKind;
-    payload.symbol = kernel.symbol()->str();
-    payload.target = kernel.target()->str();
-    payload.sha256 = kernel.sha256()->str();
-    payload.recordedSignature.reserve(kernel.signature()->size());
-    for(const fb::KernelArgument* argument : *kernel.signature())
+    payload.symbol = kernelImage.symbol()->str();
+    payload.target = kernelImage.target()->str();
+    payload.sha256 = kernelImage.sha256()->str();
+    // The kernel's argument list.
+    payload.recordedSignature.reserve(kernelImage.signature()->size());
+    for(const fb::KernelArgument* argument : *kernelImage.signature())
     {
         KernelArgument copy;
         copy.kind = argument->kind()->str();
@@ -426,13 +420,10 @@ IngestorPlanPayload toIngestorPlanPayload(const fb::IngestorPlan& plan, CheckedF
         }
         payload.recordedSignature.push_back(std::move(copy));
     }
-    const auto& codeObject = *kernel.code_object();
+    const auto& codeObject = *kernelImage.code_object();
     payload.codeObject.assign(codeObject.data(), codeObject.data() + codeObject.size());
 
-    if(plan.provider_version() != nullptr)
-    {
-        payload.providerVersion = plan.provider_version()->str();
-    }
+    payload.providerVersion = plan.provider_version()->str();
     return payload;
 }
 
@@ -452,7 +443,7 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
 
     flatbuffers::FlatBufferBuilder builder(payload.codeObject.size() + BUILDER_HEADROOM);
 
-    const auto kernel = writeKernelImage(builder, payload, sourceKind);
+    const auto kernelImage = writeKernelImage(builder, payload, sourceKind);
 
     std::vector<flatbuffers::Offset<fb::LaunchValue>> values;
     values.reserve(payload.launchValues.size());
@@ -462,30 +453,25 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
     }
     const auto valuesVector = builder.CreateVector(values);
     const auto dispatchSymbol = builder.CreateString(payload.dispatchSymbol);
-    const auto launch = fb::CreateLaunchInputs(builder, dispatchSymbol, valuesVector);
+    const auto dispatchData = fb::CreateDispatchData(builder, dispatchSymbol, valuesVector);
 
     const auto uids = builder.CreateVector(payload.runtimePassByValueUids);
 
-    flatbuffers::Offset<flatbuffers::String> providerVersion;
-    if(!payload.providerVersion.empty())
-    {
-        providerVersion = builder.CreateString(payload.providerVersion);
-    }
+    const auto providerVersion = builder.CreateString(payload.providerVersion);
+    const auto engineName = builder.CreateString(payload.engineName);
 
-    const fb::Uuid kernelId{flatbuffers::span<const uint8_t, KERNEL_ID_SIZE>(payload.kernelId)};
+    const fb::Uuid kernelDescriptorId{
+        flatbuffers::span<const uint8_t, KERNEL_DESCRIPTOR_ID_SIZE>(payload.kernelDescriptorId)};
 
-    fb::IngestorPlanBuilder plan(builder);
-    plan.add_engine_id(payload.engineId);
-    plan.add_kernel_id(&kernelId);
+    fb::ExecutionPlanBuilder plan(builder);
+    plan.add_engine_name(engineName);
+    plan.add_kernel_descriptor_id(&kernelDescriptorId);
     plan.add_workspace_bytes(payload.workspaceBytes);
     plan.add_runtime_pass_by_value_uids(uids);
-    plan.add_launch(launch);
-    plan.add_kernel(kernel);
-    if(!payload.providerVersion.empty())
-    {
-        plan.add_provider_version(providerVersion);
-    }
-    fb::FinishIngestorPlanBuffer(builder, plan.Finish());
+    plan.add_dispatch_data(dispatchData);
+    plan.add_kernel_image(kernelImage);
+    plan.add_provider_version(providerVersion);
+    fb::FinishExecutionPlanBuffer(builder, plan.Finish());
 
     if(builder.GetBufferMinAlignment() > INGESTOR_PLAN_BODY_ALIGNMENT)
     {
@@ -509,6 +495,16 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
     return bytes;
 }
 
+std::string ingestorPlanMessageText(const std::string& text)
+{
+    if(text.size() <= MESSAGE_TEXT_LIMIT)
+    {
+        return text;
+    }
+    return text.substr(0, MESSAGE_TEXT_LIMIT) + "... (" + std::to_string(text.size())
+           + " characters)";
+}
+
 IngestorPlanPayload decodeIngestorPlan(const uint8_t* data, size_t size)
 {
     const IngestorPlanHeader header = decodeIngestorPlanHeader(data, size);
@@ -520,7 +516,7 @@ IngestorPlanPayload decodeIngestorPlan(const uint8_t* data, size_t size)
 
     std::vector<detail::IngestorPlanAlignedBlock> storage;
     const uint8_t* alignedBody = detail::alignedIngestorPlanBody(body, bodySize, storage);
-    const fb::IngestorPlan& plan = *verifyIngestorPlanBody(alignedBody, bodySize);
+    const fb::ExecutionPlan& plan = *verifyIngestorPlanBody(alignedBody, bodySize);
 
     CheckedFields fields = checkIngestorPlanStructure(plan);
     checkIngestorPlanCompatibility(plan);

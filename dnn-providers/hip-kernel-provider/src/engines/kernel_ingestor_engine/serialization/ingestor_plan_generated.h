@@ -48,17 +48,17 @@ struct LaunchValue;
 struct LaunchValueBuilder;
 struct LaunchValueT;
 
-struct LaunchInputs;
-struct LaunchInputsBuilder;
-struct LaunchInputsT;
+struct DispatchData;
+struct DispatchDataBuilder;
+struct DispatchDataT;
 
 struct KernelImage;
 struct KernelImageBuilder;
 struct KernelImageT;
 
-struct IngestorPlan;
-struct IngestorPlanBuilder;
-struct IngestorPlanT;
+struct ExecutionPlan;
+struct ExecutionPlanBuilder;
+struct ExecutionPlanT;
 
 bool operator==(const Uuid &lhs, const Uuid &rhs);
 bool operator!=(const Uuid &lhs, const Uuid &rhs);
@@ -76,12 +76,12 @@ bool operator==(const Int64ListValueT &lhs, const Int64ListValueT &rhs);
 bool operator!=(const Int64ListValueT &lhs, const Int64ListValueT &rhs);
 bool operator==(const LaunchValueT &lhs, const LaunchValueT &rhs);
 bool operator!=(const LaunchValueT &lhs, const LaunchValueT &rhs);
-bool operator==(const LaunchInputsT &lhs, const LaunchInputsT &rhs);
-bool operator!=(const LaunchInputsT &lhs, const LaunchInputsT &rhs);
+bool operator==(const DispatchDataT &lhs, const DispatchDataT &rhs);
+bool operator!=(const DispatchDataT &lhs, const DispatchDataT &rhs);
 bool operator==(const KernelImageT &lhs, const KernelImageT &rhs);
 bool operator!=(const KernelImageT &lhs, const KernelImageT &rhs);
-bool operator==(const IngestorPlanT &lhs, const IngestorPlanT &rhs);
-bool operator!=(const IngestorPlanT &lhs, const IngestorPlanT &rhs);
+bool operator==(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs);
+bool operator!=(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs);
 
 enum class SourceKind : uint8_t {
   UNSET = 0,
@@ -898,19 +898,19 @@ inline ::flatbuffers::Offset<LaunchValue> CreateLaunchValueDirect(
 
 ::flatbuffers::Offset<LaunchValue> CreateLaunchValue(::flatbuffers::FlatBufferBuilder &_fbb, const LaunchValueT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
-struct LaunchInputsT : public ::flatbuffers::NativeTable {
-  typedef LaunchInputs TableType;
+struct DispatchDataT : public ::flatbuffers::NativeTable {
+  typedef DispatchData TableType;
   std::string dispatch_symbol{};
   std::vector<std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValueT>> values{};
-  LaunchInputsT() = default;
-  LaunchInputsT(const LaunchInputsT &o);
-  LaunchInputsT(LaunchInputsT&&) FLATBUFFERS_NOEXCEPT = default;
-  LaunchInputsT &operator=(LaunchInputsT o) FLATBUFFERS_NOEXCEPT;
+  DispatchDataT() = default;
+  DispatchDataT(const DispatchDataT &o);
+  DispatchDataT(DispatchDataT&&) FLATBUFFERS_NOEXCEPT = default;
+  DispatchDataT &operator=(DispatchDataT o) FLATBUFFERS_NOEXCEPT;
 };
 
-struct LaunchInputs FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef LaunchInputsT NativeTableType;
-  typedef LaunchInputsBuilder Builder;
+struct DispatchData FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef DispatchDataT NativeTableType;
+  typedef DispatchDataBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_DISPATCH_SYMBOL = 4,
     VT_VALUES = 6
@@ -936,57 +936,57 @@ struct LaunchInputs FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfTables(values()) &&
            verifier.EndTable();
   }
-  LaunchInputsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  void UnPackTo(LaunchInputsT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  static ::flatbuffers::Offset<LaunchInputs> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const LaunchInputsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+  DispatchDataT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(DispatchDataT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<DispatchData> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const DispatchDataT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
-struct LaunchInputsBuilder {
-  typedef LaunchInputs Table;
+struct DispatchDataBuilder {
+  typedef DispatchData Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
   void add_dispatch_symbol(::flatbuffers::Offset<::flatbuffers::String> dispatch_symbol) {
-    fbb_.AddOffset(LaunchInputs::VT_DISPATCH_SYMBOL, dispatch_symbol);
+    fbb_.AddOffset(DispatchData::VT_DISPATCH_SYMBOL, dispatch_symbol);
   }
   void add_values(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValue>>> values) {
-    fbb_.AddOffset(LaunchInputs::VT_VALUES, values);
+    fbb_.AddOffset(DispatchData::VT_VALUES, values);
   }
-  explicit LaunchInputsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+  explicit DispatchDataBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  ::flatbuffers::Offset<LaunchInputs> Finish() {
+  ::flatbuffers::Offset<DispatchData> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<LaunchInputs>(end);
-    fbb_.Required(o, LaunchInputs::VT_DISPATCH_SYMBOL);
-    fbb_.Required(o, LaunchInputs::VT_VALUES);
+    auto o = ::flatbuffers::Offset<DispatchData>(end);
+    fbb_.Required(o, DispatchData::VT_DISPATCH_SYMBOL);
+    fbb_.Required(o, DispatchData::VT_VALUES);
     return o;
   }
 };
 
-inline ::flatbuffers::Offset<LaunchInputs> CreateLaunchInputs(
+inline ::flatbuffers::Offset<DispatchData> CreateDispatchData(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::String> dispatch_symbol = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValue>>> values = 0) {
-  LaunchInputsBuilder builder_(_fbb);
+  DispatchDataBuilder builder_(_fbb);
   builder_.add_values(values);
   builder_.add_dispatch_symbol(dispatch_symbol);
   return builder_.Finish();
 }
 
-inline ::flatbuffers::Offset<LaunchInputs> CreateLaunchInputsDirect(
+inline ::flatbuffers::Offset<DispatchData> CreateDispatchDataDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const char *dispatch_symbol = nullptr,
     const std::vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValue>> *values = nullptr) {
   auto dispatch_symbol__ = dispatch_symbol ? _fbb.CreateString(dispatch_symbol) : 0;
   auto values__ = values ? _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValue>>(*values) : 0;
-  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateLaunchInputs(
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateDispatchData(
       _fbb,
       dispatch_symbol__,
       values__);
 }
 
-::flatbuffers::Offset<LaunchInputs> CreateLaunchInputs(::flatbuffers::FlatBufferBuilder &_fbb, const LaunchInputsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+::flatbuffers::Offset<DispatchData> CreateDispatchData(::flatbuffers::FlatBufferBuilder &_fbb, const DispatchDataT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct KernelImageT : public ::flatbuffers::NativeTable {
   typedef KernelImage TableType;
@@ -1152,44 +1152,44 @@ inline ::flatbuffers::Offset<KernelImage> CreateKernelImageDirect(
 
 ::flatbuffers::Offset<KernelImage> CreateKernelImage(::flatbuffers::FlatBufferBuilder &_fbb, const KernelImageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
-struct IngestorPlanT : public ::flatbuffers::NativeTable {
-  typedef IngestorPlan TableType;
-  ::flatbuffers::Optional<int64_t> engine_id = ::flatbuffers::nullopt;
-  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid> kernel_id{};
+struct ExecutionPlanT : public ::flatbuffers::NativeTable {
+  typedef ExecutionPlan TableType;
+  std::string engine_name{};
+  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid> kernel_descriptor_id{};
   ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt;
   std::vector<int64_t> runtime_pass_by_value_uids{};
-  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputsT> launch{};
-  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT> kernel{};
+  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT> dispatch_data{};
+  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT> kernel_image{};
   std::string provider_version{};
-  IngestorPlanT() = default;
-  IngestorPlanT(const IngestorPlanT &o);
-  IngestorPlanT(IngestorPlanT&&) FLATBUFFERS_NOEXCEPT = default;
-  IngestorPlanT &operator=(IngestorPlanT o) FLATBUFFERS_NOEXCEPT;
+  ExecutionPlanT() = default;
+  ExecutionPlanT(const ExecutionPlanT &o);
+  ExecutionPlanT(ExecutionPlanT&&) FLATBUFFERS_NOEXCEPT = default;
+  ExecutionPlanT &operator=(ExecutionPlanT o) FLATBUFFERS_NOEXCEPT;
 };
 
-struct IngestorPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef IngestorPlanT NativeTableType;
-  typedef IngestorPlanBuilder Builder;
+struct ExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef ExecutionPlanT NativeTableType;
+  typedef ExecutionPlanBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ENGINE_ID = 4,
-    VT_KERNEL_ID = 6,
+    VT_ENGINE_NAME = 4,
+    VT_KERNEL_DESCRIPTOR_ID = 6,
     VT_WORKSPACE_BYTES = 8,
     VT_RUNTIME_PASS_BY_VALUE_UIDS = 10,
-    VT_LAUNCH = 12,
-    VT_KERNEL = 14,
+    VT_DISPATCH_DATA = 12,
+    VT_KERNEL_IMAGE = 14,
     VT_PROVIDER_VERSION = 16
   };
-  ::flatbuffers::Optional<int64_t> engine_id() const {
-    return GetOptional<int64_t, int64_t>(VT_ENGINE_ID);
+  const ::flatbuffers::String *engine_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ENGINE_NAME);
   }
-  bool mutate_engine_id(int64_t _engine_id) {
-    return SetField<int64_t>(VT_ENGINE_ID, _engine_id);
+  ::flatbuffers::String *mutable_engine_name() {
+    return GetPointer<::flatbuffers::String *>(VT_ENGINE_NAME);
   }
-  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_id() const {
-    return GetStruct<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_ID);
+  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id() const {
+    return GetStruct<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_DESCRIPTOR_ID);
   }
-  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *mutable_kernel_id() {
-    return GetStruct<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_ID);
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *mutable_kernel_descriptor_id() {
+    return GetStruct<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_DESCRIPTOR_ID);
   }
   ::flatbuffers::Optional<uint64_t> workspace_bytes() const {
     return GetOptional<uint64_t, uint64_t>(VT_WORKSPACE_BYTES);
@@ -1203,17 +1203,17 @@ struct IngestorPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<int64_t> *mutable_runtime_pass_by_value_uids() {
     return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_RUNTIME_PASS_BY_VALUE_UIDS);
   }
-  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs *launch() const {
-    return GetPointer<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs *>(VT_LAUNCH);
+  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *dispatch_data() const {
+    return GetPointer<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *>(VT_DISPATCH_DATA);
   }
-  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs *mutable_launch() {
-    return GetPointer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs *>(VT_LAUNCH);
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *mutable_dispatch_data() {
+    return GetPointer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *>(VT_DISPATCH_DATA);
   }
-  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *kernel() const {
-    return GetPointer<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *>(VT_KERNEL);
+  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *kernel_image() const {
+    return GetPointer<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *>(VT_KERNEL_IMAGE);
   }
-  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *mutable_kernel() {
-    return GetPointer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *>(VT_KERNEL);
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *mutable_kernel_image() {
+    return GetPointer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage *>(VT_KERNEL_IMAGE);
   }
   const ::flatbuffers::String *provider_version() const {
     return GetPointer<const ::flatbuffers::String *>(VT_PROVIDER_VERSION);
@@ -1223,107 +1223,111 @@ struct IngestorPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
-           VerifyFieldRequired<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(verifier, VT_KERNEL_ID, 1) &&
+           VerifyOffsetRequired(verifier, VT_ENGINE_NAME) &&
+           verifier.VerifyString(engine_name()) &&
+           VerifyFieldRequired<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(verifier, VT_KERNEL_DESCRIPTOR_ID, 1) &&
            VerifyField<uint64_t>(verifier, VT_WORKSPACE_BYTES, 8) &&
            VerifyOffsetRequired(verifier, VT_RUNTIME_PASS_BY_VALUE_UIDS) &&
            verifier.VerifyVector(runtime_pass_by_value_uids()) &&
-           VerifyOffsetRequired(verifier, VT_LAUNCH) &&
-           verifier.VerifyTable(launch()) &&
-           VerifyOffsetRequired(verifier, VT_KERNEL) &&
-           verifier.VerifyTable(kernel()) &&
-           VerifyOffset(verifier, VT_PROVIDER_VERSION) &&
+           VerifyOffsetRequired(verifier, VT_DISPATCH_DATA) &&
+           verifier.VerifyTable(dispatch_data()) &&
+           VerifyOffsetRequired(verifier, VT_KERNEL_IMAGE) &&
+           verifier.VerifyTable(kernel_image()) &&
+           VerifyOffsetRequired(verifier, VT_PROVIDER_VERSION) &&
            verifier.VerifyString(provider_version()) &&
            verifier.EndTable();
   }
-  IngestorPlanT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  void UnPackTo(IngestorPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  static ::flatbuffers::Offset<IngestorPlan> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const IngestorPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+  ExecutionPlanT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(ExecutionPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<ExecutionPlan> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ExecutionPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
-struct IngestorPlanBuilder {
-  typedef IngestorPlan Table;
+struct ExecutionPlanBuilder {
+  typedef ExecutionPlan Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_engine_id(int64_t engine_id) {
-    fbb_.AddElement<int64_t>(IngestorPlan::VT_ENGINE_ID, engine_id);
+  void add_engine_name(::flatbuffers::Offset<::flatbuffers::String> engine_name) {
+    fbb_.AddOffset(ExecutionPlan::VT_ENGINE_NAME, engine_name);
   }
-  void add_kernel_id(const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_id) {
-    fbb_.AddStruct(IngestorPlan::VT_KERNEL_ID, kernel_id);
+  void add_kernel_descriptor_id(const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id) {
+    fbb_.AddStruct(ExecutionPlan::VT_KERNEL_DESCRIPTOR_ID, kernel_descriptor_id);
   }
   void add_workspace_bytes(uint64_t workspace_bytes) {
-    fbb_.AddElement<uint64_t>(IngestorPlan::VT_WORKSPACE_BYTES, workspace_bytes);
+    fbb_.AddElement<uint64_t>(ExecutionPlan::VT_WORKSPACE_BYTES, workspace_bytes);
   }
   void add_runtime_pass_by_value_uids(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> runtime_pass_by_value_uids) {
-    fbb_.AddOffset(IngestorPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS, runtime_pass_by_value_uids);
+    fbb_.AddOffset(ExecutionPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS, runtime_pass_by_value_uids);
   }
-  void add_launch(::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs> launch) {
-    fbb_.AddOffset(IngestorPlan::VT_LAUNCH, launch);
+  void add_dispatch_data(::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data) {
+    fbb_.AddOffset(ExecutionPlan::VT_DISPATCH_DATA, dispatch_data);
   }
-  void add_kernel(::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel) {
-    fbb_.AddOffset(IngestorPlan::VT_KERNEL, kernel);
+  void add_kernel_image(::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel_image) {
+    fbb_.AddOffset(ExecutionPlan::VT_KERNEL_IMAGE, kernel_image);
   }
   void add_provider_version(::flatbuffers::Offset<::flatbuffers::String> provider_version) {
-    fbb_.AddOffset(IngestorPlan::VT_PROVIDER_VERSION, provider_version);
+    fbb_.AddOffset(ExecutionPlan::VT_PROVIDER_VERSION, provider_version);
   }
-  explicit IngestorPlanBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+  explicit ExecutionPlanBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  ::flatbuffers::Offset<IngestorPlan> Finish() {
+  ::flatbuffers::Offset<ExecutionPlan> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<IngestorPlan>(end);
-    fbb_.Required(o, IngestorPlan::VT_KERNEL_ID);
-    fbb_.Required(o, IngestorPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS);
-    fbb_.Required(o, IngestorPlan::VT_LAUNCH);
-    fbb_.Required(o, IngestorPlan::VT_KERNEL);
+    auto o = ::flatbuffers::Offset<ExecutionPlan>(end);
+    fbb_.Required(o, ExecutionPlan::VT_ENGINE_NAME);
+    fbb_.Required(o, ExecutionPlan::VT_KERNEL_DESCRIPTOR_ID);
+    fbb_.Required(o, ExecutionPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS);
+    fbb_.Required(o, ExecutionPlan::VT_DISPATCH_DATA);
+    fbb_.Required(o, ExecutionPlan::VT_KERNEL_IMAGE);
+    fbb_.Required(o, ExecutionPlan::VT_PROVIDER_VERSION);
     return o;
   }
 };
 
-inline ::flatbuffers::Offset<IngestorPlan> CreateIngestorPlan(
+inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Optional<int64_t> engine_id = ::flatbuffers::nullopt,
-    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_id = nullptr,
+    ::flatbuffers::Offset<::flatbuffers::String> engine_name = 0,
+    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
     ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> runtime_pass_by_value_uids = 0,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs> launch = 0,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel = 0,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data = 0,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel_image = 0,
     ::flatbuffers::Offset<::flatbuffers::String> provider_version = 0) {
-  IngestorPlanBuilder builder_(_fbb);
+  ExecutionPlanBuilder builder_(_fbb);
   if(workspace_bytes) { builder_.add_workspace_bytes(*workspace_bytes); }
-  if(engine_id) { builder_.add_engine_id(*engine_id); }
   builder_.add_provider_version(provider_version);
-  builder_.add_kernel(kernel);
-  builder_.add_launch(launch);
+  builder_.add_kernel_image(kernel_image);
+  builder_.add_dispatch_data(dispatch_data);
   builder_.add_runtime_pass_by_value_uids(runtime_pass_by_value_uids);
-  builder_.add_kernel_id(kernel_id);
+  builder_.add_kernel_descriptor_id(kernel_descriptor_id);
+  builder_.add_engine_name(engine_name);
   return builder_.Finish();
 }
 
-inline ::flatbuffers::Offset<IngestorPlan> CreateIngestorPlanDirect(
+inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlanDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Optional<int64_t> engine_id = ::flatbuffers::nullopt,
-    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_id = nullptr,
+    const char *engine_name = nullptr,
+    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
     ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
     const std::vector<int64_t> *runtime_pass_by_value_uids = nullptr,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputs> launch = 0,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel = 0,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data = 0,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel_image = 0,
     const char *provider_version = nullptr) {
+  auto engine_name__ = engine_name ? _fbb.CreateString(engine_name) : 0;
   auto runtime_pass_by_value_uids__ = runtime_pass_by_value_uids ? _fbb.CreateVector<int64_t>(*runtime_pass_by_value_uids) : 0;
   auto provider_version__ = provider_version ? _fbb.CreateString(provider_version) : 0;
-  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateIngestorPlan(
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateExecutionPlan(
       _fbb,
-      engine_id,
-      kernel_id,
+      engine_name__,
+      kernel_descriptor_id,
       workspace_bytes,
       runtime_pass_by_value_uids__,
-      launch,
-      kernel,
+      dispatch_data,
+      kernel_image,
       provider_version__);
 }
 
-::flatbuffers::Offset<IngestorPlan> CreateIngestorPlan(::flatbuffers::FlatBufferBuilder &_fbb, const IngestorPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::FlatBufferBuilder &_fbb, const ExecutionPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 
 inline bool operator==(const KernelArgumentT &lhs, const KernelArgumentT &rhs) {
@@ -1604,53 +1608,53 @@ inline ::flatbuffers::Offset<LaunchValue> CreateLaunchValue(::flatbuffers::FlatB
 }
 
 
-inline bool operator==(const LaunchInputsT &lhs, const LaunchInputsT &rhs) {
+inline bool operator==(const DispatchDataT &lhs, const DispatchDataT &rhs) {
   return
       (lhs.dispatch_symbol == rhs.dispatch_symbol) &&
       (lhs.values.size() == rhs.values.size() && std::equal(lhs.values.cbegin(), lhs.values.cend(), rhs.values.cbegin(), [](std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValueT> const &a, std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValueT> const &b) { return (a == b) || (a && b && *a == *b); }));
 }
 
-inline bool operator!=(const LaunchInputsT &lhs, const LaunchInputsT &rhs) {
+inline bool operator!=(const DispatchDataT &lhs, const DispatchDataT &rhs) {
     return !(lhs == rhs);
 }
 
 
-inline LaunchInputsT::LaunchInputsT(const LaunchInputsT &o)
+inline DispatchDataT::DispatchDataT(const DispatchDataT &o)
       : dispatch_symbol(o.dispatch_symbol) {
   values.reserve(o.values.size());
   for (const auto &values_ : o.values) { values.emplace_back((values_) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValueT(*values_) : nullptr); }
 }
 
-inline LaunchInputsT &LaunchInputsT::operator=(LaunchInputsT o) FLATBUFFERS_NOEXCEPT {
+inline DispatchDataT &DispatchDataT::operator=(DispatchDataT o) FLATBUFFERS_NOEXCEPT {
   std::swap(dispatch_symbol, o.dispatch_symbol);
   std::swap(values, o.values);
   return *this;
 }
 
-inline LaunchInputsT *LaunchInputs::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
-  auto _o = std::unique_ptr<LaunchInputsT>(new LaunchInputsT());
+inline DispatchDataT *DispatchData::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<DispatchDataT>(new DispatchDataT());
   UnPackTo(_o.get(), _resolver);
   return _o.release();
 }
 
-inline void LaunchInputs::UnPackTo(LaunchInputsT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+inline void DispatchData::UnPackTo(DispatchDataT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
   { auto _e = dispatch_symbol(); if (_e) _o->dispatch_symbol = _e->str(); }
   { auto _e = values(); if (_e) { _o->values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->values[_i]) { _e->Get(_i)->UnPackTo(_o->values[_i].get(), _resolver); } else { _o->values[_i] = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValueT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->values.resize(0); } }
 }
 
-inline ::flatbuffers::Offset<LaunchInputs> LaunchInputs::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const LaunchInputsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  return CreateLaunchInputs(_fbb, _o, _rehasher);
+inline ::flatbuffers::Offset<DispatchData> DispatchData::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const DispatchDataT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateDispatchData(_fbb, _o, _rehasher);
 }
 
-inline ::flatbuffers::Offset<LaunchInputs> CreateLaunchInputs(::flatbuffers::FlatBufferBuilder &_fbb, const LaunchInputsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+inline ::flatbuffers::Offset<DispatchData> CreateDispatchData(::flatbuffers::FlatBufferBuilder &_fbb, const DispatchDataT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
   (void)_rehasher;
   (void)_o;
-  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const LaunchInputsT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const DispatchDataT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _dispatch_symbol = _fbb.CreateString(_o->dispatch_symbol);
   auto _values = _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchValue>> (_o->values.size(), [](size_t i, _VectorArgs *__va) { return CreateLaunchValue(*__va->__fbb, __va->__o->values[i].get(), __va->__rehasher); }, &_va );
-  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateLaunchInputs(
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateDispatchData(
       _fbb,
       _dispatch_symbol,
       _values);
@@ -1735,84 +1739,84 @@ inline ::flatbuffers::Offset<KernelImage> CreateKernelImage(::flatbuffers::FlatB
 }
 
 
-inline bool operator==(const IngestorPlanT &lhs, const IngestorPlanT &rhs) {
+inline bool operator==(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs) {
   return
-      (lhs.engine_id == rhs.engine_id) &&
-      ((lhs.kernel_id == rhs.kernel_id) || (lhs.kernel_id && rhs.kernel_id && *lhs.kernel_id == *rhs.kernel_id)) &&
+      (lhs.engine_name == rhs.engine_name) &&
+      ((lhs.kernel_descriptor_id == rhs.kernel_descriptor_id) || (lhs.kernel_descriptor_id && rhs.kernel_descriptor_id && *lhs.kernel_descriptor_id == *rhs.kernel_descriptor_id)) &&
       (lhs.workspace_bytes == rhs.workspace_bytes) &&
       (lhs.runtime_pass_by_value_uids == rhs.runtime_pass_by_value_uids) &&
-      ((lhs.launch == rhs.launch) || (lhs.launch && rhs.launch && *lhs.launch == *rhs.launch)) &&
-      ((lhs.kernel == rhs.kernel) || (lhs.kernel && rhs.kernel && *lhs.kernel == *rhs.kernel)) &&
+      ((lhs.dispatch_data == rhs.dispatch_data) || (lhs.dispatch_data && rhs.dispatch_data && *lhs.dispatch_data == *rhs.dispatch_data)) &&
+      ((lhs.kernel_image == rhs.kernel_image) || (lhs.kernel_image && rhs.kernel_image && *lhs.kernel_image == *rhs.kernel_image)) &&
       (lhs.provider_version == rhs.provider_version);
 }
 
-inline bool operator!=(const IngestorPlanT &lhs, const IngestorPlanT &rhs) {
+inline bool operator!=(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs) {
     return !(lhs == rhs);
 }
 
 
-inline IngestorPlanT::IngestorPlanT(const IngestorPlanT &o)
-      : engine_id(o.engine_id),
-        kernel_id((o.kernel_id) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*o.kernel_id) : nullptr),
+inline ExecutionPlanT::ExecutionPlanT(const ExecutionPlanT &o)
+      : engine_name(o.engine_name),
+        kernel_descriptor_id((o.kernel_descriptor_id) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*o.kernel_descriptor_id) : nullptr),
         workspace_bytes(o.workspace_bytes),
         runtime_pass_by_value_uids(o.runtime_pass_by_value_uids),
-        launch((o.launch) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputsT(*o.launch) : nullptr),
-        kernel((o.kernel) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT(*o.kernel) : nullptr),
+        dispatch_data((o.dispatch_data) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT(*o.dispatch_data) : nullptr),
+        kernel_image((o.kernel_image) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT(*o.kernel_image) : nullptr),
         provider_version(o.provider_version) {
 }
 
-inline IngestorPlanT &IngestorPlanT::operator=(IngestorPlanT o) FLATBUFFERS_NOEXCEPT {
-  std::swap(engine_id, o.engine_id);
-  std::swap(kernel_id, o.kernel_id);
+inline ExecutionPlanT &ExecutionPlanT::operator=(ExecutionPlanT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(engine_name, o.engine_name);
+  std::swap(kernel_descriptor_id, o.kernel_descriptor_id);
   std::swap(workspace_bytes, o.workspace_bytes);
   std::swap(runtime_pass_by_value_uids, o.runtime_pass_by_value_uids);
-  std::swap(launch, o.launch);
-  std::swap(kernel, o.kernel);
+  std::swap(dispatch_data, o.dispatch_data);
+  std::swap(kernel_image, o.kernel_image);
   std::swap(provider_version, o.provider_version);
   return *this;
 }
 
-inline IngestorPlanT *IngestorPlan::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
-  auto _o = std::unique_ptr<IngestorPlanT>(new IngestorPlanT());
+inline ExecutionPlanT *ExecutionPlan::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<ExecutionPlanT>(new ExecutionPlanT());
   UnPackTo(_o.get(), _resolver);
   return _o.release();
 }
 
-inline void IngestorPlan::UnPackTo(IngestorPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+inline void ExecutionPlan::UnPackTo(ExecutionPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
-  { auto _e = engine_id(); _o->engine_id = _e; }
-  { auto _e = kernel_id(); if (_e) _o->kernel_id = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*_e)); }
+  { auto _e = engine_name(); if (_e) _o->engine_name = _e->str(); }
+  { auto _e = kernel_descriptor_id(); if (_e) _o->kernel_descriptor_id = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*_e)); }
   { auto _e = workspace_bytes(); _o->workspace_bytes = _e; }
   { auto _e = runtime_pass_by_value_uids(); if (_e) { _o->runtime_pass_by_value_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->runtime_pass_by_value_uids[_i] = _e->Get(_i); } } else { _o->runtime_pass_by_value_uids.resize(0); } }
-  { auto _e = launch(); if (_e) { if(_o->launch) { _e->UnPackTo(_o->launch.get(), _resolver); } else { _o->launch = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::LaunchInputsT>(_e->UnPack(_resolver)); } } else if (_o->launch) { _o->launch.reset(); } }
-  { auto _e = kernel(); if (_e) { if(_o->kernel) { _e->UnPackTo(_o->kernel.get(), _resolver); } else { _o->kernel = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT>(_e->UnPack(_resolver)); } } else if (_o->kernel) { _o->kernel.reset(); } }
+  { auto _e = dispatch_data(); if (_e) { if(_o->dispatch_data) { _e->UnPackTo(_o->dispatch_data.get(), _resolver); } else { _o->dispatch_data = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT>(_e->UnPack(_resolver)); } } else if (_o->dispatch_data) { _o->dispatch_data.reset(); } }
+  { auto _e = kernel_image(); if (_e) { if(_o->kernel_image) { _e->UnPackTo(_o->kernel_image.get(), _resolver); } else { _o->kernel_image = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImageT>(_e->UnPack(_resolver)); } } else if (_o->kernel_image) { _o->kernel_image.reset(); } }
   { auto _e = provider_version(); if (_e) _o->provider_version = _e->str(); }
 }
 
-inline ::flatbuffers::Offset<IngestorPlan> IngestorPlan::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const IngestorPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  return CreateIngestorPlan(_fbb, _o, _rehasher);
+inline ::flatbuffers::Offset<ExecutionPlan> ExecutionPlan::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ExecutionPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateExecutionPlan(_fbb, _o, _rehasher);
 }
 
-inline ::flatbuffers::Offset<IngestorPlan> CreateIngestorPlan(::flatbuffers::FlatBufferBuilder &_fbb, const IngestorPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::FlatBufferBuilder &_fbb, const ExecutionPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
   (void)_rehasher;
   (void)_o;
-  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const IngestorPlanT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  auto _engine_id = _o->engine_id;
-  auto _kernel_id = _o->kernel_id ? _o->kernel_id.get() : nullptr;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const ExecutionPlanT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _engine_name = _fbb.CreateString(_o->engine_name);
+  auto _kernel_descriptor_id = _o->kernel_descriptor_id ? _o->kernel_descriptor_id.get() : nullptr;
   auto _workspace_bytes = _o->workspace_bytes;
   auto _runtime_pass_by_value_uids = _fbb.CreateVector(_o->runtime_pass_by_value_uids);
-  auto _launch = _o->launch ? CreateLaunchInputs(_fbb, _o->launch.get(), _rehasher) : 0;
-  auto _kernel = _o->kernel ? CreateKernelImage(_fbb, _o->kernel.get(), _rehasher) : 0;
-  auto _provider_version = _o->provider_version.empty() ? 0 : _fbb.CreateString(_o->provider_version);
-  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateIngestorPlan(
+  auto _dispatch_data = _o->dispatch_data ? CreateDispatchData(_fbb, _o->dispatch_data.get(), _rehasher) : 0;
+  auto _kernel_image = _o->kernel_image ? CreateKernelImage(_fbb, _o->kernel_image.get(), _rehasher) : 0;
+  auto _provider_version = _fbb.CreateString(_o->provider_version);
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateExecutionPlan(
       _fbb,
-      _engine_id,
-      _kernel_id,
+      _engine_name,
+      _kernel_descriptor_id,
       _workspace_bytes,
       _runtime_pass_by_value_uids,
-      _launch,
-      _kernel,
+      _dispatch_data,
+      _kernel_image,
       _provider_version);
 }
 
@@ -1971,68 +1975,68 @@ inline void LaunchValueDataUnion::Reset() {
   type = LaunchValueData::NONE;
 }
 
-inline const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan *GetIngestorPlan(const void *buf) {
-  return ::flatbuffers::GetRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan>(buf);
+inline const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan *GetExecutionPlan(const void *buf) {
+  return ::flatbuffers::GetRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan>(buf);
 }
 
-inline const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan *GetSizePrefixedIngestorPlan(const void *buf) {
-  return ::flatbuffers::GetSizePrefixedRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan>(buf);
+inline const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan *GetSizePrefixedExecutionPlan(const void *buf) {
+  return ::flatbuffers::GetSizePrefixedRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan>(buf);
 }
 
-inline IngestorPlan *GetMutableIngestorPlan(void *buf) {
-  return ::flatbuffers::GetMutableRoot<IngestorPlan>(buf);
+inline ExecutionPlan *GetMutableExecutionPlan(void *buf) {
+  return ::flatbuffers::GetMutableRoot<ExecutionPlan>(buf);
 }
 
-inline hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan *GetMutableSizePrefixedIngestorPlan(void *buf) {
-  return ::flatbuffers::GetMutableSizePrefixedRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan>(buf);
+inline hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan *GetMutableSizePrefixedExecutionPlan(void *buf) {
+  return ::flatbuffers::GetMutableSizePrefixedRoot<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan>(buf);
 }
 
-inline const char *IngestorPlanIdentifier() {
+inline const char *ExecutionPlanIdentifier() {
   return "HKSP";
 }
 
-inline bool IngestorPlanBufferHasIdentifier(const void *buf) {
+inline bool ExecutionPlanBufferHasIdentifier(const void *buf) {
   return ::flatbuffers::BufferHasIdentifier(
-      buf, IngestorPlanIdentifier());
+      buf, ExecutionPlanIdentifier());
 }
 
-inline bool SizePrefixedIngestorPlanBufferHasIdentifier(const void *buf) {
+inline bool SizePrefixedExecutionPlanBufferHasIdentifier(const void *buf) {
   return ::flatbuffers::BufferHasIdentifier(
-      buf, IngestorPlanIdentifier(), true);
+      buf, ExecutionPlanIdentifier(), true);
 }
 
-inline bool VerifyIngestorPlanBuffer(
+inline bool VerifyExecutionPlanBuffer(
     ::flatbuffers::Verifier &verifier) {
-  return verifier.VerifyBuffer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan>(IngestorPlanIdentifier());
+  return verifier.VerifyBuffer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan>(ExecutionPlanIdentifier());
 }
 
-inline bool VerifySizePrefixedIngestorPlanBuffer(
+inline bool VerifySizePrefixedExecutionPlanBuffer(
     ::flatbuffers::Verifier &verifier) {
-  return verifier.VerifySizePrefixedBuffer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan>(IngestorPlanIdentifier());
+  return verifier.VerifySizePrefixedBuffer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan>(ExecutionPlanIdentifier());
 }
 
-inline void FinishIngestorPlanBuffer(
+inline void FinishExecutionPlanBuffer(
     ::flatbuffers::FlatBufferBuilder &fbb,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan> root) {
-  fbb.Finish(root, IngestorPlanIdentifier());
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan> root) {
+  fbb.Finish(root, ExecutionPlanIdentifier());
 }
 
-inline void FinishSizePrefixedIngestorPlanBuffer(
+inline void FinishSizePrefixedExecutionPlanBuffer(
     ::flatbuffers::FlatBufferBuilder &fbb,
-    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlan> root) {
-  fbb.FinishSizePrefixed(root, IngestorPlanIdentifier());
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlan> root) {
+  fbb.FinishSizePrefixed(root, ExecutionPlanIdentifier());
 }
 
-inline std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlanT> UnPackIngestorPlan(
+inline std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlanT> UnPackExecutionPlan(
     const void *buf,
     const ::flatbuffers::resolver_function_t *res = nullptr) {
-  return std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlanT>(GetIngestorPlan(buf)->UnPack(res));
+  return std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlanT>(GetExecutionPlan(buf)->UnPack(res));
 }
 
-inline std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlanT> UnPackSizePrefixedIngestorPlan(
+inline std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlanT> UnPackSizePrefixedExecutionPlan(
     const void *buf,
     const ::flatbuffers::resolver_function_t *res = nullptr) {
-  return std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::IngestorPlanT>(GetSizePrefixedIngestorPlan(buf)->UnPack(res));
+  return std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::ExecutionPlanT>(GetSizePrefixedExecutionPlan(buf)->UnPack(res));
 }
 
 }  // namespace fb

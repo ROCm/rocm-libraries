@@ -55,15 +55,7 @@ std::string formatVersion(uint16_t major, uint16_t minor)
 int hexDigitValue(char digit)
 {
     const auto position = HEX_DIGITS.find(digit);
-    if(position != std::string_view::npos)
-    {
-        return static_cast<int>(position);
-    }
-    if(digit >= 'A' && digit <= 'F')
-    {
-        return digit - 'A' + 10;
-    }
-    return -1;
+    return position == std::string_view::npos ? -1 : static_cast<int>(position);
 }
 
 } // namespace

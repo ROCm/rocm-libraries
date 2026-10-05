@@ -61,8 +61,9 @@ enum class IngestorPlanKind : uint16_t
 /// The contents of a saved single-kernel plan.
 struct IngestorPlanPayload
 {
-    int64_t engineId = 0;
-    hipdnn_plugin_sdk::ingestor::DescriptorId kernelId{};
+    /// The human-readable name of the engine that built the plan. Its hash is the engine id.
+    std::string engineName;
+    hipdnn_plugin_sdk::ingestor::DescriptorId kernelDescriptorId{};
     uint64_t workspaceBytes = 0;
     /// UIDs of the tensors the plan takes by value at execution.
     std::vector<int64_t> runtimePassByValueUids;
@@ -77,9 +78,10 @@ struct IngestorPlanPayload
     std::string target;
     /// The kernel's identity digest: 64 lowercase hex characters.
     std::string sha256;
+    /// The kernel's argument list.
     std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> recordedSignature;
     std::vector<uint8_t> codeObject;
-    /// Diagnostic only. It never gates a load.
+    /// The version of the provider that saved the plan. Diagnostic only: it never gates a load.
     std::string providerVersion;
 };
 
@@ -104,7 +106,7 @@ inline bool sameKernelSignature(const std::vector<hipdnn_plugin_sdk::ingestor::K
 
 inline bool operator==(const IngestorPlanPayload& lhs, const IngestorPlanPayload& rhs)
 {
-    return lhs.engineId == rhs.engineId && lhs.kernelId == rhs.kernelId
+    return lhs.engineName == rhs.engineName && lhs.kernelDescriptorId == rhs.kernelDescriptorId
            && lhs.workspaceBytes == rhs.workspaceBytes
            && lhs.runtimePassByValueUids == rhs.runtimePassByValueUids
            && lhs.dispatchSymbol == rhs.dispatchSymbol && lhs.launchValues == rhs.launchValues
