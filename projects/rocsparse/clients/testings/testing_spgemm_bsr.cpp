@@ -623,4 +623,152 @@ INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-void testing_spgemm_bsr_extra(const Arguments& arg) {}
+// Regression for AISPARSE-676. The bsrgemm beta-scaling path (C = beta * D)
+// launched its copy_scale kernel with the element count block_dim * block_dim *
+// nnzb_D computed as a 32-bit product, both in the grid expression and as the
+// kernel bounds argument. Once that product exceeds 2^31 it overflows (signed
+// 32-bit), corrupting the grid and the bound together and silently skipping the
+// tail of the block-value array. Build a scaling bsrgemm whose scaled array has
+// more than 2^31 elements and check that every element - including those past
+// the 2^31 boundary - is scaled correctly.
+void testing_spgemm_bsr_extra(const Arguments& arg)
+{
+    using T = float;
+    using I = int32_t;
+    using J = int32_t;
+
+    const rocsparse_direction  dir  = rocsparse_direction_row;
+    const rocsparse_index_base base = rocsparse_index_base_zero;
+
+    const J block_dim = 32;
+    // 32 * 32 * 2'097'153 = 2'147'484'672 = 2^31 + 1024, i.e. just past the
+    // signed 32-bit boundary while keeping the value buffers modest.
+    const J Mb     = 2097153;
+    const J Nb     = 1;
+    const J Kb     = 1;
+    const I nnzb_D = Mb; // one non-zero block per block-row
+
+    const int64_t num_elements
+        = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(nnzb_D);
+
+    // alpha == nullptr selects the multiply-free path, beta != nullptr enables
+    // the scaling add, so rocsparse_spgemm routes through bsrgemm_scal_core.
+    const T* h_alpha_ptr = nullptr;
+    T        h_beta      = static_cast<T>(2);
+    T*       h_beta_ptr  = &h_beta;
+
+    rocsparse_datatype compute_type = get_datatype<T>();
+
+    rocsparse_local_handle handle;
+
+    // D: one non-zero block per block-row, all in block-column 0.
+    host_gebsr_matrix<T, I, J> hD;
+    hD.define(dir, Mb, Nb, nnzb_D, block_dim, block_dim, base);
+    for(J i = 0; i < Mb + 1; ++i)
+    {
+        hD.ptr[i] = static_cast<I>(i) + base;
+    }
+    for(I i = 0; i < nnzb_D; ++i)
+    {
+        hD.ind[i] = static_cast<J>(0) + base;
+    }
+    for(int64_t e = 0; e < num_elements; ++e)
+    {
+        // Deterministic, index-dependent pattern so a missed tail element cannot
+        // accidentally match the expected scaled value.
+        hD.val[e] = static_cast<T>((e & 7) + 1);
+    }
+
+    // Empty A (Mb x Kb) and B (Kb x Nb): the multiply-free path ignores them.
+    host_gebsr_matrix<T, I, J> hA, hB, hC;
+    hA.define(dir, Mb, Kb, 0, block_dim, block_dim, base);
+    hB.define(dir, Kb, Nb, 0, block_dim, block_dim, base);
+    hC.define(dir, Mb, Nb, 0, block_dim, block_dim, base);
+    for(J i = 0; i < Mb + 1; ++i)
+    {
+        hA.ptr[i] = base;
+    }
+    hB.ptr[0] = base;
+    hB.ptr[1] = base;
+
+    device_gebsr_matrix<T, I, J> dA(hA), dB(hB), dC(hC), dD(hD);
+
+    rocsparse_local_spmat A(dA), B(dB), C(dC), D(dD);
+
+    const rocsparse_operation  trans_A = rocsparse_operation_none;
+    const rocsparse_operation  trans_B = rocsparse_operation_none;
+    const rocsparse_spgemm_alg alg     = rocsparse_spgemm_alg_default;
+
+    size_t buffer_size;
+    void*  dbuffer = nullptr;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgemm(handle,
+                                           trans_A,
+                                           trans_B,
+                                           h_alpha_ptr,
+                                           A,
+                                           B,
+                                           h_beta_ptr,
+                                           D,
+                                           C,
+                                           compute_type,
+                                           alg,
+                                           rocsparse_spgemm_stage_buffer_size,
+                                           &buffer_size,
+                                           dbuffer));
+
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgemm(handle,
+                                           trans_A,
+                                           trans_B,
+                                           h_alpha_ptr,
+                                           A,
+                                           B,
+                                           h_beta_ptr,
+                                           D,
+                                           C,
+                                           compute_type,
+                                           alg,
+                                           rocsparse_spgemm_stage_nnz,
+                                           &buffer_size,
+                                           dbuffer));
+
+    int64_t rows_C;
+    int64_t cols_C;
+    int64_t nnzb_C;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_get_size(C, &rows_C, &cols_C, &nnzb_C));
+
+    if(nnzb_C > 0)
+    {
+        dC.define(dC.dir, dC.mb, dC.nb, nnzb_C, dC.row_block_dim, dC.col_block_dim, dC.base);
+        CHECK_ROCSPARSE_ERROR(test_bsr_set_pointers(C, dC));
+    }
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgemm(handle,
+                                           trans_A,
+                                           trans_B,
+                                           h_alpha_ptr,
+                                           A,
+                                           B,
+                                           h_beta_ptr,
+                                           D,
+                                           C,
+                                           compute_type,
+                                           alg,
+                                           rocsparse_spgemm_stage_compute,
+                                           &buffer_size,
+                                           dbuffer));
+
+    // C must share D's structure and hold beta * D for every element, including
+    // the ones with a flat element index beyond 2^31.
+    for(int64_t e = 0; e < num_elements; ++e)
+    {
+        hD.val[e] = h_beta * hD.val[e];
+    }
+    hD.near_check(dC);
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+}
