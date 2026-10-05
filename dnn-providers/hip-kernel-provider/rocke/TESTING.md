@@ -573,7 +573,10 @@ independently of GPU enrollment. Schema-1 tensor bundles are not supported.
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` is the single installation switch. It defaults
 ON for provider artifact builds and OFF for standalone and rocm-libraries
 superbuild configurations. OFF ignores all local reference source/lock overrides;
-host reference tests remain installed.
+host reference tests remain installed. When reference installation is enabled,
+a Python 3 interpreter is required at configure time to validate and extract
+archives. A missing interpreter fails configuration with the option to disable
+reference installation; it never silently drops required GPU coverage.
 
 [`published_bundles.json`](library/tests/reference_common/published_bundles.json)
 lists published operation/architecture pairs. With the option ON, CMake installs
@@ -601,7 +604,7 @@ provider test directory:
 
 ```bash
 python -c 'import importlib.util; assert importlib.util.find_spec("torch") is None'
-ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu|conv_gpu)_pytest$' --output-on-failure
+ctest -V -R '^rocke_(reference_common|sdpa_reference_unit|conv_reference_unit|sdpa_gpu_gfx942|conv_gpu_gfx942)_pytest$' --output-on-failure
 ```
 
 Inspect the selected tests: a missing bundle prevents its GPU entry from being
@@ -616,3 +619,22 @@ The shared launcher blocks Torch imports in baseline and current worker
 interpreters, including frozen replay workers. Neither CPU oracle runs during
 verification. This restriction is confined to reference workers and does not
 change the runtime's behavior for other callers or the legacy Torch test suites.
+
+Each installed operation/architecture pair has its own CTest entry:
+`rocke_<operation>_gpu_<arch>_pytest`, with a five-minute timeout. CTest passes
+`--rocke-reference-operation` and `--rocke-reference-arch` to select that cohort;
+shared negative checks still run for the selected architecture. A different GPU
+lane exits with code 77, recorded by CTest as skipped. On the intended lane,
+missing hardware, missing bundles, and validation errors fail the test.
+
+The provider's existing category filters remain unchanged. Reference entries do
+not add `ex_gpu_*` labels: the current provider runner would use those labels
+as an inclusion filter and omit unrelated tests. Architecture selection occurs
+inside the reference test entry, before collection and bundle lookup. TheRock
+passes `AMDGPU_FAMILIES` for the family and comma-separated `AMDGPU_TARGETS`
+for the fetched target artifacts. The gate uses exact targets when available,
+falls back to family expectations for local runs, and checks the actual HIP
+device architecture before executing a selected cohort. Adding a
+published architecture creates a separate CTest automatically. Add its exact
+test name to the provider category YAML; it also requires an adapter, qualified
+bundle, and matching CI hardware.

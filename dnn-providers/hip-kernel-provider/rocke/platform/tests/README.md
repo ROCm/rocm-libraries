@@ -143,8 +143,8 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_reference_common_pytest` | Shared artifact integrity and worker import isolation | Host suite; independent of bundles |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
-| `rocke_conv_gpu_pytest` | Twelve gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+| `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | Twelve gfx942 forward cases and three failure checks | When the convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
 operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published

@@ -343,11 +343,15 @@ For gfx950 or gfx1151:
    lane. New hardware lanes may need infrastructure coordination even though the
    gfx942 implementation needs no new workflow.
 
-Do not add `ex_gpu_<arch>` labels to just the new reference suite without reviewing
-the provider runner: those labels can add CTest filters and omit existing suites.
-Use the existing categories unless the whole component's selection is deliberately
-updated. Required enrolled cases must fail on missing prerequisites; cases outside
-an enrolled target's scope should be reported separately.
+Each installed operation/architecture gets a separate CTest entry and explicit
+pytest architecture selection. Nonmatching GPU lanes return CTest's configured
+skip code before looking up an absent architecture artifact. The matching lane
+must fail on missing hardware, bundles, or invalid qualification.
+
+Keep the existing provider categories. Do not add `ex_gpu_<arch>` labels only to
+reference suites: the provider runner uses a matching label as an inclusion
+filter, which would omit unrelated tests. Architecture-specific CTest names and
+the reference lane gate provide isolation without changing global selection.
 
 ### Add convolution or another operation
 

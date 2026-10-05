@@ -315,6 +315,14 @@ if(ROCKE_INSTALL_TESTS)
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
+      # Validating/extracting reference archives requires a host interpreter.
+      # Keep Python optional when reference installation is disabled, and explain
+      # the opt-out before entering the operation/architecture loops.
+      if(ROCKE_INSTALL_TEST_GPU_REFERENCES AND NOT Python3_Interpreter_FOUND)
+        message(FATAL_ERROR
+                "ROCKE_INSTALL_TEST_GPU_REFERENCES requires a Python3 interpreter. "
+                "Install Python3 or configure with ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
+      endif()
       # Publication enrollment is independent of supported qualification
       # cohorts. Each operation/architecture retains its own archive and lock.
       file(READ "${_ROCKE_LIBRARY_DIR}/tests/reference_common/published_bundles.json"
@@ -385,7 +393,6 @@ if(ROCKE_INSTALL_TESTS)
                       "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/${_operation}/${_arch}.tar.gz.dvc "
                       "or configure with ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
             endif()
-            find_package(Python3 COMPONENTS Interpreter REQUIRED)
             file(SHA256 "${_archive}" _archive_sha256)
             set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_archive_sha256}")
             execute_process(
@@ -399,7 +406,6 @@ if(ROCKE_INSTALL_TESTS)
             endif()
           endif()
           if(_bundle)
-            find_package(Python3 COMPONENTS Interpreter REQUIRED)
             execute_process(
               COMMAND "${Python3_EXECUTABLE}" -I
                       "${_ROCKE_LIBRARY_DIR}/tests/reference_common/artifact.py" validate
@@ -565,19 +571,17 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # Enroll the SDPA lane only with a qualified bundle. Its files live beneath
-    # engines/test_arch_content/ so packaging keeps them test-only and per-arch. Once
-    # enrolled, missing gfx942 hardware or a failed qualification check is an
-    # error; other GPU architectures remain explicitly outside this pilot.
-    if(_ROCKE_HAS_SDPA_REFERENCE)
+    # Register a separate result and explicit cohort for each installed SDPA target.
+    foreach(_arch IN LISTS _ROCKE_SDPA_INSTALLED_ARCHITECTURES)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_sdpa_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_pinned_reference.py\" -v -rs)\n")
+             "add_test(rocke_sdpa_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_pinned_reference.py\" --rocke-reference-operation sdpa --rocke-reference-arch ${_arch} -v -rs)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_sdpa_gpu_pytest PROPERTIES\n"
+             "set_tests_properties(rocke_sdpa_gpu_${_arch}_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;sdpa\\;gpu\\;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_SDPA_GPU=1\"\n"
-             "  TIMEOUT 1800)\n")
-    endif()
+             "  SKIP_RETURN_CODE 77\n"
+             "  TIMEOUT 300)\n")
+    endforeach()
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_conv_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_reference_contract.py\" -v -rs --timeout=30)\n")
@@ -587,19 +591,17 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # Enroll the CONV lane only with a qualified bundle. Its files live beneath
-    # engines/test_arch_content/ so packaging keeps them test-only and per-arch. Once
-    # enrolled, missing gfx942 hardware or a failed qualification check is an
-    # error; other GPU architectures remain explicitly outside this pilot.
-    if(_ROCKE_HAS_CONV_REFERENCE)
+    # Register a separate result and explicit cohort for each installed CONV target.
+    foreach(_arch IN LISTS _ROCKE_CONV_INSTALLED_ARCHITECTURES)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_conv_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_pinned_reference.py\" -v -rs)\n")
+             "add_test(rocke_conv_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_pinned_reference.py\" --rocke-reference-operation conv --rocke-reference-arch ${_arch} -v -rs)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_conv_gpu_pytest PROPERTIES\n"
+             "set_tests_properties(rocke_conv_gpu_${_arch}_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;conv\\;gpu\\;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_CONV_GPU=1\"\n"
-             "  TIMEOUT 1800)\n")
-    endif()
+             "  SKIP_RETURN_CODE 77\n"
+             "  TIMEOUT 300)\n")
+    endforeach()
 
     # Library GPU numeric suites: convolution, attention, KDA, and GDN.
     # Select files rather than the "gpu" pytest marker because several runtime

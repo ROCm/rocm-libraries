@@ -232,7 +232,7 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
    release library payload.
 4. The test job assembles the generic and matching architecture artifacts and
    prepares the Python/runtime dependencies. The existing provider runner selects
-   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_pytest` runs
+   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_gfx942_pytest` runs
    the same pytest file used locally: eight numerical cases and three negative
    checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
    `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
@@ -255,7 +255,7 @@ Run the installed GPU entry with:
 
 ```bash
 ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
-  -R '^rocke_sdpa_gpu_pytest$' --output-on-failure
+  -R '^rocke_sdpa_gpu_gfx942_pytest$' --output-on-failure
 ```
 
 The GPU entry is installed when a qualified bundle is configured. In that required

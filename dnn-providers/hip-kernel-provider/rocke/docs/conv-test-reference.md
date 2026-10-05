@@ -170,7 +170,7 @@ installed bundle is beneath
 `engines/test_arch_content/rocke/conv/gfx942/`, preserving architecture-specific,
 test-only artifact packaging. The generic artifact contains the harness and trusted
 lock. Host checks register as `rocke_conv_reference_unit_pytest`; the GPU entry
-`rocke_conv_gpu_pytest` registers only when reference installation is enabled and a
+`rocke_conv_gpu_gfx942_pytest` registers only when reference installation is enabled and a
 published or explicitly staged local bundle passes validation. Both entries are
 in the provider category YAML.
 

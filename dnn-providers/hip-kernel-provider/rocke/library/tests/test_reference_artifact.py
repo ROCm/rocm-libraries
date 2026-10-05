@@ -364,3 +364,96 @@ if __name__ == "__main__":
                 module="probe_worker",
             )
             assert not report["torch_imported"]
+
+
+def test_reference_pytest_selects_cohort_and_keeps_negative_checks(tmp_path):
+    """Test collection with a fake HIP probe; this does not execute GPU kernels."""
+    import os
+
+    runtime = tmp_path / "rocke/runtime"
+    runtime.mkdir(parents=True)
+    (runtime.parent / "__init__.py").touch()
+    (runtime / "__init__.py").touch()
+    (runtime / "hip_module.py").write_text("def get_device_arch(): return 'gfx942'\n")
+    (tmp_path / "conftest.py").write_text(
+        """
+from reference_common.pytest_support import start_reference_session, select_reference_items
+def pytest_addoption(parser):
+    parser.addoption("--rocke-reference-arch")
+    parser.addoption("--rocke-reference-operation")
+def pytest_sessionstart(session):
+    start_reference_session(session.config)
+def pytest_collection_modifyitems(config, items):
+    select_reference_items(config, items)
+"""
+    )
+    (tmp_path / "test_probe.py").write_text(
+        """
+import pytest
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_numerical_case(architecture):
+    assert architecture == "gfx942"
+def test_negative_control():
+    pass
+"""
+    )
+    env = dict(os.environ, AMDGPU_FAMILIES="gfx94X-dcgpu", AMDGPU_TARGETS="gfx942")
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(Path(__file__).parent)])
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(tmp_path / "test_probe.py"),
+            "-q",
+            "--rocke-reference-operation",
+            "conv",
+            "--rocke-reference-arch",
+            "gfx942",
+        ],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 passed, 1 deselected" in result.stdout
+
+
+def test_reference_entry_skips_a_different_gpu_lane():
+    from reference_common.pytest_support import architecture_available
+
+    assert not architecture_available(
+        "gfx942", ("gfx942", "gfx94x"), "gfx950", "gfx950-dcgpu"
+    )
+
+
+@pytest.mark.parametrize("device", [None, "gfx950"], ids=["missing-gpu", "wrong-gpu"])
+def test_reference_selected_target_requires_matching_hardware(device):
+    from reference_common.pytest_support import architecture_available
+
+    with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
+        architecture_available(
+            "gfx942", ("gfx942", "gfx94x"), device, "gfx94X-dcgpu", "gfx942"
+        )
+
+
+def test_reference_exact_targets_override_the_family():
+    from reference_common.pytest_support import architecture_available
+
+    # Same family, different artifact target: do not require the gfx942 bundle.
+    assert not architecture_available(
+        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941"
+    )
+    # Downloading both artifacts does not mean both devices are present.
+    assert not architecture_available(
+        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941,gfx942"
+    )
+
+
+def test_reference_local_run_without_a_gpu_fails():
+    from reference_common.pytest_support import architecture_available
+
+    with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
+        architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
