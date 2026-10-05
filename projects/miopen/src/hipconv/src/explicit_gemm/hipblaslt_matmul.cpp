@@ -1,11 +1,11 @@
-#include "pointwise/hipblaslt_matmul.hpp"
+#include "explicit_gemm/hipblaslt_matmul.hpp"
 
 #include <hipblaslt/hipblaslt.h>
 
 #include <stdexcept>
 #include <string>
 
-namespace hipconv::pointwise
+namespace hipconv::explicit_gemm
 {
 namespace
 {
@@ -25,10 +25,16 @@ hipDataType to_hip_data_type(DataType dtype)
     case DataType::bf16:
         return HIP_R_16BF;
     case DataType::fp32:
+    case DataType::tf32:
         return HIP_R_32F;
     default:
-        throw std::invalid_argument("unsupported pointwise dtype");
+        throw std::invalid_argument("unsupported GEMM dtype");
     }
+}
+
+hipblasComputeType_t to_compute_type(DataType dtype)
+{
+    return dtype == DataType::tf32 ? HIPBLAS_COMPUTE_32F_FAST_TF32 : HIPBLAS_COMPUTE_32F;
 }
 
 // Process-wide lazily-created hipBLASLt handle. Held as a raw handle (not a
@@ -36,7 +42,7 @@ hipDataType to_hip_data_type(DataType dtype)
 // destruction-order fiasco and the driver reclaims it at process exit.
 // TODO: revisit once hipconv gains an explicit lifecycle (e.g. hipconvCreate /
 // hipconvDestroy). At that point the handle should live in the hipconv context
-// object, be owned by a Guard, and be passed into launch_pointwise_gemm rather
+// object, be owned by a Guard, and be passed into launch_gemm rather
 // than pulled from this global accessor.
 hipblasLtHandle_t& handle()
 {
@@ -84,10 +90,12 @@ LayoutGuard make_col_layout(hipDataType type, int64_t rows, int64_t cols, int64_
     return LayoutGuard{layout};
 }
 
-MatmulDescGuard make_matmul_desc(hipblasOperation_t trans_a, hipblasOperation_t trans_b)
+MatmulDescGuard make_matmul_desc(hipblasComputeType_t compute_type,
+                                 hipblasOperation_t trans_a,
+                                 hipblasOperation_t trans_b)
 {
     hipblasLtMatmulDesc_t desc{};
-    check_status(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+    check_status(hipblasLtMatmulDescCreate(&desc, compute_type, HIP_R_32F),
                  "hipblasLtMatmulDescCreate");
     check_status(hipblasLtMatmulDescSetAttribute(
                      desc, HIPBLASLT_MATMUL_DESC_TRANSA, &trans_a, sizeof(trans_a)),
@@ -143,6 +151,7 @@ void run_matmul(hipblasOperation_t trans_a,
                 int64_t k,
                 hipDataType abc_type,
                 hipDataType d_type,
+                hipblasComputeType_t compute_type,
                 const void* a,
                 int64_t lda,
                 const void* b,
@@ -159,7 +168,7 @@ void run_matmul(hipblasOperation_t trans_a,
         abc_type, trans_b == HIPBLAS_OP_N ? k : n, trans_b == HIPBLAS_OP_N ? n : k, ldb);
     auto c_desc  = make_col_layout(d_type, m, n, ldd);
     auto d_desc  = make_col_layout(d_type, m, n, ldd);
-    auto mm_desc = make_matmul_desc(trans_a, trans_b);
+    auto mm_desc = make_matmul_desc(compute_type, trans_a, trans_b);
 
     hipblasLtMatmulAlgo_t algo{};
     const bool have_algo = resolve_algo(
@@ -186,16 +195,17 @@ void run_matmul(hipblasOperation_t trans_a,
 
 } // namespace
 
-void launch_pointwise_gemm(const ConvParams& par,
-                           const void* in,
-                           const void* wei,
-                           void* out,
-                           hipStream_t stream)
+void launch_gemm(const ConvParams& par,
+                 const void* in,
+                 const void* wei,
+                 void* out,
+                 hipStream_t stream)
 {
     const int64_t m_spatial = static_cast<int64_t>(par.n) * par.h * par.w;
     const int64_t c         = par.c;
     const int64_t k         = par.k;
     const auto abc_type     = to_hip_data_type(par.input_type);
+    const auto compute_type = to_compute_type(par.input_type);
 
     switch(par.direction)
     {
@@ -209,6 +219,7 @@ void launch_pointwise_gemm(const ConvParams& par,
                    c,
                    abc_type,
                    abc_type,
+                   compute_type,
                    wei,
                    c,
                    in,
@@ -230,6 +241,7 @@ void launch_pointwise_gemm(const ConvParams& par,
                    k,
                    abc_type,
                    abc_type,
+                   compute_type,
                    wei,
                    c,
                    in,
@@ -251,6 +263,7 @@ void launch_pointwise_gemm(const ConvParams& par,
                    m_spatial,
                    abc_type,
                    HIP_R_32F,
+                   compute_type,
                    in,
                    c,
                    wei,
@@ -264,4 +277,4 @@ void launch_pointwise_gemm(const ConvParams& par,
     }
 }
 
-} // namespace hipconv::pointwise
+} // namespace hipconv::explicit_gemm

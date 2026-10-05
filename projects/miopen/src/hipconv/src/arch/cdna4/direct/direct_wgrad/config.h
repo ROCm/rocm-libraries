@@ -16,8 +16,10 @@ static constexpr int WAVES_PER_WORKGROUP = 8;
 
 // VGPRs a config may spend on the gradient and the operands together.
 //
-// Past this the symptom is a spill rather than a diagnostic, so config_table.h asserts it
-// entry by entry.
+// This sizes a tile. Addresses, buffer descriptors, loop state and the rows the split path stages
+// are left to the headroom below the 256-register file, so a config can clear it and still spill;
+// scripts/cdna4/direct/direct_wgrad/hot_loop_check.py measures what each one spills.
+// direct-wgrad-config-table.md has the measured headroom.
 static constexpr int TILE_VGPR_BUDGET = 192;
 
 // Channels a swizzled LDS row needs, on either operand: TransposeSwizzle needs C4 >= 8.
@@ -48,6 +50,8 @@ struct Config
     int kh = 3; // filter height, and the depth of the delta register ring
     int kw = 3; // filter width, and the S tiles a compute phase holds at once
 
+    int elem_bytes = 2; // 2 for fp16/bf16, 4 for tf32.
+
     int wave_c16; // input channels per wave / 16
     int wave_k16; // output channels per wave / 16
 
@@ -65,6 +69,8 @@ struct Config
     // which is the only way to reach an image past 2 GiB. Must be a multiple of unroll(). See
     // the row-tile section of row_schedule.h.
     int rows_per_tile = 0;
+
+    constexpr bool is_tf32() const { return elem_bytes == 4; }
 
     constexpr int waves() const { return waves_c * waves_k * waves_q * waves_g; }
     constexpr int threads() const { return WAVE_SIZE * waves(); }
@@ -88,8 +94,14 @@ struct Config
     constexpr int s_cols_per_image() const { return w_unfold() + kw - 1; }
 
     // VGPRs one wave spends on the gradient, and on the two operands.
+    //
+    // The gradient is fp32 whatever the operands are. A tf32 operand block is the (big, small)
+    // bf16 pair, so it costs twice a 16-bit one, which is what 2 * elem_bytes says: 4 registers
+    // per 16-bit block and 8 per split one. tf32's staging registers (RowStage) are a third term,
+    // unbudgeted as TILE_VGPR_BUDGET explains; direct-wgrad-config-table.md's tf32 section sizes
+    // them.
     constexpr int acc_vgprs() const { return kh * kw * wave_c16 * wave_k16 * 4; }
-    constexpr int operand_vgprs() const { return 4 * (kw * wave_c16 + kh * wave_k16); }
+    constexpr int operand_vgprs() const { return 2 * elem_bytes * (kw * wave_c16 + kh * wave_k16); }
 
     // LDS row buffers per ring: one front buffer plus the rows in flight.
     //
