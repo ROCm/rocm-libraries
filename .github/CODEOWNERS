@@ -261,6 +261,7 @@
 /projects/rocsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/rocsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/rocsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/fortran/                        @ROCm/rocm-fortran-maintainers @ROCm/solvers-reviewers
 
 /projects/rocsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/rocsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
