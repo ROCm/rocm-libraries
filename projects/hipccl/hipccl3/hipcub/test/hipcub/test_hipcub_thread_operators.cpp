@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,20 @@
 
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_functional.hpp"
 #include "test_utils_thread_operators.hpp"
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
 #include <hipcub/device/device_segmented_reduce.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 #include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/util_type.hpp>
 
+#include <iterator>
 #include <numeric>
 #include <type_traits>
 #include <vector>
+
+#include _HIPCUB_STD_INCLUDE(functional)
 
 template<class InputType, class OutputType = InputType>
 struct ThreadOperatorsParams
@@ -77,217 +80,6 @@ using ThreadOperatorsParameters = ::testing::Types<
 TYPED_TEST_SUITE(HipcubThreadOperatorsTests, ThreadOperatorsParameters);
 
 // Commutative operators tests.
-
-/// \brief Shared code for equality/inequality operators.
-template<typename InputT, typename OutputT, typename ScanOpT>
-void equality_op_test(ScanOpT op, bool equality)
-{
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        // Generate random input value.
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-        const InputT input_val
-            = test_utils::get_random_data<InputT>(1, 1.0f, 100.0f, seed_value)[0];
-
-        OutputT output_val{};
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(input_val, input_val), equality));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(output_val, output_val), equality));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(output_val, input_val), !equality));
-
-        output_val = OutputT(input_val);
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(output_val, input_val), equality));
-    }
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Equality)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-
-    using Equality = typename EqualitySelector<hipcub::Equality, input_type, output_type>::type;
-    Equality op{};
-
-    equality_op_test<input_type, output_type>(op, true);
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Inequality)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-
-    using Inequality = typename EqualitySelector<hipcub::Inequality, input_type, output_type>::type;
-    Inequality op{};
-
-    equality_op_test<input_type, output_type>(op, false);
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, InequalityWrapper)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-
-    using Equality = typename EqualitySelector<hipcub::Equality, input_type, output_type>::type;
-    Equality                            wrapped_op{};
-    hipcub::InequalityWrapper<Equality> op{wrapped_op};
-
-    equality_op_test<input_type, output_type>(op, false);
-}
-
-/// \brief Shared code for algebraic operators.
-template<typename ScanOpT, typename InputT, typename OutputT>
-void algebraic_op_test(const InputT input_val, OutputT init_val)
-{
-    using accum_type = hipcub::detail::accumulator_t<ScanOpT, InputT, OutputT>;
-
-    ScanOpT op{};
-
-    accum_type output_val = init_val;
-
-    // Check result.
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(init_val, input_val), output_val));
-
-    // Check return type.
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_type(op(init_val, input_val), output_val));
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Sum)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-    using Sum         = typename AlgebraicSelector<hipcub::Sum, input_type, output_type>::type;
-
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        // Generate random initial value.
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-        output_type init_val
-            = test_utils::get_random_data<output_type>(1, 1.0f, 100.0f, seed_value)[0];
-
-        algebraic_op_test<Sum>(input_type{}, init_val);
-    }
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Difference)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-    using Difference =
-        typename AlgebraicSelector<hipcub::Difference, input_type, output_type>::type;
-
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        // Generate random initial value.
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-        output_type init_val
-            = test_utils::get_random_data<output_type>(1, 1.0f, 100.0f, seed_value)[0];
-
-        algebraic_op_test<Difference>(input_type{}, init_val);
-    }
-}
-
-// Division operator is not defined for custom_test_type.
-template<class Params>
-class HipcubDivisionOperatorTests : public ::testing::Test
-{
-public:
-    using input_type  = typename Params::input_type;
-    using output_type = typename Params::output_type;
-};
-
-using DivisionOperatorParameters = ::testing::Types<
-    ThreadOperatorsParams<int, short>,
-    ThreadOperatorsParams<int, long>,
-    ThreadOperatorsParams<int, float>,
-    ThreadOperatorsParams<int, double>,
-    ThreadOperatorsParams<short, long>,
-    ThreadOperatorsParams<short, float>,
-    ThreadOperatorsParams<short, double>,
-    ThreadOperatorsParams<long, float>,
-    ThreadOperatorsParams<long, double>,
-    ThreadOperatorsParams<float, double>,
-    ThreadOperatorsParams<double>,
-    ThreadOperatorsParams<test_utils::half, test_utils::half>,
-    ThreadOperatorsParams<test_utils::bfloat16, test_utils::bfloat16>
-#ifdef __HIP_PLATFORM_AMD__
-    ,
-    ThreadOperatorsParams<test_utils::half, float>, // Doesn't work on NVIDIA / CUB
-    ThreadOperatorsParams<test_utils::bfloat16, float> // Doesn't work on NVIDIA / CUB
-#endif
-    >;
-TYPED_TEST_SUITE(HipcubDivisionOperatorTests, DivisionOperatorParameters);
-
-TYPED_TEST(HipcubDivisionOperatorTests, Division)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-    using Division    = typename AlgebraicSelector<hipcub::Division, input_type, output_type>::type;
-
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        // Generate random input value.
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-        input_type input_val
-            = test_utils::get_random_data<input_type>(1, 1.0f, 100.0f, seed_value)[0];
-
-        algebraic_op_test<Division>(input_val, output_type{});
-    }
-}
-
-/// \brief Shared code for min/max operators.
-template<typename ScanOpT, typename InputT, typename OutputT, typename AccumT>
-void minmax_op_test(bool is_max)
-{
-    ScanOpT op{};
-
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        // Generate random initial and input values.
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
-        OutputT init_val  = test_utils::get_random_data<OutputT>(1, 1.0f, 100.0f, seed_value)[0];
-        InputT  input_val = test_utils::get_random_data<InputT>(1, 1.0f, 100.0f, seed_value)[0];
-
-        AccumT output_val
-            = is_max ? test_utils::max(init_val, input_val) : test_utils::min(init_val, input_val);
-
-        // Check result.
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(op(init_val, input_val), output_val));
-
-        // Check return type.
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_type(op(init_val, input_val), output_val));
-    }
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Max)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-    using accum_type  = typename std::common_type<output_type, input_type>::type;
-    using Max         = typename MaxSelector<input_type, output_type>::type;
-
-    minmax_op_test<Max, input_type, output_type, accum_type>(true);
-}
-
-TYPED_TEST(HipcubThreadOperatorsTests, Min)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-    using accum_type  = typename std::common_type<output_type, input_type>::type;
-    using Min         = typename MinSelector<input_type, output_type>::type;
-
-    minmax_op_test<Min, input_type, output_type, accum_type>(false);
-}
 
 /// \brief Shared code for ArgMin/ArgMax operators.
 template<typename ArgOpT, typename InputT>
@@ -458,8 +250,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, SwizzleScanOp)
         std::iota(h_input.begin(), h_input.end(), static_cast<input_type>(1));
 
         // Scan function: SwizzleScanOp.
-        hipcub::Sum                        sum_op{};
-        hipcub::SwizzleScanOp<hipcub::Sum> scan_op(sum_op);
+        test_utils::plus                        sum_op{};
+        hipcub::SwizzleScanOp<test_utils::plus> scan_op(sum_op);
 
         // Calculate expected results on host.
         std::vector<output_type> h_expected(input_size);
@@ -503,15 +295,15 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
         }
 
         // Reduce and scan operators.
-        hipcub::Sum                            sum_op{};
-        hipcub::ReduceBySegmentOp<hipcub::Sum> op(sum_op);
+        test_utils::plus                            sum_op{};
+        hipcub::ReduceBySegmentOp<test_utils::plus> op(sum_op);
 
         // Calculate expected results on host.
         std::vector<pair_type> expected{};
         pair_type              init(0, 0);
         for(size_t offset = 0; offset < input_size; offset += segment_size)
         {
-            const size_t end       = std::min(input_size, offset + segment_size);
+            const size_t end       = _HIPCUB_STD::min(input_size, offset + segment_size);
             pair_type    aggregate = init;
             for(size_t i = offset; i < end; ++i)
             {
@@ -528,7 +320,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
         std::vector<pair_type> output{};
         for(size_t offset = 0; offset < input_size; offset += segment_size)
         {
-            const size_t end       = std::min(input_size, offset + segment_size);
+            const size_t end       = _HIPCUB_STD::min(input_size, offset + segment_size);
             pair_type    aggregate = init;
             for(size_t i = offset; i < end; ++i)
             {
@@ -584,8 +376,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
         }
 
         // Reduce operators.
-        hipcub::Sum                        sum_op;
-        hipcub::ReduceByKeyOp<hipcub::Sum> op{};
+        test_utils::plus                        sum_op;
+        hipcub::ReduceByKeyOp<test_utils::plus> op{};
 
         // Calculate output on host.
         std::vector<output_type> h_output(h_unique_keys);
@@ -696,44 +488,6 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
     }
 }
 
-TYPED_TEST(HipcubNCThreadOperatorsTests, BinaryFlip)
-{
-    using input_type  = typename TestFixture::input_type;
-    using output_type = typename TestFixture::output_type;
-
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : sizes)
-    {
-        // Generate data.
-        std::vector<input_type> h_input(input_size);
-        std::iota(h_input.begin(), h_input.end(), static_cast<input_type>(1));
-
-        // Scan function: BinaryFlip.
-        hipcub::Sum                     sum_op{};
-        hipcub::BinaryFlip<hipcub::Sum> scan_op(sum_op);
-
-        // Calculate expected results on host.
-        std::vector<output_type> h_expected{};
-
-        // BinaryFlip's () operator is a device function, so cannot be called from the host function
-        // test_utils::host_inclusive_scan. We do the scan "manually".
-        output_type accum = h_input[0];
-        h_expected.push_back(accum);
-        for(size_t i = 1; i < input_size; ++i)
-        {
-            // The host_inclusive_cast would do:
-            //
-            // accum = scan_op(accum, static_cast<output_type>(h_input[i]));
-            //
-            // But for the BinaryFlip this is equivalent to:
-            accum = sum_op(static_cast<output_type>(h_input[i]), accum);
-            h_expected.push_back(accum);
-        }
-
-        scan_op_test<input_type, output_type>(h_input, h_expected, scan_op, input_size);
-    }
-}
-
 // Unary operators tests.
 
 TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
@@ -741,7 +495,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
     using IteratorType
-        = rocprim::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
+        = test_utils::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto input_size : sizes)
     {

@@ -83,10 +83,10 @@ void Initialize(
         unsigned short repeat;
         RandomBits(repeat);
         repeat = (unsigned short) ((float(repeat) * (float(max_segment) / float(max_short))));
-        repeat = std::max<unsigned short>(1, repeat);
+        repeat = _HIPCUB_STD::max<unsigned short>(1, repeat);
 
         int j = i;
-        while (j < std::min<int>(i + repeat, num_items))
+        while(j < _HIPCUB_STD::min<int>(i + repeat, num_items))
         {
             h_flags[j] = 0;
             h_in[j] = key;

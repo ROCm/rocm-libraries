@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2023-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2023-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -40,14 +40,20 @@ BEGIN_HIPCUB_NAMESPACE
 struct DeviceMemcpy
 {
     template<typename InputBufferIt, typename OutputBufferIt, typename BufferSizeIteratorT>
-    static hipError_t Batched(void*               d_temp_storage,
-                              size_t&             temp_storage_bytes,
-                              InputBufferIt       input_buffer_it,
-                              OutputBufferIt      output_buffer_it,
-                              BufferSizeIteratorT buffer_sizes,
-                              uint32_t            num_buffers,
-                              hipStream_t         stream = 0)
+    static hipError_t Batched(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              InputBufferIt        input_buffer_it,
+                              OutputBufferIt       output_buffer_it,
+                              BufferSizeIteratorT  buffer_sizes,
+                              _HIPCUB_STD::int64_t num_buffers,
+                              hipStream_t          stream = 0)
     {
+        if(num_buffers == 0)
+        {
+            temp_storage_bytes = 0;
+            return hipSuccess;
+        }
+
         return hipCUDAErrorTohipError(::cub::DeviceMemcpy::Batched(d_temp_storage,
                                                                    temp_storage_bytes,
                                                                    input_buffer_it,

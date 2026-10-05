@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/replace.h>
 #  include <thrust/transform.h>
@@ -67,7 +68,7 @@ inline O transform(execution::parallel_unsequenced_policy, I fi, I li, O fo, F f
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)
   {
-    return ::thrust::transform(::thrust::device, fi, li, fo, ::std::move(fn));
+    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn));
   }
   else
   {
@@ -75,14 +76,16 @@ inline O transform(execution::parallel_unsequenced_policy, I fi, I li, O fo, F f
     O result;
     try
     {
-      result = ::thrust::transform(::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      result = THRUST_NS_QUALIFIER::transform(
+        THRUST_NS_QUALIFIER::device, fi, li, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
     guard.destroy_and_free();
     return result;
   }
@@ -122,7 +125,7 @@ inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)
   {
-    return ::thrust::transform(::thrust::device, fi0, li0, fi1, fo, ::std::move(fn));
+    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, fo, ::std::move(fn));
   }
   else
   {
@@ -130,15 +133,16 @@ inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
     O result;
     try
     {
-      result =
-        ::thrust::transform(::thrust::device, fi0, li0, fi1, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      result = THRUST_NS_QUALIFIER::transform(
+        THRUST_NS_QUALIFIER::device, fi0, li0, fi1, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
     guard.destroy_and_free();
     return result;
   }
@@ -174,7 +178,7 @@ inline void replace(execution::parallel_unsequenced_policy, I f, I l, const T& x
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::replace(::thrust::device, f, l, x, y);
+  return THRUST_NS_QUALIFIER::replace(THRUST_NS_QUALIFIER::device, f, l, x, y);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -200,21 +204,23 @@ inline void replace_if(execution::parallel_unsequenced_policy, I f, I l, P p, co
 
   if constexpr (::std::is_trivially_destructible_v<p_t>)
   {
-    ::thrust::replace_if(::thrust::device, f, l, ::std::move(p), x);
+    THRUST_NS_QUALIFIER::replace_if(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p), x);
   }
   else
   {
     ::hipstd::detail::device_callable_guard<p_t> guard(::std::move(p));
     try
     {
-      ::thrust::replace_if(::thrust::device, f, l, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
+      THRUST_NS_QUALIFIER::replace_if(
+        THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar replace_if: failed to synchronize");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar replace_if: failed to synchronize");
     guard.destroy_and_free();
   }
 }
@@ -245,7 +251,7 @@ inline void replace_copy(execution::parallel_unsequenced_policy, I fi, I li, O f
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::replace_copy(::thrust::device, fi, li, fo, x, y);
+  return THRUST_NS_QUALIFIER::replace_copy(THRUST_NS_QUALIFIER::device, fi, li, fo, x, y);
 }
 
 template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -273,22 +279,22 @@ inline void replace_copy_if(execution::parallel_unsequenced_policy, I fi, I li, 
 
   if constexpr (::std::is_trivially_destructible_v<p_t>)
   {
-    ::thrust::replace_copy_if(::thrust::device, fi, li, fo, ::std::move(p), x);
+    THRUST_NS_QUALIFIER::replace_copy_if(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(p), x);
   }
   else
   {
     ::hipstd::detail::device_callable_guard<p_t> guard(::std::move(p));
     try
     {
-      ::thrust::replace_copy_if(
-        ::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
+      THRUST_NS_QUALIFIER::replace_copy_if(
+        THRUST_NS_QUALIFIER::device, fi, li, fo, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    ::thrust::hip_rocprim::throw_on_error(
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
       ::hipDeviceSynchronize(), "hipstdpar replace_copy_if: failed to synchronize");
     guard.destroy_and_free();
   }

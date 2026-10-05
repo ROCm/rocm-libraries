@@ -2,10 +2,19 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 4.8.0 for ROCm 10.2.0
+## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
 
+* Added C++ 17 style type_traits utilities
+ * is_floating_point_v
+ * is_integral_v
+ * is_arithmetic_v
+ * is_fundamental_v
+ * is_unsigned_v
+ * is_signed_v
+ * is_scalar_v
+ * is_compound_v
 * gfx1250-strict support.
 
 ### Optimizations
@@ -22,7 +31,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.7.0 for ROCm 10.1.0
 
-### Changed 
+### Changed
 
 * SPIR-V support is no longer experimental. `ROCPRIM_EXPERIMENTAL_SPIRV` no longer needs to be defined to build with SPIR-V support; to build with SPIR-V, set `--offload-arch` to `amdgcnspirv`.
 
@@ -102,7 +111,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Changed
 
-* Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+* Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE`
 * Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
   * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
   * See `shared/primbench/README.md` for primbench its documentation.
@@ -132,14 +141,14 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Optimizations
 
-* Improved performance of `device_radix_sort` onesweep variant 
+* Improved performance of `device_radix_sort` onesweep variant
 
 ### Resolved issues
 
 * Fixed the issue where `rocprim::device_scan_by_key` failed when performing an "in-place" inclusive scan by reusing "keys" as output, by adding a buffer to store the last keys of each block (excluding the last block). This fix only affects the specific case of reusing "keys" as output in an inclusive scan, and does not affect other cases.
 * Fixed benchmark build error on Windows.
 * Fixed offload compress build option.
-* Fixed `float_bit_mask` for `rocprim::half`. 
+* Fixed `float_bit_mask` for `rocprim::half`.
 * Fixed handling of undefined behaviour when `__builtin_clz`, `__builtin_ctz`, and similar builtins are called.
 * Fixed potential build error with `rocprim::detail::histogram_impl`.
 
@@ -226,7 +235,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Renamed `type_traits_interface.hpp` to `type_traits.hpp`, rename the original `type_traits.hpp` to `type_traits_functions.hpp`.
 * The default scan accumulator types for device-level scan algorithms have changed. This is a breaking change.
 The previous default accumulator types could lead to situations in which unexpected overflow occured, such as
-when the input or inital type was smaller than the output type. 
+when the input or inital type was smaller than the output type.
   * This is a complete list of affected functions and how their default accumulator types are changing:
     * `rocprim::inclusive_scan`
       * Previous default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
@@ -244,7 +253,7 @@ when the input or inital type was smaller than the output type.
 * A new version of `rocprim::thread_load` and `rocprim::thread_store` replace the deprecated `rocprim::thread_load` and `rocprim::thread_store` functions. The versions avoid inline assembly where possible, and don't hinder the optimizer as much as a result.
 * Renamed `rocprim::load_cs` to `rocprim::load_nontemporal` and `rocprim::store_cs` to `rocprim::store_nontemporal` to express the intent of these load and store methods better.
 * All kernels now have hidden symbol visibility. All symbols now have inline namespaces that include the library version, for example, `rocprim::ROCPRIM_300400_NS::symbol` instead of `rocPRIM::symbol`, letting the user link multiple libraries built with different versions of rocPRIM.
-    
+
 ### Upcoming changes
 
 * `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
@@ -276,7 +285,7 @@ when the input or inital type was smaller than the output type.
   * `ROCPRIM_WAVEFRONT_SIZE`
     * Use `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
   * `__AMDGCN_WAVEFRONT_SIZE`
-    * This was a fallback define for the compiler's removed symbol, having the same name. 
+    * This was a fallback define for the compiler's removed symbol, having the same name.
 * This release removes support for custom builds on gfx940 and gfx941.
 
 ### Resolved issues
@@ -303,11 +312,11 @@ when the input or inital type was smaller than the output type.
     * For run-time constants, this is replaced with `rocprim::arch::wavefront::size().`
   * `rocprim::warp_size()`
   * `ROCPRIM_WAVEFRONT_SIZE`
-  
-* The default scan accumulator types for device-level scan algorithms will be changed in an upcoming release, resulting in a breaking change. Previously, the default accumulator type was set to the input type for the inclusive scans and to the initial value type for the exclusive scans. This could lead to unexpected overflow if the input or initial type was smaller than the output type when the accumulator type was't explicitly set using the `AccType` template parameter. The new default accumulator types will be set to the type that results when the input or initial value type is applied to the scan operator.  
+
+* The default scan accumulator types for device-level scan algorithms will be changed in an upcoming release, resulting in a breaking change. Previously, the default accumulator type was set to the input type for the inclusive scans and to the initial value type for the exclusive scans. This could lead to unexpected overflow if the input or initial type was smaller than the output type when the accumulator type was't explicitly set using the `AccType` template parameter. The new default accumulator types will be set to the type that results when the input or initial value type is applied to the scan operator.
 
     The following is the complete list of affected functions and how their default accumulator types are changing:
-    
+
     * `rocprim::inclusive_scan`
         * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
         * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`

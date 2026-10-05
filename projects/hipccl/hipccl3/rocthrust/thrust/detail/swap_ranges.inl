@@ -18,35 +18,36 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/swap.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/swap.h>
+#include <thrust/system/detail/adl/swap_ranges.h>
 #include <thrust/system/detail/generic/select_system.h>
 #include <thrust/system/detail/generic/swap_ranges.h>
-#include <thrust/system/detail/adl/swap_ranges.h>
 
 THRUST_NAMESPACE_BEGIN
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename ForwardIterator1,
-         typename ForwardIterator2>
-THRUST_HOST_DEVICE
-  ForwardIterator2 swap_ranges(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                               ForwardIterator1 first1,
-                               ForwardIterator1 last1,
-                               ForwardIterator2 first2)
+template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
+THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator1 first1,
+  ForwardIterator1 last1,
+  ForwardIterator2 first2)
 {
   using thrust::system::detail::generic::swap_ranges;
   return swap_ranges(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first1, last1, first2);
 } // end swap_ranges()
 
-
-template<typename ForwardIterator1,
-         typename ForwardIterator2>
-  ForwardIterator2 swap_ranges(ForwardIterator1 first1,
-                               ForwardIterator1 last1,
-                               ForwardIterator2 first2)
+template <typename ForwardIterator1, typename ForwardIterator2>
+ForwardIterator2 swap_ranges(ForwardIterator1 first1, ForwardIterator1 last1, ForwardIterator2 first2)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -56,8 +57,7 @@ template<typename ForwardIterator1,
   System1 system1;
   System2 system2;
 
-  return thrust::swap_ranges(select_system(system1,system2), first1, last1, first2);
+  return thrust::swap_ranges(select_system(system1, system2), first1, last1, first2);
 } // end swap_ranges()
-
 
 THRUST_NAMESPACE_END

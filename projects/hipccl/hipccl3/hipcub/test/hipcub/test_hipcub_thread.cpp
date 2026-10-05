@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -484,8 +484,16 @@ void thread_reduce_kernel(Type* const device_input, Type* device_output)
 {
     size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
     size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
-    device_output[output_index]
-        = hipcub::ThreadReduce<Length>(&device_input[input_index], sum_op());
+
+    // Load into a local array
+    Type values[Length];
+#pragma unroll
+    for(int i = 0; i < Length; i++)
+    {
+        values[i] = device_input[input_index + i];
+    }
+
+    device_output[output_index] = hipcub::ThreadReduce(values, sum_op());
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Reduction)

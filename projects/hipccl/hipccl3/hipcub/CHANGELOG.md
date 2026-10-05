@@ -2,6 +2,35 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-5.0.0 for ROCm 10.2.0
+
+### Added
+
+* Feature parity with CCCL/CUB 3.0.0.
+* Added `::hip::std` support.
+
+### Changed
+
+* Changed `CCCL_MINIMUM_VERSION` to `3.0.0` to align with CUB.
+* Add support for large num_items `DeviceMerge` and `DeviceSegmentedSort`.
+* Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
+* Add `_CCCL_SORT_MAYBE_UNROLL()` in block merge sort and thread sort.
+* Update `WarpExchange` template parameters for CUB compatibility.
+
+### Removed
+
+* hipCUB compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 or later.
+* Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
+* Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
+* Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
+* Removed `GridBarrier`.
+* Removed `HIPCUB_MIN`, `HIPCUB_MAX`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST` which were deprecated in hipCUB-4.1.0.
+* Removed `LEGACY_PTX_ARCH`.
+* Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
+* Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
+* Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
+* Deprecated `hipcub::Equality`, `hipcub::Inequality`, `hipcub::InequalityWrapper`, `hipcub::Sum`, `hipcub::Difference`, `hipcub::Division`, `hipcub::Max` and `hipcub::Min` operators. Use `hip::std::equal_to`, `hip::std::not_equal_to`, `hip::std::plus`, `hip::std::minus`, `hip::std::divides`, `hip::maximum` and `hip:minimum` operators instead.
+
 ## hipCUB 4.7.0 for ROCm 10.1
 
 ### Changed
@@ -10,13 +39,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
   * See `shared/primbench/README.md` for its documentation.
 
 ## hipCUB 4.6.0 for ROCm 10.0
- 
+
 ### Added
- 
+
 * Return value checks for assorted locations in the codebase that were previously missing.
- 
+
 ### Fixed
- 
+
 * DeviceSegmentedRadixSort test failure when using hipMallocManaged with size 0.
 * Fixed uninitialized automatic variable bug in BlockReduce.
 
@@ -59,9 +88,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
 
 ## hipCUB-4.2.0 for ROCm 7.2
- 
+
 ### Resolved issues
- 
+
 * Fixed memory leak issues with some unit tests.
 
 ## hipCUB-4.1.0 for ROCm 7.1
@@ -82,7 +111,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
     * `MONOREPO` - this options is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocPRIM). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocPRIM. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
 
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from installed `hipCUB` provided by the system.
-    
+
 ### Removed
 
 * Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.

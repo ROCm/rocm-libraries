@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/merge.h>
 
@@ -58,7 +59,7 @@ inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo);
+  return THRUST_NS_QUALIFIER::merge(THRUST_NS_QUALIFIER::device, f0, l0, f1, l1, fo);
 }
 
 template <typename I0, typename I1, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
@@ -82,7 +83,7 @@ inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
+  return THRUST_NS_QUALIFIER::merge(THRUST_NS_QUALIFIER::device, f0, l0, f1, l1, fo, ::std::move(r));
 }
 
 template <

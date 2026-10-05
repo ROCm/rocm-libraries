@@ -64,7 +64,7 @@ THRUST_HOST_DEVICE void uninitialized_fill(
   const T& x,
   thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
-  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
+  using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
   thrust::for_each(exec, first, last, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -88,7 +88,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
   const T& x,
   thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
-  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
+  using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
   return thrust::for_each_n(exec, first, n, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -99,7 +99,7 @@ template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE void uninitialized_fill(
   thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, const T& x)
 {
-  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
+  using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
   using ValueTypeHasTrivialCopyConstructor = _THRUST_STD::is_trivially_copy_constructible<ValueType>;
 
@@ -111,7 +111,7 @@ template <typename DerivedPolicy, typename ForwardIterator, typename Size, typen
 THRUST_HOST_DEVICE ForwardIterator
 uninitialized_fill_n(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, Size n, const T& x)
 {
-  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
+  using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
   using ValueTypeHasTrivialCopyConstructor = _THRUST_STD::is_trivially_copy_constructible<ValueType>;
 
