@@ -67,7 +67,9 @@ Exits: 0 feasible, 1 device/path/write failure, 2 invalid invocation, 3 neither
 `rocminfo` nor `hipInfo` could run. Exit 3 means the device was never observed, not that
 it is absent: obtain an inspection utility on this host. For rocKE, confirm the actual
 builder/spec and its `(spec, *, arch)` interface; an unknown architecture inventory
-needs source investigation.
+needs source investigation. A packaged engine whose kernel is a prebuilt per-arch code
+object plus its symbol is authored as `hsaco`, not mined for a rocKE builder; see the
+authored-source table in [SKILL.md](SKILL.md).
 
 **Gate:** feasible target/workspace, representable scope and capable reference. A
 missing dependency blocks its gate; host-only research may continue while a device
@@ -394,8 +396,8 @@ separately:
   required checks `NOT RUN` block acceptance, including missing vocabulary.
 - A packed kernel declaring no specialized `metadata_fields` and carrying no
   `effective_spec` reports **`NOT VERIFIED HERE`** when `provenance.origin_kind` is
-  absent or `hip`: no gate failure and no compiled-specialization proof. AOT HIP
-  specialization stays outside this check.
+  absent, `hip` or `hsaco`: no gate failure and no compiled-specialization proof. AOT
+  HIP specialization stays outside this check.
 - **The exemption does not extend to rocKE.** The same condition with
   `provenance.origin_kind` of `rocke` is a **hard failure**: the packer publishes a
   rocKE kernel's `effective_spec` when it ships it, so the pair means the archive bytes

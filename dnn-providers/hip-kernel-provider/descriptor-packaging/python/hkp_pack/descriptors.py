@@ -319,6 +319,21 @@ def _validate_ukd_fields(ukd, where, log=print):
         validate_rocke_spec(ks["spec"], where)
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
+        for field_name in ("file", "symbol"):
+            value = ks[field_name]
+            if not isinstance(value, str) or not value:
+                raise HkpPackError(
+                    f"{where} hsaco '{field_name}' must be a non-empty string"
+                )
+        if not ks["symbol"].isascii():
+            raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
+        # An hsaco object is built for specific archs, so a wildcard would ship
+        # its bytes into every shard.
+        if not ukd.get("arch"):
+            raise HkpPackError(
+                f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
+                "the code object runs on"
+            )
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
     elif kind == "embedded_source":

@@ -264,6 +264,15 @@ class TestKernelSourceKindRejection:
         with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
             _check_kernel_source_kind_implemented(config)
 
+    def test_hsaco_under_direct_load_names_the_right_dialect(self):
+        """'hsaco' is a packaged kind: hkp_pack packs it, the direct-load reader never
+        sees it."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="hsaco")
+        with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
+            _check_kernel_source_kind_implemented(config)
+
     def test_embedded_source_under_packaged_names_the_right_dialect(self):
         from codegen.config_loader import _check_kernel_source_kind_implemented
         from codegen.models import DIALECT_PACKAGED
@@ -2712,3 +2721,100 @@ class TestExpandedKernelsAreKeyChecked:
         raw = self._axes_raw()
         raw["packs"][0]["kernel_template"]["kernel_source"]["spec"] = {"seqlen_q": 256}
         assert self._load(tmp_path, raw) is not None
+
+
+class TestHsacoKernelSource:
+    """A packaged ``hsaco`` kernel names a prebuilt code object by ``file`` and
+    ``symbol``; hkp_pack packs it as-is, so no builder object exists to check."""
+
+    @staticmethod
+    def _raw(**kernel_source):
+        source = {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        }
+        source.update(kernel_source)
+        return {
+            "dialect": "packaged",
+            "kernel_source_kind": "hsaco",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "specialization": {
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size"],
+                "bindings": {},
+                "vocabulary": {},
+            },
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k1",
+                            "kernel_source": source,
+                            "arch": ["gfx942"],
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _load(tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_packaged_hsaco_config_carries_file_and_symbol(self, tmp_path):
+        config = self._load(tmp_path, self._raw())
+        ks = config.packs[0].kernels[0].kernel_source
+        assert (ks.kind, ks.file, ks.symbol) == (
+            "hsaco",
+            "HsacoFixture.co",
+            "HsacoFixtureAdd",
+        )
+
+    def test_a_kernel_and_pack_without_arch_is_refused(self, tmp_path):
+        from codegen.config_loader import _check_kernel_source_fields
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        config.packs[0].arch = []
+        with pytest.raises(ConfigError, match="neither the kernel nor its pack"):
+            _check_kernel_source_fields(config)
+
+    def test_a_kernel_inherits_its_packs_arch_into_the_descriptor(self, tmp_path):
+        from codegen.generator import build_kdp, mint_ids
+
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["arch"]
+        config = self._load(tmp_path, raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert kdp["kernelDescriptors"][0]["arch"] == ["gfx942"]
+
+    def test_a_missing_symbol_is_refused(self, tmp_path):
+        raw = self._raw()
+        del raw["packs"][0]["kernels"][0]["kernel_source"]["symbol"]
+        with pytest.raises(ConfigError, match="requires file, symbol"):
+            self._load(tmp_path, raw)
+
+    def test_another_kinds_key_is_refused_by_the_closed_key_set(self, tmp_path):
+        raw = self._raw(source="HsacoFixture.cpp")
+        with pytest.raises(ConfigError, match=r"\['source'\], which kind 'hsaco'"):
+            self._load(tmp_path, raw)
+
+    def test_specialized_metadata_fields_are_refused(self, tmp_path):
+        """A prebuilt object hydrates no builder, so a binding reads nothing back."""
+        raw = self._raw()
+        raw["specialization"] = {
+            "metadata_fields": ["block_size"],
+            "matcher_only_fields": [],
+            "bindings": {"block_size": {"field": "block_size"}},
+            "vocabulary": {},
+        }
+        with pytest.raises(ConfigError, match="compiled specialization"):
+            self._load(tmp_path, raw)

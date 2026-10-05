@@ -13,7 +13,8 @@ unless the cache variable below is pointed elsewhere.
 descriptors/<producer>/<bundle>/
 ```
 
-A bundle is authored under the producer that builds its kernels. `rocKE/` is spelled with
+A bundle is authored under the producer that builds its kernels. The subpath is a
+convention: `kernel_source.kind` selects the behaviour. `rocKE/` is spelled with
 that capitalization because the packer preserves an authored subpath verbatim into the
 staged and installed trees. A bundle sits one level under its producer, so every
 descriptor lands in a child of its shard root and the archive can be written at the root.
@@ -22,10 +23,16 @@ Nothing here is registered in CMake: the packer walks this root recursively, so 
 bundle is dropping files in a folder. Kernel-source *embedding* is a separate mechanism,
 required only for `kernel_source.kind == "embedded_source"`.
 
-A bundle here is compiled at pack time, one comgr invocation per variant, on every build
-that has this root wired — CI included. Trim an authored variant set to a covering subset
-before it lands, and register the symbols its UKDs name in a native pack, or the loader
-refuses the engine at provider load and every lowered kernel is wasted build time.
+A `hip` or `rocke` bundle here is compiled at pack time, one comgr invocation per variant,
+on every build that has this root wired — CI included. An `hsaco` bundle is packed as-is:
+no comgr and no hipcc run. Trim an authored variant set to a covering subset before it
+lands, and register the symbols its UKDs name in a native pack, or the loader refuses the
+engine at provider load and every lowered kernel is wasted build time.
+
+The packer does not check an `hsaco` object's format or target processor. Every
+`hsaco` UKD must list its `arch`(es) (non-empty; a generic-target object lists every arch
+it runs on). `hkp_pack` rejects one without, because an unrestricted `hsaco` UKD would ship
+the same bytes into every shard, and they fail at module load on the wrong device.
 
 ## Root selection and dormancy
 
